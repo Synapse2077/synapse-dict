@@ -8,7 +8,7 @@
  *
  * 环境变量（.env）：
  *   ARK_API_KEY    - 火山引擎 API 密钥
- *   DOUBAO_MODEL   - 豆包模型 ID
+ *   DOUBAO_MODEL_ONLINE_LITE   - 豆包模型 ID
  *
  * 用法：npx tsx scripts/test-doubao-format.ts
  */
@@ -26,6 +26,12 @@ const client = new OpenAI({
   apiKey: process.env.ARK_API_KEY,
   baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
 });
+
+const model = process.env.DOUBAO_MODEL_ONLINE_LITE || process.env.DOUBAO_MODEL_ONLINE_MINI || process.env.DOUBAO_MODEL_BATCH_LITE;
+if (!model) {
+  console.error('Missing DOUBAO_MODEL_* in .env');
+  process.exit(1);
+}
 
 const prompt = `你是一个专业词典编辑。请为以下英文单词提供简洁的中文释义。
 
@@ -58,7 +64,7 @@ jewdigger: Someone who dates people specifically because they are Jewish.`;
 
 async function test() {
   const resp = await client.chat.completions.create({
-    model: process.env.DOUBAO_MODEL!,
+    model: model!,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.1,
   });
