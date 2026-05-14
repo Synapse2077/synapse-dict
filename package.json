@@ -1,0 +1,23 @@
+{
+  "name": "synapse-dict",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev --workspace @synapse-dict/api",
+    "dev:web": "npm run dev --workspace @synapse-dict/web",
+    "build": "npm run typecheck && npm run build --workspace @synapse-dict/web",
+    "typecheck": "npm run typecheck --workspace @synapse-dict/api && npm run typecheck --workspace @synapse-dict/web"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

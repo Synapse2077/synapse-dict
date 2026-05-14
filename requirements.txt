@@ -1,0 +1,2 @@
+python-dotenv
+volcengine-python-sdk[ark]
