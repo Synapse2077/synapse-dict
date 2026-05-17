@@ -36,8 +36,12 @@ function parseTranslation(raw: string | null): { pos: string; text: string }[] {
 function parseDefinition(raw: string | null): { pos: string; text: string }[] {
   if (!raw) return [];
   return raw.split('\\n').filter(Boolean).map((line) => {
+    // Match "n." "v." "a." "s." etc. at the start
     const match = line.match(/^([a-z]+\.)\s*(.+)$/);
     if (match) return { pos: match[1], text: match[2] };
+    // Match single letter prefix without dot like "n " "v "
+    const match2 = line.match(/^([a-z])\s+(.+)$/);
+    if (match2) return { pos: match2[1] + '.', text: match2[2] };
     return { pos: '', text: line };
   });
 }
