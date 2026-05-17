@@ -83,7 +83,8 @@ export class DictionaryService {
   private readonly db: DatabaseSync;
   private readonly statsQuery;
   private readonly exactQuery;
-  private readonly searchQuery;
+  private readonly prefixQuery;
+  private readonly fuzzyQuery;
 
   constructor(databasePath = DEFAULT_DB_PATH) {
     this.databasePath = databasePath;
@@ -108,21 +109,29 @@ export class DictionaryService {
       LIMIT 1
     `);
 
-    this.searchQuery = this.db.prepare(`
+    // Two-phase search: prefix (uses index) then fuzzy fallback
+    this.prefixQuery = this.db.prepare(`
       SELECT id, word, phonetic, phonetic_uk, phonetic_us, definition, translation, pos,
              collins, oxford, tag, bnc, frq, exchange, detail, audio
       FROM stardict
-      WHERE word LIKE ? COLLATE NOCASE OR word LIKE ? COLLATE NOCASE
+      WHERE word LIKE ? COLLATE NOCASE
       ORDER BY
-        CASE
-          WHEN lower(word) = lower(?) THEN 0
-          WHEN word LIKE ? COLLATE NOCASE THEN 1
-          ELSE 2
-        END,
+        CASE WHEN lower(word) = lower(?) THEN 0 ELSE 1 END,
         CASE WHEN frq IS NULL THEN 1 ELSE 0 END,
         frq ASC,
-        CASE WHEN bnc IS NULL THEN 1 ELSE 0 END,
-        bnc ASC,
+        LENGTH(word) ASC,
+        word ASC
+      LIMIT ?
+    `);
+
+    this.fuzzyQuery = this.db.prepare(`
+      SELECT id, word, phonetic, phonetic_uk, phonetic_us, definition, translation, pos,
+             collins, oxford, tag, bnc, frq, exchange, detail, audio
+      FROM stardict
+      WHERE word LIKE ? COLLATE NOCASE AND word NOT LIKE ? COLLATE NOCASE
+      ORDER BY
+        CASE WHEN frq IS NULL THEN 1 ELSE 0 END,
+        frq ASC,
         LENGTH(word) ASC,
         word ASC
       LIMIT ?
@@ -140,14 +149,7 @@ export class DictionaryService {
     }
 
     const prefixPattern = `${keyword}%`;
-    const fuzzyPattern = `%${keyword}%`;
-    const rows = this.searchQuery.all(
-      prefixPattern,
-      fuzzyPattern,
-      keyword,
-      prefixPattern,
-      limit,
-    ) as DictionaryRow[];
+    const rows = this.prefixQuery.all(prefixPattern, keyword, limit) as DictionaryRow[];
     return rows.map(mapEntry);
   }
 
