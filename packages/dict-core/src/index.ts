@@ -49,6 +49,56 @@ export type DictionaryStats = {
   definitions: number;
 };
 
+/**
+ * Convert Wiktionary strict IPA → dictionary-style IPA (one function for UK & US).
+ *
+ * Order matters — context-sensitive rules first, then simple replacements.
+ */
+function normalizePronunciation(ipa: string | null): string | null {
+  if (!ipa) return ipa;
+  return ipa
+    // 1. Remove phonetic diacritics (strict IPA markers not used in teaching)
+    .replace(/\u032F/g, '')   // ̯ non-syllabic mark
+    .replace(/\u0329/g, '')   // ̩ syllabic mark
+    .replace(/\u031F/g, '')   // ̟ advanced tongue
+    .replace(/\u0325/g, '')   // ̥ voiceless/devoiced
+    .replace(/\u0308/g, '')   // ̈ centralized
+    .replace(/\u02B0/g, '')   // ʰ aspiration
+    .replace(/\u031A/g, '')   // ̚ unreleased stop (e.g. t̚)
+    .replace(/\u0303/g, '')   // ̃ nasalization
+    .replace(/\u203F/g, '')   // ‿ liaison mark
+    .replace(/ʔ/g, '')        // glottal stop
+    .replace(/kç/g, 'k')     // palatalized k → k (but keep standalone ç for loanwords)
+    // 2. Tie-bar affricates → simple affricates
+    .replace(/t\u0361ʃ/g, 'tʃ')
+    .replace(/d\u0361ʒ/g, 'dʒ')
+    .replace(/t\u0361s/g, 'ts')
+    .replace(/d\u0361z/g, 'dz')
+    // 3. Diphthong variant spellings → standard
+    .replace(/aj/g, 'aɪ')
+    .replace(/æw/g, 'aʊ')
+    // 4. ɚ + sonorant consonant → rə + consonant (e.g. ɚn→rən, ɚm→rəm, ɚl→rəl)
+    .replace(/ɚ([nml])/g, 'rə$1')
+    // 5. ɚ elsewhere → ər (e.g. word-final, before obstruent)
+    .replace(/ɚ/g, 'ər')
+    // 6. ɝ → ɜːr (stressed r-colored vowel)
+    .replace(/ɝ/g, 'ɜːr')
+    // 6b. Fix aʊɜːr → aʊər (Wiktionary misuses ɝ in unstressed "our" etc.)
+    .replace(/aʊɜːr/g, 'aʊər')
+    // 7. ɹ/ɾ → r
+    .replace(/ɹ/g, 'r')
+    .replace(/ɾ/g, 'r')
+    // 8. Minor vowel normalizations
+    .replace(/ɐ/g, 'ə')
+    .replace(/ɨ/g, 'ɪ')
+    // 9. Remove syllable dots
+    .replace(/\./g, '')
+    // 10. Merge duplicate r (artifact from ɚ→ər + (ɹ)→(r) overlap)
+    .replace(/rr/g, 'r')
+    // 11. Clean up spaces inside parentheses: (ə ) → (ə)
+    .replace(/\(\s*(.+?)\s*\)/g, '($1)');
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DB_PATH = path.resolve(__dirname, '../../../data/synapse-dict.sqlite');
 
@@ -57,9 +107,9 @@ function mapEntry(row: DictionaryRow): DictionaryEntry {
     id: row.id,
     word: row.word,
     phonetic: row.phonetic,
-    phoneticUk: row.phonetic_uk,
-    phoneticUs: row.phonetic_us,
-    phoneticDisplay: row.phonetic_uk || row.phonetic_us || row.phonetic,
+    phoneticUk: normalizePronunciation(row.phonetic_uk),
+    phoneticUs: normalizePronunciation(row.phonetic_us),
+    phoneticDisplay: normalizePronunciation(row.phonetic_uk || row.phonetic_us || row.phonetic),
     definition: row.definition,
     translation: row.translation,
     pos: row.pos,
