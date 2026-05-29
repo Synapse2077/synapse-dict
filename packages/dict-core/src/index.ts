@@ -91,6 +91,7 @@ function normalizePronunciation(ipa: string | null): string | null {
     // 8. Minor vowel normalizations
     .replace(/ɐ/g, 'ə')
     .replace(/ɨ/g, 'ɪ')
+    .replace(/ɛ/g, 'e')
     // 9. Remove syllable dots
     .replace(/\./g, '')
     // 10. Merge duplicate r (artifact from ɚ→ər + (ɹ)→(r) overlap)
