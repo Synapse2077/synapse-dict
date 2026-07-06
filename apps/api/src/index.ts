@@ -1,3 +1,4 @@
+import './assertNodeVersion'; // 必须放最前：抢在 dict-core 的 node:sqlite import 求值之前断言 Node 版本
 import cors from 'cors';
 import express from 'express';
 import { DictionaryService, resolveDatabasePath } from '@synapse-dict/dict-core';
