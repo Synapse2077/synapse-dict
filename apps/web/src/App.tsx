@@ -125,12 +125,42 @@ function parseTags(raw: string | null): string[] {
 
 const GENDER_LABELS: Record<string, string> = { f: '阴', m: '阳', mf: '阴/阳', n: '中' };
 
-function speak(word: string, locale: string) {
+// 语音列表是异步加载的，首帧 getVoices() 常为空 → 缓存 + onvoiceschanged 兜底。
+let voiceCache: SpeechSynthesisVoice[] = [];
+function refreshVoices() {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  const v = window.speechSynthesis.getVoices();
+  if (v.length) voiceCache = v;
+}
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  refreshVoices();
+  window.speechSynthesis.addEventListener('voiceschanged', refreshVoices);
+}
+
+// 按 locale 找语音：先精确匹配（es-ES），再退到同语言（任意 es-*）。找不到返回 null。
+function findVoice(locale: string): SpeechSynthesisVoice | null {
+  if (voiceCache.length === 0) refreshVoices();
+  const lc = locale.toLowerCase();
+  const base = lc.split('-')[0];
+  return (
+    voiceCache.find((v) => v.lang.toLowerCase() === lc) ||
+    voiceCache.find((v) => v.lang.toLowerCase().startsWith(base)) ||
+    null
+  );
+}
+
+// 读词。挑到匹配语音就用它并返回 true；一个都没有 → 返回 false（调用方给提示，
+// 不 return 前的 speak 仍会执行：浏览器可能用默认音兜底，但那多半读不准）。
+function speak(word: string, locale: string): boolean {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return false;
+  const voice = findVoice(locale);
   const utterance = new SpeechSynthesisUtterance(word);
+  if (voice) utterance.voice = voice;
   utterance.lang = locale;
   utterance.rate = 0.9;
   window.speechSynthesis.cancel();
   window.speechSynthesis.speak(utterance);
+  return !!voice;
 }
 
 function classifyResponse(res: Response) {
@@ -212,16 +242,29 @@ export default function App() {
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [entry, setEntry] = useState<AnyEntry | null>(null);
   const [entryError, setEntryError] = useState<FetchError | null>(null);
+  const [entryNotFound, setEntryNotFound] = useState(false);
   const [loading, setLoading] = useState(false);
   const [entryLoading, setEntryLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
+  const [toast, setToast] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultListRef = useRef<HTMLDivElement>(null);
   const langInitDone = useRef(false);
+  const toastTimer = useRef<number | undefined>(undefined);
 
   const activeLang = languages.find((l) => l.code === lang);
   const speakLocale = activeLang?.speak || 'en-US';
+
+  // 读词入口：设备缺该语言语音时弹一条非阻塞提示（浏览器会用默认音兜底，多半读不准）。
+  const speakWord = useCallback((word: string, locale: string) => {
+    if (speak(word, locale)) return;
+    const base = locale.split('-')[0];
+    const label = languages.find((l) => l.speak.split('-')[0] === base)?.name || '该语言';
+    setToast(`当前设备未安装${label}语音，发音可能不准确`);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 4000);
+  }, [languages]);
 
   // Apply + persist theme
   useEffect(() => {
@@ -336,6 +379,7 @@ export default function App() {
     if (!selectedWord) {
       setEntry(null);
       setEntryError(null);
+      setEntryNotFound(false);
       return;
     }
 
@@ -345,8 +389,15 @@ export default function App() {
         setEntryLoading(true);
         setEntryError(null);
         const response = await fetch(`/api/entries/${encodeURIComponent(selectedWord!)}?lang=${lang}`);
+        // 404 = 词典里没这个词（正常情形，非故障）→ 标记查无此词，别当网络错误报错。
+        // 不清旧 entry：沿用 SWR，保住上一个词条不闪；查无此词只在无词条可显时才露出，
+        // 这样切语言/失效链接触发的瞬时 404 不会把当前词条闪没。
+        if (response.status === 404) {
+          if (!cancelled) setEntryNotFound(true);
+          return;
+        }
         classifyResponse(response);
-        if (!cancelled) setEntry(await response.json());
+        if (!cancelled) { setEntry(await response.json()); setEntryNotFound(false); }
       } catch (e) {
         if (!cancelled) setEntryError(errorKind(e));  // 保留旧词条，不闪空
       } finally {
@@ -486,11 +537,11 @@ export default function App() {
       <div className="detail-column">
         {/* SWR：有词条就一直显示（含切换/加载中），避免闪空或回弹欢迎页 */}
         {entry && entry.lang === 'en' && (
-          <EnglishEntry entry={entry as EnEntry} onWord={goToWord} />
+          <EnglishEntry entry={entry as EnEntry} onWord={goToWord} speak={speakWord} />
         )}
 
         {entry && entry.lang !== 'en' && (
-          <KaikkiEntryView entry={entry as KaikkiEntry} speakLocale={speakLocale} onWord={goToWord} />
+          <KaikkiEntryView entry={entry as KaikkiEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
         {!entry && entryLoading && <div className="detail-loading">加载中…</div>}
@@ -500,6 +551,13 @@ export default function App() {
             <span className="hint-emoji">{entryError === 'rate' ? '🌊' : '😕'}</span>
             <p>{entryError === 'rate' ? '请求有点频繁，稍等一下再试～' : '词条加载失败，请稍后重试'}</p>
             <button className="retry-btn" onClick={retry} type="button">重试</button>
+          </div>
+        )}
+
+        {!entry && !entryLoading && !entryError && entryNotFound && selectedWord && (
+          <div className="detail-error">
+            <span className="hint-emoji">🔍</span>
+            <p>词典中没有「{selectedWord}」这个词条</p>
           </div>
         )}
 
@@ -523,13 +581,17 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {toast && <div className="speak-toast" role="status">{toast}</div>}
     </div>
   );
 }
 
 // --- English entry detail (unchanged layout) ---
 
-function EnglishEntry({ entry, onWord }: { entry: EnEntry; onWord: (w: string) => void }) {
+function EnglishEntry({ entry, onWord, speak }: {
+  entry: EnEntry; onWord: (w: string) => void; speak: (word: string, locale: string) => void;
+}) {
   const translations = parseTranslation(entry.translation);
   const definitions = parseDefinition(entry.definition);
   const exchanges = parseExchange(entry.exchange);
@@ -647,8 +709,9 @@ function SenseChips({ sense }: { sense: KaikkiSense }) {
   );
 }
 
-function KaikkiEntryView({ entry, speakLocale, onWord }: {
+function KaikkiEntryView({ entry, speakLocale, onWord, speak }: {
   entry: KaikkiEntry; speakLocale: string; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
 }) {
   return (
     <article className="entry-detail">

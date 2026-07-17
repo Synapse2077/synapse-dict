@@ -377,12 +377,6 @@ body {
 /* ---- Entry detail ---- */
 .entry-detail {
   max-width: 720px;
-  animation: fade-in 0.18s ease;
-}
-
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
 }
 
 .entry-header {
@@ -798,4 +792,28 @@ body {
   .empty-state {
     margin-top: 4vh;
   }
+}
+
+/* ---- 发音提示（设备缺该语言语音时） ---- */
+.speak-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  max-width: min(88vw, 420px);
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: var(--shadow);
+  z-index: 50;
+  animation: speak-toast-in 0.18s ease-out;
+}
+
+@keyframes speak-toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
 }
