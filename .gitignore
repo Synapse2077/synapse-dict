@@ -5,3 +5,11 @@ dist/
 .env.local
 # Data directory (too large for git)
 data/
+
+# 多语言词典大文件（GitHub 放不下；源 dump 靠下载、成品 sqlite 靠 scp 上线）
+# 每语言目录 es/ fr/ it/ pt/ no/ 只把脚本+README 进 git，数据不进
+*.sqlite
+kaikki.org-dictionary-*.jsonl
+doubao-*.jsonl
+b_out/
+b_out.tar.gz
