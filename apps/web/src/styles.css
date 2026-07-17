@@ -577,6 +577,198 @@ body {
 }
 
 /* ============================================================
+   Language switcher (left column)
+   ============================================================ */
+.lang-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 16px 2px;
+}
+
+.lang-pill {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.lang-pill:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.lang-pill.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* ---- Part-of-speech badge (Kaikki langs) ---- */
+.badge.pos {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: 'Noto Sans', sans-serif;
+  letter-spacing: 0.02em;
+}
+
+/* ============================================================
+   Kaikki (es/fr/it/pt/no) entry detail
+   ============================================================ */
+.sense-list {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 14px;
+}
+
+.sense-item {
+  line-height: 1.6;
+}
+
+.sense-zh {
+  font-size: 16px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sense-en {
+  font-size: 13.5px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.sense-missing {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.sense-chips {
+  display: inline-flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.sense-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.sense-chip.g {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.sense-chip.reg {
+  background: color-mix(in srgb, var(--star) 16%, transparent);
+  color: var(--star);
+  border-color: transparent;
+}
+
+.sense-chip.lex,
+.sense-chip.num {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+}
+
+/* ---- Inflection → lemma notes ---- */
+.infl-notes {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+/* ---- Base forms with inline meaning (on inflection pages) ---- */
+.base-list {
+  display: grid;
+  gap: 10px;
+}
+
+.base-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.base-word {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.base-word:hover {
+  text-decoration: underline;
+}
+
+.base-pos {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-family: 'Noto Sans', sans-serif;
+}
+
+.base-senses {
+  font-size: 14.5px;
+  color: var(--text);
+  flex: 1 1 200px;
+}
+
+.base-more {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  margin-left: 4px;
+}
+
+/* ---- Collocations ---- */
+.colloc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.colloc-item {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.colloc-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.colloc-zh {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* ============================================================
    Responsive
    ============================================================ */
 @media (max-width: 820px) {

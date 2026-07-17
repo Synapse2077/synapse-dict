@@ -4,9 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="description" content="突触词典 Synapse Dict — 英文单词查询，含释义、音标、发音、词形变化与词频。" />
+    <meta name="description" content="突触词典 Synapse Dict — 多语言查词（英语 / 西班牙语…），含释义、音标、发音与词形变化。" />
     <meta name="theme-color" content="#2f6df6" />
     <title>突触词典 · Synapse Dict</title>
+    <script>
+      // 在首次绘制前同步设好主题，避免深色模式加载时先闪一下白（FOUC）。
+      (function () {
+        try {
+          var t = localStorage.getItem('dict-theme');
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) { /* localStorage 不可用时用 CSS 默认 */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

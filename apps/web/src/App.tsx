@@ -1,20 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+// ---- Shared types ----
+
+type LanguageMeta = { code: string; label: string; name: string; speak: string };
+
 type SearchItem = {
   id: number;
   word: string;
-  translation: string | null;
-  definition: string | null;
-  phoneticDisplay: string | null;
+  brief: string | null;
   pos: string | null;
 };
 
-type DictionaryEntry = SearchItem & {
+// English entry (legacy stardict schema)
+type EnEntry = {
+  lang: 'en';
+  id: number;
+  word: string;
   phonetic: string | null;
   phoneticUk: string | null;
   phoneticUs: string | null;
+  phoneticDisplay: string | null;
+  translation: string | null;
+  definition: string | null;
   exchange: string | null;
-  detail: string | null;
   tag: string | null;
   collins: number | null;
   oxford: number | null;
@@ -22,12 +30,49 @@ type DictionaryEntry = SearchItem & {
   frq: number | null;
 };
 
+// Kaikki-family entry (es / fr / it / pt / no — same schema)
+type KaikkiSense = {
+  en: string | null;
+  zh: string | null;
+  gender: string | null;
+  regions: string[];
+  registers: string[];
+  numbers: string[];
+};
+type KaikkiCollocation = { text: string; zh: string | null };
+type KaikkiBase = {
+  word: string;
+  pos: string | null;
+  phonetic: string | null;
+  senses: KaikkiSense[];
+};
+type KaikkiEntry = {
+  lang: string;
+  id: number;
+  word: string;
+  phonetic: string | null;
+  pos: string | null;
+  isLemma: boolean;
+  reflexive: boolean;
+  senses: KaikkiSense[];
+  collocations: KaikkiCollocation[];
+  baseForms: string[];
+  bases: KaikkiBase[];
+  inflNotes: string[];
+  flag: string | null;
+};
+
+type AnyEntry = EnEntry | KaikkiEntry;
+
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
 
-const EXAMPLE_WORDS = ['serene', 'ephemeral', 'resilience', 'curious', 'nuance', 'vivid'];
+const EXAMPLES: Record<string, string[]> = {
+  en: ['serene', 'ephemeral', 'resilience', 'curious', 'nuance', 'vivid'],
+  es: ['hola', 'escalera', 'hablar', 'corazón', 'mariposa', 'rápido'],
+};
 
-// --- Parsing helpers ---
+// --- English parsing helpers ---
 
 function parseTranslation(raw: string | null): { pos: string; text: string }[] {
   if (!raw) return [];
@@ -41,10 +86,8 @@ function parseTranslation(raw: string | null): { pos: string; text: string }[] {
 function parseDefinition(raw: string | null): { pos: string; text: string }[] {
   if (!raw) return [];
   return raw.split('\\n').filter(Boolean).map((line) => {
-    // Match "n." "v." "a." "s." etc. at the start
     const match = line.match(/^([a-z]+\.)\s*(.+)$/);
     if (match) return { pos: match[1], text: match[2] };
-    // Match single letter prefix without dot like "n " "v "
     const match2 = line.match(/^([a-z])\s+(.+)$/);
     if (match2) return { pos: match2[1] + '.', text: match2[2] };
     return { pos: '', text: line };
@@ -52,17 +95,9 @@ function parseDefinition(raw: string | null): { pos: string; text: string }[] {
 }
 
 const EXCHANGE_LABELS: Record<string, string> = {
-  p: '过去式',
-  d: '过去分词',
-  i: '现在分词',
-  '3': '第三人称单数',
-  r: '比较级',
-  t: '最高级',
-  s: '复数',
-  '0': '原形',
+  p: '过去式', d: '过去分词', i: '现在分词', '3': '第三人称单数',
+  r: '比较级', t: '最高级', s: '复数', '0': '原形',
 };
-
-// "1" means "word form derived from type X" - it's metadata, not a linkable word
 const EXCHANGE_SKIP_KEYS = new Set(['1']);
 
 function parseExchange(raw: string | null): { label: string; words: string[] }[] {
@@ -86,15 +121,18 @@ function parseTags(raw: string | null): string[] {
   return raw.split(/\s+/).filter(Boolean).map((t) => TAG_NAMES[t] || t);
 }
 
-function speak(word: string, lang: 'en-GB' | 'en-US' = 'en-GB') {
+// --- Spanish/Kaikki display helpers ---
+
+const GENDER_LABELS: Record<string, string> = { f: '阴', m: '阳', mf: '阴/阳', n: '中' };
+
+function speak(word: string, locale: string) {
   const utterance = new SpeechSynthesisUtterance(word);
-  utterance.lang = lang;
+  utterance.lang = locale;
   utterance.rate = 0.9;
   window.speechSynthesis.cancel();
   window.speechSynthesis.speak(utterance);
 }
 
-// Throw a typed error so the UI can distinguish "被限流了" from a real failure.
 function classifyResponse(res: Response) {
   if (res.status === 429 || res.status === 503) {
     const err = new Error('rate') as Error & { kind: FetchError };
@@ -126,6 +164,27 @@ function getInitialTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+function getInitialLang(): string {
+  try {
+    const saved = localStorage.getItem('dict-lang');
+    if (saved) return saved;
+  } catch {
+    // ignore
+  }
+  return 'en';
+}
+
+// 用上次缓存的语言列表初始化，让语言栏首帧就在位、不再加载后弹入（避免布局跳动）。
+function getInitialLanguages(): LanguageMeta[] {
+  try {
+    const saved = localStorage.getItem('dict-langs');
+    if (saved) return JSON.parse(saved) as LanguageMeta[];
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
 const SpeakerIcon = () => (
   <svg className="phonetic-speaker" viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
     <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
@@ -145,11 +204,13 @@ function CollinsStars({ rating }: { rating: number | null }) {
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [languages, setLanguages] = useState<LanguageMeta[]>(getInitialLanguages);
+  const [lang, setLang] = useState<string>(getInitialLang);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchItem[]>([]);
   const [searchError, setSearchError] = useState<FetchError | null>(null);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
-  const [entry, setEntry] = useState<DictionaryEntry | null>(null);
+  const [entry, setEntry] = useState<AnyEntry | null>(null);
   const [entryError, setEntryError] = useState<FetchError | null>(null);
   const [loading, setLoading] = useState(false);
   const [entryLoading, setEntryLoading] = useState(false);
@@ -157,6 +218,10 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultListRef = useRef<HTMLDivElement>(null);
+  const langInitDone = useRef(false);
+
+  const activeLang = languages.find((l) => l.code === lang);
+  const speakLocale = activeLang?.speak || 'en-US';
 
   // Apply + persist theme
   useEffect(() => {
@@ -174,27 +239,54 @@ export default function App() {
 
   const retry = useCallback(() => setReloadKey((k) => k + 1), []);
 
+  // Load available languages once; reconcile the persisted choice.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/langs');
+        const data = await res.json();
+        const langs = (data.languages || []) as LanguageMeta[];
+        setLanguages(langs);
+        try { localStorage.setItem('dict-langs', JSON.stringify(langs)); } catch { /* ignore */ }
+        setLang((cur) => (langs.some((l) => l.code === cur) ? cur : data.default || langs[0]?.code || 'en'));
+      } catch {
+        // API down — leave selector empty, English default still works
+      }
+    })();
+  }, []);
+
+  // Persist language + reset the view when it actually changes (skip first settle).
+  useEffect(() => {
+    try {
+      localStorage.setItem('dict-lang', lang);
+    } catch {
+      // ignore
+    }
+    if (!langInitDone.current) {
+      langInitDone.current = true;
+      return;
+    }
+    // 切换语言不清空详情：由 search 效应重新选词，旧词条保留到新词条就绪，
+    // 避免详情区先回弹欢迎页再显示新词（那个来回就是偶发的“闪一下”）。
+    setEntryError(null);
+  }, [lang]);
+
   // Hash routing: read word from URL on mount
   useEffect(() => {
-    const hash = window.location.hash.slice(1); // remove #
+    const hash = window.location.hash.slice(1);
     if (hash) {
       const word = decodeURIComponent(hash);
       setSelectedWord(word);
       setQuery(word);
     }
-
     const onHashChange = () => {
       const h = window.location.hash.slice(1);
-      if (h) {
-        const w = decodeURIComponent(h);
-        setSelectedWord(w);
-      }
+      if (h) setSelectedWord(decodeURIComponent(h));
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  // Update hash when word is selected
   const selectWord = useCallback((word: string) => {
     setSelectedWord(word);
     window.location.hash = encodeURIComponent(word);
@@ -219,13 +311,12 @@ export default function App() {
       try {
         setLoading(true);
         setSearchError(null);
-        const response = await fetch(`/api/search?q=${encodeURIComponent(keyword)}&limit=20`);
+        const response = await fetch(`/api/search?q=${encodeURIComponent(keyword)}&limit=20&lang=${lang}`);
         classifyResponse(response);
         const data = await response.json();
         const items = (data.items || []) as SearchItem[];
         setResults(items);
         setActiveIndex(0);
-        // Auto-select first result
         if (items.length > 0) {
           selectWord(items[0].word);
         }
@@ -238,7 +329,7 @@ export default function App() {
     }, 200);
 
     return () => window.clearTimeout(timer);
-  }, [query, selectWord, reloadKey]);
+  }, [query, lang, selectWord, reloadKey]);
 
   // Load entry
   useEffect(() => {
@@ -253,21 +344,18 @@ export default function App() {
       try {
         setEntryLoading(true);
         setEntryError(null);
-        const response = await fetch(`/api/entries/${encodeURIComponent(selectedWord!)}`);
+        const response = await fetch(`/api/entries/${encodeURIComponent(selectedWord!)}?lang=${lang}`);
         classifyResponse(response);
         if (!cancelled) setEntry(await response.json());
       } catch (e) {
-        if (!cancelled) {
-          setEntry(null);
-          setEntryError(errorKind(e));
-        }
+        if (!cancelled) setEntryError(errorKind(e));  // 保留旧词条，不闪空
       } finally {
         if (!cancelled) setEntryLoading(false);
       }
     }
     void loadEntry();
     return () => { cancelled = true; };
-  }, [selectedWord, reloadKey]);
+  }, [selectedWord, lang, reloadKey]);
 
   // Keyboard navigation
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -287,7 +375,6 @@ export default function App() {
     }
   };
 
-  // Scroll active result into view
   useEffect(() => {
     const container = resultListRef.current;
     if (!container) return;
@@ -295,10 +382,10 @@ export default function App() {
     if (active) active.scrollIntoView({ block: 'nearest' });
   }, [activeIndex]);
 
-  const translations = entry ? parseTranslation(entry.translation) : [];
-  const definitions = entry ? parseDefinition(entry.definition) : [];
-  const exchanges = entry ? parseExchange(entry.exchange) : [];
-  const tags = entry ? parseTags(entry.tag) : [];
+  const goToWord = useCallback((word: string) => {
+    setQuery(word);
+    selectWord(word);
+  }, [selectWord]);
 
   return (
     <div className="dict-app">
@@ -326,6 +413,24 @@ export default function App() {
           </button>
         </div>
 
+        {languages.length > 1 && (
+          <div className="lang-switch" role="tablist" aria-label="词典语言">
+            {languages.map((l) => (
+              <button
+                key={l.code}
+                className={l.code === lang ? 'lang-pill active' : 'lang-pill'}
+                onClick={() => setLang(l.code)}
+                type="button"
+                role="tab"
+                aria-selected={l.code === lang}
+                title={l.label}
+              >
+                {l.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="search-input-wrap">
           <svg className="search-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
           <input
@@ -334,7 +439,7 @@ export default function App() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入单词查询…"
+            placeholder={activeLang ? `查询${activeLang.name}…` : '输入单词查询…'}
             autoFocus
           />
           {loading && <span className="search-spinner" />}
@@ -349,9 +454,7 @@ export default function App() {
               type="button"
             >
               <span className="result-word">{item.word}</span>
-              <span className="result-brief">
-                {item.translation?.split('\\n')[0] || item.definition?.split('\\n')[0] || ''}
-              </span>
+              <span className="result-brief">{item.brief || ''}</span>
             </button>
           ))}
 
@@ -381,9 +484,18 @@ export default function App() {
       </div>
 
       <div className="detail-column">
-        {entryLoading && <div className="detail-loading">加载中…</div>}
+        {/* SWR：有词条就一直显示（含切换/加载中），避免闪空或回弹欢迎页 */}
+        {entry && entry.lang === 'en' && (
+          <EnglishEntry entry={entry as EnEntry} onWord={goToWord} />
+        )}
 
-        {!entryLoading && entryError && (
+        {entry && entry.lang !== 'en' && (
+          <KaikkiEntryView entry={entry as KaikkiEntry} speakLocale={speakLocale} onWord={goToWord} />
+        )}
+
+        {!entry && entryLoading && <div className="detail-loading">加载中…</div>}
+
+        {!entry && !entryLoading && entryError && (
           <div className="detail-error">
             <span className="hint-emoji">{entryError === 'rate' ? '🌊' : '😕'}</span>
             <p>{entryError === 'rate' ? '请求有点频繁，稍等一下再试～' : '词条加载失败，请稍后重试'}</p>
@@ -391,120 +503,18 @@ export default function App() {
           </div>
         )}
 
-        {!entryLoading && !entryError && entry && (
-          <article className="entry-detail">
-            <header className="entry-header">
-              <h2 className="entry-word">{entry.word}</h2>
-              <div className="entry-meta-row">
-                <CollinsStars rating={entry.collins} />
-                {entry.oxford === 1 && <span className="badge oxford">Oxford 3000</span>}
-                {tags.map((t) => <span className="badge tag" key={t}>{t}</span>)}
-              </div>
-            </header>
-
-            <div className="phonetic-row">
-              {entry.phoneticUk && (
-                <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-GB')} title="播放英式发音" type="button">
-                  <span className="phonetic-label">UK</span>
-                  <span className="phonetic-value">/{entry.phoneticUk}/</span>
-                  <SpeakerIcon />
-                </button>
-              )}
-              {entry.phoneticUs && (
-                <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-US')} title="播放美式发音" type="button">
-                  <span className="phonetic-label">US</span>
-                  <span className="phonetic-value">/{entry.phoneticUs}/</span>
-                  <SpeakerIcon />
-                </button>
-              )}
-              {!entry.phoneticUk && !entry.phoneticUs && (
-                <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-US')} title="播放发音" type="button">
-                  {entry.phonetic && <span className="phonetic-value">/{entry.phonetic}/</span>}
-                  <SpeakerIcon />
-                </button>
-              )}
-            </div>
-
-            {translations.length > 0 && (
-              <section className="entry-section">
-                <h3>释义</h3>
-                <dl className="definition-list">
-                  {translations.map((item, i) => (
-                    <div className="def-item" key={i}>
-                      {item.pos && <dt>{item.pos}</dt>}
-                      <dd>{item.text}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-            )}
-
-            {definitions.length > 0 && (
-              <section className="entry-section">
-                <h3>English</h3>
-                <dl className="definition-list en">
-                  {definitions.map((item, i) => (
-                    <div className="def-item" key={i}>
-                      {item.pos && <dt>{item.pos}</dt>}
-                      <dd>{item.text}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
-            )}
-
-            {exchanges.length > 0 && (
-              <section className="entry-section">
-                <h3>词形变化</h3>
-                <div className="exchange-list">
-                  {exchanges.map((ex) => (
-                    <div className="exchange-item" key={ex.label}>
-                      <span className="exchange-label">{ex.label}</span>
-                      <span className="exchange-words">
-                        {ex.words.map((w) => (
-                          <a
-                            key={w}
-                            className="exchange-link"
-                            href={`#${encodeURIComponent(w)}`}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              setQuery(w);
-                              selectWord(w);
-                            }}
-                          >
-                            {w}
-                          </a>
-                        ))}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {(entry.bnc != null && entry.bnc > 0 || entry.frq != null && entry.frq > 0) && (
-              <section className="entry-section">
-                <h3>词频</h3>
-                <div className="freq-row">
-                  {entry.bnc != null && entry.bnc > 0 && <span className="freq-item">BNC: <strong>{entry.bnc}</strong></span>}
-                  {entry.frq != null && entry.frq > 0 && <span className="freq-item">COCA: <strong>{entry.frq}</strong></span>}
-                </div>
-              </section>
-            )}
-          </article>
-        )}
-
-        {!entryLoading && !entryError && !entry && !selectedWord && (
+        {!entry && !entryLoading && !entryError && !selectedWord && (
           <div className="empty-state">
             <div className="empty-logo">突</div>
             <h1 className="empty-title">突触词典</h1>
             <p className="empty-desc">
-              收录海量英文词条，含释义、音标、发音、词形变化与词频。<br />
-              在左侧输入单词即可查询。
+              {activeLang ? `${activeLang.name}词典` : '多语言词典'}
+              ，含释义、音标、发音与词形变化。<br />
+              在左侧输入即可查询{languages.length > 1 ? '，上方可切换语言' : ''}。
             </p>
             <div className="example-label">试试这些词</div>
             <div className="example-chips">
-              {EXAMPLE_WORDS.map((w) => (
+              {(EXAMPLES[lang] || EXAMPLES.en).map((w) => (
                 <button className="example-chip" key={w} onClick={() => pickExample(w)} type="button">
                   {w}
                 </button>
@@ -514,5 +524,221 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+// --- English entry detail (unchanged layout) ---
+
+function EnglishEntry({ entry, onWord }: { entry: EnEntry; onWord: (w: string) => void }) {
+  const translations = parseTranslation(entry.translation);
+  const definitions = parseDefinition(entry.definition);
+  const exchanges = parseExchange(entry.exchange);
+  const tags = parseTags(entry.tag);
+
+  return (
+    <article className="entry-detail">
+      <header className="entry-header">
+        <h2 className="entry-word">{entry.word}</h2>
+        <div className="entry-meta-row">
+          <CollinsStars rating={entry.collins} />
+          {entry.oxford === 1 && <span className="badge oxford">Oxford 3000</span>}
+          {tags.map((t) => <span className="badge tag" key={t}>{t}</span>)}
+        </div>
+      </header>
+
+      <div className="phonetic-row">
+        {entry.phoneticUk && (
+          <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-GB')} title="播放英式发音" type="button">
+            <span className="phonetic-label">UK</span>
+            <span className="phonetic-value">/{entry.phoneticUk}/</span>
+            <SpeakerIcon />
+          </button>
+        )}
+        {entry.phoneticUs && (
+          <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-US')} title="播放美式发音" type="button">
+            <span className="phonetic-label">US</span>
+            <span className="phonetic-value">/{entry.phoneticUs}/</span>
+            <SpeakerIcon />
+          </button>
+        )}
+        {!entry.phoneticUk && !entry.phoneticUs && (
+          <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-US')} title="播放发音" type="button">
+            {entry.phonetic && <span className="phonetic-value">/{entry.phonetic}/</span>}
+            <SpeakerIcon />
+          </button>
+        )}
+      </div>
+
+      {translations.length > 0 && (
+        <section className="entry-section">
+          <h3>释义</h3>
+          <dl className="definition-list">
+            {translations.map((item, i) => (
+              <div className="def-item" key={i}>
+                {item.pos && <dt>{item.pos}</dt>}
+                <dd>{item.text}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
+
+      {definitions.length > 0 && (
+        <section className="entry-section">
+          <h3>English</h3>
+          <dl className="definition-list en">
+            {definitions.map((item, i) => (
+              <div className="def-item" key={i}>
+                {item.pos && <dt>{item.pos}</dt>}
+                <dd>{item.text}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
+
+      {exchanges.length > 0 && (
+        <section className="entry-section">
+          <h3>词形变化</h3>
+          <div className="exchange-list">
+            {exchanges.map((ex) => (
+              <div className="exchange-item" key={ex.label}>
+                <span className="exchange-label">{ex.label}</span>
+                <span className="exchange-words">
+                  {ex.words.map((w) => (
+                    <a key={w} className="exchange-link" href={`#${encodeURIComponent(w)}`}
+                      onClick={(e) => { e.preventDefault(); onWord(w); }}>
+                      {w}
+                    </a>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {(entry.bnc != null && entry.bnc > 0 || entry.frq != null && entry.frq > 0) && (
+        <section className="entry-section">
+          <h3>词频</h3>
+          <div className="freq-row">
+            {entry.bnc != null && entry.bnc > 0 && <span className="freq-item">BNC: <strong>{entry.bnc}</strong></span>}
+            {entry.frq != null && entry.frq > 0 && <span className="freq-item">COCA: <strong>{entry.frq}</strong></span>}
+          </div>
+        </section>
+      )}
+    </article>
+  );
+}
+
+// --- Spanish / Kaikki entry detail ---
+
+function SenseChips({ sense }: { sense: KaikkiSense }) {
+  const chips: { cls: string; text: string }[] = [];
+  if (sense.gender) chips.push({ cls: 'g', text: GENDER_LABELS[sense.gender] || sense.gender });
+  for (const r of sense.regions) chips.push({ cls: 'reg', text: r });
+  for (const r of sense.registers) chips.push({ cls: 'lex', text: r });
+  for (const n of sense.numbers) chips.push({ cls: 'num', text: n });
+  if (chips.length === 0) return null;
+  return (
+    <span className="sense-chips">
+      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+    </span>
+  );
+}
+
+function KaikkiEntryView({ entry, speakLocale, onWord }: {
+  entry: KaikkiEntry; speakLocale: string; onWord: (w: string) => void;
+}) {
+  return (
+    <article className="entry-detail">
+      <header className="entry-header">
+        <h2 className="entry-word">{entry.word}</h2>
+        <div className="entry-meta-row">
+          {entry.pos && <span className="badge pos">{entry.pos}</span>}
+          {entry.reflexive && <span className="badge tag">代动词 prnl.</span>}
+          {!entry.isLemma && <span className="badge tag">变位形式</span>}
+        </div>
+      </header>
+
+      {entry.phonetic && (
+        <div className="phonetic-row">
+          <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
+            <span className="phonetic-value">{entry.phonetic}</span>
+            <SpeakerIcon />
+          </button>
+        </div>
+      )}
+
+      {/* 真义 lemma：逐义项中文 + 英文锚点 + 性别/地区/语域 chip */}
+      {entry.isLemma && entry.senses.length > 0 && (
+        <section className="entry-section">
+          <h3>释义</h3>
+          <ol className="sense-list">
+            {entry.senses.map((s, i) => (
+              <li className="sense-item" key={i}>
+                <div className="sense-zh">
+                  {s.zh || <span className="sense-missing">（待补）</span>}
+                  <SenseChips sense={s} />
+                </div>
+                {s.en && <div className="sense-en">{s.en}</div>}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {/* 变位形式：指回原形 + 各原形的词义 + 语法说明 */}
+      {entry.baseForms.length > 0 && (
+        <section className="entry-section">
+          <h3>变位形式</h3>
+          {entry.inflNotes.length > 0 && (
+            <ul className="infl-notes">
+              {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          )}
+          <div className="base-list">
+            {entry.baseForms.map((bw) => {
+              const base = entry.bases.find((b) => b.word === bw);
+              return (
+                <div className="base-item" key={bw}>
+                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                    onClick={(e) => { e.preventDefault(); onWord(bw); }}>
+                    {bw}
+                  </a>
+                  {base?.pos && <span className="base-pos">{base.pos}</span>}
+                  {base && base.senses.length > 0 && (() => {
+                    const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
+                    const CAP = 4;
+                    const shown = zhs.slice(0, CAP).join('；');
+                    const more = zhs.length > CAP;
+                    return (
+                      <span className="base-senses">
+                        {shown}
+                        {more && <span className="base-more">… 共 {zhs.length} 义，点词查看</span>}
+                      </span>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {entry.collocations.length > 0 && (
+        <section className="entry-section">
+          <h3>搭配 / 固定短语</h3>
+          <ul className="colloc-list">
+            {entry.collocations.map((c, i) => (
+              <li className="colloc-item" key={i}>
+                <span className="colloc-text">{c.text}</span>
+                {c.zh && <span className="colloc-zh">{c.zh}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </article>
   );
 }
