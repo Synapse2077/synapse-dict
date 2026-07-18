@@ -144,7 +144,8 @@ CREATE INDEX idx_norm ON dict(word_norm);
 - **本质优先**：意语独有特征（助动词、异性复数、gemination、开闭元音）升为一等，不被通用模具压平。
 - **按语种解耦**：脚本层、服务层各自独立，互不引用；仅语言注册表一处汇总。
 - **一种数据一个权威**：义项/变位 = kaikki；中文/助动词/性别/搭配/兜底IPA = 豆包（只填不造义项）。
-- **IPA 三级填充**：kaikki > 规则 G2P > 豆包；**drop-ledger** 全 tag 归桶不静默丢。
+- **IPA 两阶段**：①**入库=维基式精确源**（kaikki > 规则 G2P > 豆包三级填充，覆盖 99.9%，含连结弧/音节点/双写长辅音）；②**读取=本土词典标准**（`italian.ts` 的 `normalizeItalianIpa` 显示层规范化，和英语 `normalizePronunciation` 同一定位）：去连结弧 t͡ʃ→tʃ、真双辅音→长音符 ː（gatto /ˈɡatːo/、braccio /ˈbratːtʃo/）、固有长 ʎ/ɲ/ʃ 单写（figlio /ˈfiʎo/）、去音节点、开闭元音保留。同时解决 ˈ/连结弧的字体渲染问题。
+- **drop-ledger** 全 tag 归桶不静默丢。
 
 ## 6. 待办清单（实现顺序）
 

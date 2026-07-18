@@ -83,6 +83,30 @@ type ItRow = {
   flag: string | null;
 };
 
+// kaikki/维基 IPA → 意大利本土词典标准（显示层规范化，与英语 normalizePronunciation 同一定位）。
+// DB 内存的是精确的维基式源 IPA（含连结弧/音节点/双写长辅音）；对外读取时统一转本土写法：
+//   ① 去连结弧 t͡ʃ→tʃ  ② 固有长辅音 ʎ/ɲ/ʃ 元音间恒长 → 单写（不双写不加 ː）
+//   ③ 真双辅音(双写字母)→ 长音符 ː（gatto ˈɡatːo；塞擦音 braccio ˈbratːtʃo=闭塞tː+释放tʃ）
+//   ④ 去音节点  ⑤ 开/闭元音 ɛ/ɔ 保留
+// 例：/ˈbrat.t͡ʃo/→/ˈbratːtʃo/、/ˈfiʎ.ʎo/→/ˈfiʎo/、/adˈd͡zɔ.to/→/aˈdːdzɔto/
+function normalizeItalianIpa(ipa: string | null): string | null {
+  if (!ipa) return ipa;
+  const s = ipa.trim();
+  let inner = s.startsWith('/') && s.endsWith('/') ? s.slice(1, -1) : s;
+  inner = inner.replace(/͡/g, '');                     // ① 去连结弧
+  // ② 固有长 ʎ ɲ ʃ（先处理，免得被当普通双辅音加 ː）
+  inner = inner.replace(/([ʎɲʃ])ˈ\1/gu, 'ˈ$1');            // 跨重音
+  inner = inner.replace(/([ʎɲʃ])[.ˌ]\1/gu, '$1');          // 跨点/次重音
+  // ③a 塞擦音长音：塞音 + 边界 + 塞擦音 → 塞音ː + 塞擦音（跨重音时重音移到长辅音前）
+  inner = inner.replace(/([td])ˈ(t[ʃs]|d[ʒz])/gu, 'ˈ$1ː$2');
+  inner = inner.replace(/([td])[.ˌ](t[ʃs]|d[ʒz])/gu, '$1ː$2');
+  // ③b 普通双辅音：C + 边界 + 同 C → Cː
+  inner = inner.replace(/([bdfɡklmnprstv])ˈ\1/gu, 'ˈ$1ː');
+  inner = inner.replace(/([bdfɡklmnprstv])[.ˌ]\1/gu, '$1ː');
+  inner = inner.replace(/\./g, '');                          // ④ 去剩余音节点
+  return '/' + inner + '/';
+}
+
 function splitLines(s: string | null): string[] {
   if (!s) return [];
   return s.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
@@ -144,7 +168,7 @@ function mapEntry(row: ItRow): ItalianEntry {
     lang: 'it',
     id: row.id,
     word: row.word,
-    ipa: row.ipa,                       // 原样透传，不 normalize
+    ipa: normalizeItalianIpa(row.ipa),  // 维基式源 IPA → 本土词典标准（见函数注释）
     pos: row.pos,
     isLemma: row.is_lemma === 1,
     aux: row.aux,

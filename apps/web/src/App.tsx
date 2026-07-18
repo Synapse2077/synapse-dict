@@ -964,12 +964,6 @@ const IT_REGION_LABELS: Record<string, string> = {
   regional: '地区性', dialectal: '方言', 'Ancient-Rome': '古罗马', Roman: '罗马',
 };
 
-// 显示用：去掉连结弧 U+0361（t͡ʃ→tʃ）。它是最脆弱的组合字符，多数字体不渲染而显示为空，
-// 去掉后 tʃ/dʒ/ts/dz 读音等价、任何字体都能正常显示；DB 内仍保留精确的 t͡ʃ。
-function displayIpa(ipa: string | null): string | null {
-  return ipa ? ipa.replace(/͡/g, '') : ipa;
-}
-
 function ItSenseChips({ sense }: { sense: ItSense }) {
   const chips: { cls: string; text: string }[] = [];
   for (const r of sense.regions) chips.push({ cls: 'reg', text: IT_REGION_LABELS[r] || r });
@@ -1008,7 +1002,7 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.ipa && (
         <div className="phonetic-row">
           <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
-            <span className="phonetic-value">{displayIpa(entry.ipa)}</span>
+            <span className="phonetic-value">{entry.ipa}</span>
             <SpeakerIcon />
           </button>
         </div>
