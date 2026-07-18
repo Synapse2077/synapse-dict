@@ -51,6 +51,7 @@ export type ItalianEntry = {
   plural: string | null;        // 不规则复数形
   pluralGender: string | null;  // 异性复数（braccio→braccia 记 f）
   numberNote: string | null;    // invariable / plural-only / uncountable
+  level: string | null;         // CEFR 难度等级 A1-C2（豆包填）
   // —— 释义与关联 ——
   senses: ItalianSense[];
   collocations: ItalianCollocation[];
@@ -74,6 +75,7 @@ type ItRow = {
   plural: string | null;
   plural_gender: string | null;
   number_note: string | null;
+  level: string | null;
   definition: string | null;
   translation: string | null;
   meta: string | null;
@@ -179,6 +181,7 @@ function mapEntry(row: ItRow): ItalianEntry {
     plural: row.plural,
     pluralGender: row.plural_gender,
     numberNote: row.number_note,
+    level: row.level,
     senses: buildSenses(row),
     collocations: parseCollocations(row.collocation),
     baseForms: parseBaseForms(row.exchange),
@@ -212,7 +215,7 @@ export class ItalianDictService {
 
     this.exactQuery = this.db.prepare(`
       SELECT id, word, ipa, pos, is_lemma, aux, conj, transitivity, pronominal,
-             gender, plural, plural_gender, number_note,
+             gender, plural, plural_gender, number_note, level,
              definition, translation, meta, infl, exchange, collocation, flag
       FROM dict
       WHERE word = ? COLLATE NOCASE

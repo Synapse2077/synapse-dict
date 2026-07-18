@@ -915,3 +915,9 @@ body {
   line-height: 1.6;
 }
 .it-note b { color: var(--text-primary); }
+
+/* ---- CEFR 难度徽标（A 易→绿、B 中→橙、C 难→红）---- */
+.badge.cefr { border: 1px solid transparent; font-variant-numeric: tabular-nums; }
+.badge.cefr-A { background: color-mix(in srgb, #2e9e5b 16%, transparent); color: #2e9e5b; }
+.badge.cefr-B { background: color-mix(in srgb, #d9822b 18%, transparent); color: #d9822b; }
+.badge.cefr-C { background: color-mix(in srgb, #d1495b 16%, transparent); color: #d1495b; }

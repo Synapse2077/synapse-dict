@@ -450,6 +450,7 @@ def main(dump_infl=False):
           plural        TEXT,
           plural_gender TEXT,
           number_note   TEXT,
+          level         TEXT,          -- CEFR 难度等级 A1-C2（豆包填，kaikki 无此数据）
           definition    TEXT,
           translation   TEXT,
           meta          TEXT,

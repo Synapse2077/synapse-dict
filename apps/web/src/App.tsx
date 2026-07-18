@@ -95,6 +95,7 @@ type ItEntry = {
   plural: string | null;
   pluralGender: string | null;
   numberNote: string | null;
+  level: string | null;
   senses: ItSense[];
   collocations: ItCollocation[];
   baseForms: string[];
@@ -1008,8 +1009,9 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
         </div>
       )}
 
-      {/* 意语本质徽标：动词看助动词/变位类/及物性，名词看性别/复数 */}
+      {/* 意语本质徽标：动词看助动词/变位类/及物性，名词看性别/复数；CEFR 难度贯穿所有词性 */}
       <div className="entry-meta-row entry-badges">
+        {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
         {isNoun && entry.gender && (
           <span className={`badge g g-${entry.gender}`}>{GENDER_LABELS[entry.gender] || entry.gender}性</span>
         )}
