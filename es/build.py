@@ -156,7 +156,7 @@ def base_of(s):
 
 def meta_of(s, pos):
     t = s.get("tags", [])
-    m = {}
+    m = {"pos": POS_MAP.get(pos, pos)}   # 逐义项词性（kaikki 一条=一个 pos）
     # 性别：只对名词/专名有意义。形容词的阴+阳双标是"一致关系"非固有性别→丢。
     if pos in ("noun", "name", "proper noun"):
         hf = "feminine" in t

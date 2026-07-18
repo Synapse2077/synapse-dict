@@ -34,6 +34,7 @@ type EnEntry = {
 type KaikkiSense = {
   en: string | null;
   zh: string | null;
+  pos: string | null;
   gender: string | null;
   regions: string[];
   registers: string[];
@@ -62,7 +63,47 @@ type KaikkiEntry = {
   flag: string | null;
 };
 
-type AnyEntry = EnEntry | KaikkiEntry;
+// Italian entry (意语专属 schema：本质字段 aux/conj/gender/plural 为一等公民)
+type ItSense = {
+  en: string | null;
+  zh: string | null;
+  pos: string | null;
+  regions: string[];
+  registers: string[];
+};
+type ItCollocation = { text: string; zh: string | null };
+type ItBase = {
+  word: string;
+  pos: string | null;
+  ipa: string | null;
+  aux: string | null;
+  gender: string | null;
+  senses: ItSense[];
+};
+type ItEntry = {
+  lang: 'it';
+  id: number;
+  word: string;
+  ipa: string | null;
+  pos: string | null;
+  isLemma: boolean;
+  aux: string | null;
+  conj: string | null;
+  transitivity: string | null;
+  pronominal: boolean;
+  gender: string | null;
+  plural: string | null;
+  pluralGender: string | null;
+  numberNote: string | null;
+  senses: ItSense[];
+  collocations: ItCollocation[];
+  baseForms: string[];
+  bases: ItBase[];
+  inflNotes: string[];
+  flag: string | null;
+};
+
+type AnyEntry = EnEntry | KaikkiEntry | ItEntry;
 
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
@@ -70,6 +111,7 @@ type FetchError = 'rate' | 'network';
 const EXAMPLES: Record<string, string[]> = {
   en: ['serene', 'ephemeral', 'resilience', 'curious', 'nuance', 'vivid'],
   es: ['hola', 'escalera', 'hablar', 'corazón', 'mariposa', 'rápido'],
+  it: ['ciao', 'mangiare', 'braccio', 'bello', 'andare', 'città'],
 };
 
 // --- English parsing helpers ---
@@ -124,6 +166,73 @@ function parseTags(raw: string | null): string[] {
 // --- Spanish/Kaikki display helpers ---
 
 const GENDER_LABELS: Record<string, string> = { f: '阴', m: '阳', mf: '阴/阳', n: '中' };
+
+// 逐义项词性 → 中文标签（对应 build.py POS_MAP 的短码）。
+const POS_LABELS: Record<string, string> = {
+  n: '名词', name: '专名', adj: '形容词', adv: '副词', v: '动词', pron: '代词',
+  prep: '介词', conj: '连词', det: '限定词', num: '数词', intj: '感叹词',
+  pref: '前缀', suf: '后缀', phr: '短语', contr: '缩合', art: '冠词', prov: '谚语',
+};
+
+// 地区标签 → 中文（对应 build.py REGIONS）。映射不到回退原文。
+const REGION_LABELS: Record<string, string> = {
+  Spain: '西班牙', 'Canary-Islands': '加那利群岛', Andalusia: '安达卢西亚',
+  'Latin-America': '拉美', Mexico: '墨西哥', Chile: '智利', Colombia: '哥伦比亚',
+  Peru: '秘鲁', Venezuela: '委内瑞拉', Cuba: '古巴', Bolivia: '玻利维亚',
+  Ecuador: '厄瓜多尔', Guatemala: '危地马拉', Honduras: '洪都拉斯', Nicaragua: '尼加拉瓜',
+  'Costa-Rica': '哥斯达黎加', Paraguay: '巴拉圭', Uruguay: '乌拉圭',
+  'Dominican-Republic': '多米尼加', 'Puerto-Rico': '波多黎各', Caribbean: '加勒比',
+  Rioplatense: '拉普拉塔河地区', Argentina: '阿根廷', Panama: '巴拿马',
+  'El-Salvador': '萨尔瓦多', 'Central-America': '中美洲', 'South-America': '南美洲',
+  'North-America': '北美洲', Philippines: '菲律宾', US: '美国', UK: '英国',
+  Canada: '加拿大', Australia: '澳大利亚', Louisiana: '路易斯安那', Texas: '得州',
+  California: '加州', 'New-York-City': '纽约市', Aragon: '阿拉贡', Asturias: '阿斯图里亚斯',
+  Galicia: '加利西亚', Navarre: '纳瓦拉', Tenerife: '特内里费', Seville: '塞维利亚',
+  Valencia: '巴伦西亚', Catalonia: '加泰罗尼亚', Mallorca: '马略卡', Belize: '伯利兹',
+  Antilles: '安的列斯', Guerrero: '格雷罗', Puebla: '普埃布拉', Bogota: '波哥大',
+  Manila: '马尼拉', Llanos: '亚诺斯平原', Morocco: '摩洛哥', Angola: '安哥拉',
+  'Equatorial-Guinea': '赤道几内亚', Iberian: '伊比利亚', European: '欧洲',
+  'European-Union': '欧盟', EU: '欧盟', Lunfardo: '隆法多黑话', 'Southern-Spain': '西班牙南部',
+  Northern: '北部', Southern: '南部', Eastern: '东部', Western: '西部',
+  Northeastern: '东北部', Northwestern: '西北部', Southeastern: '东南部',
+  Southwestern: '西南部', Central: '中部',
+};
+
+// 语域标签 → 中文（对应 build.py REGISTERS）。
+const REGISTER_LABELS: Record<string, string> = {
+  colloquial: '口语', vulgar: '粗俗', slang: '俚语', derogatory: '贬义',
+  offensive: '冒犯', humorous: '诙谐', literary: '文学', dated: '旧式',
+  euphemistic: '委婉', informal: '非正式', formal: '正式', pejorative: '贬义',
+  childish: '童语', poetic: '诗歌', familiar: '亲昵', proscribed: '非规范',
+  nonstandard: '非标准', obsolete: '废弃', historical: '历史', archaic: '古语',
+  rare: '罕见', uncommon: '少见', neologism: '新词', Internet: '网络',
+  misspelling: '误拼', 'pronunciation-spelling': '音写', dialectal: '方言',
+  regional: '地区性', jargon: '行话', slur: '蔑称', ironic: '反讽',
+  sarcastic: '讽刺', endearing: '亲昵', emphatic: '强调', rhetoric: '修辞',
+  bureaucratese: '官腔', Leet: 'Leet黑话', figuratively: '比喻',
+};
+
+// 数属性 → 中文（对应 build.py NUMBER）。
+const NUMBER_LABELS: Record<string, string> = {
+  uncountable: '不可数', 'plural-only': '仅复数', invariable: '单复同形', collective: '集合',
+};
+
+// 词性短码 → 中文（支持 "n/v" 这种聚合，逐段映射后再拼），全站统一显示。
+function posLabel(raw: string | null): string {
+  if (!raw) return '';
+  return raw.split('/').map((p) => POS_LABELS[p] || p).join('/');
+}
+
+// 义项按相邻相同词性分组（definition 本就按词性成段，相邻聚合即可）。
+function groupSensesByPos(senses: KaikkiSense[]): { pos: string | null; senses: KaikkiSense[] }[] {
+  const groups: { pos: string | null; senses: KaikkiSense[] }[] = [];
+  for (const s of senses) {
+    const last = groups[groups.length - 1];
+    if (last && last.pos === s.pos) last.senses.push(s);
+    else groups.push({ pos: s.pos, senses: [s] });
+  }
+  return groups;
+}
 
 // 语音列表是异步加载的，首帧 getVoices() 常为空 → 缓存 + onvoiceschanged 兜底。
 let voiceCache: SpeechSynthesisVoice[] = [];
@@ -540,7 +649,11 @@ export default function App() {
           <EnglishEntry entry={entry as EnEntry} onWord={goToWord} speak={speakWord} />
         )}
 
-        {entry && entry.lang !== 'en' && (
+        {entry && entry.lang === 'it' && (
+          <ItalianEntryView entry={entry as ItEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+        )}
+
+        {entry && entry.lang !== 'en' && entry.lang !== 'it' && (
           <KaikkiEntryView entry={entry as KaikkiEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
@@ -697,10 +810,10 @@ function EnglishEntry({ entry, onWord, speak }: {
 
 function SenseChips({ sense }: { sense: KaikkiSense }) {
   const chips: { cls: string; text: string }[] = [];
-  if (sense.gender) chips.push({ cls: 'g', text: GENDER_LABELS[sense.gender] || sense.gender });
-  for (const r of sense.regions) chips.push({ cls: 'reg', text: r });
-  for (const r of sense.registers) chips.push({ cls: 'lex', text: r });
-  for (const n of sense.numbers) chips.push({ cls: 'num', text: n });
+  if (sense.gender) chips.push({ cls: `g g-${sense.gender}`, text: GENDER_LABELS[sense.gender] || sense.gender });
+  for (const r of sense.regions) chips.push({ cls: 'reg', text: REGION_LABELS[r] || r });
+  for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
+  for (const n of sense.numbers) chips.push({ cls: 'num', text: NUMBER_LABELS[n] || n });
   if (chips.length === 0) return null;
   return (
     <span className="sense-chips">
@@ -713,15 +826,15 @@ function KaikkiEntryView({ entry, speakLocale, onWord, speak }: {
   entry: KaikkiEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  // 空壳 lemma（有释义但义项无 pos）才显示聚合词性 badge。变位形式不挂标签——
+  // 下方「变位形式」区块已含语法说明+原形，头部再标一个纯属重复。
+  const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
+  const hasBadges = showStubPos || entry.reflexive;
   return (
     <article className="entry-detail">
+      {/* 音标紧跟单词；标签（变位形式/代动词/空壳词性）移到音标下方 */}
       <header className="entry-header">
         <h2 className="entry-word">{entry.word}</h2>
-        <div className="entry-meta-row">
-          {entry.pos && <span className="badge pos">{entry.pos}</span>}
-          {entry.reflexive && <span className="badge tag">代动词 prnl.</span>}
-          {!entry.isLemma && <span className="badge tag">变位形式</span>}
-        </div>
       </header>
 
       {entry.phonetic && (
@@ -733,21 +846,35 @@ function KaikkiEntryView({ entry, speakLocale, onWord, speak }: {
         </div>
       )}
 
-      {/* 真义 lemma：逐义项中文 + 英文锚点 + 性别/地区/语域 chip */}
+      {hasBadges && (
+        <div className="entry-meta-row entry-badges">
+          {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
+          {entry.reflexive && <span className="badge tag">代动词 prnl.</span>}
+        </div>
+      )}
+
+      {/* 真义 lemma：按词性分组，组内逐义项中文 + 英文锚点 + 性别/地区/语域 chip */}
       {entry.isLemma && entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          <ol className="sense-list">
-            {entry.senses.map((s, i) => (
-              <li className="sense-item" key={i}>
-                <div className="sense-zh">
-                  {s.zh || <span className="sense-missing">（待补）</span>}
-                  <SenseChips sense={s} />
-                </div>
-                {s.en && <div className="sense-en">{s.en}</div>}
-              </li>
-            ))}
-          </ol>
+          {groupSensesByPos(entry.senses).map((grp, gi) => (
+            <div className="pos-group" key={gi}>
+              {grp.pos && (
+                <div className="pos-group-label">{posLabel(grp.pos)}</div>
+              )}
+              <ol className="sense-list">
+                {grp.senses.map((s, i) => (
+                  <li className="sense-item" key={i}>
+                    <div className="sense-zh">
+                      {s.zh || <span className="sense-missing">（待补）</span>}
+                      <SenseChips sense={s} />
+                    </div>
+                    {s.en && <div className="sense-en">{s.en}</div>}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
         </section>
       )}
 
@@ -769,7 +896,7 @@ function KaikkiEntryView({ entry, speakLocale, onWord, speak }: {
                     onClick={(e) => { e.preventDefault(); onWord(bw); }}>
                     {bw}
                   </a>
-                  {base?.pos && <span className="base-pos">{base.pos}</span>}
+                  {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
                   {base && base.senses.length > 0 && (() => {
                     const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
                     const CAP = 4;
@@ -779,6 +906,200 @@ function KaikkiEntryView({ entry, speakLocale, onWord, speak }: {
                       <span className="base-senses">
                         {shown}
                         {more && <span className="base-more">… 共 {zhs.length} 义，点词查看</span>}
+                      </span>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {entry.collocations.length > 0 && (
+        <section className="entry-section">
+          <h3>搭配 / 固定短语</h3>
+          <ul className="colloc-list">
+            {entry.collocations.map((c, i) => (
+              <li className="colloc-item" key={i}>
+                <span className="colloc-text">{c.text}</span>
+                {c.zh && <span className="colloc-zh">{c.zh}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </article>
+  );
+}
+
+// ============================================================================
+// 意大利语词条视图 —— 意语专属，把本质特征做成一等展示：
+// 助动词 essere/avere 徽标、变位类、异性复数（braccio→braccia 阴）、gemination 已在 IPA 内。
+// 自包含，不复用西语的 KaikkiEntryView。
+// ============================================================================
+
+const AUX_LABELS: Record<string, string> = {
+  avere: '助动词 avere', essere: '助动词 essere', both: '助动词 avere/essere',
+};
+const CONJ_LABELS: Record<string, string> = {
+  '1': '第一变位 -are', '2': '第二变位 -ere', '3': '第三变位 -ire', '3isc': '第三变位 -ire (-isc-)',
+};
+const TRANS_LABELS: Record<string, string> = { t: '及物', i: '不及物', ti: '及物/不及物' };
+const NUMBER_NOTE_LABELS: Record<string, string> = {
+  invariable: '单复同形', 'plural-only': '仅复数', 'singular-only': '仅单数',
+  uncountable: '不可数', collective: '集合名词',
+};
+// 意语地区标签（意语专属，不复用西语 REGION_LABELS）。映射不到回退原文。
+const IT_REGION_LABELS: Record<string, string> = {
+  Italy: '意大利', Tuscany: '托斯卡纳', Switzerland: '瑞士意语区', Sardinia: '撒丁岛',
+  Sicily: '西西里', Naples: '那不勒斯', Rome: '罗马', Florence: '佛罗伦萨', Milan: '米兰',
+  Venice: '威尼斯', Turin: '都灵', Genoa: '热那亚', Bologna: '博洛尼亚', Lombardy: '伦巴第',
+  Piedmont: '皮埃蒙特', Veneto: '威尼托', Campania: '坎帕尼亚', Calabria: '卡拉布里亚',
+  Apulia: '普利亚', Abruzzo: '阿布鲁佐', Lazio: '拉齐奥', Liguria: '利古里亚',
+  Umbria: '翁布里亚', Marche: '马尔凯', Molise: '莫利塞', Basilicata: '巴西利卡塔',
+  Friuli: '弗留利', Trentino: '特伦蒂诺', 'Northern-Italy': '意大利北部',
+  'Southern-Italy': '意大利南部', 'Central-Italy': '意大利中部', Northern: '北部',
+  Southern: '南部', Eastern: '东部', Western: '西部', Central: '中部',
+  regional: '地区性', dialectal: '方言', 'Ancient-Rome': '古罗马', Roman: '罗马',
+};
+
+// 显示用：去掉连结弧 U+0361（t͡ʃ→tʃ）。它是最脆弱的组合字符，多数字体不渲染而显示为空，
+// 去掉后 tʃ/dʒ/ts/dz 读音等价、任何字体都能正常显示；DB 内仍保留精确的 t͡ʃ。
+function displayIpa(ipa: string | null): string | null {
+  return ipa ? ipa.replace(/͡/g, '') : ipa;
+}
+
+function ItSenseChips({ sense }: { sense: ItSense }) {
+  const chips: { cls: string; text: string }[] = [];
+  for (const r of sense.regions) chips.push({ cls: 'reg', text: IT_REGION_LABELS[r] || r });
+  for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
+  if (chips.length === 0) return null;
+  return (
+    <span className="sense-chips">
+      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+    </span>
+  );
+}
+
+function groupItSenses(senses: ItSense[]): { pos: string | null; senses: ItSense[] }[] {
+  const groups: { pos: string | null; senses: ItSense[] }[] = [];
+  for (const s of senses) {
+    const last = groups[groups.length - 1];
+    if (last && last.pos === s.pos) last.senses.push(s);
+    else groups.push({ pos: s.pos, senses: [s] });
+  }
+  return groups;
+}
+
+function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
+  entry: ItEntry; speakLocale: string; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
+}) {
+  const isVerb = !!entry.pos && entry.pos.split('/').includes('v');
+  const isNoun = !!entry.pos && entry.pos.split('/').some((p) => p === 'n' || p === 'name');
+  const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
+  return (
+    <article className="entry-detail">
+      <header className="entry-header">
+        <h2 className="entry-word">{entry.word}</h2>
+      </header>
+
+      {entry.ipa && (
+        <div className="phonetic-row">
+          <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
+            <span className="phonetic-value">{displayIpa(entry.ipa)}</span>
+            <SpeakerIcon />
+          </button>
+        </div>
+      )}
+
+      {/* 意语本质徽标：动词看助动词/变位类/及物性，名词看性别/复数 */}
+      <div className="entry-meta-row entry-badges">
+        {isNoun && entry.gender && (
+          <span className={`badge g g-${entry.gender}`}>{GENDER_LABELS[entry.gender] || entry.gender}性</span>
+        )}
+        {isNoun && entry.plural && (
+          <span className="badge plural">
+            复数 {entry.plural}
+            {entry.pluralGender && <span className="plural-shift">〈{GENDER_LABELS[entry.pluralGender]}〉</span>}
+          </span>
+        )}
+        {isNoun && entry.numberNote && (
+          <span className="badge num">{NUMBER_NOTE_LABELS[entry.numberNote] || entry.numberNote}</span>
+        )}
+        {isVerb && entry.aux && (
+          <span className={`badge aux aux-${entry.aux}`}>{AUX_LABELS[entry.aux]}</span>
+        )}
+        {isVerb && entry.conj && (
+          <span className="badge conj">{CONJ_LABELS[entry.conj] || entry.conj}</span>
+        )}
+        {isVerb && entry.transitivity && (
+          <span className="badge tag">{TRANS_LABELS[entry.transitivity] || entry.transitivity}</span>
+        )}
+        {entry.pronominal && <span className="badge tag">代动词 prnl.</span>}
+        {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
+      </div>
+
+      {/* 异性复数（metaplasmic）提示：意语招牌，braccio(阳)→braccia(阴) */}
+      {isNoun && entry.pluralGender && entry.plural && (
+        <div className="it-note">
+          异性复数：单数 <b>{entry.word}</b>（{GENDER_LABELS[entry.gender || 'm']}）→ 复数{' '}
+          <b>{entry.plural}</b>（{GENDER_LABELS[entry.pluralGender]}）
+        </div>
+      )}
+
+      {entry.isLemma && entry.senses.length > 0 && (
+        <section className="entry-section">
+          <h3>释义</h3>
+          {groupItSenses(entry.senses).map((grp, gi) => (
+            <div className="pos-group" key={gi}>
+              {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
+              <ol className="sense-list">
+                {grp.senses.map((s, i) => (
+                  <li className="sense-item" key={i}>
+                    <div className="sense-zh">
+                      {s.zh || <span className="sense-missing">（待补）</span>}
+                      <ItSenseChips sense={s} />
+                    </div>
+                    {s.en && <div className="sense-en">{s.en}</div>}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* 变位形式：指回原形；原形连带助动词/性别一起显示 */}
+      {entry.baseForms.length > 0 && (
+        <section className="entry-section">
+          <h3>变位形式</h3>
+          {entry.inflNotes.length > 0 && (
+            <ul className="infl-notes">
+              {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          )}
+          <div className="base-list">
+            {entry.baseForms.map((bw) => {
+              const base = entry.bases.find((b) => b.word === bw);
+              return (
+                <div className="base-item" key={bw}>
+                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                    onClick={(e) => { e.preventDefault(); onWord(bw); }}>
+                    {bw}
+                  </a>
+                  {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
+                  {base?.aux && <span className="base-pos">{AUX_LABELS[base.aux]}</span>}
+                  {base?.gender && <span className="base-pos">{GENDER_LABELS[base.gender]}性</span>}
+                  {base && base.senses.length > 0 && (() => {
+                    const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
+                    const CAP = 4;
+                    const shown = zhs.slice(0, CAP).join('；');
+                    return (
+                      <span className="base-senses">
+                        {shown}
+                        {zhs.length > CAP && <span className="base-more">… 共 {zhs.length} 义，点词查看</span>}
                       </span>
                     );
                   })()}

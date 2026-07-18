@@ -19,6 +19,8 @@
   --accent-soft: rgba(47, 109, 246, 0.1);
   --accent-contrast: #ffffff;
   --star: #f5a623;
+  --gender-f: #d6336c;   /* 阴 玫红 */
+  --gender-mf: #7c4dff;  /* 阴/阳 紫 */
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
   --en-accent: #3763c4;
@@ -40,6 +42,8 @@
   --accent-soft: rgba(76, 155, 255, 0.14);
   --accent-contrast: #0b1220;
   --star: #f5a623;
+  --gender-f: #ff85b0;   /* 阴 玫红（暗色下提亮） */
+  --gender-mf: #b39dff;  /* 阴/阳 紫（暗色下提亮） */
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --en-accent: #8fb0ff;
@@ -430,6 +434,15 @@ body {
   flex-wrap: wrap;
 }
 
+/* 标签行移到音标下方时收紧「音标→标签」间距（:has 仅命中西语新布局，不影响英语） */
+.phonetic-row:has(+ .entry-badges) {
+  margin-bottom: 10px;
+}
+
+.entry-meta-row.entry-badges {
+  margin-bottom: 26px;
+}
+
 .phonetic-btn {
   display: inline-flex;
   align-items: center;
@@ -463,7 +476,10 @@ body {
 .phonetic-value {
   font-size: 15px;
   color: var(--text);
-  font-family: 'Noto Sans', sans-serif;
+  /* IPA 需含 ˈ(U+02C8) 等修饰字符的字体：系统字体(SF/Segoe)优先，再退 IPA 专用字体。
+     旧值 'Noto Sans' 未加载 → 回退老 Helvetica，缺 IPA 字形导致重音符/连结弧不可见。 */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Charis SIL',
+    'Doulos SIL', 'Gentium Plus', 'Lucida Grande', 'Arial Unicode MS', sans-serif;
 }
 
 /* ---- Definition sections ---- */
@@ -614,6 +630,23 @@ body {
 /* ============================================================
    Kaikki (es/fr/it/pt/no) entry detail
    ============================================================ */
+.pos-group {
+  margin-bottom: 18px;
+}
+
+.pos-group:last-child {
+  margin-bottom: 0;
+}
+
+.pos-group-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
 .sense-list {
   margin: 0;
   padding-left: 22px;
@@ -662,10 +695,26 @@ body {
   line-height: 1.5;
 }
 
+/* 性别 chip：阳=蓝 / 阴=玫红 / 阴阳共性=紫 / 中=灰，靠颜色分辨（字形相近） */
 .sense-chip.g {
+  border-color: transparent;
+}
+.sense-chip.g-m {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: transparent;
+}
+.sense-chip.g-f {
+  background: color-mix(in srgb, var(--gender-f) 16%, transparent);
+  color: var(--gender-f);
+}
+.sense-chip.g-mf {
+  background: color-mix(in srgb, var(--gender-mf) 18%, transparent);
+  color: var(--gender-mf);
+}
+.sense-chip.g-n {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  border-color: var(--border);
 }
 
 .sense-chip.reg {
@@ -817,3 +866,52 @@ body {
   from { opacity: 0; transform: translate(-50%, 8px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
+
+/* ---- Italian essence badges (助动词 / 变位类 / 性别 / 异性复数) ---- */
+.badge.g-m { background: var(--accent-soft); color: var(--accent); }
+.badge.g-f { background: color-mix(in srgb, var(--gender-f) 16%, transparent); color: var(--gender-f); }
+.badge.g-mf { background: color-mix(in srgb, var(--gender-mf) 18%, transparent); color: var(--gender-mf); }
+.badge.g-n { background: var(--surface-soft); color: var(--text-secondary); }
+
+/* 助动词是意语动词的灵魂——essere/avere 分色，最显眼 */
+.badge.aux { border: 1px solid transparent; }
+.badge.aux-avere { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.badge.aux-essere { background: color-mix(in srgb, var(--gender-f) 16%, transparent); color: var(--gender-f); }
+.badge.aux-both {
+  background: color-mix(in srgb, var(--gender-mf) 16%, transparent);
+  color: var(--gender-mf);
+}
+
+.badge.conj {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.badge.plural {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.badge.plural .plural-shift {
+  margin-left: 3px;
+  color: var(--gender-f);
+  font-weight: 700;
+}
+.badge.num {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+/* 异性复数（metaplasmic）提示条——意语招牌现象，单独一行讲清 */
+.it-note {
+  margin: 4px 0 20px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--gender-f) 8%, var(--surface-soft));
+  border: 1px solid color-mix(in srgb, var(--gender-f) 24%, transparent);
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.it-note b { color: var(--text-primary); }

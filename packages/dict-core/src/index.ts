@@ -3,6 +3,10 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
+// 意语走自己的一套服务（注册表是唯一汇合点；语种服务之间互不引用）。
+import { ItalianDictService } from './italian.js';
+export * from './italian.js';
+
 type DictionaryRow = {
   id: number;
   word: string;
@@ -267,6 +271,7 @@ type KaikkiRow = {
 export type KaikkiSense = {
   en: string | null;       // 英文 gloss 锚点
   zh: string | null;       // 中文释义（变位形式时为语法说明）
+  pos: string | null;      // 逐义项词性（n/adj/adv/v…；补充义项定不了时为 null）
   gender: string | null;   // f / m / mf / n（仅名词）
   regions: string[];       // kaikki 原始地区名
   registers: string[];     // 语域（colloquial / vulgar …）
@@ -341,6 +346,7 @@ function mapKaikki(row: KaikkiRow, lang: string): KaikkiEntry {
     senses.push({
       en: defs[i] ?? null,
       zh: zhs[i] ?? null,
+      pos: typeof m.pos === 'string' ? m.pos : null,
       gender: typeof m.g === 'string' ? m.g : null,
       regions: asArr(m.reg),
       registers: asArr(m.lex),
@@ -467,7 +473,8 @@ export type LanguageMeta = {
 export const LANGUAGES: LanguageMeta[] = [
   { code: 'en', label: 'English', name: '英语', speak: 'en-US' },
   { code: 'es', label: 'Español', name: '西班牙语', speak: 'es-ES' },
-  // 后续：fr(Français/fr-FR)、it(Italiano/it-IT)、pt(Português/pt-PT)、no(Norsk/nb-NO)
+  { code: 'it', label: 'Italiano', name: '意大利语', speak: 'it-IT' },
+  // 后续：fr(Français/fr-FR)、pt(Português/pt-PT)、no(Norsk/nb-NO)
 ];
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
@@ -485,16 +492,17 @@ export function availableLanguages(): LanguageMeta[] {
   return LANGUAGES.filter((l) => fs.existsSync(dbPathFor(l.code)));
 }
 
-const serviceCache = new Map<string, DictionaryService | KaikkiDictService>();
+type AnyService = DictionaryService | KaikkiDictService | ItalianDictService;
+const serviceCache = new Map<string, AnyService>();
 
-export function getService(code: string): DictionaryService | KaikkiDictService {
+export function getService(code: string): AnyService {
   const meta = LANGUAGES.find((l) => l.code === code);
   const lang = meta ? code : 'en';
   let svc = serviceCache.get(lang);
   if (!svc) {
-    svc = lang === 'en'
-      ? new DictionaryService(dbPathFor('en'))
-      : new KaikkiDictService(dbPathFor(lang), lang);
+    if (lang === 'en') svc = new DictionaryService(dbPathFor('en'));
+    else if (lang === 'it') svc = new ItalianDictService(dbPathFor('it'));  // 意语专属服务
+    else svc = new KaikkiDictService(dbPathFor(lang), lang);
     serviceCache.set(lang, svc);
   }
   return svc;
