@@ -30,8 +30,8 @@ type EnEntry = {
   frq: number | null;
 };
 
-// Kaikki-family entry (es / fr / it / pt / no — same schema)
-type KaikkiSense = {
+// Spanish entry (西语专属；数据源自 kaikki，经 es/build.py 产出扁平 dict 表)
+type SpanishSense = {
   en: string | null;
   zh: string | null;
   pos: string | null;
@@ -40,14 +40,14 @@ type KaikkiSense = {
   registers: string[];
   numbers: string[];
 };
-type KaikkiCollocation = { text: string; zh: string | null };
-type KaikkiBase = {
+type SpanishCollocation = { text: string; zh: string | null };
+type SpanishBase = {
   word: string;
   pos: string | null;
   phonetic: string | null;
-  senses: KaikkiSense[];
+  senses: SpanishSense[];
 };
-type KaikkiEntry = {
+type SpanishEntry = {
   lang: string;
   id: number;
   word: string;
@@ -55,10 +55,10 @@ type KaikkiEntry = {
   pos: string | null;
   isLemma: boolean;
   reflexive: boolean;
-  senses: KaikkiSense[];
-  collocations: KaikkiCollocation[];
+  senses: SpanishSense[];
+  collocations: SpanishCollocation[];
   baseForms: string[];
-  bases: KaikkiBase[];
+  bases: SpanishBase[];
   inflNotes: string[];
   flag: string | null;
 };
@@ -103,7 +103,7 @@ type ItEntry = {
   flag: string | null;
 };
 
-type AnyEntry = EnEntry | KaikkiEntry | ItEntry;
+type AnyEntry = EnEntry | SpanishEntry | ItEntry;
 
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
@@ -163,7 +163,7 @@ function parseTags(raw: string | null): string[] {
   return raw.split(/\s+/).filter(Boolean).map((t) => TAG_NAMES[t] || t);
 }
 
-// --- Spanish/Kaikki display helpers ---
+// --- Spanish display helpers ---
 
 const GENDER_LABELS: Record<string, string> = { f: '阴', m: '阳', mf: '阴/阳', n: '中' };
 
@@ -224,8 +224,8 @@ function posLabel(raw: string | null): string {
 }
 
 // 义项按相邻相同词性分组（definition 本就按词性成段，相邻聚合即可）。
-function groupSensesByPos(senses: KaikkiSense[]): { pos: string | null; senses: KaikkiSense[] }[] {
-  const groups: { pos: string | null; senses: KaikkiSense[] }[] = [];
+function groupSensesByPos(senses: SpanishSense[]): { pos: string | null; senses: SpanishSense[] }[] {
+  const groups: { pos: string | null; senses: SpanishSense[] }[] = [];
   for (const s of senses) {
     const last = groups[groups.length - 1];
     if (last && last.pos === s.pos) last.senses.push(s);
@@ -654,7 +654,7 @@ export default function App() {
         )}
 
         {entry && entry.lang !== 'en' && entry.lang !== 'it' && (
-          <KaikkiEntryView entry={entry as KaikkiEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+          <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
         {!entry && entryLoading && <div className="detail-loading">加载中…</div>}
@@ -806,9 +806,9 @@ function EnglishEntry({ entry, onWord, speak }: {
   );
 }
 
-// --- Spanish / Kaikki entry detail ---
+// --- Spanish entry detail ---
 
-function SenseChips({ sense }: { sense: KaikkiSense }) {
+function SenseChips({ sense }: { sense: SpanishSense }) {
   const chips: { cls: string; text: string }[] = [];
   if (sense.gender) chips.push({ cls: `g g-${sense.gender}`, text: GENDER_LABELS[sense.gender] || sense.gender });
   for (const r of sense.regions) chips.push({ cls: 'reg', text: REGION_LABELS[r] || r });
@@ -822,8 +822,8 @@ function SenseChips({ sense }: { sense: KaikkiSense }) {
   );
 }
 
-function KaikkiEntryView({ entry, speakLocale, onWord, speak }: {
-  entry: KaikkiEntry; speakLocale: string; onWord: (w: string) => void;
+function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
+  entry: SpanishEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
   // 空壳 lemma（有释义但义项无 pos）才显示聚合词性 badge。变位形式不挂标签——
@@ -936,7 +936,7 @@ function KaikkiEntryView({ entry, speakLocale, onWord, speak }: {
 // ============================================================================
 // 意大利语词条视图 —— 意语专属，把本质特征做成一等展示：
 // 助动词 essere/avere 徽标、变位类、异性复数（braccio→braccia 阴）、gemination 已在 IPA 内。
-// 自包含，不复用西语的 KaikkiEntryView。
+// 自包含，不复用西语的 SpanishEntryView。
 // ============================================================================
 
 const AUX_LABELS: Record<string, string> = {
