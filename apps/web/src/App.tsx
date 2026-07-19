@@ -149,7 +149,49 @@ type FrEntry = {
   flag: string | null;
 };
 
-type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry;
+// —— 葡萄牙语（pt）：双读音(巴西 pt-BR + 葡萄牙 pt-PT)，与 es/it/fr 解耦 ——
+type PtSense = {
+  en: string | null;
+  zh: string | null;
+  pos: string | null;
+  regions: string[];
+  registers: string[];
+};
+type PtCollocation = { text: string; zh: string | null };
+type PtBase = {
+  word: string;
+  pos: string | null;
+  ipaBr: string | null;
+  ipaPt: string | null;
+  gender: string | null;
+  senses: PtSense[];
+};
+type PtEntry = {
+  lang: 'pt';
+  id: number;
+  word: string;
+  ipaBr: string | null;
+  ipaPt: string | null;
+  pos: string | null;
+  isLemma: boolean;
+  vconj: string | null;
+  transitivity: string | null;
+  pronominal: boolean;
+  pp: string | null;
+  gender: string | null;
+  plural: string | null;
+  feminine: string | null;
+  comparative: string | null;
+  level: string | null;
+  senses: PtSense[];
+  collocations: PtCollocation[];
+  baseForms: string[];
+  bases: PtBase[];
+  inflNotes: string[];
+  flag: string | null;
+};
+
+type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry;
 
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
@@ -159,6 +201,7 @@ const EXAMPLES: Record<string, string[]> = {
   es: ['hola', 'escalera', 'hablar', 'corazón', 'mariposa', 'rápido'],
   it: ['ciao', 'mangiare', 'braccio', 'bello', 'andare', 'città'],
   fr: ['bonjour', 'manger', 'journal', 'beau', 'aller', 'heureux'],
+  pt: ['olá', 'falar', 'livro', 'bonito', 'pão', 'saudade'],
 };
 
 // --- English parsing helpers ---
@@ -704,7 +747,11 @@ export default function App() {
           <FrenchEntryView entry={entry as FrEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
-        {entry && entry.lang !== 'en' && entry.lang !== 'it' && entry.lang !== 'fr' && (
+        {entry && entry.lang === 'pt' && (
+          <PortugueseEntryView entry={entry as PtEntry} onWord={goToWord} speak={speakWord} />
+        )}
+
+        {entry && entry.lang !== 'en' && entry.lang !== 'it' && entry.lang !== 'fr' && entry.lang !== 'pt' && (
           <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
@@ -1327,6 +1374,193 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
                   </a>
                   {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
                   {base?.aux && <span className="base-pos">{FR_AUX_LABELS[base.aux]}</span>}
+                  {base?.gender && <span className="base-pos">{GENDER_LABELS[base.gender]}性</span>}
+                  {base && base.senses.length > 0 && (() => {
+                    const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
+                    const CAP = 4;
+                    const shown = zhs.slice(0, CAP).join('；');
+                    return (
+                      <span className="base-senses">
+                        {shown}
+                        {zhs.length > CAP && <span className="base-more">… 共 {zhs.length} 义，点词查看</span>}
+                      </span>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {entry.collocations.length > 0 && (
+        <section className="entry-section">
+          <h3>搭配 / 固定短语</h3>
+          <ul className="colloc-list">
+            {entry.collocations.map((c, i) => (
+              <li className="colloc-item" key={i}>
+                <span className="colloc-text">{c.text}</span>
+                {c.zh && <span className="colloc-zh">{c.zh}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </article>
+  );
+}
+
+// ============================================================================
+// 葡萄牙语词条视图 —— 葡语专属，把本质特征做成一等展示：
+// 双读音 🇧🇷 巴西 pt-BR / 🇵🇹 葡萄牙 pt-PT（各自可发音）、变位类、过去分词、性别、复数、阴性形。
+// 自包含，不复用 es/it/fr 的视图。
+// ============================================================================
+
+const PT_VCONJ_LABELS: Record<string, string> = {
+  '1': '第一变位 -ar', '2': '第二变位 -er', '3': '第三变位 -ir', por: 'pôr 类',
+};
+// 葡语地区标签（葡语专属，不复用其它语种地区表）。映射不到回退原文。
+const PT_REGION_LABELS: Record<string, string> = {
+  Brazil: '巴西', Portugal: '葡萄牙', Brazilian: '巴西', European: '欧洲葡语',
+  'Southern-Brazil': '巴西南部', 'South-Brazil': '巴西南部', 'North-Brazil': '巴西北部',
+  'Rio-de-Janeiro': '里约', 'São-Paulo': '圣保罗', Caipira: '内陆方言',
+  Bahia: '巴伊亚', 'Minas-Gerais': '米纳斯', Paraná: '巴拉那',
+  'Northeastern-Brazil': '巴西东北', Lisbon: '里斯本', Porto: '波尔图',
+  Angola: '安哥拉', Mozambique: '莫桑比克', Macau: '澳门', 'Cape-Verde': '佛得角',
+  'East-Timor': '东帝汶', Galicia: '加利西亚', Azores: '亚速尔', Madeira: '马德拉',
+  Northern: '北部', Southern: '南部', Central: '中部', regional: '地区性',
+  dialectal: '方言', 'Old-Portuguese': '古葡语',
+};
+
+function PtSenseChips({ sense }: { sense: PtSense }) {
+  const chips: { cls: string; text: string }[] = [];
+  for (const r of sense.regions) chips.push({ cls: 'reg', text: PT_REGION_LABELS[r] || r });
+  for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
+  if (chips.length === 0) return null;
+  return (
+    <span className="sense-chips">
+      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+    </span>
+  );
+}
+
+function groupPtSenses(senses: PtSense[]): { pos: string | null; senses: PtSense[] }[] {
+  const groups: { pos: string | null; senses: PtSense[] }[] = [];
+  for (const s of senses) {
+    const last = groups[groups.length - 1];
+    if (last && last.pos === s.pos) last.senses.push(s);
+    else groups.push({ pos: s.pos, senses: [s] });
+  }
+  return groups;
+}
+
+// 双读音行：区旗 + 音标 + 发音按钮（巴西 pt-BR / 葡萄牙 pt-PT 各一套 locale）。
+function PtPhonetics({ word, ipaBr, ipaPt, speak }: {
+  word: string; ipaBr: string | null; ipaPt: string | null;
+  speak: (word: string, locale: string) => void;
+}) {
+  if (!ipaBr && !ipaPt) return null;
+  const same = ipaBr && ipaPt && ipaBr === ipaPt;
+  const rows: { flag: string; label: string; ipa: string; locale: string }[] = [];
+  if (same) {
+    rows.push({ flag: '🇧🇷🇵🇹', label: '通用', ipa: ipaBr as string, locale: 'pt-BR' });
+  } else {
+    if (ipaBr) rows.push({ flag: '🇧🇷', label: '巴西', ipa: ipaBr, locale: 'pt-BR' });
+    if (ipaPt) rows.push({ flag: '🇵🇹', label: '葡萄牙', ipa: ipaPt, locale: 'pt-PT' });
+  }
+  return (
+    <div className="pt-phonetics">
+      {rows.map((r, i) => (
+        <div className="phonetic-row" key={i}>
+          <span className="pt-dialect" title={r.label}>{r.flag}</span>
+          <button className="phonetic-btn" onClick={() => speak(word, r.locale)} title={`播放 ${r.label} 发音`} type="button">
+            <span className="phonetic-value">{r.ipa}</span>
+            <SpeakerIcon />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PortugueseEntryView({ entry, onWord, speak }: {
+  entry: PtEntry; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
+}) {
+  const posParts = entry.pos ? entry.pos.split('/') : [];
+  const isVerb = posParts.includes('v');
+  const isNoun = posParts.some((p) => p === 'n' || p === 'name');
+  const isAdj = posParts.includes('adj');
+  const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
+  return (
+    <article className="entry-detail">
+      <header className="entry-header">
+        <h2 className="entry-word">{entry.word}</h2>
+      </header>
+
+      <PtPhonetics word={entry.word} ipaBr={entry.ipaBr} ipaPt={entry.ipaPt} speak={speak} />
+
+      {/* 葡语本质徽标：动词看变位类/过去分词/及物性，名词看性别/复数，形容词看阴性形；CEFR 贯穿 */}
+      <div className="entry-meta-row entry-badges">
+        {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
+        {isNoun && entry.gender && (
+          <span className={`badge g g-${entry.gender}`}>{GENDER_LABELS[entry.gender] || entry.gender}性</span>
+        )}
+        {isNoun && entry.plural && <span className="badge plural">复数 {entry.plural}</span>}
+        {(isAdj || isNoun) && entry.feminine && <span className="badge fem">阴性 {entry.feminine}</span>}
+        {(isAdj || isVerb) && entry.comparative && <span className="badge cmp">比较级 {entry.comparative}</span>}
+        {isVerb && entry.vconj && (
+          <span className="badge conj">{PT_VCONJ_LABELS[entry.vconj] || entry.vconj}</span>
+        )}
+        {isVerb && entry.pp && <span className="badge pp">过去分词 {entry.pp}</span>}
+        {isVerb && entry.transitivity && (
+          <span className="badge tag">{TRANS_LABELS[entry.transitivity] || entry.transitivity}</span>
+        )}
+        {entry.pronominal && <span className="badge tag">代动词 pron.</span>}
+        {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
+      </div>
+
+      {entry.isLemma && entry.senses.length > 0 && (
+        <section className="entry-section">
+          <h3>释义</h3>
+          {groupPtSenses(entry.senses).map((grp, gi) => (
+            <div className="pos-group" key={gi}>
+              {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
+              <ol className="sense-list">
+                {grp.senses.map((s, i) => (
+                  <li className="sense-item" key={i}>
+                    <div className="sense-zh">
+                      {s.zh || <span className="sense-missing">（待补）</span>}
+                      <PtSenseChips sense={s} />
+                    </div>
+                    {s.en && <div className="sense-en">{s.en}</div>}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* 变位形式：指回原形（含人称不定式等葡语专属变位）；原形连带性别显示 */}
+      {entry.baseForms.length > 0 && (
+        <section className="entry-section">
+          <h3>变位形式</h3>
+          {entry.inflNotes.length > 0 && (
+            <ul className="infl-notes">
+              {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          )}
+          <div className="base-list">
+            {entry.baseForms.map((bw) => {
+              const base = entry.bases.find((b) => b.word === bw);
+              return (
+                <div className="base-item" key={bw}>
+                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                    onClick={(e) => { e.preventDefault(); onWord(bw); }}>
+                    {bw}
+                  </a>
+                  {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
                   {base?.gender && <span className="base-pos">{GENDER_LABELS[base.gender]}性</span>}
                   {base && base.senses.length > 0 && (() => {
                     const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
