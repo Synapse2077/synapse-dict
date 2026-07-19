@@ -881,6 +881,20 @@ body {
   background: color-mix(in srgb, var(--gender-mf) 16%, transparent);
   color: var(--gender-mf);
 }
+/* 法语助动词（avoir 蓝 / être 阴性色，与意语 avere/essere 同一视觉语言） */
+.badge.aux-avoir { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.badge.aux-être { background: color-mix(in srgb, var(--gender-f) 16%, transparent); color: var(--gender-f); }
+/* 法语过去分词 / 形容词阴性形 */
+.badge.pp {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.badge.fem {
+  background: color-mix(in srgb, var(--gender-f) 12%, transparent);
+  color: var(--gender-f);
+  border: 1px solid color-mix(in srgb, var(--gender-f) 26%, transparent);
+}
 
 .badge.conj {
   background: var(--surface-soft);

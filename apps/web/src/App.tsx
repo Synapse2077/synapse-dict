@@ -104,7 +104,49 @@ type ItEntry = {
   flag: string | null;
 };
 
-type AnyEntry = EnEntry | SpanishEntry | ItEntry;
+// —— 法语（fr）：法语专属 shape，与 es/it 解耦 ——
+type FrSense = {
+  en: string | null;
+  zh: string | null;
+  pos: string | null;
+  regions: string[];
+  registers: string[];
+};
+type FrCollocation = { text: string; zh: string | null };
+type FrBase = {
+  word: string;
+  pos: string | null;
+  ipa: string | null;
+  aux: string | null;
+  gender: string | null;
+  senses: FrSense[];
+};
+type FrEntry = {
+  lang: 'fr';
+  id: number;
+  word: string;
+  ipa: string | null;
+  pos: string | null;
+  isLemma: boolean;
+  aux: string | null;
+  vgroup: string | null;
+  transitivity: string | null;
+  pronominal: boolean;
+  pp: string | null;
+  gender: string | null;
+  plural: string | null;
+  feminine: string | null;
+  invariable: boolean;
+  level: string | null;
+  senses: FrSense[];
+  collocations: FrCollocation[];
+  baseForms: string[];
+  bases: FrBase[];
+  inflNotes: string[];
+  flag: string | null;
+};
+
+type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry;
 
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
@@ -113,6 +155,7 @@ const EXAMPLES: Record<string, string[]> = {
   en: ['serene', 'ephemeral', 'resilience', 'curious', 'nuance', 'vivid'],
   es: ['hola', 'escalera', 'hablar', 'corazón', 'mariposa', 'rápido'],
   it: ['ciao', 'mangiare', 'braccio', 'bello', 'andare', 'città'],
+  fr: ['bonjour', 'manger', 'journal', 'beau', 'aller', 'heureux'],
 };
 
 // --- English parsing helpers ---
@@ -654,7 +697,11 @@ export default function App() {
           <ItalianEntryView entry={entry as ItEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
-        {entry && entry.lang !== 'en' && entry.lang !== 'it' && (
+        {entry && entry.lang === 'fr' && (
+          <FrenchEntryView entry={entry as FrEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+        )}
+
+        {entry && entry.lang !== 'en' && entry.lang !== 'it' && entry.lang !== 'fr' && (
           <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
@@ -1087,6 +1134,181 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
                   </a>
                   {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
                   {base?.aux && <span className="base-pos">{AUX_LABELS[base.aux]}</span>}
+                  {base?.gender && <span className="base-pos">{GENDER_LABELS[base.gender]}性</span>}
+                  {base && base.senses.length > 0 && (() => {
+                    const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
+                    const CAP = 4;
+                    const shown = zhs.slice(0, CAP).join('；');
+                    return (
+                      <span className="base-senses">
+                        {shown}
+                        {zhs.length > CAP && <span className="base-more">… 共 {zhs.length} 义，点词查看</span>}
+                      </span>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {entry.collocations.length > 0 && (
+        <section className="entry-section">
+          <h3>搭配 / 固定短语</h3>
+          <ul className="colloc-list">
+            {entry.collocations.map((c, i) => (
+              <li className="colloc-item" key={i}>
+                <span className="colloc-text">{c.text}</span>
+                {c.zh && <span className="colloc-zh">{c.zh}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </article>
+  );
+}
+
+// ============================================================================
+// 法语词条视图 —— 法语专属，把本质特征做成一等展示：
+// 助动词 avoir/être 徽标、动词三组、过去分词、形容词阴性形、名词不规则复数、不变形。
+// 自包含，不复用 es/it 的视图。
+// ============================================================================
+
+const FR_AUX_LABELS: Record<string, string> = {
+  avoir: '助动词 avoir', être: '助动词 être', both: '助动词 avoir/être',
+};
+const FR_VGROUP_LABELS: Record<string, string> = {
+  '1': '第一组 -er', '2': '第二组 -ir (-iss-)', '3': '第三组（不规则）',
+};
+// 法语地区标签（法语专属，不复用 es/it 的地区表）。映射不到回退原文。
+const FR_REGION_LABELS: Record<string, string> = {
+  France: '法国', Belgium: '比利时', Switzerland: '瑞士法语区', Quebec: '魁北克',
+  Canada: '加拿大', 'Canadian-French': '加拿大法语', Louisiana: '路易斯安那',
+  Acadia: '阿卡迪亚', Africa: '非洲', Wallonia: '瓦隆', Haiti: '海地',
+  Luxembourg: '卢森堡', Normandy: '诺曼底', Brittany: '布列塔尼', Provence: '普罗旺斯',
+  Occitania: '奥克西塔尼', Savoie: '萨瓦', Languedoc: '朗格多克', Picardy: '皮卡第',
+  Ontario: '安大略', Newfoundland: '纽芬兰', Antilles: '安的列斯', Guyana: '圭亚那',
+  Northern: '北部', Southern: '南部', Eastern: '东部', Western: '西部', Central: '中部',
+  regional: '地区性', dialectal: '方言', 'Old-French': '古法语', 'Middle-French': '中古法语',
+};
+
+function FrSenseChips({ sense }: { sense: FrSense }) {
+  const chips: { cls: string; text: string }[] = [];
+  for (const r of sense.regions) chips.push({ cls: 'reg', text: FR_REGION_LABELS[r] || r });
+  for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
+  if (chips.length === 0) return null;
+  return (
+    <span className="sense-chips">
+      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+    </span>
+  );
+}
+
+function groupFrSenses(senses: FrSense[]): { pos: string | null; senses: FrSense[] }[] {
+  const groups: { pos: string | null; senses: FrSense[] }[] = [];
+  for (const s of senses) {
+    const last = groups[groups.length - 1];
+    if (last && last.pos === s.pos) last.senses.push(s);
+    else groups.push({ pos: s.pos, senses: [s] });
+  }
+  return groups;
+}
+
+function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
+  entry: FrEntry; speakLocale: string; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
+}) {
+  const posParts = entry.pos ? entry.pos.split('/') : [];
+  const isVerb = posParts.includes('v');
+  const isNoun = posParts.some((p) => p === 'n' || p === 'name');
+  const isAdj = posParts.includes('adj');
+  const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
+  return (
+    <article className="entry-detail">
+      <header className="entry-header">
+        <h2 className="entry-word">{entry.word}</h2>
+      </header>
+
+      {entry.ipa && (
+        <div className="phonetic-row">
+          <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
+            <span className="phonetic-value">{entry.ipa}</span>
+            <SpeakerIcon />
+          </button>
+        </div>
+      )}
+
+      {/* 法语本质徽标：动词看助动词/组/过去分词/及物性，名词看性别/复数，形容词看阴性形；CEFR 贯穿 */}
+      <div className="entry-meta-row entry-badges">
+        {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
+        {isNoun && entry.gender && (
+          <span className={`badge g g-${entry.gender}`}>{GENDER_LABELS[entry.gender] || entry.gender}性</span>
+        )}
+        {isNoun && entry.plural && (
+          <span className="badge plural">复数 {entry.plural}</span>
+        )}
+        {(isNoun || isAdj) && entry.invariable && <span className="badge num">不变形 inv.</span>}
+        {isAdj && entry.feminine && (
+          <span className="badge fem">阴性 {entry.feminine}</span>
+        )}
+        {isVerb && entry.aux && (
+          <span className={`badge aux aux-${entry.aux}`}>{FR_AUX_LABELS[entry.aux]}</span>
+        )}
+        {isVerb && entry.vgroup && (
+          <span className="badge conj">{FR_VGROUP_LABELS[entry.vgroup] || entry.vgroup}</span>
+        )}
+        {isVerb && entry.pp && <span className="badge pp">过去分词 {entry.pp}</span>}
+        {isVerb && entry.transitivity && (
+          <span className="badge tag">{TRANS_LABELS[entry.transitivity] || entry.transitivity}</span>
+        )}
+        {entry.pronominal && <span className="badge tag">代动词 pron.</span>}
+        {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
+      </div>
+
+      {entry.isLemma && entry.senses.length > 0 && (
+        <section className="entry-section">
+          <h3>释义</h3>
+          {groupFrSenses(entry.senses).map((grp, gi) => (
+            <div className="pos-group" key={gi}>
+              {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
+              <ol className="sense-list">
+                {grp.senses.map((s, i) => (
+                  <li className="sense-item" key={i}>
+                    <div className="sense-zh">
+                      {s.zh || <span className="sense-missing">（待补）</span>}
+                      <FrSenseChips sense={s} />
+                    </div>
+                    {s.en && <div className="sense-en">{s.en}</div>}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* 变位形式：指回原形；原形连带助动词/性别一起显示 */}
+      {entry.baseForms.length > 0 && (
+        <section className="entry-section">
+          <h3>变位形式</h3>
+          {entry.inflNotes.length > 0 && (
+            <ul className="infl-notes">
+              {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          )}
+          <div className="base-list">
+            {entry.baseForms.map((bw) => {
+              const base = entry.bases.find((b) => b.word === bw);
+              return (
+                <div className="base-item" key={bw}>
+                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                    onClick={(e) => { e.preventDefault(); onWord(bw); }}>
+                    {bw}
+                  </a>
+                  {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
+                  {base?.aux && <span className="base-pos">{FR_AUX_LABELS[base.aux]}</span>}
                   {base?.gender && <span className="base-pos">{GENDER_LABELS[base.gender]}性</span>}
                   {base && base.senses.length > 0 && (() => {
                     const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];

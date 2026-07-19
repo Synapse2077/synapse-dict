@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 // 每门语言走自己的一套服务（注册表是唯一汇合点；语种服务之间互不引用）。
 import { ItalianDictService } from './italian.js';
 import { SpanishDictService } from './spanish.js';
+import { FrenchDictService } from './french.js';
 export * from './italian.js';
 export * from './spanish.js';
+export * from './french.js';
 
 type DictionaryRow = {
   id: number;
@@ -265,7 +267,8 @@ export const LANGUAGES: LanguageMeta[] = [
   { code: 'en', label: 'English', name: '英语', speak: 'en-US' },
   { code: 'es', label: 'Español', name: '西班牙语', speak: 'es-ES' },
   { code: 'it', label: 'Italiano', name: '意大利语', speak: 'it-IT' },
-  // 后续：fr(Français/fr-FR)、pt(Português/pt-PT)、no(Norsk/nb-NO)
+  { code: 'fr', label: 'Français', name: '法语', speak: 'fr-FR' },
+  // 后续：pt(Português/pt-PT)、no(Norsk/nb-NO)
 ];
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
@@ -283,7 +286,7 @@ export function availableLanguages(): LanguageMeta[] {
   return LANGUAGES.filter((l) => fs.existsSync(dbPathFor(l.code)));
 }
 
-type AnyService = DictionaryService | SpanishDictService | ItalianDictService;
+type AnyService = DictionaryService | SpanishDictService | ItalianDictService | FrenchDictService;
 const serviceCache = new Map<string, AnyService>();
 
 export function getService(code: string): AnyService {
@@ -293,6 +296,7 @@ export function getService(code: string): AnyService {
   if (!svc) {
     if (lang === 'es') svc = new SpanishDictService(dbPathFor('es'));       // 西语专属服务
     else if (lang === 'it') svc = new ItalianDictService(dbPathFor('it'));  // 意语专属服务
+    else if (lang === 'fr') svc = new FrenchDictService(dbPathFor('fr'));   // 法语专属服务
     else svc = new DictionaryService(dbPathFor('en'));                      // 英语（含未知回退）
     serviceCache.set(lang, svc);
   }
