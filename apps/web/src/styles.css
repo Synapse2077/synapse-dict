@@ -959,3 +959,40 @@ body {
 .badge.cefr-A { background: color-mix(in srgb, #2e9e5b 16%, transparent); color: #2e9e5b; }
 .badge.cefr-B { background: color-mix(in srgb, #d9822b 18%, transparent); color: #d9822b; }
 .badge.cefr-C { background: color-mix(in srgb, #d1495b 16%, transparent); color: #d1495b; }
+
+/* ---- 德语专属：der/die/das 冠词 + 著录/三基本形式行 + 可分动词徽标 ---- */
+/* 词头前置定冠词，按性别着色（der 阳→强调色、die 阴→阴性色、das 中→中性灰） */
+.de-article { font-weight: 600; }
+.de-article.g-m { color: var(--accent); }
+.de-article.g-f { color: var(--gender-f); }
+.de-article.g-n { color: var(--text-secondary); }
+
+/* 名词著录（属格/复数）、动词三基本形式、形容词三级 —— 一行灰底小卡 */
+.de-forms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 14px;
+}
+.de-form {
+  padding: 4px 10px;
+  border-radius: 9px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.de-form-k {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-right: 2px;
+}
+.de-stammformen .de-form { font-variant-numeric: tabular-nums; }
+
+/* 可分动词徽标（trennbar）—— 德语招牌，用强调色点出可分前缀 */
+.badge.sep {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  font-weight: 600;
+}

@@ -104,8 +104,13 @@ CREATE INDEX idx_norm ON dict(word_norm);
 
 ## 5. 待办清单
 
-- [ ] `build.py` + `de/infl_compose.py`：kaikki → 德语骨架（gender/genitive/plural/aux/三基本形式/vclass/separable）
-- [ ] `dict-core/german.ts`：`GermanDictService`（三性冠词、三基本形式、可分动词展示）
-- [ ] 注册表加 `de`；web `GermanEntryView`
+- [x] `build.py` + `de/infl_compose.py` ✅ 349,775 词条（lemma 89,695 + 变位 260,080）；
+  gender 100,124 / 属格 62,867 / 复数 53,283 / aux 10,305 / 过去分词 10,310 / 可分 4,481 /
+  比较级 5,829；drop-ledger 全归桶（131 长尾 tag 已分类，无静默丢弃）
+- [x] `dict-core/german.ts`：`GermanDictService` ✅ 三性冠词、三基本形式、可分动词；
+  `normalizeGermanIpa` 去连结弧/音节点、[窄式]→/斜杠/，保留 ʔ/ː/ʁ；typecheck 过
+- [x] 注册表加 `de`(speak de-DE)；web `GermanEntryView` ✅ der/die/das 词头着色 + 著录行 +
+  三基本形式行 + 可分/强弱/助动词徽标；API `/api/entries/Haus?lang=de` 三性/属格/复数正确、
+  ankommen 可分 sepPrefix=an、gut→besser/am besten、变音检索(Häus)通；typecheck 全过
 - [ ] **全量豆包翻译（用户自己跑）**：`cd de && python3 b_translate.py --mode batch --concurrency 50` 后 `--merge`
 - [ ] 跑前小样验证：`--mode online --words "Haus,gehen,ankommen,gut,Frau,schön"` 确认三性/三基本形式/可分/CEFR

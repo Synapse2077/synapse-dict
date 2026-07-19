@@ -191,7 +191,50 @@ type PtEntry = {
   flag: string | null;
 };
 
-type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry;
+type DeSense = {
+  en: string | null;
+  zh: string | null;
+  pos: string | null;
+  regions: string[];
+  registers: string[];
+};
+type DeCollocation = { text: string; zh: string | null };
+type DeBase = {
+  word: string;
+  pos: string | null;
+  ipa: string | null;
+  gender: string | null;
+  senses: DeSense[];
+};
+type DeEntry = {
+  lang: 'de';
+  id: number;
+  word: string;
+  ipa: string | null;
+  pos: string | null;
+  isLemma: boolean;
+  gender: string | null;        // m / f / n / mf（der/die/das）
+  genitive: string | null;      // 属格单数
+  plural: string | null;        // 复数
+  aux: string | null;           // haben / sein / both
+  praeteritum: string | null;   // 过去式
+  partizip2: string | null;     // 过去分词
+  vclass: string | null;        // weak / strong / mixed（可带 ablaut 类号）
+  separable: boolean;           // 可分动词
+  sepPrefix: string | null;     // 可分前缀
+  reflexive: boolean;           // 反身 sich
+  comparative: string | null;
+  superlative: string | null;
+  level: string | null;
+  senses: DeSense[];
+  collocations: DeCollocation[];
+  baseForms: string[];
+  bases: DeBase[];
+  inflNotes: string[];
+  flag: string | null;
+};
+
+type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry | DeEntry;
 
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
@@ -202,6 +245,7 @@ const EXAMPLES: Record<string, string[]> = {
   it: ['ciao', 'mangiare', 'braccio', 'bello', 'andare', 'città'],
   fr: ['bonjour', 'manger', 'journal', 'beau', 'aller', 'heureux'],
   pt: ['olá', 'falar', 'livro', 'bonito', 'pão', 'saudade'],
+  de: ['Haus', 'gehen', 'ankommen', 'gut', 'Frau', 'schön'],
 };
 
 // --- English parsing helpers ---
@@ -751,7 +795,11 @@ export default function App() {
           <PortugueseEntryView entry={entry as PtEntry} onWord={goToWord} speak={speakWord} />
         )}
 
-        {entry && entry.lang !== 'en' && entry.lang !== 'it' && entry.lang !== 'fr' && entry.lang !== 'pt' && (
+        {entry && entry.lang === 'de' && (
+          <GermanEntryView entry={entry as DeEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+        )}
+
+        {entry && entry.lang !== 'en' && entry.lang !== 'it' && entry.lang !== 'fr' && entry.lang !== 'pt' && entry.lang !== 'de' && (
           <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
@@ -1562,6 +1610,216 @@ function PortugueseEntryView({ entry, onWord, speak }: {
                   </a>
                   {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
                   {base?.gender && <span className="base-pos">{GENDER_LABELS[base.gender]}性</span>}
+                  {base && base.senses.length > 0 && (() => {
+                    const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
+                    const CAP = 4;
+                    const shown = zhs.slice(0, CAP).join('；');
+                    return (
+                      <span className="base-senses">
+                        {shown}
+                        {zhs.length > CAP && <span className="base-more">… 共 {zhs.length} 义，点词查看</span>}
+                      </span>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {entry.collocations.length > 0 && (
+        <section className="entry-section">
+          <h3>搭配 / 固定短语</h3>
+          <ul className="colloc-list">
+            {entry.collocations.map((c, i) => (
+              <li className="colloc-item" key={i}>
+                <span className="colloc-text">{c.text}</span>
+                {c.zh && <span className="colloc-zh">{c.zh}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </article>
+  );
+}
+
+// ============================================================================
+// 德语词条视图 —— 德语专属，把本质特征做成一等展示：
+// 名词 der/die/das 冠词 + 属格/复数著录；动词三基本形式（Infinitiv–Präteritum–
+// Partizip II）+ 完成时助动词 haben/sein + 强弱/可分；形容词比较级/最高级。
+// 自包含，不复用 es/it/fr/pt 的视图。
+// ============================================================================
+
+const DE_ARTICLE: Record<string, string> = { m: 'der', f: 'die', n: 'das', mf: 'der/die' };
+const DE_AUX_LABELS: Record<string, string> = {
+  haben: '完成时·haben', sein: '完成时·sein', both: '完成时·haben/sein',
+};
+const DE_VCLASS_BASE: Record<string, string> = {
+  weak: '弱变化', strong: '强变化', mixed: '混合变化', irregular: '不规则',
+};
+// 德语地区标签（德语专属）。映射不到回退原文。
+const DE_REGION_LABELS: Record<string, string> = {
+  Germany: '德国', Austria: '奥地利', Switzerland: '瑞士', 'South-Tyrol': '南蒂罗尔',
+  Bavaria: '巴伐利亚', Berlin: '柏林', Saxony: '萨克森', Swabia: '施瓦本',
+  'Low-German': '低地德语', 'High-German': '高地德语', 'Middle-High-German': '中古高地德语',
+  'Old-High-German': '古高地德语', Austrian: '奥地利', Swiss: '瑞士', German: '德国',
+  Viennese: '维也纳', 'Northern-German': '北德', 'Southern-German': '南德',
+  regional: '地区性', dialectal: '方言', Yiddish: '意第绪语', GDR: '东德', DDR: '东德',
+};
+
+function deVclassLabel(v: string): string {
+  const [base, cls] = v.split('-');
+  const b = DE_VCLASS_BASE[base] || base;
+  return cls ? `${b}·第${cls}类` : b;
+}
+
+function isNounPos(pos: string | null): boolean {
+  if (!pos) return false;
+  return pos.split('/').some((p) => p === 'n' || p === 'name');
+}
+
+function DeSenseChips({ sense }: { sense: DeSense }) {
+  const chips: { cls: string; text: string }[] = [];
+  for (const r of sense.regions) chips.push({ cls: 'reg', text: DE_REGION_LABELS[r] || r });
+  for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
+  if (chips.length === 0) return null;
+  return (
+    <span className="sense-chips">
+      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+    </span>
+  );
+}
+
+function groupDeSenses(senses: DeSense[]): { pos: string | null; senses: DeSense[] }[] {
+  const groups: { pos: string | null; senses: DeSense[] }[] = [];
+  for (const s of senses) {
+    const last = groups[groups.length - 1];
+    if (last && last.pos === s.pos) last.senses.push(s);
+    else groups.push({ pos: s.pos, senses: [s] });
+  }
+  return groups;
+}
+
+function GermanEntryView({ entry, speakLocale, onWord, speak }: {
+  entry: DeEntry; speakLocale: string; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
+}) {
+  const posParts = entry.pos ? entry.pos.split('/') : [];
+  const isVerb = posParts.includes('v');
+  const isNoun = posParts.some((p) => p === 'n' || p === 'name');
+  const isAdj = posParts.some((p) => p === 'adj' || p === 'adv');
+  const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
+  const g0 = entry.gender ? entry.gender.split('/')[0] : null;
+  const article = entry.gender ? (DE_ARTICLE[entry.gender] || DE_ARTICLE[g0 || ''] || '') : '';
+  return (
+    <article className="entry-detail">
+      <header className="entry-header">
+        <h2 className="entry-word">
+          {isNoun && article && <span className={`de-article g-${g0}`}>{article} </span>}
+          {entry.word}
+        </h2>
+      </header>
+
+      {entry.ipa && (
+        <div className="phonetic-row">
+          <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
+            <span className="phonetic-value">{entry.ipa}</span>
+            <SpeakerIcon />
+          </button>
+        </div>
+      )}
+
+      {isNoun && entry.isLemma && (entry.genitive || entry.plural) && (
+        <div className="de-forms">
+          {entry.genitive && <span className="de-form"><span className="de-form-k">属格</span> {entry.genitive}</span>}
+          {entry.plural && <span className="de-form"><span className="de-form-k">复数</span> die {entry.plural}</span>}
+        </div>
+      )}
+
+      {isVerb && entry.isLemma && (entry.praeteritum || entry.partizip2) && (
+        <div className="de-forms de-stammformen">
+          <span className="de-form"><span className="de-form-k">原形</span> {entry.word}</span>
+          {entry.praeteritum && <span className="de-form"><span className="de-form-k">过去式</span> {entry.praeteritum}</span>}
+          {entry.partizip2 && (
+            <span className="de-form">
+              <span className="de-form-k">过去分词</span>{' '}
+              {entry.aux === 'sein' ? 'ist ' : entry.aux === 'haben' ? 'hat ' : ''}{entry.partizip2}
+            </span>
+          )}
+        </div>
+      )}
+
+      {isAdj && !isVerb && entry.isLemma && (entry.comparative || entry.superlative) && (
+        <div className="de-forms">
+          <span className="de-form"><span className="de-form-k">原级</span> {entry.word}</span>
+          {entry.comparative && <span className="de-form"><span className="de-form-k">比较级</span> {entry.comparative}</span>}
+          {entry.superlative && <span className="de-form"><span className="de-form-k">最高级</span> {entry.superlative}</span>}
+        </div>
+      )}
+
+      <div className="entry-meta-row entry-badges">
+        {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
+        {isNoun && entry.gender && (
+          <span className={`badge g g-${g0}`}>{GENDER_LABELS[entry.gender] || entry.gender}性</span>
+        )}
+        {isVerb && entry.aux && (
+          <span className={`badge aux aux-${entry.aux === 'sein' ? 'être' : 'avoir'}`}>{DE_AUX_LABELS[entry.aux]}</span>
+        )}
+        {isVerb && entry.vclass && (
+          <span className="badge conj">{deVclassLabel(entry.vclass)}</span>
+        )}
+        {isVerb && entry.separable && (
+          <span className="badge sep">可分 · {entry.sepPrefix}-</span>
+        )}
+        {isVerb && entry.reflexive && <span className="badge tag">反身 sich</span>}
+        {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
+      </div>
+
+      {entry.isLemma && entry.senses.length > 0 && (
+        <section className="entry-section">
+          <h3>释义</h3>
+          {groupDeSenses(entry.senses).map((grp, gi) => (
+            <div className="pos-group" key={gi}>
+              {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
+              <ol className="sense-list">
+                {grp.senses.map((s, i) => (
+                  <li className="sense-item" key={i}>
+                    <div className="sense-zh">
+                      {s.zh || <span className="sense-missing">（待补）</span>}
+                      <DeSenseChips sense={s} />
+                    </div>
+                    {s.en && <div className="sense-en">{s.en}</div>}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {entry.baseForms.length > 0 && (
+        <section className="entry-section">
+          <h3>词形还原</h3>
+          {entry.inflNotes.length > 0 && (
+            <ul className="infl-notes">
+              {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          )}
+          <div className="base-list">
+            {entry.baseForms.map((bw) => {
+              const base = entry.bases.find((b) => b.word === bw);
+              const bg0 = base?.gender ? base.gender.split('/')[0] : null;
+              const bArticle = base?.gender && isNounPos(base.pos)
+                ? (DE_ARTICLE[base.gender] || DE_ARTICLE[bg0 || ''] || '') : '';
+              return (
+                <div className="base-item" key={bw}>
+                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                    onClick={(e) => { e.preventDefault(); onWord(bw); }}>
+                    {bArticle ? `${bArticle} ` : ''}{bw}
+                  </a>
+                  {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
                   {base && base.senses.length > 0 && (() => {
                     const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
                     const CAP = 4;
