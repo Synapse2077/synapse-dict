@@ -52,8 +52,11 @@ export type FrenchEntry = {
   pp: string | null;            // 过去分词 participe passé
   gender: string | null;        // m / f / mf
   plural: string | null;        // 不规则复数形
-  feminine: string | null;      // 形容词阴性形（grand→grande）
+  feminine: string | null;      // 阴性形（形容词 grand→grande；名词 acteur→actrice）
   invariable: boolean;          // 不变形
+  adjPos: string | null;        // 形容词位置 pre / post / both
+  government: string | null;    // 动词/形容词固定介词支配（如 "à + inf." / "de qch"）
+  comparative: string | null;   // 不规则比较级（bon→meilleur）
   level: string | null;         // CEFR 难度等级 A1-C2（豆包填）
   // —— 释义与关联 ——
   senses: FrenchSense[];
@@ -79,6 +82,9 @@ type FrRow = {
   plural: string | null;
   feminine: string | null;
   invariable: number | null;
+  adj_pos: string | null;
+  government: string | null;
+  comparative: string | null;
   level: string | null;
   definition: string | null;
   translation: string | null;
@@ -182,6 +188,9 @@ function mapEntry(row: FrRow): FrenchEntry {
     plural: row.plural,
     feminine: row.feminine,
     invariable: row.invariable === 1,
+    adjPos: row.adj_pos,
+    government: row.government,
+    comparative: row.comparative,
     level: row.level,
     senses: buildSenses(row),
     collocations: parseCollocations(row.collocation),
@@ -216,7 +225,7 @@ export class FrenchDictService {
 
     this.exactQuery = this.db.prepare(`
       SELECT id, word, ipa, pos, is_lemma, aux, vgroup, transitivity, pronominal,
-             pp, gender, plural, feminine, invariable, level,
+             pp, gender, plural, feminine, invariable, adj_pos, government, comparative, level,
              definition, translation, meta, infl, exchange, collocation, flag
       FROM dict
       WHERE word = ? COLLATE NOCASE

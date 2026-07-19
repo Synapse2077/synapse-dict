@@ -314,12 +314,20 @@ def is_invariable(e, senses):
     return False
 
 
+# 不规则比较级（数量极少、纯记忆，确定性硬编码；豆包不碰这几个）。
+# adj: bon→meilleur / mauvais→pire / petit→moindre；adv: bien→mieux / mal→pis。
+COMPARATIVE_IRREGULAR = {
+    "bon": "meilleur", "mauvais": "pire", "petit": "moindre",
+    "bien": "mieux", "mal": "pis",
+}
+
+
 def new_rec(word):
     return {
         "word": word, "spellings": set(), "ipa": None, "pos": set(),
         "aux": None, "vgroup": None, "transitivity": None, "pronominal": 0,
         "pp": None, "gender": None, "plural": None, "feminine": None,
-        "invariable": 0,
+        "invariable": 0, "adj_pos": None, "government": None, "comparative": None,
         "real_gloss": [], "real_meta": [], "real_seen": set(),
         "infl": [], "infl_seen": set(), "bases": [],
         "_trans": set(),
@@ -417,6 +425,10 @@ def main(dump_infl=False):
                 pl = extract_plural(e, word)
                 if pl and not rec["plural"]:
                     rec["plural"] = pl
+                # 名词阴性对应形（acteur→actrice、ami→amie；生物性别配对）
+                fem = extract_feminine(e)
+                if fem and not rec["feminine"]:
+                    rec["feminine"] = fem
                 if is_invariable(e, senses):
                     rec["invariable"] = 1
             elif pos_raw == "adj":
@@ -428,6 +440,14 @@ def main(dump_infl=False):
                     rec["plural"] = pl
                 if is_invariable(e, senses):
                     rec["invariable"] = 1
+                # 位置 seed：kaikki 极少标（多数交豆包）。postpositional→后置。
+                for s in senses:
+                    if "postpositional" in (s.get("tags") or []) and not rec["adj_pos"]:
+                        rec["adj_pos"] = "post"
+
+            # 不规则比较级（bon→meilleur 等，按词硬编码，与词性无关）
+            if word.lower() in COMPARATIVE_IRREGULAR and not rec["comparative"]:
+                rec["comparative"] = COMPARATIVE_IRREGULAR[word.lower()]
 
             # —— 义项 / 变位分流 ——
             for s in senses:
@@ -498,7 +518,8 @@ def main(dump_infl=False):
     print(f"总行数 {total} (解析失败 {bad}) → 去重词条 {len(words)}")
     print(f"  真义 lemma {n_lemma} | 纯变位 {n_infl}")
     print(f"  IPA {n_ipa} ({100*n_ipa//max(len(words),1)}%，其中收割回填 {n_harvest})")
-    print(f"  kaikki 抽取：aux {n_aux} | gender {n_gender} | 阴性形 {n_fem} | 过去分词 {n_pp}")
+    n_cmp = sum(1 for r in words.values() if r["comparative"])
+    print(f"  kaikki 抽取：aux {n_aux} | gender {n_gender} | 阴性形(名+形) {n_fem} | 过去分词 {n_pp} | 不规则比较级 {n_cmp}")
     if dropped:
         print(f"  ⚠ 未归桶 tag {len(dropped)} 种（真义义项上，请归类）：")
         for tg, n in dropped.most_common(30):
@@ -527,8 +548,11 @@ def main(dump_infl=False):
           pp            TEXT,          -- 过去分词 participe passé
           gender        TEXT,          -- m | f | mf
           plural        TEXT,          -- 不规则复数（规则 +s 留空）
-          feminine      TEXT,          -- 形容词阴性形
+          feminine      TEXT,          -- 阴性形（形容词 grand→grande；名词 acteur→actrice）
           invariable    INTEGER,       -- 不变形
+          adj_pos       TEXT,          -- 形容词位置 pre | post | both（豆包填，kaikki 几乎无）
+          government    TEXT,          -- 动词/形容词固定介词支配 如 "à qch"/"de qch"（豆包填）
+          comparative   TEXT,          -- 不规则比较级 bon→meilleur（硬编码/豆包）
           level         TEXT,          -- CEFR 难度 A1-C2（豆包填，kaikki 无）
           definition    TEXT,
           translation   TEXT,
@@ -559,14 +583,15 @@ def main(dump_infl=False):
             is_lemma,
             rec["aux"], rec["vgroup"], rec["transitivity"], rec["pronominal"] or None,
             rec["pp"], rec["gender"], rec["plural"], rec["feminine"],
-            rec["invariable"] or None,
+            rec["invariable"] or None, rec["adj_pos"], rec["government"], rec["comparative"],
             definition, translation, meta, infl, exchange,
         ))
     conn.executemany(
         "INSERT INTO dict (word, word_norm, ipa, pos, is_lemma, aux, vgroup, "
         "transitivity, pronominal, pp, gender, plural, feminine, invariable, "
+        "adj_pos, government, comparative, "
         "definition, translation, meta, infl, exchange) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         batch,
     )
     conn.commit()

@@ -895,6 +895,19 @@ body {
   color: var(--gender-f);
   border: 1px solid color-mix(in srgb, var(--gender-f) 26%, transparent);
 }
+/* 形容词位置 / 比较级：中性描述性徽标 */
+.badge.apos, .badge.cmp {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+/* 固定介词支配（动词/形容词刚需）：用强调色，学习者一眼看到 */
+.badge.gov {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  font-weight: 600;
+}
 
 .badge.conj {
   background: var(--surface-soft);

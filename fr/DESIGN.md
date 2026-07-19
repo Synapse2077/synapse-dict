@@ -68,9 +68,12 @@ CREATE TABLE dict (
 
   -- 名词/形容词本质
   gender      TEXT,            -- 'm' | 'f' | 'mf'（法语核心）
-  plural      TEXT,            -- 不规则复数（-al→-aux/-eau→-eaux 或整词；规则 +s 留空）
-  feminine    TEXT,            -- 形容词阴性形（grand→grande；规则可推者仍收，发音会变）
+  plural      TEXT,            -- 不规则复数（-al→-aux/-eau→-eaux 或整词；规则 +s、数不变留空）
+  feminine    TEXT,            -- 阴性形：形容词 grand→grande；名词 acteur→actrice（生物性别配对）
   invariable  INTEGER,         -- 不变形（gratis、色彩复合形容词、缩略）
+  adj_pos     TEXT,            -- 形容词位置 'pre'|'post'|'both'（BAGS前置/颜色国籍后置/变义两可，豆包）
+  government  TEXT,            -- 动词/形容词固定介词支配 "à + inf."/"de qch"（学习者刚需，豆包）
+  comparative TEXT,            -- 不规则比较级 bon→meilleur（硬编码 5 词：bon/mauvais/petit/bien/mal）
 
   -- 难度
   level       TEXT,            -- CEFR A1-C2（豆包填）

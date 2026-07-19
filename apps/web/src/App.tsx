@@ -137,6 +137,9 @@ type FrEntry = {
   plural: string | null;
   feminine: string | null;
   invariable: boolean;
+  adjPos: string | null;
+  government: string | null;
+  comparative: string | null;
   level: string | null;
   senses: FrSense[];
   collocations: FrCollocation[];
@@ -1182,6 +1185,10 @@ const FR_AUX_LABELS: Record<string, string> = {
 const FR_VGROUP_LABELS: Record<string, string> = {
   '1': '第一组 -er', '2': '第二组 -ir (-iss-)', '3': '第三组（不规则）',
 };
+// 形容词位置：前置/后置/两可（BAGS 类前置，颜色国籍等后置，ancien/grand 两可且变义）
+const FR_ADJPOS_LABELS: Record<string, string> = {
+  pre: '名词前', post: '名词后', both: '前/后（位置变义）',
+};
 // 法语地区标签（法语专属，不复用 es/it 的地区表）。映射不到回退原文。
 const FR_REGION_LABELS: Record<string, string> = {
   France: '法国', Belgium: '比利时', Switzerland: '瑞士法语区', Quebec: '魁北克',
@@ -1250,8 +1257,15 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
           <span className="badge plural">复数 {entry.plural}</span>
         )}
         {(isNoun || isAdj) && entry.invariable && <span className="badge num">不变形 inv.</span>}
-        {isAdj && entry.feminine && (
+        {/* 阴性形：形容词 grand→grande；名词 acteur→actrice */}
+        {(isAdj || isNoun) && entry.feminine && (
           <span className="badge fem">阴性 {entry.feminine}</span>
+        )}
+        {isAdj && entry.adjPos && (
+          <span className="badge apos">{FR_ADJPOS_LABELS[entry.adjPos] || entry.adjPos}</span>
+        )}
+        {(isAdj || isVerb) && entry.comparative && (
+          <span className="badge cmp">比较级 {entry.comparative}</span>
         )}
         {isVerb && entry.aux && (
           <span className={`badge aux aux-${entry.aux}`}>{FR_AUX_LABELS[entry.aux]}</span>
@@ -1260,6 +1274,10 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
           <span className="badge conj">{FR_VGROUP_LABELS[entry.vgroup] || entry.vgroup}</span>
         )}
         {isVerb && entry.pp && <span className="badge pp">过去分词 {entry.pp}</span>}
+        {/* 固定介词支配（动词/形容词）：commencer à、dépendre de——学习者刚需 */}
+        {(isVerb || isAdj) && entry.government && (
+          <span className="badge gov">＋{entry.government}</span>
+        )}
         {isVerb && entry.transitivity && (
           <span className="badge tag">{TRANS_LABELS[entry.transitivity] || entry.transitivity}</span>
         )}
