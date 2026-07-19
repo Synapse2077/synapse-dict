@@ -22,7 +22,6 @@
 """
 import argparse
 import asyncio
-import glob
 import json
 import re
 import sqlite3
@@ -30,7 +29,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DB_PATH = HERE / "synapse-dict-de.sqlite"
-OUT_DIR = HERE / "b_out"
+OUT_FILE = HERE / "b_out.jsonl"   # 单文件续跑：每批一行 JSON，不再一 chunk 一文件
 ENV_PATH = HERE.parent / ".env"
 MODE = "batch"
 CHUNK = 50
@@ -153,6 +152,8 @@ async def arun(todo):
     for c in todo:
         q.put_nowait(c)
     counters = {"done": 0, "tok": 0}
+    lock = asyncio.Lock()
+    fout = open(OUT_FILE, "a", encoding="utf-8")   # 追加写单文件
 
     async def worker():
         while True:
@@ -162,8 +163,9 @@ async def arun(todo):
                 return
             res, tok = await aresolve(comps, model, chunk)
             out = assemble_out(chunk, res)
-            fp = OUT_DIR / f"chunk_{chunk[0][0]:07d}.json"
-            json.dump(out, open(fp, "w"), ensure_ascii=False, indent=1)
+            async with lock:                        # 串行化追加，一批一行，并发安全
+                fout.write(json.dumps(out, ensure_ascii=False) + "\n")
+                fout.flush()
             counters["done"] += 1
             counters["tok"] += tok
             if counters["done"] % 10 == 0 or counters["done"] == len(todo):
@@ -172,22 +174,33 @@ async def arun(todo):
 
     await asyncio.gather(*[asyncio.create_task(worker())
                            for _ in range(min(CONC, len(todo)))])
+    fout.close()
     await client.close()
     return counters["tok"]
 
 
-def done_rids():
-    s = set()
-    for fp in glob.glob(str(OUT_DIR / "chunk_*.json")):
+def _iter_batches():
+    """逐行读单文件 JSONL，产出每批的 dict（末行截断等坏行跳过）。"""
+    if not OUT_FILE.exists():
+        return
+    for ln in open(OUT_FILE, encoding="utf-8"):
+        ln = ln.strip()
+        if not ln:
+            continue
         try:
-            s.update(int(k) for k in json.load(open(fp)))
+            yield json.loads(ln)
         except Exception:
             pass
+
+
+def done_rids():
+    s = set()
+    for data in _iter_batches():
+        s.update(int(k) for k in data)
     return s
 
 
 def translate(limit=None, words=None):
-    OUT_DIR.mkdir(exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     rows = pending(conn, limit, words)
     conn.close()
@@ -216,8 +229,7 @@ def merge():
     conn = sqlite3.connect(str(DB_PATH))
     n = nf = nc = n_lvl = 0
     n_g = n_gen = n_pl = n_aux = n_pt = n_pp = n_sep = n_cmp = n_sup = n_ipa = 0
-    for fp in sorted(glob.glob(str(OUT_DIR / "chunk_*.json"))):
-        data = json.load(open(fp))
+    for data in _iter_batches():
         for rid, o in data.items():
             rid = int(rid)
             zh = o.get("zh") or []
@@ -315,8 +327,8 @@ def stats():
     lemma = conn.execute("SELECT COUNT(*) FROM dict WHERE is_lemma=1").fetchone()[0]
     done = conn.execute("SELECT COUNT(*) FROM dict WHERE is_lemma=1 AND translation IS NOT NULL").fetchone()[0]
     conn.close()
-    outn = len(glob.glob(str(OUT_DIR / "chunk_*.json")))
-    print(f"lemma {lemma} | 已翻(库) {done} | 待翻 {lemma-done} | 已落盘 chunk {outn}")
+    outn = len(done_rids())
+    print(f"lemma {lemma} | 已翻(库) {done} | 待翻 {lemma-done} | 已落盘(单文件) {outn} 词")
 
 
 if __name__ == "__main__":
