@@ -38,10 +38,21 @@ export type SpanishEntry = {
   lang: 'es';
   id: number;
   word: string;
-  phonetic: string | null;
+  phonetic: string | null;       // España 半岛标准音（distinción，含 θ）
+  phoneticLatam: string | null;  // América 拉美音（seseo，θ→s 规则派生；与半岛同则为 null）
   pos: string | null;
   isLemma: boolean;
   reflexive: boolean;          // 代动词（-arse/-erse/-irse / pronominal）
+  // —— 西语本质（一等字段；无 aux，西语复合时态恒用 haber）——
+  gender: string | null;       // m / f / mf（el/la）
+  plural: string | null;       // 不规则复数（lápiz→lápices；规则 +s 留空）
+  feminine: string | null;     // 阴性形（名词 actor→actriz；形容词 rojo→roja）
+  conjugation: string | null;  // 1 / 2 / 3（-ar/-er/-ir 三变位类）
+  stemChange: string | null;   // 词干变化 e→ie / o→ue / e→i / u→ue（西语招牌）
+  pp: string | null;           // 过去分词（不规则 roto/escrito/visto…）
+  transitivity: string | null; // t / i / ti
+  comparative: string | null;  // 不规则比较级（bueno→mejor）
+  level: string | null;        // CEFR A1-C2（豆包）
   senses: SpanishSense[];
   collocations: SpanishCollocation[];
   baseForms: string[];         // 变位形式 → 原形词（来自 exchange "0:原形"）
@@ -64,7 +75,23 @@ type EsRow = {
   exchange: string | null;
   collocation: string | null;
   flag: string | null;
+  gender: string | null;
+  plural: string | null;
+  feminine: string | null;
+  conjugation: string | null;
+  stem_change: string | null;
+  pp: string | null;
+  transitivity: string | null;
+  comparative: string | null;
+  level: string | null;
 };
+
+// América 拉美音（seseo）由半岛音规则派生：所有 θ→s（gracias /ˈɡɾaθjas/→/ˈɡɾasjas/）。
+// seseo 是完全规则的音变，无例外，故不入库、显示层派生即可。返回与半岛不同时才有意义。
+function seseoLatam(spainIpa: string | null): string | null {
+  if (!spainIpa || !spainIpa.includes('θ')) return null;   // 无 θ = 两地同音，不另示
+  return spainIpa.replace(/θ/g, 's');
+}
 
 // kaikki/维基式 IPA → 西班牙 RAE 本土词典标准（显示层，DB 内仍存精确源）。
 // 西语数据本已近 RAE（无音位长辅音 ː、几无音节点，θ/ʝ/ʎ/ɾ/r/x 齐全），只需：
@@ -140,14 +167,25 @@ function buildSenses(row: EsRow): SpanishSense[] {
 }
 
 function mapEntry(row: EsRow): SpanishEntry {
+  const phonetic = normalizeSpanishIpa(row.phonetic);   // España 半岛（含 θ）
   return {
     lang: 'es',
     id: row.id,
     word: row.word,
-    phonetic: normalizeSpanishIpa(row.phonetic),   // 维基式 → RAE 本土标准
+    phonetic,
+    phoneticLatam: seseoLatam(phonetic),               // América seseo（θ→s 派生）
     pos: row.pos,
     isLemma: row.is_lemma === 1,
     reflexive: row.reflexive === 1,
+    gender: row.gender,
+    plural: row.plural,
+    feminine: row.feminine,
+    conjugation: row.conjugation,
+    stemChange: row.stem_change,
+    pp: row.pp,
+    transitivity: row.transitivity,
+    comparative: row.comparative,
+    level: row.level,
     senses: buildSenses(row),
     collocations: parseCollocations(row.collocation),
     baseForms: parseBaseForms(row.exchange),
@@ -181,7 +219,9 @@ export class SpanishDictService {
 
     this.exactQuery = this.db.prepare(`
       SELECT id, word, phonetic, pos, is_lemma, reflexive,
-             definition, translation, meta, infl, exchange, collocation, flag
+             definition, translation, meta, infl, exchange, collocation, flag,
+             gender, plural, feminine, conjugation, stem_change, pp,
+             transitivity, comparative, level
       FROM dict
       WHERE word = ? COLLATE NOCASE
       ORDER BY is_lemma DESC

@@ -51,10 +51,20 @@ type SpanishEntry = {
   lang: string;
   id: number;
   word: string;
-  phonetic: string | null;
+  phonetic: string | null;       // España 半岛（含 θ）
+  phoneticLatam: string | null;  // América seseo（θ→s 派生）
   pos: string | null;
   isLemma: boolean;
   reflexive: boolean;
+  gender: string | null;         // m / f / mf（el/la）
+  plural: string | null;         // 不规则复数
+  feminine: string | null;       // 阴性形（actor→actriz / rojo→roja）
+  conjugation: string | null;    // 1 / 2 / 3（-ar/-er/-ir）
+  stemChange: string | null;     // 词干变化 e→ie / o→ue / e→i / u→ue
+  pp: string | null;             // 过去分词（不规则）
+  transitivity: string | null;   // t / i / ti
+  comparative: string | null;    // 不规则比较级
+  level: string | null;          // CEFR
   senses: SpanishSense[];
   collocations: SpanishCollocation[];
   baseForms: string[];
@@ -870,14 +880,14 @@ function EnglishEntry({ entry, onWord, speak }: {
       <div className="phonetic-row">
         {entry.phoneticUk && (
           <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-GB')} title="播放英式发音" type="button">
-            <span className="phonetic-label">UK</span>
+            <span className="phonetic-label">英</span>
             <span className="phonetic-value">/{entry.phoneticUk}/</span>
             <SpeakerIcon />
           </button>
         )}
         {entry.phoneticUs && (
           <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-US')} title="播放美式发音" type="button">
-            <span className="phonetic-label">US</span>
+            <span className="phonetic-label">美</span>
             <span className="phonetic-value">/{entry.phoneticUs}/</span>
             <SpeakerIcon />
           </button>
@@ -968,36 +978,72 @@ function SenseChips({ sense }: { sense: SpanishSense }) {
   );
 }
 
+// 西语定冠词（按性别；共性 mf 两冠词）
+const ES_ARTICLE: Record<string, string> = { m: 'el', f: 'la', mf: 'el/la', n: 'lo' };
+// 西语三变位类
+const ES_CONJ_LABELS: Record<string, string> = {
+  '1': '第一变位 -ar', '2': '第二变位 -er', '3': '第三变位 -ir',
+};
+
 function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   entry: SpanishEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
-  // 空壳 lemma（有释义但义项无 pos）才显示聚合词性 badge。变位形式不挂标签——
-  // 下方「变位形式」区块已含语法说明+原形，头部再标一个纯属重复。
   const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
-  const hasBadges = showStubPos || entry.reflexive;
+  const posParts = entry.pos ? entry.pos.split('/') : [];
+  const isVerb = posParts.includes('v');
+  const isNoun = posParts.some((p) => p === 'n' || p === 'name');
+  const isAdj = posParts.some((p) => p === 'adj' || p === 'adv');
+  const g0 = entry.gender ? entry.gender.split('/')[0] : null;
   return (
     <article className="entry-detail">
-      {/* 音标紧跟单词；标签（变位形式/代动词/空壳词性）移到音标下方 */}
       <header className="entry-header">
         <h2 className="entry-word">{entry.word}</h2>
       </header>
 
-      {entry.phonetic && (
+      {/* 双音：ES 半岛(distinción θ) / LA 拉美(seseo s)，格式同英语 UK/US——字母标签+音标同在一标签内 */}
+      {entry.phonetic && entry.phoneticLatam ? (
+        <div className="phonetic-row">
+          <button className="phonetic-btn" onClick={() => speak(entry.word, 'es-ES')} title="播放 西班牙(半岛) 发音" type="button">
+            <span className="phonetic-label">西</span>
+            <span className="phonetic-value">{entry.phonetic}</span>
+            <SpeakerIcon />
+          </button>
+          <button className="phonetic-btn" onClick={() => speak(entry.word, 'es-MX')} title="播放 拉美 发音" type="button">
+            <span className="phonetic-label">拉美</span>
+            <span className="phonetic-value">{entry.phoneticLatam}</span>
+            <SpeakerIcon />
+          </button>
+        </div>
+      ) : entry.phonetic ? (
         <div className="phonetic-row">
           <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
             <span className="phonetic-value">{entry.phonetic}</span>
             <SpeakerIcon />
           </button>
         </div>
-      )}
+      ) : null}
 
-      {hasBadges && (
-        <div className="entry-meta-row entry-badges">
-          {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
-          {entry.reflexive && <span className="badge tag">代动词 prnl.</span>}
-        </div>
-      )}
+      {/* 西语本质徽标：CEFR 贯穿；名词性别 el/la/复数/阴性，动词变位类/词干变化/过去分词/及物性 */}
+      <div className="entry-meta-row entry-badges">
+        {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
+        {isNoun && entry.gender && (
+          <span className={`badge g g-${g0}`}>{ES_ARTICLE[entry.gender] || ''} · {GENDER_LABELS[entry.gender] || entry.gender}</span>
+        )}
+        {isNoun && entry.plural && <span className="badge plural">复数 {entry.plural}</span>}
+        {(isNoun || isAdj) && entry.feminine && <span className="badge fem">阴性 {entry.feminine}</span>}
+        {(isAdj || isVerb) && entry.comparative && <span className="badge cmp">比较级 {entry.comparative}</span>}
+        {isVerb && entry.conjugation && (
+          <span className="badge conj">{ES_CONJ_LABELS[entry.conjugation] || entry.conjugation}</span>
+        )}
+        {isVerb && entry.stemChange && <span className="badge sep">词干 {entry.stemChange}</span>}
+        {isVerb && entry.pp && <span className="badge pp">过去分词 {entry.pp}</span>}
+        {isVerb && entry.transitivity && (
+          <span className="badge tag">{TRANS_LABELS[entry.transitivity] || entry.transitivity}</span>
+        )}
+        {entry.reflexive && <span className="badge tag">代动词 prnl.</span>}
+        {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
+      </div>
 
       {/* 真义 lemma：按词性分组，组内逐义项中文 + 英文锚点 + 性别/地区/语域 chip */}
       {entry.isLemma && entry.senses.length > 0 && (
@@ -1509,23 +1555,23 @@ function PtPhonetics({ word, ipaBr, ipaPt, speak }: {
 }) {
   if (!ipaBr && !ipaPt) return null;
   const same = ipaBr && ipaPt && ipaBr === ipaPt;
-  const rows: { flag: string; label: string; ipa: string; locale: string }[] = [];
+  // 格式同英语 英/美、西语 西/拉美——单字标签 + 音标同在一个 .phonetic-btn 标签内，同一排。
+  // label 短(巴/葡)供显示，name 全称供 hover；两地同音时不带标签只显示一个音标（同英语单音）。
+  const rows: { label: string; name: string; ipa: string; locale: string }[] = [];
   if (same) {
-    rows.push({ flag: '🇧🇷🇵🇹', label: '通用', ipa: ipaBr as string, locale: 'pt-BR' });
+    rows.push({ label: '', name: '', ipa: ipaBr as string, locale: 'pt-BR' });
   } else {
-    if (ipaBr) rows.push({ flag: '🇧🇷', label: '巴西', ipa: ipaBr, locale: 'pt-BR' });
-    if (ipaPt) rows.push({ flag: '🇵🇹', label: '葡萄牙', ipa: ipaPt, locale: 'pt-PT' });
+    if (ipaBr) rows.push({ label: '巴', name: '巴西', ipa: ipaBr, locale: 'pt-BR' });
+    if (ipaPt) rows.push({ label: '葡', name: '葡萄牙', ipa: ipaPt, locale: 'pt-PT' });
   }
   return (
-    <div className="pt-phonetics">
+    <div className="phonetic-row">
       {rows.map((r, i) => (
-        <div className="phonetic-row" key={i}>
-          <span className="pt-dialect" title={r.label}>{r.flag}</span>
-          <button className="phonetic-btn" onClick={() => speak(word, r.locale)} title={`播放 ${r.label} 发音`} type="button">
-            <span className="phonetic-value">{r.ipa}</span>
-            <SpeakerIcon />
-          </button>
-        </div>
+        <button className="phonetic-btn" key={i} onClick={() => speak(word, r.locale)} title={r.name ? `播放 ${r.name} 发音` : '播放发音'} type="button">
+          {r.label && <span className="phonetic-label">{r.label}</span>}
+          <span className="phonetic-value">{r.ipa}</span>
+          <SpeakerIcon />
+        </button>
       ))}
     </div>
   );

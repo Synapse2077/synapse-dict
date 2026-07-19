@@ -943,17 +943,6 @@ body {
 }
 .it-note b { color: var(--text-primary); }
 
-/* ---- 葡语双读音：巴西 / 葡萄牙 两行，区旗 + 音标 + 发音 ---- */
-.pt-phonetics { display: flex; flex-direction: column; gap: 2px; }
-.pt-phonetics .phonetic-row { display: flex; align-items: center; gap: 8px; }
-.pt-dialect {
-  font-size: 14px;
-  line-height: 1;
-  min-width: 2.2em;
-  text-align: center;
-  flex-shrink: 0;
-}
-
 /* ---- CEFR 难度徽标（A 易→绿、B 中→橙、C 难→红）---- */
 .badge.cefr { border: 1px solid transparent; font-variant-numeric: tabular-nums; }
 .badge.cefr-A { background: color-mix(in srgb, #2e9e5b 16%, transparent); color: #2e9e5b; }
