@@ -21,6 +21,7 @@ export type FrenchSense = {
   en: string | null;        // 英文 gloss 锚点
   zh: string | null;        // 中文释义
   pos: string | null;       // 逐义项词性
+  gender: string | null;    // 逐义项性别（双性名词 livre m 书 / f 斤）
   regions: string[];        // 地区（Quebec / Belgium / dialectal …）
   registers: string[];      // 语域（literary / colloquial …）
 };
@@ -164,6 +165,7 @@ function buildSenses(row: FrRow): FrenchSense[] {
       en: defs[i] ?? null,
       zh: zhs[i] ?? null,
       pos: typeof m.pos === 'string' ? m.pos : null,
+      gender: typeof m.g === 'string' ? m.g : null,
       regions: asArr(m.reg),
       registers: asArr(m.lex),
     });

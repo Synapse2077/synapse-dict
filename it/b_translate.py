@@ -30,6 +30,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DB_PATH = HERE / "synapse-dict-it.sqlite"
 OUT_DIR = HERE / "b_out"
+CONFLICT_FILE = HERE / "conflict_review.tsv"   # merge 时 kaikki↔豆包 冲突留痕，供人工复核
 ENV_PATH = HERE.parent / ".env"
 MODE = "batch"          # batch(ep-bi 便宜) / online(ep-m 快，测试)
 CHUNK = 50
@@ -198,6 +199,7 @@ def translate(limit=None, words=None):
 def merge():
     conn = sqlite3.connect(str(DB_PATH))
     n = nf = n_aux = n_gender = n_plural = n_ipa = nc = n_lvl = 0
+    conflicts = []   # (word, field, kaikki值, 豆包值)：两边都有值且不一致，留痕不覆盖
     for fp in sorted(glob.glob(str(OUT_DIR / "chunk_*.json"))):
         data = json.load(open(fp))
         for rid, o in data.items():
@@ -226,29 +228,43 @@ def merge():
                 lvl = None
 
             row = conn.execute(
-                "SELECT pos, aux, conj, gender, plural, ipa FROM dict WHERE id=?", (rid,)
+                "SELECT word, pos, aux, conj, gender, plural, ipa FROM dict WHERE id=?", (rid,)
             ).fetchone()
             if not row:
                 continue
-            pos, cur_aux, cur_conj, cur_gender, cur_plural, cur_ipa = row
+            word, pos, cur_aux, cur_conj, cur_gender, cur_plural, cur_ipa = row
+            posset = set(pos.split("/")) if pos else set()
             sets, vals = ["translation=?", "flag=?", "collocation=?", "level=?"], [tr, flag, collocation, lvl]
 
-            # 本质字段仲裁：kaikki 优先，仅填 kaikki 留空的缺口
+            # 本质字段仲裁：kaikki 优先——空则填豆包，已有值而豆包不同则记冲突（不覆盖，供复核）。
+            # conj 是 kaikki 独有、豆包不返回，无冲突面。
             d_aux = o.get("aux")
-            if not cur_aux and d_aux in ("avere", "essere", "both") and pos and "v" in pos.split("/"):
-                sets.append("aux=?"); vals.append(d_aux); n_aux += 1
+            if d_aux in ("avere", "essere", "both") and "v" in posset:
+                if not cur_aux:
+                    sets.append("aux=?"); vals.append(d_aux); n_aux += 1
+                elif cur_aux.strip() != d_aux:
+                    conflicts.append((word, "aux", cur_aux, d_aux))
             d_g = o.get("gender")
-            if not cur_gender and d_g in ("m", "f", "mf") and pos and any(
-                    p in ("n", "name") for p in pos.split("/")):
-                sets.append("gender=?"); vals.append(d_g); n_gender += 1
+            if d_g in ("m", "f", "mf") and ({"n", "name"} & posset):
+                if not cur_gender:
+                    sets.append("gender=?"); vals.append(d_g); n_gender += 1
+                elif cur_gender.strip() != d_g:
+                    conflicts.append((word, "gender", cur_gender, d_g))
             d_pl = o.get("plural")
             # 消毒：豆包偶尔返回词典惯例符号（~=不变/+=规则/#/-）当复数，非真实词形，拦掉。
-            if (not cur_plural and isinstance(d_pl, str)
+            if (isinstance(d_pl, str)
                     and re.fullmatch(r"[a-zàèéìíòóùA-Z]{2,}", d_pl.strip())
-                    and pos and "n" in pos.split("/")):
-                sets.append("plural=?"); vals.append(d_pl.strip()); n_plural += 1
-            if not cur_ipa and ipa:
-                sets.append("ipa=?"); vals.append(ipa); n_ipa += 1
+                    and "n" in posset):
+                d_pl = d_pl.strip()
+                if not cur_plural:
+                    sets.append("plural=?"); vals.append(d_pl); n_plural += 1
+                elif cur_plural.strip() != d_pl:
+                    conflicts.append((word, "plural", cur_plural, d_pl))
+            if ipa:
+                if not cur_ipa:
+                    sets.append("ipa=?"); vals.append(ipa); n_ipa += 1
+                elif cur_ipa.strip() != ipa.strip():
+                    conflicts.append((word, "ipa", cur_ipa, ipa.strip()))
 
             vals.append(rid)
             conn.execute(f"UPDATE dict SET {', '.join(sets)} WHERE id=?", vals)
@@ -261,8 +277,15 @@ def merge():
                 n_lvl += 1
     conn.commit()
     conn.close()
+    if conflicts:
+        with open(CONFLICT_FILE, "w", encoding="utf-8") as cf:
+            cf.write("word\tfield\tkaikki\tdoubao\n")
+            for w_, f_, kv, dv in conflicts:
+                cf.write(f"{w_}\t{f_}\t{kv}\t{dv}\n")
     print(f"写回 {n} 词，flag {nf}；补缺 aux {n_aux}/gender {n_gender}/plural {n_plural}/ipa {n_ipa}；"
           f"搭配 {nc}；CEFR {n_lvl}")
+    print(f"kaikki↔豆包 冲突 {len(conflicts)} 处"
+          + (f" → {CONFLICT_FILE.name}（已按 kaikki 保留，可人工复核）" if conflicts else ""))
 
 
 def stats():

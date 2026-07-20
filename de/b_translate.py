@@ -30,6 +30,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DB_PATH = HERE / "synapse-dict-de.sqlite"
 OUT_FILE = HERE / "b_out.jsonl"   # 单文件续跑：每批一行 JSON，不再一 chunk 一文件
+CONFLICT_FILE = HERE / "conflict_review.tsv"   # merge 时 kaikki↔豆包 冲突留痕，供人工复核
 ENV_PATH = HERE.parent / ".env"
 MODE = "batch"
 CHUNK = 50
@@ -229,6 +230,7 @@ def merge():
     conn = sqlite3.connect(str(DB_PATH))
     n = nf = nc = n_lvl = 0
     n_g = n_gen = n_pl = n_aux = n_pt = n_pp = n_sep = n_cmp = n_sup = n_ipa = 0
+    conflicts = []   # (word, field, kaikki值, 豆包值)：两边都有值且不一致，留痕不覆盖
     for data in _iter_batches():
         for rid, o in data.items():
             rid = int(rid)
@@ -254,57 +256,81 @@ def merge():
                 lvl = None
 
             row = conn.execute(
-                "SELECT pos, gender, genitive, plural, aux, praeteritum, partizip2, "
+                "SELECT word, pos, gender, genitive, plural, aux, praeteritum, partizip2, "
                 "separable, sep_prefix, comparative, superlative, ipa "
                 "FROM dict WHERE id=?", (rid,)
             ).fetchone()
             if not row:
                 continue
-            (pos, c_g, c_gen, c_pl, c_aux, c_pt, c_pp,
+            (word, pos, c_g, c_gen, c_pl, c_aux, c_pt, c_pp,
              c_sep, c_spx, c_cmp, c_sup, c_ipa) = row
             posset = set(pos.split("/")) if pos else set()
             sets = ["translation=?", "flag=?", "collocation=?", "level=?"]
             vals = [tr, flag, collocation, lvl]
 
-            # 本质字段仲裁：kaikki 优先，仅填 kaikki 留空的缺口
+            # 本质字段仲裁：kaikki 优先——空则填豆包，已有值而豆包不同则记冲突（不覆盖，供复核）
             d_g = o.get("gender")
-            if not c_g and isinstance(d_g, str) and d_g.strip() in ("m", "f", "n", "mf") \
-                    and ({"n", "name"} & posset):
-                sets.append("gender=?"); vals.append(d_g.strip()); n_g += 1
-            if not c_gen and ({"n", "name"} & posset):
+            if isinstance(d_g, str) and d_g.strip() in ("m", "f", "n", "mf") and ({"n", "name"} & posset):
+                d_g = d_g.strip()
+                if not c_g:
+                    sets.append("gender=?"); vals.append(d_g); n_g += 1
+                elif c_g.strip() != d_g:
+                    conflicts.append((word, "gender", c_g, d_g))
+            if {"n", "name"} & posset:
                 v = _clean_form(o.get("genitive"))
                 if v:
-                    sets.append("genitive=?"); vals.append(v); n_gen += 1
-            if not c_pl and ({"n", "name"} & posset):
+                    if not c_gen:
+                        sets.append("genitive=?"); vals.append(v); n_gen += 1
+                    elif c_gen.strip() != v:
+                        conflicts.append((word, "genitive", c_gen, v))
                 v = _clean_form(o.get("plural"))
                 if v:
-                    sets.append("plural=?"); vals.append(v); n_pl += 1
+                    if not c_pl:
+                        sets.append("plural=?"); vals.append(v); n_pl += 1
+                    elif c_pl.strip() != v:
+                        conflicts.append((word, "plural", c_pl, v))
             d_aux = o.get("aux")
-            if not c_aux and d_aux in ("haben", "sein", "both") and "v" in posset:
-                sets.append("aux=?"); vals.append(d_aux); n_aux += 1
-            if not c_pt and "v" in posset:
+            if d_aux in ("haben", "sein", "both") and "v" in posset:
+                if not c_aux:
+                    sets.append("aux=?"); vals.append(d_aux); n_aux += 1
+                elif c_aux.strip() != d_aux:
+                    conflicts.append((word, "aux", c_aux, d_aux))
+            if "v" in posset:
                 v = _clean_form(o.get("praeteritum"))
                 if v:
-                    sets.append("praeteritum=?"); vals.append(v); n_pt += 1
-            if not c_pp and "v" in posset:
+                    if not c_pt:
+                        sets.append("praeteritum=?"); vals.append(v); n_pt += 1
+                    elif c_pt.strip() != v:
+                        conflicts.append((word, "praeteritum", c_pt, v))
                 v = _clean_form(o.get("partizip2"))
                 if v:
-                    sets.append("partizip2=?"); vals.append(v); n_pp += 1
+                    if not c_pp:
+                        sets.append("partizip2=?"); vals.append(v); n_pp += 1
+                    elif c_pp.strip() != v:
+                        conflicts.append((word, "partizip2", c_pp, v))
             if not c_sep and o.get("separable") is True and "v" in posset:
                 spx = _clean_form(o.get("sep_prefix"))
                 sets.append("separable=?"); vals.append(1); n_sep += 1
                 if spx and not c_spx:
                     sets.append("sep_prefix=?"); vals.append(spx)
-            if not c_cmp and (posset & {"adj", "adv"}):
+            if posset & {"adj", "adv"}:
                 v = _clean_form(o.get("comparative"))
                 if v:
-                    sets.append("comparative=?"); vals.append(v); n_cmp += 1
-            if not c_sup and (posset & {"adj", "adv"}):
+                    if not c_cmp:
+                        sets.append("comparative=?"); vals.append(v); n_cmp += 1
+                    elif c_cmp.strip() != v:
+                        conflicts.append((word, "comparative", c_cmp, v))
                 v = _clean_form(o.get("superlative"))
                 if v:
-                    sets.append("superlative=?"); vals.append(v); n_sup += 1
-            if not c_ipa and ipa:
-                sets.append("ipa=?"); vals.append(ipa); n_ipa += 1
+                    if not c_sup:
+                        sets.append("superlative=?"); vals.append(v); n_sup += 1
+                    elif c_sup.strip() != v:
+                        conflicts.append((word, "superlative", c_sup, v))
+            if ipa:
+                if not c_ipa:
+                    sets.append("ipa=?"); vals.append(ipa); n_ipa += 1
+                elif c_ipa.strip() != ipa.strip():
+                    conflicts.append((word, "ipa", c_ipa, ipa.strip()))
 
             vals.append(rid)
             conn.execute(f"UPDATE dict SET {', '.join(sets)} WHERE id=?", vals)
@@ -317,9 +343,16 @@ def merge():
                 n_lvl += 1
     conn.commit()
     conn.close()
+    if conflicts:
+        with open(CONFLICT_FILE, "w", encoding="utf-8") as cf:
+            cf.write("word\tfield\tkaikki\tdoubao\n")
+            for w_, f_, kv, dv in conflicts:
+                cf.write(f"{w_}\t{f_}\t{kv}\t{dv}\n")
     print(f"写回 {n} 词，flag {nf}；补缺 gender {n_g}/属格 {n_gen}/复数 {n_pl}/aux {n_aux}/"
           f"过去式 {n_pt}/过去分词 {n_pp}/可分 {n_sep}/比较级 {n_cmp}/最高级 {n_sup}/ipa {n_ipa}；"
           f"搭配 {nc}；CEFR {n_lvl}")
+    print(f"kaikki↔豆包 冲突 {len(conflicts)} 处"
+          + (f" → {CONFLICT_FILE.name}（已按 kaikki 保留，可人工复核）" if conflicts else ""))
 
 
 def stats():

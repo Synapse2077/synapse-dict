@@ -30,6 +30,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DB_PATH = HERE / "synapse-dict-pt.sqlite"
 OUT_FILE = HERE / "b_out.jsonl"   # 单文件续跑：每批一行 JSON，不再一 chunk 一文件
+CONFLICT_FILE = HERE / "conflict_review.tsv"   # merge 时 kaikki↔豆包 冲突留痕，供人工复核
 ENV_PATH = HERE.parent / ".env"
 MODE = "batch"
 CHUNK = 50
@@ -217,6 +218,7 @@ def merge():
     conn = sqlite3.connect(str(DB_PATH))
     n = nf = n_gender = n_plural = n_fem = n_br = n_pt = nc = n_lvl = 0
     _wordre = re.compile(r"[a-zàáâãçéêíóôõúA-Z'’ -]{2,}")
+    conflicts = []   # (word, field, kaikki值, 豆包值)：两边都有值且不一致，留痕不覆盖
     for data in _iter_batches():
         for rid, o in data.items():
             rid = int(rid)
@@ -242,30 +244,48 @@ def merge():
                 lvl = None
 
             row = conn.execute(
-                "SELECT pos, gender, plural, feminine, ipa_br, ipa_pt FROM dict WHERE id=?", (rid,)
+                "SELECT word, pos, gender, plural, feminine, ipa_br, ipa_pt FROM dict WHERE id=?", (rid,)
             ).fetchone()
             if not row:
                 continue
-            pos, cur_gender, cur_plural, cur_fem, cur_br, cur_pt = row
+            word, pos, cur_gender, cur_plural, cur_fem, cur_br, cur_pt = row
             posset = set(pos.split("/")) if pos else set()
             sets = ["translation=?", "flag=?", "collocation=?", "level=?"]
             vals = [tr, flag, collocation, lvl]
 
+            # kaikki 优先——空则填豆包，kaikki 已有值而豆包不同则记冲突（不覆盖，供人工复核）
             d_g = o.get("gender")
-            if not cur_gender and d_g in ("m", "f", "mf") and ({"n", "name"} & posset):
-                sets.append("gender=?"); vals.append(d_g); n_gender += 1
+            if d_g in ("m", "f", "mf") and ({"n", "name"} & posset):
+                if not cur_gender:
+                    sets.append("gender=?"); vals.append(d_g); n_gender += 1
+                elif cur_gender.strip() != d_g:
+                    conflicts.append((word, "gender", cur_gender, d_g))
             d_pl = o.get("plural")
-            if (not cur_plural and isinstance(d_pl, str) and _wordre.fullmatch(d_pl.strip())
-                    and "n" in posset):
-                sets.append("plural=?"); vals.append(d_pl.strip()); n_plural += 1
+            if (isinstance(d_pl, str) and _wordre.fullmatch(d_pl.strip()) and "n" in posset):
+                d_pl = d_pl.strip()
+                if not cur_plural:
+                    sets.append("plural=?"); vals.append(d_pl); n_plural += 1
+                elif cur_plural.strip() != d_pl:
+                    conflicts.append((word, "plural", cur_plural, d_pl))
             d_fem = o.get("feminine")
-            if (not cur_fem and isinstance(d_fem, str) and _wordre.fullmatch(d_fem.strip())
+            if (isinstance(d_fem, str) and _wordre.fullmatch(d_fem.strip())
                     and (posset & {"adj", "n", "name"})):
-                sets.append("feminine=?"); vals.append(d_fem.strip()); n_fem += 1
-            if not cur_br and br:
-                sets.append("ipa_br=?"); vals.append(br); n_br += 1
-            if not cur_pt and pt:
-                sets.append("ipa_pt=?"); vals.append(pt); n_pt += 1
+                d_fem = d_fem.strip()
+                if not cur_fem:
+                    sets.append("feminine=?"); vals.append(d_fem); n_fem += 1
+                elif cur_fem.strip() != d_fem:
+                    conflicts.append((word, "feminine", cur_fem, d_fem))
+            # 双读音：巴西 ipa_br / 葡萄牙 ipa_pt 各自仲裁
+            if br:
+                if not cur_br:
+                    sets.append("ipa_br=?"); vals.append(br); n_br += 1
+                elif cur_br.strip() != br.strip():
+                    conflicts.append((word, "ipa_br", cur_br, br.strip()))
+            if pt:
+                if not cur_pt:
+                    sets.append("ipa_pt=?"); vals.append(pt); n_pt += 1
+                elif cur_pt.strip() != pt.strip():
+                    conflicts.append((word, "ipa_pt", cur_pt, pt.strip()))
 
             vals.append(rid)
             conn.execute(f"UPDATE dict SET {', '.join(sets)} WHERE id=?", vals)
@@ -278,8 +298,15 @@ def merge():
                 n_lvl += 1
     conn.commit()
     conn.close()
+    if conflicts:
+        with open(CONFLICT_FILE, "w", encoding="utf-8") as cf:
+            cf.write("word\tfield\tkaikki\tdoubao\n")
+            for w_, f_, kv, dv in conflicts:
+                cf.write(f"{w_}\t{f_}\t{kv}\t{dv}\n")
     print(f"写回 {n} 词，flag {nf}；补缺 gender {n_gender}/plural {n_plural}/feminine {n_fem}/"
           f"巴西音 {n_br}/葡音 {n_pt}；搭配 {nc}；CEFR {n_lvl}")
+    print(f"kaikki↔豆包 冲突 {len(conflicts)} 处"
+          + (f" → {CONFLICT_FILE.name}（已按 kaikki 保留，可人工复核）" if conflicts else ""))
 
 
 def stats():

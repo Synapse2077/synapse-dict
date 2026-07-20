@@ -20,6 +20,7 @@ export type PortugueseSense = {
   en: string | null;
   zh: string | null;
   pos: string | null;
+  gender: string | null;    // 逐义项性别（双性名词 rádio m 收音机 / f 镭）
   regions: string[];        // 地区（Brazil / Portugal / dialectal …）
   registers: string[];
 };
@@ -151,6 +152,7 @@ function buildSenses(row: PtRow): PortugueseSense[] {
       en: defs[i] ?? null,
       zh: zhs[i] ?? null,
       pos: typeof m.pos === 'string' ? m.pos : null,
+      gender: typeof m.g === 'string' ? m.g : null,
       regions: asArr(m.reg),
       registers: asArr(m.lex),
     });

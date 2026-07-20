@@ -119,6 +119,7 @@ type FrSense = {
   en: string | null;
   zh: string | null;
   pos: string | null;
+  gender: string | null;
   regions: string[];
   registers: string[];
 };
@@ -164,6 +165,7 @@ type PtSense = {
   en: string | null;
   zh: string | null;
   pos: string | null;
+  gender: string | null;
   regions: string[];
   registers: string[];
 };
@@ -1342,8 +1344,14 @@ const FR_REGION_LABELS: Record<string, string> = {
   regional: '地区性', dialectal: '方言', 'Old-French': '古法语', 'Middle-French': '中古法语',
 };
 
-function FrSenseChips({ sense }: { sense: FrSense }) {
+// 法语冠词（逐义项性别用）：le 阳 / la 阴。
+const FR_ARTICLE: Record<string, string> = { m: 'le', f: 'la', mf: 'le/la' };
+
+function FrSenseChips({ sense, dualGender }: { sense: FrSense; dualGender?: boolean }) {
   const chips: { cls: string; text: string }[] = [];
+  // 仅双性名词逐义项标性别（le 书 / la 斤），单性词与词头徽标重复故略
+  if (dualGender && sense.gender)
+    chips.push({ cls: `g g-${sense.gender}`, text: `${FR_ARTICLE[sense.gender] || ''} ${GENDER_LABELS[sense.gender] || ''}` });
   for (const r of sense.regions) chips.push({ cls: 'reg', text: FR_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
   if (chips.length === 0) return null;
@@ -1437,7 +1445,7 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
                   <li className="sense-item" key={i}>
                     <div className="sense-zh">
                       {s.zh || <span className="sense-missing">（待补）</span>}
-                      <FrSenseChips sense={s} />
+                      <FrSenseChips sense={s} dualGender={entry.gender === 'mf'} />
                     </div>
                     {s.en && <div className="sense-en">{s.en}</div>}
                   </li>
@@ -1526,8 +1534,14 @@ const PT_REGION_LABELS: Record<string, string> = {
   dialectal: '方言', 'Old-Portuguese': '古葡语',
 };
 
-function PtSenseChips({ sense }: { sense: PtSense }) {
+// 葡语冠词（逐义项性别用）：o 阳 / a 阴。
+const PT_ARTICLE: Record<string, string> = { m: 'o', f: 'a', mf: 'o/a' };
+
+function PtSenseChips({ sense, dualGender }: { sense: PtSense; dualGender?: boolean }) {
   const chips: { cls: string; text: string }[] = [];
+  // 仅双性名词逐义项标性别（o 收音机 / a 镭），单性词与词头徽标重复故略
+  if (dualGender && sense.gender)
+    chips.push({ cls: `g g-${sense.gender}`, text: `${PT_ARTICLE[sense.gender] || ''} ${GENDER_LABELS[sense.gender] || ''}` });
   for (const r of sense.regions) chips.push({ cls: 'reg', text: PT_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
   if (chips.length === 0) return null;
@@ -1625,7 +1639,7 @@ function PortugueseEntryView({ entry, onWord, speak }: {
                   <li className="sense-item" key={i}>
                     <div className="sense-zh">
                       {s.zh || <span className="sense-missing">（待补）</span>}
-                      <PtSenseChips sense={s} />
+                      <PtSenseChips sense={s} dualGender={entry.gender === 'mf'} />
                     </div>
                     {s.en && <div className="sense-en">{s.en}</div>}
                   </li>

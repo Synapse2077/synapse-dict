@@ -271,13 +271,15 @@ def new_rec(word):
         "gender": None, "plural": None, "feminine": None, "comparative": None,
         "real_gloss": [], "real_meta": [], "real_seen": set(),
         "infl": [], "infl_seen": set(), "bases": [],
-        "_trans": set(),
+        "_trans": set(), "_gender": set(),
     }
 
 
-def meta_of_sense(s, pos):
+def meta_of_sense(s, pos, gender=None):
     t = s.get("tags", [])
     m = {"pos": POS_MAP.get(pos, pos)}
+    if gender in ("m", "f", "mf"):     # 逐义项性别（双性名词 o/a 靠这个区分）
+        m["g"] = gender
     reg = [x for x in t if x in REGIONS]
     if reg:
         m["reg"] = reg
@@ -340,6 +342,7 @@ def main(dump_infl=False):
 
             senses = e.get("senses", [])
             is_affix = pos_raw in ("suffix", "prefix", "infix", "interfix")
+            entry_gender = None      # 本词条性别，供其义项 meta 逐条标注
 
             # —— 葡语本质字段 ——
             if pos_raw == "verb":
@@ -363,8 +366,9 @@ def main(dump_infl=False):
                         rec["_trans"].update(("t", "i"))
             elif pos_raw in ("noun", "name"):
                 g = extract_gender(e, senses)
-                if g and not rec["gender"]:
-                    rec["gender"] = g
+                if g:
+                    rec["_gender"].add(g)   # 跨词条累积：o/a 双性常分居不同 etym
+                    entry_gender = g
                 pl = extract_plural(e, word)
                 if pl and not rec["plural"]:
                     rec["plural"] = pl
@@ -408,10 +412,22 @@ def main(dump_infl=False):
                         continue
                     rec["real_seen"].add(g)
                     rec["real_gloss"].append(g)
-                    rec["real_meta"].append(meta_of_sense(s, pos_raw))
+                    rec["real_meta"].append(meta_of_sense(s, pos_raw, entry_gender))
                     for tg in tags:
                         if tg not in KNOWN:
                             dropped[tg] += 1
+
+    # gender 收口：跨词条累积后判定；m+f（或 mf）双性 → mf（o/a）
+    for rec in words.values():
+        gs = rec["_gender"]
+        if not gs:
+            continue
+        if "mf" in gs or {"m", "f"} <= gs:
+            rec["gender"] = "mf"
+        elif "f" in gs:
+            rec["gender"] = "f"
+        else:
+            rec["gender"] = "m"
 
     for rec in words.values():
         tr = rec["_trans"]

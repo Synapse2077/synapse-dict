@@ -9,14 +9,14 @@
   · 中文释义、搭配、CEFR 难度、审计 flag = 豆包。
 
 设计（承 es/it b_translate 的成熟架构，fr 独立文件不 import）：
-- 可中断续跑：按 chunk 落盘 b_out/，重跑跳过已完成 chunk。
+- 可中断续跑：每批一行 JSON 追加到 b_out.jsonl，重跑跳过已完成 chunk。
 - 对齐安全：index-key JSON（本地 rid↔dict.id），逐词校验 zh 长度=义项数，不符记 __misalign__。
 - 只喂 词/词性/英文gloss（消歧用，不直译）；已有的 aux/gender 不喂（省 token）。
 
 用法（在 fr/ 目录）：
   python3 b_translate.py --limit 40     # 小样测试
-  python3 b_translate.py                # 全量续跑，落 b_out/
-  python3 b_translate.py --merge        # b_out/ 写回 sqlite（含本质字段仲裁）
+  python3 b_translate.py                # 全量续跑，落 b_out.jsonl
+  python3 b_translate.py --merge        # b_out.jsonl 写回 sqlite（含本质字段仲裁）
   python3 b_translate.py --stats        # 进度
 """
 import argparse
@@ -29,6 +29,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DB_PATH = HERE / "synapse-dict-fr.sqlite"
 OUT_FILE = HERE / "b_out.jsonl"   # 单文件续跑：每批一行 JSON，不再一 chunk 一文件
+CONFLICT_FILE = HERE / "conflict_review.tsv"   # merge 时 kaikki↔豆包 冲突留痕，供人工复核
 ENV_PATH = HERE.parent / ".env"
 MODE = "batch"          # batch(ep-bi 便宜) / online(ep-m 快，测试)
 CHUNK = 50
@@ -217,6 +218,7 @@ def merge():
     conn = sqlite3.connect(str(DB_PATH))
     n = nf = n_aux = n_gender = n_plural = n_fem = n_ipa = nc = n_lvl = 0
     n_gov = n_apos = 0
+    conflicts = []   # (word, field, kaikki值, 豆包值)：两边都有值且不一致，留痕不覆盖
     for data in _iter_batches():
         for rid, o in data.items():
             rid = int(rid)
@@ -244,35 +246,50 @@ def merge():
                 lvl = None
 
             row = conn.execute(
-                "SELECT pos, aux, gender, plural, feminine, ipa, adj_pos, government "
+                "SELECT word, pos, aux, gender, plural, feminine, ipa, adj_pos, government "
                 "FROM dict WHERE id=?", (rid,)
             ).fetchone()
             if not row:
                 continue
-            pos, cur_aux, cur_gender, cur_plural, cur_fem, cur_ipa, cur_apos, cur_gov = row
+            word, pos, cur_aux, cur_gender, cur_plural, cur_fem, cur_ipa, cur_apos, cur_gov = row
             posset = set(pos.split("/")) if pos else set()
             sets = ["translation=?", "flag=?", "collocation=?", "level=?"]
             vals = [tr, flag, collocation, lvl]
 
-            # 本质字段仲裁：kaikki 优先，仅填 kaikki 留空的缺口
+            # 本质字段仲裁：kaikki 优先——空则填豆包，kaikki 已有值而豆包不同则记冲突（不覆盖）。
+            # kaikki 平均更准（尤其发音规则），但非无错；留痕让 ce=/se.ø/、but=mf 这类 kaikki 坏值可复核。
             d_aux = o.get("aux")
-            if not cur_aux and d_aux in ("avoir", "être", "both") and "v" in posset:
-                sets.append("aux=?"); vals.append(d_aux); n_aux += 1
+            if d_aux in ("avoir", "être", "both") and "v" in posset:
+                if not cur_aux:
+                    sets.append("aux=?"); vals.append(d_aux); n_aux += 1
+                elif cur_aux.strip() != d_aux:
+                    conflicts.append((word, "aux", cur_aux, d_aux))
             d_g = o.get("gender")
-            if not cur_gender and d_g in ("m", "f", "mf") and ({"n", "name"} & posset):
-                sets.append("gender=?"); vals.append(d_g); n_gender += 1
+            if d_g in ("m", "f", "mf") and ({"n", "name"} & posset):
+                if not cur_gender:
+                    sets.append("gender=?"); vals.append(d_g); n_gender += 1
+                elif cur_gender.strip() != d_g:
+                    conflicts.append((word, "gender", cur_gender, d_g))
             d_pl = o.get("plural")
             # 消毒：豆包偶尔返回词典惯例符号（~/+/#/-）当复数，非真实词形，拦掉。
-            if (not cur_plural and isinstance(d_pl, str)
+            if (isinstance(d_pl, str)
                     and re.fullmatch(r"[a-zàâäéèêëîïôöùûüÿçœæ'’ -]{2,}", d_pl.strip())
                     and "n" in posset):
-                sets.append("plural=?"); vals.append(d_pl.strip()); n_plural += 1
+                d_pl = d_pl.strip()
+                if not cur_plural:
+                    sets.append("plural=?"); vals.append(d_pl); n_plural += 1
+                elif cur_plural.strip() != d_pl:
+                    conflicts.append((word, "plural", cur_plural, d_pl))
             d_fem = o.get("feminine")
             # 阴性形：名词(acteur→actrice)与形容词(grand→grande)都收
-            if (not cur_fem and isinstance(d_fem, str)
+            if (isinstance(d_fem, str)
                     and re.fullmatch(r"[a-zàâäéèêëîïôöùûüÿçœæ'’ -]{2,}", d_fem.strip())
                     and (posset & {"adj", "n", "name"})):
-                sets.append("feminine=?"); vals.append(d_fem.strip()); n_fem += 1
+                d_fem = d_fem.strip()
+                if not cur_fem:
+                    sets.append("feminine=?"); vals.append(d_fem); n_fem += 1
+                elif cur_fem.strip() != d_fem:
+                    conflicts.append((word, "feminine", cur_fem, d_fem))
             # 固定介词支配：豆包独有权威（kaikki 无），动词/形容词才写
             d_gov = o.get("gov")
             if (not cur_gov and isinstance(d_gov, str) and 1 <= len(d_gov.strip()) <= 40
@@ -280,11 +297,19 @@ def merge():
                 sets.append("government=?"); vals.append(d_gov.strip()); n_gov += 1
             # 形容词位置：仅形容词，取值 pre/post/both
             d_apos = o.get("apos")
-            if (not cur_apos and isinstance(d_apos, str)
+            if (isinstance(d_apos, str)
                     and d_apos.strip().lower() in ("pre", "post", "both") and "adj" in posset):
-                sets.append("adj_pos=?"); vals.append(d_apos.strip().lower()); n_apos += 1
-            if not cur_ipa and ipa:
-                sets.append("ipa=?"); vals.append(ipa); n_ipa += 1
+                d_apos = d_apos.strip().lower()
+                if not cur_apos:
+                    sets.append("adj_pos=?"); vals.append(d_apos); n_apos += 1
+                elif cur_apos.strip() != d_apos:
+                    conflicts.append((word, "adj_pos", cur_apos, d_apos))
+            # IPA：kaikki 收割优先，豆包兜底；冲突留痕（豆包 IPA 质量偏松，供参考）
+            if ipa:
+                if not cur_ipa:
+                    sets.append("ipa=?"); vals.append(ipa); n_ipa += 1
+                elif cur_ipa.strip() != ipa.strip():
+                    conflicts.append((word, "ipa", cur_ipa, ipa.strip()))
 
             vals.append(rid)
             conn.execute(f"UPDATE dict SET {', '.join(sets)} WHERE id=?", vals)
@@ -297,8 +322,15 @@ def merge():
                 n_lvl += 1
     conn.commit()
     conn.close()
+    if conflicts:
+        with open(CONFLICT_FILE, "w", encoding="utf-8") as cf:
+            cf.write("word\tfield\tkaikki\tdoubao\n")
+            for w_, f_, kv, dv in conflicts:
+                cf.write(f"{w_}\t{f_}\t{kv}\t{dv}\n")
     print(f"写回 {n} 词，flag {nf}；补缺 aux {n_aux}/gender {n_gender}/plural {n_plural}/"
           f"feminine {n_fem}/介词支配 {n_gov}/形容词位置 {n_apos}/ipa {n_ipa}；搭配 {nc}；CEFR {n_lvl}")
+    print(f"kaikki↔豆包 冲突 {len(conflicts)} 处"
+          + (f" → {CONFLICT_FILE.name}（已按 kaikki 保留，可人工复核）" if conflicts else ""))
 
 
 def stats():
