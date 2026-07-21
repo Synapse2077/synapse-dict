@@ -502,6 +502,7 @@ def main(dump_infl=False):
           reflexive     INTEGER,       -- 反身 sich
           comparative   TEXT,          -- 比较级（gut→besser）
           superlative   TEXT,          -- 最高级（am besten）
+          government    TEXT,          -- 支配 Rektion（helfen +Dat、warten auf +Akk、mit +Dat；豆包）
           level         TEXT,          -- CEFR A1-C2（豆包填）
           definition    TEXT,
           translation   TEXT,

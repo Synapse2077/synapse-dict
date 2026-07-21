@@ -56,6 +56,7 @@ export type GermanEntry = {
   reflexive: boolean;           // 反身 sich
   comparative: string | null;   // 比较级（gut→besser）
   superlative: string | null;   // 最高级（am besten）
+  government: string | null;     // 支配 Rektion（helfen +Dat、warten auf +Akk、mit +Dat）
   level: string | null;         // CEFR A1-C2
   senses: GermanSense[];
   collocations: GermanCollocation[];
@@ -83,6 +84,7 @@ type DeRow = {
   reflexive: number | null;
   comparative: string | null;
   superlative: string | null;
+  government: string | null;
   level: string | null;
   definition: string | null;
   translation: string | null;
@@ -189,6 +191,7 @@ function mapEntry(row: DeRow): GermanEntry {
     reflexive: row.reflexive === 1,
     comparative: row.comparative,
     superlative: row.superlative,
+    government: row.government,
     level: row.level,
     senses: buildSenses(row),
     collocations: parseCollocations(row.collocation),
@@ -224,7 +227,7 @@ export class GermanDictService {
     this.exactQuery = this.db.prepare(`
       SELECT id, word, ipa, pos, is_lemma, gender, genitive, plural, aux,
              praeteritum, partizip2, vclass, separable, sep_prefix, reflexive,
-             comparative, superlative, level,
+             comparative, superlative, government, level,
              definition, translation, meta, infl, exchange, collocation, flag
       FROM dict
       WHERE word = ? COLLATE NOCASE

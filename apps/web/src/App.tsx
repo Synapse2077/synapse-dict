@@ -240,6 +240,7 @@ type DeEntry = {
   reflexive: boolean;           // 反身 sich
   comparative: string | null;
   superlative: string | null;
+  government: string | null;    // 支配 Rektion（helfen +Dat、warten auf +Akk）
   level: string | null;
   senses: DeSense[];
   collocations: DeCollocation[];
@@ -1844,6 +1845,7 @@ function GermanEntryView({ entry, speakLocale, onWord, speak }: {
           <span className="badge sep">可分 · {entry.sepPrefix}-</span>
         )}
         {isVerb && entry.reflexive && <span className="badge tag">反身 sich</span>}
+        {entry.government && <span className="badge gov">支配 {entry.government}</span>}
         {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
       </div>
 
