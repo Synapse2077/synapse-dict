@@ -48,11 +48,14 @@ export type PortugueseEntry = {
   vconj: string | null;         // 1 / 2 / 3 / por（变位类）
   transitivity: string | null;  // t / i / ti
   pronominal: boolean;          // 代词式/反身 -se
-  pp: string | null;            // 过去分词
+  pp: string | null;            // 过去分词（规则/长形 ganhado）
+  ppShort: string | null;       // particípio duplo 不规则短形（ganho/pago/gasto）
   gender: string | null;        // m / f / mf
   plural: string | null;        // 不规则复数
   feminine: string | null;      // 阴性形（bonito→bonita；ator→atriz）
   comparative: string | null;   // 不规则比较级（bom→melhor）
+  adjPos: string | null;        // 形容词位置 pre / post / both（velho amigo / amigo velho）
+  government: string | null;    // 动词/形容词介词支配 regência（gostar de、assistir a）
   level: string | null;         // CEFR A1-C2
   senses: PortugueseSense[];
   collocations: PortugueseCollocation[];
@@ -73,10 +76,13 @@ type PtRow = {
   transitivity: string | null;
   pronominal: number | null;
   pp: string | null;
+  pp_short: string | null;
   gender: string | null;
   plural: string | null;
   feminine: string | null;
   comparative: string | null;
+  adj_pos: string | null;
+  government: string | null;
   level: string | null;
   definition: string | null;
   translation: string | null;
@@ -173,10 +179,13 @@ function mapEntry(row: PtRow): PortugueseEntry {
     transitivity: row.transitivity,
     pronominal: row.pronominal === 1,
     pp: row.pp,
+    ppShort: row.pp_short,
     gender: row.gender,
     plural: row.plural,
     feminine: row.feminine,
     comparative: row.comparative,
+    adjPos: row.adj_pos,
+    government: row.government,
     level: row.level,
     senses: buildSenses(row),
     collocations: parseCollocations(row.collocation),
@@ -211,7 +220,7 @@ export class PortugueseDictService {
 
     this.exactQuery = this.db.prepare(`
       SELECT id, word, ipa_br, ipa_pt, pos, is_lemma, vconj, transitivity, pronominal,
-             pp, gender, plural, feminine, comparative, level,
+             pp, pp_short, gender, plural, feminine, comparative, adj_pos, government, level,
              definition, translation, meta, infl, exchange, collocation, flag
       FROM dict
       WHERE word = ? COLLATE NOCASE

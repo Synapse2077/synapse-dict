@@ -190,10 +190,13 @@ type PtEntry = {
   transitivity: string | null;
   pronominal: boolean;
   pp: string | null;
+  ppShort: string | null;
   gender: string | null;
   plural: string | null;
   feminine: string | null;
   comparative: string | null;
+  adjPos: string | null;
+  government: string | null;
   level: string | null;
   senses: PtSense[];
   collocations: PtCollocation[];
@@ -1617,10 +1620,17 @@ function PortugueseEntryView({ entry, onWord, speak }: {
         {isNoun && entry.plural && <span className="badge plural">复数 {entry.plural}</span>}
         {(isAdj || isNoun) && entry.feminine && <span className="badge fem">阴性 {entry.feminine}</span>}
         {(isAdj || isVerb) && entry.comparative && <span className="badge cmp">比较级 {entry.comparative}</span>}
+        {isAdj && entry.adjPos && (
+          <span className="badge apos">{FR_ADJPOS_LABELS[entry.adjPos] || entry.adjPos}</span>
+        )}
         {isVerb && entry.vconj && (
           <span className="badge conj">{PT_VCONJ_LABELS[entry.vconj] || entry.vconj}</span>
         )}
         {isVerb && entry.pp && <span className="badge pp">过去分词 {entry.pp}</span>}
+        {isVerb && entry.ppShort && <span className="badge pp">短分词 {entry.ppShort}</span>}
+        {(isVerb || isAdj) && entry.government && (
+          <span className="badge gov">＋{entry.government}</span>
+        )}
         {isVerb && entry.transitivity && (
           <span className="badge tag">{TRANS_LABELS[entry.transitivity] || entry.transitivity}</span>
         )}

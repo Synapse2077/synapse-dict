@@ -196,6 +196,21 @@ def extract_pp(e):
     for fm in e.get("forms") or []:
         tags = set(fm.get("tags") or [])
         if "participle" in tags and "past" in tags \
+                and "feminine" not in tags and "plural" not in tags \
+                and "short-form" not in tags:      # 长/规则形归 pp，短形归 pp_short
+            f = (fm.get("form") or "").strip()
+            if f and _WORDLIKE.match(f):
+                return f
+    return None
+
+
+def extract_pp_short(e):
+    """particípio duplo 的不规则短形（ganhar→ganho / pagar→pago / gastar→gasto /
+    aceitar→aceite/aceito），与 ser/estar 连用、现代葡语常作默认。kaikki 明确 tag short-form。
+    取无性数的基础短形（避开 feminine/plural 变体）。"""
+    for fm in e.get("forms") or []:
+        tags = set(fm.get("tags") or [])
+        if {"short-form", "participle", "past"} <= tags \
                 and "feminine" not in tags and "plural" not in tags:
             f = (fm.get("form") or "").strip()
             if f and _WORDLIKE.match(f):
@@ -267,7 +282,7 @@ def extract_feminine(e):
 def new_rec(word):
     return {
         "word": word, "spellings": set(), "ipa_br": None, "ipa_pt": None, "pos": set(),
-        "vconj": None, "transitivity": None, "pronominal": 0, "pp": None,
+        "vconj": None, "transitivity": None, "pronominal": 0, "pp": None, "pp_short": None,
         "gender": None, "plural": None, "feminine": None, "comparative": None,
         "real_gloss": [], "real_meta": [], "real_seen": set(),
         "infl": [], "infl_seen": set(), "bases": [],
@@ -352,6 +367,9 @@ def main(dump_infl=False):
                 pp = extract_pp(e)
                 if pp and not rec["pp"]:
                     rec["pp"] = pp
+                pps = extract_pp_short(e)          # particípio duplo 不规则短形
+                if pps and not rec["pp_short"]:
+                    rec["pp_short"] = pps
                 if re.search(r"-se$|\bse$", word):
                     rec["pronominal"] = 1
                 for s in senses:
@@ -455,11 +473,12 @@ def main(dump_infl=False):
     n_gender = sum(1 for r in words.values() if r["gender"])
     n_fem = sum(1 for r in words.values() if r["feminine"])
     n_pp = sum(1 for r in words.values() if r["pp"])
+    n_pps = sum(1 for r in words.values() if r["pp_short"])
     tot = len(words)
     print(f"总行数 {total} (解析失败 {bad}) → 去重词条 {tot}")
     print(f"  真义 lemma {n_lemma} | 纯变位 {n_infl}")
     print(f"  双音：巴西 {n_br}({100*n_br//tot}%) | 葡萄牙 {n_pt}({100*n_pt//tot}%)")
-    print(f"  kaikki 抽取：vconj {n_vc} | gender {n_gender} | 阴性形(名+形) {n_fem} | 过去分词 {n_pp}")
+    print(f"  kaikki 抽取：vconj {n_vc} | gender {n_gender} | 阴性形(名+形) {n_fem} | 过去分词 {n_pp} | 双分词短形 {n_pps}")
     if dropped:
         print(f"  ⚠ 未归桶 tag {len(dropped)} 种：")
         for tg, n in dropped.most_common(30):
@@ -485,11 +504,14 @@ def main(dump_infl=False):
           vconj         TEXT,          -- 1 | 2 | 3 | por（变位类）
           transitivity  TEXT,          -- t | i | ti
           pronominal    INTEGER,       -- 代词式/反身 -se
-          pp            TEXT,          -- 过去分词
+          pp            TEXT,          -- 过去分词（规则/长形 ganhado）
+          pp_short      TEXT,          -- particípio duplo 不规则短形（ganho/pago/gasto，kaikki）
           gender        TEXT,          -- m | f | mf
           plural        TEXT,          -- 不规则复数
           feminine      TEXT,          -- 阴性形（形容词 bonito→bonita；名词 ator→atriz）
           comparative   TEXT,          -- 不规则比较级 bom→melhor
+          adj_pos       TEXT,          -- 形容词位置 pre|post|both（变义 velho amigo/amigo velho，豆包）
+          government    TEXT,          -- 动词/形容词介词支配 regência（gostar de、assistir a，豆包）
           level         TEXT,          -- CEFR A1-C2（豆包）
           definition    TEXT,
           translation   TEXT,
@@ -518,15 +540,16 @@ def main(dump_infl=False):
             disp, unaccent(disp), rec["ipa_br"], rec["ipa_pt"],
             "/".join(sorted(rec["pos"])) if rec["pos"] else None,
             is_lemma,
-            rec["vconj"], rec["transitivity"], rec["pronominal"] or None, rec["pp"],
+            rec["vconj"], rec["transitivity"], rec["pronominal"] or None,
+            rec["pp"], rec["pp_short"],
             rec["gender"], rec["plural"], rec["feminine"], rec["comparative"],
             definition, translation, meta, infl, exchange,
         ))
     conn.executemany(
         "INSERT INTO dict (word, word_norm, ipa_br, ipa_pt, pos, is_lemma, vconj, "
-        "transitivity, pronominal, pp, gender, plural, feminine, comparative, "
+        "transitivity, pronominal, pp, pp_short, gender, plural, feminine, comparative, "
         "definition, translation, meta, infl, exchange) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         batch,
     )
     conn.commit()
