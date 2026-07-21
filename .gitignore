@@ -7,9 +7,13 @@ dist/
 data/
 
 # 多语言词典大文件（GitHub 放不下；源 dump 靠下载、成品 sqlite 靠 scp 上线）
-# 每语言目录 es/ fr/ it/ pt/ no/ 只把脚本+README 进 git，数据不进
-*.sqlite
-kaikki.org-dictionary-*.jsonl
-doubao-*.jsonl
+# 每语言目录 es/ fr/ it/ pt/ no/ 只把脚本+README 进 git，数据不进。
+# 用宽模式，别再按具体文件名写死（旧规则漏了 .sqlite.*.bak / b_out.jsonl / *_out.jsonl）。
+# 成品库 + 所有派生：.sqlite / .sqlite.premerge.bak / .sqlite-wal …
+*.sqlite*
+# 一切备份
+*.bak
+# 本仓无任何该进 git 的 jsonl：源 dump / 豆包输出(b_out/b_enrich_out) / 裁决输出
+*.jsonl
 b_out/
 b_out.tar.gz
