@@ -112,6 +112,9 @@ function normalizeFrenchIpa(ipa: string | null): string | null {
   inner = inner.replace(/͡/g, '');   // ① 去连结弧（tie bar）
   inner = inner.replace(/‿/g, '');   // ③ 去联诵标记 ‿
   inner = inner.replace(/\./g, '');       // ② 去音节点
+  // ④ 后 a → 前 a（Larousse 式，现代法语已合并 pâte /pɑt/→/pat/）；
+  //    负向前瞻保护鼻化元音 ɑ̃（ɑ+U+0303），绝不可误改成葡语的 ã。
+  inner = inner.replace(/ɑ(?!\u0303)/g, 'a');
   inner = inner.trim();
   return '/' + inner + '/';
 }
