@@ -978,6 +978,25 @@ body {
 }
 .de-stammformen .de-form { font-variant-numeric: tabular-nums; }
 
+/* 多性别名词逐性别范式束（der Band(Bandes/Bände) 卷 vs die Band(–/Bands) 乐队）——每性别一行 */
+.de-noun-variants {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 14px;
+}
+.de-nv-row {
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.de-nv-row .de-article { margin-right: 2px; }
+.de-nv-word { font-weight: 600; }
+.de-nv-forms { color: var(--text-primary); }
+
 /* 可分动词徽标（trennbar）—— 德语招牌，用强调色点出可分前缀 */
 .badge.sep {
   background: color-mix(in srgb, var(--accent) 12%, transparent);

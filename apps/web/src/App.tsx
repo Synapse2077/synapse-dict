@@ -78,6 +78,7 @@ type ItSense = {
   en: string | null;
   zh: string | null;
   pos: string | null;
+  gender: string | null;   // 逐义项性别 m/f（双性名词 il radio 半径 vs la radio 收音机）
   regions: string[];
   registers: string[];
 };
@@ -228,9 +229,10 @@ type DeEntry = {
   ipa: string | null;
   pos: string | null;
   isLemma: boolean;
-  gender: string | null;        // m / f / n / mf（der/die/das）
+  gender: string | null;        // m / f / n / mf（der/die/das；单性别词主性别）
   genitive: string | null;      // 属格单数
   plural: string | null;        // 复数
+  nounVariants: { g: string; gen: string | null; pl: string | null }[]; // 多性别名词逐性别范式束
   aux: string | null;           // haben / sein / both
   praeteritum: string | null;   // 过去式
   partizip2: string | null;     // 过去分词
@@ -1162,8 +1164,13 @@ const IT_REGION_LABELS: Record<string, string> = {
   regional: '地区性', dialectal: '方言', 'Ancient-Rome': '古罗马', Roman: '罗马',
 };
 
-function ItSenseChips({ sense }: { sense: ItSense }) {
+const IT_ARTICLE: Record<string, string> = { m: 'il', f: 'la', mf: 'il/la' };
+
+function ItSenseChips({ sense, dualGender }: { sense: ItSense; dualGender?: boolean }) {
   const chips: { cls: string; text: string }[] = [];
+  // 仅双性名词逐义项标性别（il 半径 / la 收音机），单性词与词头徽标重复故略
+  if (dualGender && sense.gender)
+    chips.push({ cls: `g g-${sense.gender}`, text: `${IT_ARTICLE[sense.gender] || ''} ${GENDER_LABELS[sense.gender] || ''}` });
   for (const r of sense.regions) chips.push({ cls: 'reg', text: IT_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
   if (chips.length === 0) return null;
@@ -1253,7 +1260,7 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
                   <li className="sense-item" key={i}>
                     <div className="sense-zh">
                       {s.zh || <span className="sense-missing">（待补）</span>}
-                      <ItSenseChips sense={s} />
+                      <ItSenseChips sense={s} dualGender={entry.gender === 'mf'} />
                     </div>
                     {s.en && <div className="sense-en">{s.en}</div>}
                   </li>
@@ -1784,11 +1791,13 @@ function GermanEntryView({ entry, speakLocale, onWord, speak }: {
   const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
   const g0 = entry.gender ? entry.gender.split('/')[0] : null;
   const article = entry.gender ? (DE_ARTICLE[entry.gender] || DE_ARTICLE[g0 || ''] || '') : '';
+  // 多性别名词（Band der/die/das 各自变格）：词头不塞单一冠词，改下方逐性别范式束展示
+  const multiGender = isNoun && entry.isLemma && entry.nounVariants.length > 1;
   return (
     <article className="entry-detail">
       <header className="entry-header">
         <h2 className="entry-word">
-          {isNoun && article && <span className={`de-article g-${g0}`}>{article} </span>}
+          {isNoun && article && !multiGender && <span className={`de-article g-${g0}`}>{article} </span>}
           {entry.word}
         </h2>
       </header>
@@ -1802,11 +1811,28 @@ function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         </div>
       )}
 
-      {isNoun && entry.isLemma && (entry.genitive || entry.plural) && (
-        <div className="de-forms">
-          {entry.genitive && <span className="de-form"><span className="de-form-k">属格</span> {entry.genitive}</span>}
-          {entry.plural && <span className="de-form"><span className="de-form-k">复数</span> die {entry.plural}</span>}
+      {multiGender ? (
+        <div className="de-noun-variants">
+          {entry.nounVariants.map((v) => (
+            <div className="de-nv-row" key={v.g}>
+              <span className={`de-article g-${v.g}`}>{DE_ARTICLE[v.g] || ''}</span>
+              {' '}<span className="de-nv-word">{entry.word}</span>
+              {(v.gen || v.pl) && (
+                <span className="de-nv-forms">
+                  {v.gen && <>{' '}<span className="de-form-k">属格</span> {v.gen}</>}
+                  {v.pl && <>{' '}<span className="de-form-k">复数</span> die {v.pl}</>}
+                </span>
+              )}
+            </div>
+          ))}
         </div>
+      ) : (
+        isNoun && entry.isLemma && (entry.genitive || entry.plural) && (
+          <div className="de-forms">
+            {entry.genitive && <span className="de-form"><span className="de-form-k">属格</span> {entry.genitive}</span>}
+            {entry.plural && <span className="de-form"><span className="de-form-k">复数</span> die {entry.plural}</span>}
+          </div>
+        )
       )}
 
       {isVerb && entry.isLemma && (entry.praeteritum || entry.partizip2) && (
@@ -1832,7 +1858,11 @@ function GermanEntryView({ entry, speakLocale, onWord, speak }: {
 
       <div className="entry-meta-row entry-badges">
         {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
-        {isNoun && entry.gender && (
+        {isNoun && multiGender ? (
+          <span className="badge g g-mf">
+            {entry.nounVariants.map((v) => GENDER_LABELS[v.g] || v.g).join('/')}性
+          </span>
+        ) : isNoun && entry.gender && (
           <span className={`badge g g-${g0}`}>{GENDER_LABELS[entry.gender] || entry.gender}性</span>
         )}
         {isVerb && entry.aux && (

@@ -244,6 +244,7 @@ def new_rec(word):
         "real_gloss": [], "real_meta": [], "real_seen": set(),
         "infl": [], "infl_seen": set(), "bases": [],
         "_trans": set(),   # transitive/intransitive 累积
+        "_gender": set(),  # 跨词条累积 m/f（双性名词 radio/fronte/fine 收口成 mf）
     }
 
 
@@ -275,6 +276,14 @@ def meta_of_sense(s, pos):
     lex = [x for x in t if x in REGISTERS]
     if lex:
         m["lex"] = lex
+    # 双性名词逐义项性别（il radio 半径/桡骨 vs la radio 收音机）——供 web 逐义项标 il/la。
+    # 只标**单一性别**义项；兼性名词(comune: artista m/f)义项同带 masculine+feminine，不标(否则误判 f)。
+    if pos in ("noun", "name"):
+        has_f, has_m = "feminine" in t, "masculine" in t
+        if has_f and not has_m:
+            m["g"] = "f"
+        elif has_m and not has_f:
+            m["g"] = "m"
     return m
 
 
@@ -352,6 +361,11 @@ def main(dump_infl=False):
                 g = gender_of_senses(senses)
                 if g and not rec["gender"]:
                     rec["gender"] = g
+                # 跨词条累积每性别（radio 的 radium etym=m、radio etym=f 分属不同 JSONL 词条）
+                if g:
+                    for x in ("m", "f"):
+                        if x in g:
+                            rec["_gender"].add(x)
                 pl, plg = extract_plural(e, rec["gender"] or g)
                 if pl and not rec["plural"]:
                     rec["plural"] = pl
@@ -403,6 +417,10 @@ def main(dump_infl=False):
             rec["transitivity"] = "i"
         elif tr:
             rec["transitivity"] = "ti"
+        # 双性名词收口：跨词条同时见 m 和 f → mf（radio/fronte/fine/capitale），修只取首性别的 bug
+        gg = rec["_gender"]
+        if "m" in gg and "f" in gg:
+            rec["gender"] = "mf"
 
     if dump_infl:
         out = HERE / "infl_combos.txt"

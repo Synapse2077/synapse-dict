@@ -36,6 +36,13 @@ export type GermanBase = {
   senses: GermanSense[];
 };
 
+// 多性别名词的逐性别变格束（der Band(Bandes/Bände) 卷 vs die Band(–/Bands) 乐队）。
+export type NounVariant = {
+  g: string;              // m / f / n
+  gen: string | null;     // 该性别的属格单数
+  pl: string | null;      // 该性别的复数
+};
+
 export type GermanEntry = {
   lang: 'de';
   id: number;
@@ -44,9 +51,10 @@ export type GermanEntry = {
   pos: string | null;
   isLemma: boolean;
   // —— 德语本质（一等字段）——
-  gender: string | null;        // m / f / n / mf（der/die/das）
+  gender: string | null;        // m / f / n / mf（der/die/das；单性别词的主性别）
   genitive: string | null;      // 属格单数（des Hauses）
   plural: string | null;        // 复数（die Häuser）
+  nounVariants: NounVariant[];  // 多性别名词逐性别范式束（Band m/f/n 各自属格/复数）
   aux: string | null;           // haben / sein / both（完成时助动词）
   praeteritum: string | null;   // 过去式 Präteritum（ging）
   partizip2: string | null;     // 过去分词 Partizip II（gegangen）
@@ -75,6 +83,7 @@ type DeRow = {
   gender: string | null;
   genitive: string | null;
   plural: string | null;
+  noun_variants: string | null;
   aux: string | null;
   praeteritum: string | null;
   partizip2: string | null;
@@ -115,6 +124,19 @@ function normalizeGermanIpa(ipa: string | null): string | null {
   inner = inner.trim();
   if (!inner) return null;
   return '/' + inner + '/';
+}
+
+function parseNounVariants(raw: string | null): NounVariant[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((v) => v && typeof v.g === 'string')
+      .map((v) => ({ g: v.g, gen: v.gen ?? null, pl: v.pl ?? null }));
+  } catch {
+    return [];
+  }
 }
 
 function splitLines(s: string | null): string[] {
@@ -182,6 +204,7 @@ function mapEntry(row: DeRow): GermanEntry {
     gender: row.gender,
     genitive: row.genitive,
     plural: row.plural,
+    nounVariants: parseNounVariants(row.noun_variants),
     aux: row.aux,
     praeteritum: row.praeteritum,
     partizip2: row.partizip2,
@@ -225,7 +248,7 @@ export class GermanDictService {
     `);
 
     this.exactQuery = this.db.prepare(`
-      SELECT id, word, ipa, pos, is_lemma, gender, genitive, plural, aux,
+      SELECT id, word, ipa, pos, is_lemma, gender, genitive, plural, noun_variants, aux,
              praeteritum, partizip2, vclass, separable, sep_prefix, reflexive,
              comparative, superlative, government, level,
              definition, translation, meta, infl, exchange, collocation, flag

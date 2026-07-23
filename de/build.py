@@ -312,10 +312,31 @@ def extract_adj(e, word):
     return comp, sup
 
 
+def compose_noun_variants(noun_forms):
+    """noun_forms: dict gender(m/f/n) -> list[(gen, pl)]（按 kaikki 出现顺序）。
+    跨词条多性别名词 → JSON [{g,gen,pl},…]（每性别一套变格，first-非空 取值）；
+    单性别名词返回 None（走既有 gender/genitive/plural 单列即可）。"""
+    if len(noun_forms) <= 1:
+        return None
+    out = []
+    for g in ("m", "f", "n"):
+        if g not in noun_forms:
+            continue
+        gen = pl = None
+        for (gg, pp) in noun_forms[g]:
+            if gg and not gen:
+                gen = gg
+            if pp and not pl:
+                pl = pp
+        out.append({"g": g, "gen": gen, "pl": pl})
+    return json.dumps(out, ensure_ascii=False) if len(out) > 1 else None
+
+
 def new_rec(word):
     return {
         "word": word, "ipa": None, "pos": set(),
         "gender": None, "genitive": None, "plural": None,
+        "noun_forms": {},  # gender -> list[(gen,pl)]，收尾 compose 成 noun_variants
         "aux": None, "praeteritum": None, "partizip2": None, "vclass": None,
         "separable": 0, "sep_prefix": None, "reflexive": 0,
         "comparative": None, "superlative": None,
@@ -390,6 +411,11 @@ def main(dump_infl=False):
                     rec["genitive"] = gen
                 if pl and not rec["plural"]:
                     rec["plural"] = pl
+                # 每性别范式束跨词条累积（Band m/f/n 各自属格/复数）→ noun_variants。
+                # 仅收 pos=noun（普通名词变格范式）；排除 name 专名（das See 地名之类是噪声）。
+                if g and pos_raw == "noun":
+                    for gg in g.split("/"):
+                        rec["noun_forms"].setdefault(gg, []).append((gen, pl))
             elif pos_raw == "verb":
                 aux, praet, pp2, vclass, sep_prefix, refl = extract_verb(e, word, senses)
                 if aux and not rec["aux"]:
@@ -490,9 +516,10 @@ def main(dump_infl=False):
           ipa           TEXT,
           pos           TEXT,
           is_lemma      INTEGER NOT NULL,
-          gender        TEXT,          -- m | f | n | mf（三性 der/die/das）
+          gender        TEXT,          -- m | f | n | mf（三性 der/die/das；单性别词的主性别）
           genitive      TEXT,          -- 属格单数（des Hauses）
           plural        TEXT,          -- 复数（die Häuser，不可预测全收）
+          noun_variants TEXT,          -- 多性别名词逐性别范式束 JSON [{g,gen,pl},…]（Band/See/Steuer）
           aux           TEXT,          -- haben | sein | both（完成时助动词）
           praeteritum   TEXT,          -- 过去式 Präteritum（ging）
           partizip2     TEXT,          -- 过去分词 Partizip II（gegangen）
@@ -529,6 +556,7 @@ def main(dump_infl=False):
             "/".join(sorted(rec["pos"])) if rec["pos"] else None,
             is_lemma,
             rec["gender"], rec["genitive"], rec["plural"],
+            compose_noun_variants(rec["noun_forms"]),
             rec["aux"], rec["praeteritum"], rec["partizip2"], rec["vclass"],
             rec["separable"] or None, rec["sep_prefix"], rec["reflexive"] or None,
             rec["comparative"], rec["superlative"],
@@ -536,10 +564,10 @@ def main(dump_infl=False):
         ))
     conn.executemany(
         "INSERT INTO dict (word, word_norm, ipa, pos, is_lemma, gender, genitive, "
-        "plural, aux, praeteritum, partizip2, vclass, separable, sep_prefix, "
+        "plural, noun_variants, aux, praeteritum, partizip2, vclass, separable, sep_prefix, "
         "reflexive, comparative, superlative, "
         "definition, translation, meta, infl, exchange) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         batch,
     )
     conn.commit()

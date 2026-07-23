@@ -19,6 +19,7 @@ export type ItalianSense = {
   en: string | null;        // 英文 gloss 锚点
   zh: string | null;        // 中文释义
   pos: string | null;       // 逐义项词性
+  gender: string | null;    // 逐义项性别 m/f（双性名词 il radio 半径 vs la radio 收音机）
   regions: string[];        // 地区（Tuscany / dialectal …）
   registers: string[];      // 语域（literary / colloquial …）
 };
@@ -158,6 +159,7 @@ function buildSenses(row: ItRow): ItalianSense[] {
       en: defs[i] ?? null,
       zh: zhs[i] ?? null,
       pos: typeof m.pos === 'string' ? m.pos : null,
+      gender: typeof m.g === 'string' ? m.g : null,
       regions: asArr(m.reg),
       registers: asArr(m.lex),
     });
