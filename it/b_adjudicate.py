@@ -103,8 +103,9 @@ async def arun(tasks):
     from volcenginesdkarkruntime import AsyncArk
     env = load_env()
     client = AsyncArk(api_key=env["ARK_API_KEY"], timeout=600)
-    model, comps = env["DOUBAO_MODEL_ONLINE_LITE"], client.chat.completions
-    print(f"模型 {model}  并发 {CONC}  批 {len(tasks)}")
+    # 裁判＝doubao-seed-2.1-pro「词典强校验」（独立第三方，比老 lite 强，规避盲投共享偏见）
+    model, comps = env.get("DOUBAO_SEED_2_1_PRO", env["DOUBAO_MODEL_ONLINE_LITE"]), client.chat.completions
+    print(f"裁判模型 {model}  并发 {CONC}  批 {len(tasks)}")
     q = asyncio.Queue()
     for t in tasks:
         q.put_nowait(t)
