@@ -89,6 +89,7 @@ async def acall(comps, model, field, items):
     payload = {str(i): {"w": w, "zh": g} for i, w, g in items}
     r = await comps.create(
         model=model, temperature=TEMP,
+        reasoning_effort="minimal",   # 官方参数：minimal=不思考。默认high会思考、3词也要70s（结果不变）
         messages=[{"role": "system", "content": SYS[field]},
                   {"role": "user", "content": "输入：\n" + json.dumps(payload, ensure_ascii=False)}])
     out = r.choices[0].message.content.strip()
