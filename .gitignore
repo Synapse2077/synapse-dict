@@ -19,3 +19,7 @@ data/
 *.tsv
 b_out/
 b_out.tar.gz
+
+# Python 缓存（当年 git add -A 误提交了 __pycache__/*.pyc，一并忽略）
+__pycache__/
+*.pyc
