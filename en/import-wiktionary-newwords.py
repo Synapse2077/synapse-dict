@@ -22,7 +22,7 @@
   - 同一单词不同词性的条目会合并为一条记录
   - 已存在于 SQLite 中的单词会跳过
 
-用法：python scripts/import-wiktionary-newwords.py
+用法：python en/import-wiktionary-newwords.py
 """
 
 import json

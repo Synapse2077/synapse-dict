@@ -6,8 +6,8 @@
   支持断点续传——已翻译的结果保存在 JSONL 文件中，重启后自动跳过。
 
 流程：
-  1. 从 data/intermediate/doubao-translation.jsonl 加载已完成的单词
-  2. 从 data/final/synapse-dict.sqlite 查询 translation 为空且未处理的单词
+  1. 从 en/doubao-translation.jsonl 加载已完成的单词
+  2. 从 en/synapse-dict-en.sqlite 查询 translation 为空且未处理的单词
   3. 每批 BATCH_SIZE(40) 个词，最多 MAX_CONCURRENT(100) 个并发请求
   4. 结果追加写入 JSONL 文件（每批写一次，支持中断恢复）
   5. 翻译完成后，需手动运行 merge-translation.ts 合并到 SQLite
@@ -17,7 +17,7 @@
   DOUBAO_MODEL_BATCH_LITE - 豆包模型 ID
 
 前置安装：pip install --upgrade "volcengine-python-sdk[ark]" python-dotenv
-用法：python scripts/fetch-translation-batch.py
+用法：python en/fetch-translation-batch.py
 """
 
 import os
@@ -251,7 +251,7 @@ async def main():
         print(f"  [{s['word']}] → {s['translation']}")
     print(f"{'='*60}")
     print("请检查以上翻译质量，确认无误后运行：")
-    print("  npx tsx scripts/merge-translation.ts")
+    print("  npx tsx en/merge-translation.ts")
 
 
 if __name__ == "__main__":

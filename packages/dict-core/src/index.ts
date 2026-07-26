@@ -130,7 +130,7 @@ function normalizePronunciation(ipa: string | null): string | null {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_DB_PATH = path.resolve(__dirname, '../../../data/synapse-dict.sqlite');
+const DEFAULT_DB_PATH = path.resolve(__dirname, '../../../en/synapse-dict-en.sqlite');
 
 function mapEntry(row: DictionaryRow): DictionaryEntry {
   return {

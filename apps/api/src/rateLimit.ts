@@ -5,7 +5,7 @@ import type { NextFunction, Request, Response } from 'express';
  *
  * Why this exists: the dictionary queries run on node:sqlite `DatabaseSync`,
  * which is *synchronous* — every request blocks the event loop while it hits
- * the shared `data/synapse-dict.sqlite`. That same file is read directly by the
+ * the shared `en/synapse-dict-en.sqlite`. That same file is read directly by the
  * sibling synapse-web service, so a flood here contends for the host's CPU /
  * disk / page cache and can drag web down with it. These limits cap the blast
  * radius before that happens.

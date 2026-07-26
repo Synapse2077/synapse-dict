@@ -17,7 +17,7 @@
   - 如果 Wiktionary 中只有无标签的 IPA，会作为兜底同时填入英式和美式
   - 原有 phonetic 字段不受影响
 
-用法：python scripts/import-wiktionary-phonetics.py
+用法：python en/import-wiktionary-phonetics.py
 """
 
 import json

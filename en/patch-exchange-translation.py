@@ -20,7 +20,7 @@
   1:t    → 最高级
   1:dp   → 过去式和过去分词（同形）
 
-用法：python scripts/patch-exchange-translation.py
+用法：python en/patch-exchange-translation.py
 """
 
 import sqlite3

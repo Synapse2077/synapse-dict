@@ -1,4 +1,4 @@
-# 词典数据说明（synapse-dict.sqlite）
+# 英语词典数据说明（en/synapse-dict-en.sqlite）
 
 ## 数据库概览
 
@@ -40,12 +40,12 @@
 
 ### 2. Wiktionary 新词导入（约 53 万词）
 - 来源：[kaikki.org](https://kaikki.org/dictionary/English/) 的 Wiktextract 数据
-- 原始文件：`data/raw/kaikki.org-dictionary-English.jsonl`（约 145 万词条，20GB）
-- 导入脚本：`scripts/import-wiktionary-newwords.py`
+- 原始文件：`en/kaikki.org-dictionary-English.jsonl`（约 145 万词条，20GB）
+- 导入脚本：`en/import-wiktionary-newwords.py`
 - 导入内容：word、definition、pos（仅导入 ECDICT 中不存在的新词）
 
 ### 3. Wiktionary 音标补充
-- 导入脚本：`scripts/import-wiktionary-phonetics.py`
+- 导入脚本：`en/import-wiktionary-phonetics.py`
 - 补充内容：phonetic_uk、phonetic_us
 - 覆盖情况：约 8.6 万词获得了英式/美式音标
 
@@ -56,19 +56,19 @@
 **处理流程：**
 1. ECDICT 原始翻译覆盖约 80% 词条
 2. 使用豆包大模型（Volcengine Ark SDK）批量翻译剩余约 53 万词
-   - 脚本：`scripts/fetch-translation-batch.py`
+   - 脚本：`en/fetch-translation-batch.py`
    - 模型：豆包（doubao），40 词/批，100 并发
-   - 输出：`data/intermediate/doubao-translation.jsonl`（中间结果，可删除）
+   - 输出：`en/doubao-translation.jsonl`（中间结果，可删除）
 3. JSONL 结果合并入 SQLite
-   - 脚本：`scripts/merge-translation.ts`
+   - 脚本：`en/merge-translation.ts`
 4. API 无法处理的 287 个特殊词手动翻译
-   - 文件：`data/intermediate/manual-translation.jsonl`（已合并，可删除）
+   - 文件：`en/manual-translation.jsonl`（已合并，可删除）
 5. 最终结果：3,929,564 词全部有中文翻译
 
 ### ✅ 词形描述追加（9.3 万词）
 
 **处理流程：**
-- 脚本：`scripts/patch-exchange-translation.py`
+- 脚本：`en/patch-exchange-translation.py`
 - 逻辑：根据 exchange 字段中的 `0:基础词` 关系，在翻译前追加词形描述
 - 示例：`destroyed` → `(destroy 的过去式和过去分词) vt. 破坏, 毁坏...`
 - 映射规则（确定性，非 AI）：
@@ -78,13 +78,13 @@
 
 ### ✅ Wiktionary 新词导入（约 53 万词）
 
-- 脚本：`scripts/import-wiktionary-newwords.py`
+- 脚本：`en/import-wiktionary-newwords.py`
 - 仅导入 ECDICT 中不存在的词
 - 导入字段：word、definition、pos
 
 ### ✅ Wiktionary 音标补充（约 8.6 万词）
 
-- 脚本：`scripts/import-wiktionary-phonetics.py`
+- 脚本：`en/import-wiktionary-phonetics.py`
 - 仅补充 phonetic_uk 和 phonetic_us
 - 不覆盖已有数据
 
@@ -126,18 +126,19 @@
 
 | 脚本 | 用途 | 运行方式 |
 |------|------|----------|
-| `scripts/fetch-translation-batch.py` | 批量调用豆包 API 翻译缺失中文释义 | `python3 scripts/fetch-translation-batch.py` |
-| `scripts/merge-translation.ts` | 将 JSONL 翻译结果合并到 SQLite | `npx tsx scripts/merge-translation.ts` |
-| `scripts/import-wiktionary-newwords.py` | 从 Wiktionary 导入新词 | `python3 scripts/import-wiktionary-newwords.py` |
-| `scripts/import-wiktionary-phonetics.py` | 从 Wiktionary 补充英美音标 | `python3 scripts/import-wiktionary-phonetics.py` |
-| `scripts/patch-exchange-translation.py` | 根据 exchange 追加词形描述 | `python3 scripts/patch-exchange-translation.py` |
+| `en/fetch-translation-batch.py` | 批量调用豆包 API 翻译缺失中文释义 | `python3 en/fetch-translation-batch.py` |
+| `en/merge-translation.ts` | 将 JSONL 翻译结果合并到 SQLite | `npx tsx en/merge-translation.ts` |
+| `en/import-wiktionary-newwords.py` | 从 Wiktionary 导入新词 | `python3 en/import-wiktionary-newwords.py` |
+| `en/import-wiktionary-phonetics.py` | 从 Wiktionary 补充英美音标 | `python3 en/import-wiktionary-phonetics.py` |
+| `en/patch-exchange-translation.py` | 根据 exchange 追加词形描述 | `python3 en/patch-exchange-translation.py` |
 | `scripts/test-doubao-format.ts` | 测试豆包翻译格式效果 | `npx tsx scripts/test-doubao-format.ts` |
 
-## data/ 目录文件说明
+## en/ 目录文件说明
 
 | 文件 | 说明 | 是否可删 |
 |------|------|----------|
-| `synapse-dict.sqlite` | 主词典数据库 | ❌ 核心文件 |
-| `intermediate/doubao-translation.jsonl` | 豆包翻译中间结果 | ✅ 已合并入库 |
-| `intermediate/manual-translation.jsonl` | 手动翻译的 287 个特殊词 | ✅ 已合并入库 |
-| `raw/kaikki.org-dictionary-English.jsonl` | Wiktionary 原始辅助源 | ❌ 构建输入 |
+| `synapse-dict-en.sqlite` | 主词典数据库 | ❌ 核心文件 |
+| `ecdict.sqlite` / `stardict.csv` | ECDICT/Stardict 原始源 | ❌ 构建输入 |
+| `doubao-translation.jsonl` | 豆包翻译中间结果 | ✅ 已合并入库 |
+| `manual-translation.jsonl` | 手动翻译的 287 个特殊词 | ✅ 已合并入库 |
+| `kaikki.org-dictionary-English.jsonl` | Wiktionary 原始辅助源 | ❌ 构建输入 |

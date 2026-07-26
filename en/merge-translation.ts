@@ -2,7 +2,7 @@
  * 将豆包 API 返回的中文释义从 JSONL 合并到 SQLite
  *
  * 功能：
- *   读取 ../data/intermediate/doubao-translation.jsonl 中的翻译结果，
+ *   读取 ../en/doubao-translation.jsonl 中的翻译结果，
  *   批量更新到 SQLite 词典的 translation 字段。
  *   只更新 translation 为空的记录，不会覆盖已有翻译。
  *
@@ -10,7 +10,7 @@
  *   先运行 fetch-translation-batch.py 生成 JSONL，再运行本脚本合并。
  *   可多次运行，幂等安全。
  *
- * 用法：npx tsx scripts/merge-translation.ts
+ * 用法：npx tsx en/merge-translation.ts
  */
 
 import fs from 'node:fs';
@@ -21,8 +21,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DICT_ROOT = path.resolve(__dirname, '..');
 
-const DB_PATH = path.resolve(DICT_ROOT, 'data', 'synapse-dict.sqlite');
-const INPUT_PATH = path.resolve(DICT_ROOT, 'data', 'intermediate', 'doubao-translation.jsonl');
+const DB_PATH = path.resolve(DICT_ROOT, 'en', 'synapse-dict-en.sqlite');
+const INPUT_PATH = path.resolve(DICT_ROOT, 'en', 'doubao-translation.jsonl');
 
 function main() {
   if (!fs.existsSync(INPUT_PATH)) {
