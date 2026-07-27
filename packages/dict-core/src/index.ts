@@ -106,17 +106,19 @@ function normalizePronunciation(ipa: string | null): string | null {
     // 3. Diphthong variant spellings → standard
     .replace(/aj/g, 'aɪ')
     .replace(/æw/g, 'aʊ')
-    // 4. ɚ + sonorant consonant → rə + consonant (e.g. ɚn→rən, ɚm→rəm, ɚl→rəl)
-    .replace(/ɚ([nml])/g, 'rə$1')
-    // 5. ɚ elsewhere → ər (e.g. word-final, before obstruent)
+    // 4. ɚ → ər everywhere (e.g. modern ˈmɑdɚn → ˈmɑdərn; word-final, before obstruent/sonorant)
     .replace(/ɚ/g, 'ər')
-    // 6. ɝ → ɜːr (stressed r-colored vowel)
+    // 5. ɝ → ɜːr (stressed r-colored vowel)
     .replace(/ɝ/g, 'ɜːr')
-    // 6b. Fix aʊɜːr → aʊər (Wiktionary misuses ɝ in unstressed "our" etc.)
+    // 5b. Fix aʊɜːr → aʊər (Wiktionary misuses ɝ in unstressed "our" etc.)
     .replace(/aʊɜːr/g, 'aʊər')
-    // 7. ɹ/ɾ → r
+    // 6. ɹ/ɾ → r
     .replace(/ɹ/g, 'r')
     .replace(/ɾ/g, 'r')
+    // 7. Non-teaching narrow symbols → standard
+    .replace(/ɫ/g, 'l')       // dark l → l
+    .replace(/æʊ/g, 'aʊ')     // æʊ diphthong variant → aʊ
+    .replace(/ʌɪ/g, 'aɪ')     // ʌɪ diphthong variant → aɪ
     // 8. Minor vowel normalizations
     .replace(/ɐ/g, 'ə')
     .replace(/ɨ/g, 'ɪ')
@@ -125,7 +127,9 @@ function normalizePronunciation(ipa: string | null): string | null {
     .replace(/\./g, '')
     // 10. Merge duplicate r (artifact from ɚ→ər + (ɹ)→(r) overlap)
     .replace(/rr/g, 'r')
-    // 11. Clean up spaces inside parentheses: (ə ) → (ə)
+    // 11. Remove empty parens left by dropping "(.)" optional syllable break
+    .replace(/\(\s*\)/g, '')
+    // 12. Clean up spaces inside parentheses: (ə ) → (ə)
     .replace(/\(\s*(.+?)\s*\)/g, '($1)');
 }
 
