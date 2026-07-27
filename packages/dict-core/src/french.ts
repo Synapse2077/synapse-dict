@@ -116,7 +116,7 @@ function normalizeFrenchIpa(ipa: string | null): string | null {
   //    负向前瞻保护鼻化元音 ɑ̃（ɑ+U+0303），绝不可误改成葡语的 ã。
   inner = inner.replace(/ɑ(?!\u0303)/g, 'a');
   inner = inner.trim();
-  return '/' + inner + '/';
+  return inner;   // 裸输出——斜杠由展示层(App.tsx)统一加，全语种存裸
 }
 
 function splitLines(s: string | null): string[] {

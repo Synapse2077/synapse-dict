@@ -108,7 +108,7 @@ function normalizePtIpa(ipa: string | null): string | null {
   inner = inner.replace(/͡/g, '');   // ① 去连结弧
   inner = inner.replace(/\./g, '');       // ② 去音节点
   inner = inner.trim();
-  return '/' + inner + '/';
+  return inner;   // 裸输出——斜杠由展示层(App.tsx)统一加，全语种存裸
 }
 
 function splitLines(s: string | null): string[] {

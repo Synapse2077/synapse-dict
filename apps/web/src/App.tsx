@@ -1014,19 +1014,19 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         <div className="phonetic-row">
           <button className="phonetic-btn" onClick={() => speak(entry.word, 'es-ES')} title="播放 西班牙(半岛) 发音" type="button">
             <span className="phonetic-label">西</span>
-            <span className="phonetic-value">{entry.phonetic}</span>
+            <span className="phonetic-value">/{entry.phonetic}/</span>
             <SpeakerIcon />
           </button>
           <button className="phonetic-btn" onClick={() => speak(entry.word, 'es-MX')} title="播放 拉美 发音" type="button">
             <span className="phonetic-label">拉美</span>
-            <span className="phonetic-value">{entry.phoneticLatam}</span>
+            <span className="phonetic-value">/{entry.phoneticLatam}/</span>
             <SpeakerIcon />
           </button>
         </div>
       ) : entry.phonetic ? (
         <div className="phonetic-row">
           <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
-            <span className="phonetic-value">{entry.phonetic}</span>
+            <span className="phonetic-value">/{entry.phonetic}/</span>
             <SpeakerIcon />
           </button>
         </div>
@@ -1207,7 +1207,7 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.ipa && (
         <div className="phonetic-row">
           <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
-            <span className="phonetic-value">{entry.ipa}</span>
+            <span className="phonetic-value">/{entry.ipa}/</span>
             <SpeakerIcon />
           </button>
         </div>
@@ -1401,7 +1401,7 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.ipa && (
         <div className="phonetic-row">
           <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
-            <span className="phonetic-value">{entry.ipa}</span>
+            <span className="phonetic-value">/{entry.ipa}/</span>
             <SpeakerIcon />
           </button>
         </div>
@@ -1594,7 +1594,7 @@ function PtPhonetics({ word, ipaBr, ipaPt, speak }: {
       {rows.map((r, i) => (
         <button className="phonetic-btn" key={i} onClick={() => speak(word, r.locale)} title={r.name ? `播放 ${r.name} 发音` : '播放发音'} type="button">
           {r.label && <span className="phonetic-label">{r.label}</span>}
-          <span className="phonetic-value">{r.ipa}</span>
+          <span className="phonetic-value">/{r.ipa}/</span>
           <SpeakerIcon />
         </button>
       ))}
@@ -1805,7 +1805,7 @@ function GermanEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.ipa && (
         <div className="phonetic-row">
           <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
-            <span className="phonetic-value">{entry.ipa}</span>
+            <span className="phonetic-value">/{entry.ipa}/</span>
             <SpeakerIcon />
           </button>
         </div>

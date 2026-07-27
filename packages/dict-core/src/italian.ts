@@ -107,7 +107,7 @@ function normalizeItalianIpa(ipa: string | null): string | null {
   inner = inner.replace(/([bdfɡklmnprstv])ˈ\1/gu, 'ˈ$1ː');
   inner = inner.replace(/([bdfɡklmnprstv])[.ˌ]\1/gu, '$1ː');
   inner = inner.replace(/\./g, '');                          // ④ 去剩余音节点
-  return '/' + inner + '/';
+  return inner;   // 裸输出——斜杠由展示层(App.tsx)统一加，全语种存裸
 }
 
 function splitLines(s: string | null): string[] {
