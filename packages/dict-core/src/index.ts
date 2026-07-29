@@ -32,7 +32,20 @@ type DictionaryRow = {
   exchange: string | null;
   detail: string | null;
   audio: string | null;
+  qual: string | null;
 };
+
+// 译文可信度分级（英语库 stardict.qual 列，2026-07-28 建）。全库 392.9 万条按"经过了什么处理/属于哪个桶"打标，
+// 供 UI 分层展示——低可信条目可加角标或折叠，而不是把数据删掉（决策可逆）。
+//   core   常用核心成品（5.9 万，抽样真实 bad≈0.02%）
+//   judged 逐条 LLM 判过 ok/warn（7.9 万）
+//   fixed  本项目重写/回填并抽样验过（27.4 万，抽样 ok 96–98%）
+//   good   抽样 bad ≤5%（77.8 万：生物学名/地名人名/领域术语）
+//   fair   抽样 bad 7–10%（223.7 万：无标记单词/多词短语），可用但非成品
+//   low    抽样 bad ≥14%（50.2 万：缩写/[网络]众包残余），**建议加"低可信"提示**
+export type DictQuality = 'core' | 'judged' | 'fixed' | 'good' | 'fair' | 'low';
+
+export const LOW_CONFIDENCE_QUALITY: readonly DictQuality[] = ['low'];
 
 export type DictionaryEntry = {
   lang: 'en';
@@ -53,6 +66,8 @@ export type DictionaryEntry = {
   exchange: string | null;
   detail: string | null;
   audio: string | null;
+  /** 译文可信度分级；仅英语库有，其他语种为 null。见 DictQuality。 */
+  qual: DictQuality | null;
 };
 
 export type DictionaryStats = {
@@ -156,6 +171,7 @@ function mapEntry(row: DictionaryRow): DictionaryEntry {
     exchange: row.exchange,
     detail: row.detail,
     audio: row.audio,
+    qual: (row.qual as DictQuality | null) ?? null,
   };
 }
 
@@ -188,7 +204,7 @@ export class DictionaryService {
 
     this.exactQuery = this.db.prepare(`
       SELECT id, word, phonetic, phonetic_uk, phonetic_us, definition, translation, pos,
-             collins, oxford, tag, bnc, frq, exchange, detail, audio
+             collins, oxford, tag, bnc, frq, exchange, detail, audio, qual
       FROM stardict
       WHERE word = ? COLLATE NOCASE
       LIMIT 1
@@ -197,7 +213,7 @@ export class DictionaryService {
     // Two-phase search: prefix (uses index) then fuzzy fallback
     this.prefixQuery = this.db.prepare(`
       SELECT id, word, phonetic, phonetic_uk, phonetic_us, definition, translation, pos,
-             collins, oxford, tag, bnc, frq, exchange, detail, audio
+             collins, oxford, tag, bnc, frq, exchange, detail, audio, qual
       FROM stardict
       WHERE word LIKE ? COLLATE NOCASE
       ORDER BY
@@ -211,7 +227,7 @@ export class DictionaryService {
 
     this.fuzzyQuery = this.db.prepare(`
       SELECT id, word, phonetic, phonetic_uk, phonetic_us, definition, translation, pos,
-             collins, oxford, tag, bnc, frq, exchange, detail, audio
+             collins, oxford, tag, bnc, frq, exchange, detail, audio, qual
       FROM stardict
       WHERE word LIKE ? COLLATE NOCASE AND word NOT LIKE ? COLLATE NOCASE
       ORDER BY

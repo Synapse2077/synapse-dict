@@ -11,8 +11,9 @@ data/
 # 用宽模式，别再按具体文件名写死（旧规则漏了 .sqlite.*.bak / b_out.jsonl / *_out.jsonl）。
 # 成品库 + 所有派生：.sqlite / .sqlite.premerge.bak / .sqlite-wal …
 *.sqlite*
-# 一切备份
-*.bak
+# 一切备份。用 *.bak* 而非 *.bak：SQLite 备份会连带 xxx.bak-wal / xxx.bak-shm，
+# 这俩既不以 .bak 结尾、名字里也没有 .sqlite，两条旧规则正好都擦肩而过。
+*.bak*
 # 本仓无任何该进 git 的 jsonl：源 dump / 豆包输出(b_out/b_enrich_out) / 裁决输出
 *.jsonl
 # 大源 dump csv（英语 stardict.csv 等，原先靠 data/ 忽略，归拢 en/ 后单列）
@@ -21,6 +22,13 @@ data/
 *.tsv
 b_out/
 b_out.tar.gz
+# 跑批日志（sweep/rewrite 的 stdout 留痕），过程痕迹不进 git
+*.log
+# en/ 的 kaikki 提取物、候选池、抽验样本（约 156MB，前四个就占 128MB）。
+# 全部可由 en/ 下脚本从 kaikki dump 重新生成。en/ 是 2026-07-26 才从 data/ 归拢过来的，
+# 旧的 data/ 整目录忽略随之失效，这里补上。
+# 只挡未跟踪文件：已在库的 en/prune_llm_ids.json、en/rejudge.json 不受影响。
+en/*.json
 
 # Python 缓存（当年 git add -A 误提交了 __pycache__/*.pyc，一并忽略）
 __pycache__/

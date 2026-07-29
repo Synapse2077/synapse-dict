@@ -270,7 +270,7 @@ const EXAMPLES: Record<string, string[]> = {
 
 function parseTranslation(raw: string | null): { pos: string; text: string }[] {
   if (!raw) return [];
-  return raw.split('\\n').filter(Boolean).map((line) => {
+  return raw.split(/\\n|\r?\n/).filter((l) => l.trim()).map((line) => {
     const match = line.match(/^([a-z]+\.)\s*(.+)$/);
     if (match) return { pos: match[1], text: match[2] };
     return { pos: '', text: line };
@@ -279,7 +279,7 @@ function parseTranslation(raw: string | null): { pos: string; text: string }[] {
 
 function parseDefinition(raw: string | null): { pos: string; text: string }[] {
   if (!raw) return [];
-  return raw.split('\\n').filter(Boolean).map((line) => {
+  return raw.split(/\\n|\r?\n/).filter((l) => l.trim()).map((line) => {
     const match = line.match(/^([a-z]+\.)\s*(.+)$/);
     if (match) return { pos: match[1], text: match[2] };
     const match2 = line.match(/^([a-z])\s+(.+)$/);

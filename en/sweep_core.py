@@ -13,7 +13,9 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 DB = str(HERE / "synapse-dict-en.sqlite")
 ENV = ROOT / ".env"
-CHUNK, CONC = 20, 100
+CHUNK, CONC = 20, 50   # ⚠️ CONC 曾用 100:大活儿(C6 4,854 批)一次性砸进 batch 队列会把它压堵,
+                       #   前 100 个 worker 全部等满 hedge 后切 online pro(单价差一个量级),已止损重来。
+                       #   降到 50;开大活儿前最好先探 20 批看队列通不通。
 CORE = "(collins>0 OR oxford>0 OR frq>0 OR bnc>0 OR (tag IS NOT NULL AND TRIM(tag)<>''))"
 
 # 松绑版判官:只挑硬伤,明确豁免标签/生僻义/格式
