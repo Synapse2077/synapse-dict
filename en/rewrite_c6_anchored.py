@@ -39,8 +39,8 @@ import rewrite_residue_anchored as R
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-GLOSS = HERE / "residue_kaikki_gloss.json"      # 词形 → kaikki 首义
-ALLSENSE = HERE / "c56_all_senses.json"         # 词形 → **全部** sense(去元描述)
+GLOSS = HERE / "anchors/residue_kaikki_gloss.json"      # 词形 → kaikki 首义
+ALLSENSE = HERE / "anchors/c56_all_senses.json"         # 词形 → **全部** sense(去元描述)
 CHUNK = 20
 HEDGE_AFTER = 1200   # ⚠️ 别用 300:batch 队列一堵会每批都切 online pro,单价差一个量级
 
@@ -93,7 +93,7 @@ def main():
     ap.add_argument("--bucket", default="C6", choices=["C5", "C6"])
     ap.add_argument("--tag", default="", help="留痕后缀;重跑另一批时必须换,否则会把上一批退回")
     a = ap.parse_args()
-    LOG = HERE / f"{a.bucket.lower()}_anchored_fix{a.tag}.tsv"
+    LOG = HERE / f"ledgers/{a.bucket.lower()}_anchored_fix{a.tag}.tsv"
 
     conn = sqlite3.connect(DB)
     rows, rej = collect(conn, a.bucket)

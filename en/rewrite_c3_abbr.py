@@ -29,8 +29,8 @@ import buckets as B
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-GLOSS = HERE / "c3_kaikki_gloss.json"
-LOG = HERE / "c3_abbr_fix.tsv"
+GLOSS = HERE / "anchors/c3_kaikki_gloss.json"
+LOG = HERE / "ledgers/c3_abbr_fix.tsv"
 CHUNK = 20
 
 SYS = """你是英汉词典编纂专家。给你一批英语**缩写/首字母词**,每条含:

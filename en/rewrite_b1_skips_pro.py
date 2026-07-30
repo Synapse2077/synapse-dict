@@ -27,8 +27,8 @@ import rewrite_b1_suspect as RW
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-DONE = HERE / "b1_rewrite.tsv"
-LOG = HERE / "b1_skips_pro.tsv"
+DONE = HERE / "ledgers/b1_rewrite.tsv"
+LOG = HERE / "ledgers/b1_skips_pro.tsv"
 CHUNK = 10
 
 SYS = """你是英汉词典编纂专家。给你一批英语词条,每条含 word、rel(形态关系)、zh(当前译文,有问题)。

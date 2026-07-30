@@ -30,8 +30,8 @@ import sweep_core as S
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-REV = HERE / "a1d_reverted.tsv"
-LOG = HERE / "derivational_fix.tsv"
+REV = HERE / "ledgers/a1d_reverted.tsv"
+LOG = HERE / "ledgers/derivational_fix.tsv"
 CHUNK = 20
 
 PAT = re.compile(r"([A-Za-z][\w'’\- ]*?)\s*的(变形|变化形式)")

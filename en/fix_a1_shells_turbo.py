@@ -43,10 +43,10 @@ import rewrite_residue_anchored as R
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-BASE_GLOSS = HERE / "a1_base_gloss.json"       # 原形 → kaikki 首个实义(非元描述)
-LOG = HERE / "a1_turbo_fix.tsv"
-WORD_IN_KAIKKI = HERE / "a1_pseudo_kaikki.json"  # 词条本身在 kaikki 有条目 = 该复数形式真实存在
-PSEUDO = HERE / "a1_pseudoplural_candidates.tsv"   # 伪复数删除候选清单(本脚本只落盘,不删)
+BASE_GLOSS = HERE / "anchors/a1_base_gloss.json"       # 原形 → kaikki 首个实义(非元描述)
+LOG = HERE / "ledgers/a1_turbo_fix.tsv"
+WORD_IN_KAIKKI = HERE / "runs/a1_pseudo_kaikki.json"  # 词条本身在 kaikki 有条目 = 该复数形式真实存在
+PSEUDO = HERE / "ledgers/a1_pseudoplural_candidates.tsv"   # 伪复数删除候选清单(本脚本只落盘,不删)
 CHUNK = 20
 MODEL_KEY = "DOUBAO_MODEL_BATCH_LITE"   # ⭐ 同批 1000 条实测 lite vs turbo:bad 只差约 1pt、token 用量相同
 HEDGE_AFTER = 1200   # ⚠️ 别用 300:batch 队列一堵就**全部**切 online pro,单价差一个数量级
@@ -54,7 +54,10 @@ HEDGE_AFTER = 1200   # ⚠️ 别用 300:batch 队列一堵就**全部**切 onli
 MODEL_TAG = "lite"                     #   且两者 bad 高度重合(8 条里 7 条相同)=残留是数据问题,换模型修不掉
 
 # 空壳里的原形。⚠️ ECDICT 的原形可能拼错(Gagauzes 写成 "gagauze 的复数"),仅作线索用。
-PAT = re.compile(r"(?:^|[(（\s])(?:[a-z]{1,6}\.\s*)?([A-Za-z][\w''\- ]*?)\s*"
+# ⚠️ 必须容忍 `是`/`为` 系动词:`n. 是lobing的复数形式` 里原形前面不是空格/括号,
+#    旧版提取不到原形 → 该条被误算成"层D 无锚"而放弃,实际库内原形俱在。
+#    与 buckets.is_shell 同源缺陷,2026-07-29 一并修(440 条误判无锚里绝大多数是这个)。
+PAT = re.compile(r"(?:^|[(（\s])(?:[a-z]{1,6}\.\s*)?(?:是|为)?\s*([A-Za-z][\w''\- ]*?)\s*"
                  r"的(?:复数|单数|过去式|过去分词|现在分词|第三人称单数|比较级|最高级|变形|变化形式)")
 # 真·伪变形来源:分类阶元/地名限定词开头 —— 这些东西本身没有复数
 TAXON = re.compile(r'^(genus|family|order|class|subclass|suborder|superfamily|subfamily|phylum|'
@@ -103,7 +106,9 @@ def zh_ok(t):
     return bool(t and "[网络]" not in t and not B.is_shell(t) and re.search(r"[一-鿿]", t))
 
 
-def classify(conn):
+def classify(conn, only=None):
+    """only:id 白名单(set),None=全部 A1 空壳。用于只跑新识别出的那批,
+    不去碰 36,293 条老残留(其中 23,727 是伪复数删除候选,明确不该回填)。"""
     kb = json.load(open(BASE_GLOSS, encoding="utf-8"))
     # ⭐ 伪复数否决票:kaikki 若收录了**该复数形式本身**,说明这个复数真实存在,不是 ECDICT 造的。
     #   第一轮只靠词形规则(专名/学名/阶元)判伪复数,**假阳性 27.5%**(7,849/28,540):
@@ -111,7 +116,7 @@ def classify(conn):
     real = json.load(open(WORD_IN_KAIKKI, encoding="utf-8")) if WORD_IN_KAIKKI.exists() else {}
     rows = []
     for rid, w, tr, bk in B.load_tail(conn):
-        if bk != "A1":
+        if bk != "A1" or (only is not None and rid not in only):
             continue
         body = (tr or "").strip()
         m = PAT.search(body.replace("\n", " "))
@@ -192,16 +197,24 @@ def main():
     ap.add_argument("--layer-d", action="store_true", help="只跑层D(无锚,已剔伪变形):同批 500 条实测 turbo 可核实中 bad 1.8%,诚实版 lite 4.2%")
     ap.add_argument("--tag", default="", help="留痕文件后缀;第二遍必须换,否则重跑保护会把上一遍退回空壳")
     ap.add_argument("--turbo", action="store_true", help="改用 turbo(默认 lite:同批实测只差约1pt,单价更低)")
+    ap.add_argument("--only-ids", help="JSON 文件,内含 id 列表;只处理这批(配合 --tag 用)")
     a = ap.parse_args()
 
-    global MODEL_KEY, MODEL_TAG, LOG
+    only = set(json.load(open(a.only_ids, encoding="utf-8"))) if a.only_ids else None
+    if only is not None:
+        print(f"[白名单] 只处理 {len(only):,} 个 id({a.only_ids})")
+
+    global MODEL_KEY, MODEL_TAG, LOG, PSEUDO
     if a.tag:
-        LOG = HERE / f"a1_turbo_fix{a.tag}.tsv"
+        LOG = HERE / f"ledgers/a1_turbo_fix{a.tag}.tsv"
+        # ⚠️ PSEUDO 也必须跟着 tag 走:它是无条件覆盖写。跑子集(--only-ids)时 pseudo 只有
+        #    该子集内的伪复数,用默认名会把全量名单(23,728 行)截断成几百行,静默毁掉产物。
+        PSEUDO = HERE / f"ledgers/a1_pseudoplural_candidates{a.tag}.tsv"
     MODEL_KEY = "DOUBAO_SEED_2_1_TURBO_BATCH" if (a.turbo or a.layer_d) else "DOUBAO_MODEL_BATCH_LITE"
     MODEL_TAG = "turbo" if (a.turbo or a.layer_d) else "lite"
 
     conn = sqlite3.connect(DB)
-    groups, kb, info = classify(conn)
+    groups, kb, info = classify(conn, only)
     tot = sum(len(v) for v in groups.values())
     print(f"[A1 空壳分类] 共 {tot:,} 条")
     for k in sorted(groups, key=lambda x: -len(groups[x])):

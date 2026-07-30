@@ -19,7 +19,7 @@ from pathlib import Path
 import acceptance_en as A  # 复用 load_env/run_batches
 
 HERE = Path(__file__).resolve().parent
-LOG = HERE / "a1a_fill.tsv"
+LOG = HERE / "ledgers/a1a_fill.tsv"
 CHUNK = 20
 
 JUDGE_SYS = """你是英汉词典质检专家。给你一批英语词条,每条含 word(英语词)、zh(该词条的中文译文)。
@@ -33,8 +33,8 @@ JUDGE_SYS = """你是英汉词典质检专家。给你一批英语词条,每条�
 严格输出 JSON {"1":{"v":"ok"},"2":{"v":"bad","note":"..."},...},键与输入一致,无多余文字。"""
 
 
-REV = HERE / "a1a_reverted.tsv"
-PREV = HERE / "verify_a1a.jsonl"
+REV = HERE / "ledgers/a1a_reverted.tsv"
+PREV = HERE / "runs/verify_a1a.jsonl"
 
 
 def load_rows(kept_only, fresh):
@@ -65,7 +65,7 @@ def main():
     ap.add_argument("--kept-only", action="store_true", help="只验六道闸留存的 10,674 条")
     ap.add_argument("--fresh", action="store_true", help="排除上一轮已判过的词,取独立新样本")
     ap.add_argument("--seed", type=int, default=20260727)
-    ap.add_argument("--out", default="verify_a1a.jsonl")
+    ap.add_argument("--out", default="runs/verify_a1a.jsonl")
     a = ap.parse_args()
     n = a.n
 

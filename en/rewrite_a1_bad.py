@@ -26,9 +26,9 @@ import sweep_core as S
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-SWEEP = HERE / "sweep_a1.jsonl"
-FILL = HERE / "a1a_fill.tsv"
-LOG = HERE / "a1_rewrite.tsv"
+SWEEP = HERE / "runs/sweep_a1.jsonl"
+FILL = HERE / "ledgers/a1a_fill.tsv"
+LOG = HERE / "ledgers/a1_rewrite.tsv"
 CHUNK = 10
 
 SYS = """你是英汉词典编纂专家。给你一批**有问题**的英语词条,每条含:

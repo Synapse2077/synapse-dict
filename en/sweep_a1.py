@@ -23,7 +23,7 @@ import sweep_core as S
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-OUT = HERE / "sweep_a1.jsonl"
+OUT = HERE / "runs/sweep_a1.jsonl"
 CHUNK = 20
 
 JUDGE_SYS = """你是英汉词典质检专家。给你一批英语词条,每条含 word(英语词)、zh(中文译文)。
@@ -47,14 +47,14 @@ JUDGE_SYS = """你是英汉词典质检专家。给你一批英语词条,每条�
 def load_filled():
     """当前实际生效的回填行(fill 减去 reverted),连同回填前原文。"""
     rev = set()
-    for f in ("a1a_reverted.tsv", "a1d_reverted.tsv"):
+    for f in ("ledgers/a1a_reverted.tsv", "ledgers/a1d_reverted.tsv"):
         p = HERE / f
         if p.exists():
             for i, ln in enumerate(open(p, encoding="utf-8")):
                 if i:
                     rev.add(int(ln.split("\t")[0]))
     rows = []
-    for f in ("a1a_fill.tsv", "a1d_fill.tsv"):
+    for f in ("ledgers/a1a_fill.tsv", "ledgers/a1d_fill.tsv"):
         p = HERE / f
         if not p.exists():
             continue
@@ -129,7 +129,7 @@ def main():
     shutil.copy2(DB, DB.with_name(f"synapse-dict-en.pre-a1sweep-{tag}.bak"))
     conn = sqlite3.connect(DB)
     # 追加进禁止重填名单(a1a_reverted.tsv 同时是 fix_a1a.py 的 blocklist)
-    with open(HERE / "a1a_reverted.tsv", "a", encoding="utf-8") as f:
+    with open(HERE / "ledgers/a1a_reverted.tsv", "a", encoding="utf-8") as f:
         for rid, w, before, note in bad:
             conn.execute("UPDATE stardict SET translation=? WHERE id=?", (before, rid))
             f.write("\t".join([str(rid), w, "", before.replace("\n", "\\n"), "J_全量judge判bad"]) + "\n")

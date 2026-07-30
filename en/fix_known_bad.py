@@ -29,17 +29,17 @@ import acceptance_en as A
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "known_bad_fix.tsv"
+LOG = HERE / "ledgers/known_bad_fix.tsv"
 CHUNK = 10
 
 SOURCES = [
-    ("sweep_a1.jsonl", "zh"), ("verify_a1a.jsonl", "zh"), ("verify_a1a_round2.jsonl", "zh"),
-    ("verify_a1a_round3.jsonl", "zh"), ("verify_a1d.jsonl", "zh"),
-    ("verify_b1_kaikki.jsonl", "after"), ("verify_b1_rewrite.jsonl", "after"),
-    ("verify_bucket_C1.jsonl", "zh"), ("verify_bucket_C2.jsonl", "zh"),
-    ("verify_bucket_C3.jsonl", "zh"), ("verify_bucket_C4.jsonl", "zh"),
-    ("verify_bucket_C5.jsonl", "zh"), ("verify_bucket_C6.jsonl", "zh"),
-    ("verify_bucket_B2.jsonl", "zh"),
+    ("runs/sweep_a1.jsonl", "zh"), ("runs/verify_a1a.jsonl", "zh"), ("runs/verify_a1a_round2.jsonl", "zh"),
+    ("runs/verify_a1a_round3.jsonl", "zh"), ("runs/verify_a1d.jsonl", "zh"),
+    ("runs/verify_b1_kaikki.jsonl", "after"), ("runs/verify_b1_rewrite.jsonl", "after"),
+    ("runs/verify_bucket_C1.jsonl", "zh"), ("runs/verify_bucket_C2.jsonl", "zh"),
+    ("runs/verify_bucket_C3.jsonl", "zh"), ("runs/verify_bucket_C4.jsonl", "zh"),
+    ("runs/verify_bucket_C5.jsonl", "zh"), ("runs/verify_bucket_C6.jsonl", "zh"),
+    ("runs/verify_bucket_B2.jsonl", "zh"),
 ]
 
 SYS = """你是英汉词典编纂专家。给你一批**已被质检判定为错误**的英语词条,每条含:

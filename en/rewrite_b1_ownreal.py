@@ -30,8 +30,8 @@ import sweep_core as S
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-POOL = HERE / "b1_ownreal_pool.json"
-LOG = HERE / "b1_ownreal_fill.tsv"
+POOL = HERE / "runs/b1_ownreal_pool.json"
+LOG = HERE / "ledgers/b1_ownreal_fill.tsv"
 CHUNK = 20   # 20 而非 10:system prompt 是每请求固定开销,摊到 20 条可省约 20% token
 
 SYS = """你是英汉词典编纂专家。给你一批英语词条,每条含:

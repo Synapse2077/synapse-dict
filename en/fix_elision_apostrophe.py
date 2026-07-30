@@ -32,9 +32,9 @@ import buckets as B
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "elision_fix.tsv"
-GLOSSES = ["b1_kaikki_gloss.json", "b2_kaikki_gloss.json",
-           "c3_kaikki_gloss.json", "c356_kaikki_gloss.json"]
+LOG = HERE / "ledgers/elision_fix.tsv"
+GLOSSES = ["anchors/b1_kaikki_gloss.json", "anchors/b2_kaikki_gloss.json",
+           "anchors/c3_kaikki_gloss.json", "anchors/c356_kaikki_gloss.json"]
 
 BASE_RULES = """撇号在词头表示**省音**,最常见是 h 脱落(伦敦腔/方言/口语):
   'aircut='haircut  'ammer=hammer  'appy=happy  'appen=happen  'ang=hang  'ome=home  'ead=head

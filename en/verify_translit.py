@@ -61,7 +61,7 @@ def do_run(n):
 
     metas, results, tok = asyncio.run(go())
     tally = Counter(); bad = []
-    outp = HERE / "verify_translit.jsonl"
+    outp = HERE / "runs/verify_translit.jsonl"
     with open(outp, "w", encoding="utf-8") as f:
         for meta, res in zip(metas, results):
             res = res or {}

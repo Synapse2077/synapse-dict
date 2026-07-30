@@ -35,8 +35,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "a1a_fill.tsv"
-OUT = HERE / "a1a_reverted.tsv"
+LOG = HERE / "ledgers/a1a_fill.tsv"
+OUT = HERE / "ledgers/a1a_reverted.tsv"
 
 PROP = re.compile(r"人名|地名|姓氏|《|城市|首府|州名|国家|品牌")
 ABBR = re.compile(r"^\s*(abbr\.|\[?=)")

@@ -30,8 +30,8 @@ import buckets as B
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-GLOSS = HERE / "residue_kaikki_gloss.json"
-LOG = HERE / "residue_anchored_fix.tsv"
+GLOSS = HERE / "anchors/residue_kaikki_gloss.json"
+LOG = HERE / "ledgers/residue_anchored_fix.tsv"
 CHUNK = 20
 SEGS = {"B1": "low", "B2": "low", "C3": "low"}
 

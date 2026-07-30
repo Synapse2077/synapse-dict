@@ -152,7 +152,7 @@ def enrich(rows, env, batch=True):
 def do_pilot(n):
     # 过采样:优先取 acceptance 判过 bad/warn 的词,掺入 ok 的,看能否修好且不改坏
     verdict = {}
-    jp = HERE / "acceptance_en.jsonl"
+    jp = HERE / "runs/acceptance_en.jsonl"
     if jp.exists():
         for l in open(jp):
             o = json.loads(l); verdict[o["w"].lower()] = o["v"]
@@ -224,7 +224,7 @@ def do_run():
     env = load_env()
     metas, results, tok = enrich(rows, env, batch=True)
     conn = sqlite3.connect(DB)
-    ov = HERE / "overrides.tsv"
+    ov = HERE / "ledgers/overrides.tsv"
     fixed = same = skip = 0
     ov_lines = []
     for meta, res in zip(metas, results):

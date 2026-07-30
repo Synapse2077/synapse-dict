@@ -154,7 +154,7 @@ def do_run(n):
     metas, results, tok = asyncio.run(go())
     from collections import Counter
     tally = Counter(); bad = []
-    outp = HERE / "acceptance_en.jsonl"
+    outp = HERE / "runs/acceptance_en.jsonl"
     with open(outp, "w", encoding="utf-8") as f:
         for meta, res in zip(metas, results):
             res = res or {}

@@ -31,10 +31,10 @@ HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
 
 # 本项目改动过的留痕(id 在第 1 列;reverted 类要扣除)
-FILL_LOGS = ["a1a_fill.tsv", "a1d_fill.tsv", "a1_rewrite.tsv",
-             "b1_kaikki_fill.tsv", "b1_rewrite.tsv", "b1_skips_pro.tsv",
-             "b1_stuck_fill.tsv", "b1_ownreal_fill.tsv", "known_bad_fix.tsv"]
-REV_LOGS = ["a1a_reverted.tsv", "a1d_reverted.tsv"]
+FILL_LOGS = ["ledgers/a1a_fill.tsv", "ledgers/a1d_fill.tsv", "ledgers/a1_rewrite.tsv",
+             "ledgers/b1_kaikki_fill.tsv", "ledgers/b1_rewrite.tsv", "ledgers/b1_skips_pro.tsv",
+             "ledgers/b1_stuck_fill.tsv", "ledgers/b1_ownreal_fill.tsv", "ledgers/known_bad_fix.tsv"]
+REV_LOGS = ["ledgers/a1a_reverted.tsv", "ledgers/a1d_reverted.tsv"]
 
 BUCKET_QUAL = {"C1": "good", "C2": "good", "C4": "good",
                "C5": "fair", "C6": "fair",
@@ -65,7 +65,7 @@ def main():
     conn = sqlite3.connect(DB)
     fixed = ids_of(FILL_LOGS) - ids_of(REV_LOGS)
     judged = set()
-    p = HERE / "sweep_a1.jsonl"
+    p = HERE / "runs/sweep_a1.jsonl"
     if p.exists():
         import json
         for ln in open(p, encoding="utf-8"):

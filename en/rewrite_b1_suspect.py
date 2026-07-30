@@ -28,8 +28,8 @@ import sweep_core as S
 
 HERE = Path(__file__).resolve().parent
 DB = HERE / "synapse-dict-en.sqlite"
-FILL = HERE / "b1_kaikki_fill.tsv"
-LOG = HERE / "b1_rewrite.tsv"
+FILL = HERE / "ledgers/b1_kaikki_fill.tsv"
+LOG = HERE / "ledgers/b1_rewrite.tsv"
 CHUNK = 10
 
 VERB = ("的现在分词", "的动名词", "的过去分词", "的过去式", "的第三人称单数")

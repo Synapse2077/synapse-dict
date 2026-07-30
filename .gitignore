@@ -33,3 +33,11 @@ en/*.json
 # Python 缓存（当年 git add -A 误提交了 __pycache__/*.pyc，一并忽略）
 __pycache__/
 *.pyc
+
+# en/ 跑批产出与证据链：体积大、每轮都变，留在本地不进 git。
+# ⚠️ ledgers/ 是回滚账本，本地绝不能删（见 en/README.md），只是不该进版本库。
+en/runs/
+en/ledgers/
+en/logs/
+en/backups/
+en/anchors/

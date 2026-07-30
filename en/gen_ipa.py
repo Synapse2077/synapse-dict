@@ -87,7 +87,7 @@ def do_run(names):
     env = ec.load_env()
     metas, results, tok = gen(rows, env)
     conn = sqlite3.connect(DB)
-    ov = HERE / "overrides.tsv"
+    ov = HERE / "ledgers/overrides.tsv"
     wrote = skip = 0
     ov_lines = []
     for meta, res in zip(metas, results):

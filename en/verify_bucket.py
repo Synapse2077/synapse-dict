@@ -68,7 +68,11 @@ def main():
     async def go():
         cl = AsyncArk(api_key=env["ARK_API_KEY"], timeout=1800)
         model = env["DOUBAO_SEED_2_1_TURBO_BATCH"]
-        hedge = (env["DOUBAO_SEED_2_1_PRO"], cl.chat.completions, 180)
+        # ⚠️ 阈值别用 180/300s:batch 队列一堵就**每批都切 online pro**,单价差一个数量级。
+        #   而且这里还有第二重代价 —— **切过去的批次是 pro 判的,和 turbo 口径不同**,
+        #   混在一个数字里就没法和历轮比(2026-07-30 实测豆包 pro 比 v4-pro 严 11pp,
+        #   判官之间的系统性偏差远大于我们要测的变化量)。测量脚本尤其要让 hedge 尽量不触发。
+        hedge = (env["DOUBAO_SEED_2_1_PRO"], cl.chat.completions, 1200)
         batches, metas = [], []
         for j in range(0, len(rows), CHUNK):
             sub = rows[j:j + CHUNK]
@@ -80,7 +84,7 @@ def main():
 
     metas, results, tok = asyncio.run(go())
     tally = Counter(); bad = []
-    outp = HERE / f"verify_bucket_{a.bucket}.jsonl"
+    outp = HERE / f"runs/verify_bucket_{a.bucket}.jsonl"
     with open(outp, "w", encoding="utf-8") as f:
         for meta, res in zip(metas, results):
             res = res or {}

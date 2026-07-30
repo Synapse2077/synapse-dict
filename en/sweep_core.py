@@ -156,7 +156,7 @@ def main(limit):
     metas, results, tok = asyncio.run(go())
     from collections import Counter
     tally = Counter()
-    outp = HERE / "sweep_core.jsonl"
+    outp = HERE / "runs/sweep_core.jsonl"
     with open(outp, "w", encoding="utf-8") as f:
         for meta, res in zip(metas, results):
             res = res or {}
