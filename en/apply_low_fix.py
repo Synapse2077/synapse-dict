@@ -120,7 +120,7 @@ def main():
 
     conn.close()
     tag = datetime.now().strftime("%Y%m%d-%H%M")
-    bak = DB.with_name(f"synapse-dict-en.pre-lowfix-{tag}.bak")
+    bak = HERE / "backups" / f"synapse-dict-en.pre-lowfix-{tag}.bak"
     shutil.copy2(DB, bak)
     conn = sqlite3.connect(DB)
     with open(LOG, "w", encoding="utf-8") as f:

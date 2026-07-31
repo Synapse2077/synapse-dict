@@ -97,59 +97,101 @@ function firstLine(s: string | null): string | null {
   return first || null;
 }
 
+type Accent = 'uk' | 'us';
+
 /**
- * Convert Wiktionary strict IPA → dictionary-style IPA (one function for UK & US).
+ * Convert Wiktionary strict IPA → teaching-style IPA, **per accent**.
  *
- * Order matters — context-sensitive rules first, then simple replacements.
+ * 2026-07-30 重制。依据 = 2000 条真实音标送豆包 pro + DeepSeek v4-pro 双盲评审
+ * （两家同码 234 条），外加两家对旧规则代码本身的独立评审。两家独立得出同一结论：
+ * **英美共用一套规则修不好**，下面标 UK-only / US-only 的都是必须分列的。
+ *
+ * 旧版「把对的改错了」的四条（A 类 129 条归因：ɾ 95 / ɚɝ 27 / ɛ 22 / ʔ 16 / ɐ 10 / ɨ 6）：
+ *   ɾ→r  citing ˈsaɪɾɪŋ 出 ˈsaɪrɪŋ「赛润」——ɾ 是 /t,d/ 的闪音变体，不是通音 r。占 A 类 73%。
+ *   ʔ→''  fitty fɪʔi 出 fɪi，整个音节没了——ʔ 是英式 /t/ 的喉塞变体。
+ *   ɐ→ə  现代 RP 严式用 ɐ 记 STRUT，映射成 schwa 会把重读读成弱读。
+ *   ɚ→ər 用在英式列上会给非儿化音加上不该有的 r（abhorrers 英式原文就带 ɚ）。
+ *
+ * ⚠️ 有一份 Python 孪生体 `en/ipa_normalize.py`（19 条自检样例，全部取自真实词条）。
+ *    改这里必须同步改那边，否则审计工具算出来的「用户看到的音标」是假的。
  */
-function normalizePronunciation(ipa: string | null): string | null {
+export function normalizePronunciation(ipa: string | null, accent: Accent = 'uk'): string | null {
   if (!ipa) return ipa;
-  return ipa
-    // 1. Remove phonetic diacritics (strict IPA markers not used in teaching)
-    .replace(/\u032F/g, '')   // ̯ non-syllabic mark
-    .replace(/\u0329/g, '')   // ̩ syllabic mark
-    .replace(/\u031F/g, '')   // ̟ advanced tongue
-    .replace(/\u0325/g, '')   // ̥ voiceless/devoiced
-    .replace(/\u0308/g, '')   // ̈ centralized
-    .replace(/\u02B0/g, '')   // ʰ aspiration
-    .replace(/\u031A/g, '')   // ̚ unreleased stop (e.g. t̚)
-    .replace(/\u0303/g, '')   // ̃ nasalization
-    .replace(/\u203F/g, '')   // ‿ liaison mark
-    .replace(/ʔ/g, '')        // glottal stop
-    .replace(/kç/g, 'k')     // palatalized k → k (but keep standalone ç for loanwords)
-    // 2. Tie-bar affricates → simple affricates
-    .replace(/t\u0361ʃ/g, 'tʃ')
-    .replace(/d\u0361ʒ/g, 'dʒ')
-    .replace(/t\u0361s/g, 'ts')
-    .replace(/d\u0361z/g, 'dz')
-    // 3. Diphthong variant spellings → standard
+  let s = ipa
+    // 1. Tie-bar affricates（U+0361 上置连弧、U+035C 下置连弧都要管）
+    .replace(/t[͜͡]ʃ/g, 'tʃ')
+    .replace(/d[͜͡]ʒ/g, 'dʒ')
+    .replace(/t[͜͡]s/g, 'ts')
+    .replace(/d[͜͡]z/g, 'dz')
+    // 2. 上标括号 ⁽ʲ⁾ 与腭化符 ʲ（Kamin-Kashyrskyi 那类外来专名）
+    .replace(/⁽[^⁾]*⁾/g, '')
+    .replace(/ʲ/g, '')   // ʲ palatalization
+    // 3. 去严式变音符
+    .replace(/̯/g, '')   // ̯ non-syllabic
+    .replace(/̟/g, '')   // ̟ advanced tongue
+    .replace(/̥/g, '')   // ̥ devoiced
+    .replace(/̈/g, '')   // ̈ centralized
+    .replace(/ʰ/g, '')   // ʰ aspiration
+    .replace(/̚/g, '')   // ̚ unreleased stop
+    .replace(/̃/g, '')   // ̃ nasalization
+    .replace(/‿/g, '')   // ‿ liaison
+    // 4. 音位级还原：喉塞与闪音都是 /t/ 的变体，不是「无音」、也不是 r
+    .replace(/ʔ/g, 't')
+    .replace(/ɾ/g, 't')
+    .replace(/kç/g, 'k')
+    // 5. 双元音异写 → 标准
     .replace(/aj/g, 'aɪ')
     .replace(/æw/g, 'aʊ')
-    // 4. ɚ → ər everywhere (e.g. modern ˈmɑdɚn → ˈmɑdərn; word-final, before obstruent/sonorant)
-    .replace(/ɚ/g, 'ər')
-    // 5. ɝ → ɜːr (stressed r-colored vowel)
-    .replace(/ɝ/g, 'ɜːr')
-    // 5b. Fix aʊɜːr → aʊər (Wiktionary misuses ɝ in unstressed "our" etc.)
-    .replace(/aʊɜːr/g, 'aʊər')
-    // 6. ɹ/ɾ → r
+    .replace(/æʊ/g, 'aʊ')
+    .replace(/ʌɪ/g, 'aɪ')
+    // 6. 非教学用严式符号
     .replace(/ɹ/g, 'r')
-    .replace(/ɾ/g, 'r')
-    // 7. Non-teaching narrow symbols → standard
-    .replace(/ɫ/g, 'l')       // dark l → l
-    .replace(/æʊ/g, 'aʊ')     // æʊ diphthong variant → aʊ
-    .replace(/ʌɪ/g, 'aɪ')     // ʌɪ diphthong variant → aɪ
-    // 8. Minor vowel normalizations
-    .replace(/ɐ/g, 'ə')
+    .replace(/ɫ/g, 'l')       // dark l
+    .replace(/ɐ/g, 'ʌ')       // 现代 RP 的 STRUT，不是 schwa
     .replace(/ɨ/g, 'ɪ')
-    .replace(/ɛ/g, 'e')
-    // 9. Remove syllable dots
-    .replace(/\./g, '')
-    // 10. Merge duplicate r (artifact from ɚ→ər + (ɹ)→(r) overlap)
-    .replace(/rr/g, 'r')
-    // 11. Remove empty parens left by dropping "(.)" optional syllable break
+    // 7. 成节辅音补 schwa——光删标记会读不出（dirndl ˈdɜːndl̩ → ˈdɜːndl）。
+    //    ⚠️ (ə)C̩ 必须先合并，否则 ˈæb.s(ə)n̩s 会出双 schwa。
+    .replace(/\(ə\)([lnmr])̩/g, 'ə$1')
+    .replace(/([lnmr])̩/g, 'ə$1')
+    .replace(/̩/g, '');
+
+  if (accent === 'uk') {
+    s = s
+      .replace(/ɚ/g, 'ə')            // UK-only 非儿化：不加 r
+      .replace(/ɝ/g, 'ɜː')
+      .replace(/ɛ/g, 'e')            // UK-only 英式 DJ 记法 DRESS 写 /e/（牛津/朗文英式如此）
+      .replace(/a(?![ɪʊ])/g, 'æ')    // UK-only TRAP；⚠️ 排除 aɪ/aʊ，否则劈坏双元音
+      // 括号：英式连诵 r 单说不读 → 整个删；保留 yod；保留长音
+      .replace(/\([rɹ]\)/g, '')
+      .replace(/\(j\)/g, 'j')
+      .replace(/\(ː\)/g, 'ː');
+  } else {
+    s = s
+      .replace(/ɚ/g, 'ər')           // US-only 儿化：带 r
+      .replace(/ɝ/g, 'ɜr')           //           且不补长音符
+      // 括号：美式 r 必读；GA 在 t/d/n/l 后丢 yod；GA 无可选长音
+      .replace(/\([rɹ]\)/g, 'r')
+      .replace(/\(j\)/g, '')
+      .replace(/\(ː\)/g, '');
+    // ⚠️ 不动 uː/iː/ɑː：剑桥/朗文的美式 IPA 本来就写 /uː/，
+    //    「美式无长短对立」只适用于可选长音 (ː) 那一类。
+  }
+
+  return s
+    // 8. 其余括号一律拆掉留内容（(ə)(t)(h)…）——取全读形式，对学习者最稳。
+    //    严式可选音括号不该透给用户：全库 9,796 条里常用核心就占 4,676。
     .replace(/\(\s*\)/g, '')
-    // 12. Clean up spaces inside parentheses: (ə ) → (ə)
-    .replace(/\(\s*(.+?)\s*\)/g, '($1)');
+    .replace(/\(\s*(.+?)\s*\)/g, '$1')
+    .replace(/\./g, '')
+    .replace(/ː{2,}/g, 'ː')   // ɝ→ɜː 撞上已有 ː
+    // 兜底：源数据里有**括号没闭合**的（academic quarter 的 ˈkwɔːtə(r、unmetamorphized 的 ˈmɔː(r.fə），
+    // 上面按 (x) 配对的规则匹配不到，会把裸括号透给用户。这两条应当修数据，
+    // 但展示层仍要有兜底——畸形输入不该变成用户看到的乱字符。
+    .replace(/[()]/g, '')
+    // 9. 合并重复 r。⚠️ 必须在括号拆完之后：旧版放在前面，ˈnʌmbɚ(r) 出 ˈnʌmbər(r)，
+    //    注释说这条就是为修重复 r 写的，却因为顺序错而从未生效。
+    .replace(/r{2,}/g, 'r')
+    .trim();
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -161,9 +203,12 @@ function mapEntry(row: DictionaryRow): DictionaryEntry {
     id: row.id,
     word: row.word,
     phonetic: row.phonetic,
-    phoneticUk: normalizePronunciation(row.phonetic_uk),
-    phoneticUs: normalizePronunciation(row.phonetic_us),
-    phoneticDisplay: normalizePronunciation(row.phonetic_uk || row.phonetic_us || row.phonetic),
+    phoneticUk: normalizePronunciation(row.phonetic_uk, 'uk'),
+    phoneticUs: normalizePronunciation(row.phonetic_us, 'us'),
+    // 兜底显示：按取到的是哪一列决定口音，别用同一套规则套两种音
+    phoneticDisplay: row.phonetic_uk
+      ? normalizePronunciation(row.phonetic_uk, 'uk')
+      : normalizePronunciation(row.phonetic_us || row.phonetic, 'us'),
     definition: row.definition,
     translation: row.translation,
     pos: row.pos,
