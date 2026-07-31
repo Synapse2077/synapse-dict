@@ -95,8 +95,10 @@ function seseoLatam(spainIpa: string | null): string | null {
 
 // kaikki/维基式 IPA → 西班牙 RAE 本土词典标准（显示层，DB 内仍存精确源）。
 // 西语数据本已近 RAE（无音位长辅音 ː、几无音节点，θ/ʝ/ʎ/ɾ/r/x 齐全），只需：
-//   去连结弧 t͡ʃ→tʃ、去音节点、去长音符、剥方括号窄式。
-// 例：/ˈmut͡ʃo/→/ˈmutʃo/、/ˈɡɾaθjas/ [ˈɡɾa.θjas]→/ˈɡɾaθjas/。
+//   去连结弧 t͡ʃ→tʃ、去音节点、去长音符、剥方括号窄式、去升降符 ̝ ̞。
+// 例：/ˈmut͡ʃo/→/ˈmutʃo/、/ˈɡɾaθjas/ [ˈɡɾa.θjas]→/ˈɡɾaθjas/、/ˈw̝eb/→/ˈweb/。
+// ⭐ ̝(U+031D) 是 kaikki 对西语 /w/ 的约定（hu- 词与字母 w 外来词都写 w̝，库内 1,092 条忠实照存），
+//   但对划词用户是噪声 → 只在这层剥，DB 保持与 kaikki 逐字一致。别去库里剥（2026-07-31 试过，踩坑）。
 function normalizeSpanishIpa(ipa: string | null): string | null {
   if (!ipa) return ipa;
   let s = ipa.trim();
@@ -105,6 +107,15 @@ function normalizeSpanishIpa(ipa: string | null): string | null {
   else s = s.replace(/\s*\[[^\]]*\]\s*/g, '').trim();
   s = s.replace(/͡/g, '');                          // 去连结弧
   s = s.replace(/[.ː]/g, '');                        // 去音节点、长音符
+  s = s.replace(/[\u031D\u031E]/g, '');              // 去升符 ̝ / 降符 ̞（w̝→w、β̞→β）
+  // ⭐ 擦音变体 → 音位（ð→d、β→b、ɣ→ɡ、ŋ→n）。库内约 12,300 行把 [β ð ɣ ŋ] 这些
+  //   **同位异音**写进了音位式格子（ˈliβɾo / ˈxuɣo / iŋkonfoɾ…），而同类词的另一批写的
+  //   是塞音 —— 纯属内部不一致。2026-07-31 v4-pro 盲测的逐条任务与规则评审**各自独立
+  //   指出同一处不一致**（主张的方向相反：一个要删、一个要补），故方向不由判官定，
+  //   由本函数既定目标定：RAE 教学式音标写 /b d ɡ n/，不写变体。
+  //   同 w̝ 的处理：**只在展示层换，DB 保持与 kaikki 逐字一致**，零风险可回退。
+  s = s.replace(/ð/g, 'd').replace(/β/g, 'b')
+       .replace(/ɣ/g, 'ɡ').replace(/ŋ/g, 'n');
   return s;
 }
 

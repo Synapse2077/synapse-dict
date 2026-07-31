@@ -107,6 +107,17 @@ def build_corpus():
         "含正字法残留字母 c/q/v":
             q1(conn, f"SELECT count(*) FROM dict WHERE {H} AND phonetic GLOB '*[cqv]*'"),
         "无重音符 ˈ": q1(conn, f"SELECT count(*) FROM dict WHERE {H} AND phonetic NOT LIKE '%ˈ%'"),
+        # ↓ 2026-07-31 抽样审计当场挖出来的两族,单列统计交评审确认
+        "浊塞音 ɡ/b/d 紧跟清辅音(疑似 coda 浊化过度)":
+            q1(conn, "SELECT count(*) FROM dict WHERE phonetic GLOB '*[ɡbd][ptkθsfx]*'"),
+        "  └ 其中 ɡt(如 acto→ˈaɡto)": q1(conn, "SELECT count(*) FROM dict WHERE phonetic LIKE '%ɡt%'"),
+        "  └ 其中 ɡs(如 taxi→ˈtaɡsi,x=ks 再浊化)":
+            q1(conn, "SELECT count(*) FROM dict WHERE phonetic LIKE '%ɡs%'"),
+        "  └ 其中 bt(如 apto→ˈabto)": q1(conn, "SELECT count(*) FROM dict WHERE phonetic LIKE '%bt%'"),
+        "多词条目(音标含空格)": q1(conn, f"SELECT count(*) FROM dict WHERE {H} AND phonetic LIKE '% %'"),
+        "  └ 多词且含次重音 ˌ(疑似非末词被降级为次重音)":
+            q1(conn, f"SELECT count(*) FROM dict WHERE {H} AND phonetic LIKE '% %' "
+                     "AND phonetic LIKE '%ˌ%'"),
         "缺音标(lemma)":
             q1(conn, f"SELECT count(*) FROM dict WHERE is_lemma=1 AND NOT ({H})"),
         "缺音标(变形层)":
@@ -129,6 +140,11 @@ def build_corpus():
         "含 ks(字母 x 的规则产物)": samples(conn, S + "phonetic LIKE '%ks%' AND is_lemma=1"),
         "普通高频词(对照组,应当没问题)":
             samples(conn, S + "is_lemma=1 AND level='A1' AND phonetic LIKE '%ˈ%'", 12),
+        # ↓ 抽样审计挖出的两族,附真实例词请评审判定是不是缺陷
+        "浊塞音紧跟清辅音(ɡt/bt 类,请判定对错)":
+            samples(conn, S + "phonetic GLOB '*[ɡb][tkθs]*' AND is_lemma=1", 14),
+        "多词条目里出现次重音 ˌ(请判定非末词该标 ˈ 还是 ˌ)":
+            samples(conn, S + "phonetic LIKE '% %' AND phonetic LIKE '%ˌ%'", 12),
     }
     conn.close()
     return stats, ex

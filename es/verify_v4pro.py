@@ -137,6 +137,13 @@ IPA_SYS = """你是西班牙语语音学专家。审核一个**中文用户划�
   D 整体读错:与该词实际读音明显不符(元音/辅音串对不上词形)。
   E 其他。
 
+🔴 **有些条目会给 src 字段** —— 该词在 Wiktionary/kaikki 的音位式原文。
+   **src 是本词典音标的权威来源,转写约定以它为准,不是以你习惯的 RAE 教学式为准。**
+   若 ipa 与 src 一致(或只差可忽略的记法),**一律不要报** —— 哪怕它和你认为的"标准"不同。
+   典型:本词典按 kaikki 约定把 coda 阻塞音分析成浊音(`acto`→`ˈaɡto`、`apto`→`ˈabto`、
+   `taxi`→`ˈtaɡsi`),短语非末词标次重音 ˌ —— 这些**都是对的**,不是缺陷。
+   只有 ipa **偏离 src** 时才判,或 src 缺失时才用你自己的知识判。
+
 ⚠️ 以下**不要列出**:
 - 音标正确、只是词生僻/专业/是外来词或专有名词;
 - 单音节词或虚词(如 a、de、en、y)没标 ˈ —— 正常,不是 B;
@@ -299,9 +306,24 @@ def chunked(rows, size, build):
     return metas, batches
 
 
-def cost(pin, cout, hit):
-    """v4-pro 计价(元/M token):命中 0.2 / 未命中 4 / 输出 12。粗算,用于判断值不值得放全量。"""
-    return (hit * 0.2 + (pin - hit) * 4.0 + cout * 12.0) / 1e6
+# v4-pro 官方人民币基准价(元/M token)。原来这里硬写的是「0.2 / 4 / 12」——
+# 那其实是**高峰价**(见下),被当成常量写死了,所以平峰跑会高估一倍。
+P_HIT, P_MISS, P_OUT = 0.025, 3.0, 6.0
+# 🔴 峰谷定价:北京时间每日 9:00–12:00 与 14:00–18:00 **所有计费项 ×2**。
+#   今天(2026-07-31)的跑几乎全落在高峰:上午 10:20 那跑、10:52 的 3000 条、下午 15:5x 的
+#   100 条 A/B —— 它们按 12 元/M 算出的 7.8 / 9.18 元是**对的**;而 21:47 起的 1500 条
+#   在平峰,才是 6 元/M。
+#   ⚠️ 官方页写的是"即将采用,具体时间以正式通知为准" —— 是否已生效我没有独立确认,
+#      故 peak_x2 默认按已生效算(宁可高估账单,不要低估)。
+PEAK_HOURS = set(range(9, 12)) | set(range(14, 18))
+
+
+def cost(pin, cout, hit, when=None):
+    """v4-pro 计价(元)。when 给 datetime(北京时间)则按其时段计,默认按当前时刻。"""
+    import datetime
+    h = (when or datetime.datetime.now()).hour
+    x = 2.0 if h in PEAK_HOURS else 1.0
+    return x * (hit * P_HIT + (pin - hit) * P_MISS + cout * P_OUT) / 1e6
 
 
 def report(title, recs, total, lab, codec):
@@ -457,10 +479,106 @@ def ipa(n, seed, conc, chunk):
     print(f"  → {outp.relative_to(HERE.parent)}")
 
 
+def kaikki_ipa(words):
+    """扫 kaikki dump 取音位式 /.../ 原文。判官必须看得到权威源,否则它只能拿通行 RAE 写法当尺子,
+    在本库刻意对齐 kaikki 的地方(coda 浊化、短语次重音)必然误报。2026-07-31 四次误报的共同根因。"""
+    import re as _re
+    kk, t0 = {}, time.time()
+    with open(HERE / "kaikki.org-dictionary-Spanish.jsonl", encoding="utf-8") as f:
+        for ln in f:
+            m = _re.search(r'"word":\s*"((?:[^"\\]|\\.)*)"', ln)
+            if not m or m.group(1) not in words or m.group(1) in kk:
+                continue
+            for s in (json.loads(ln).get("sounds") or []):
+                if s.get("ipa", "").startswith("/"):
+                    kk[m.group(1)] = s["ipa"].strip("/")
+                    break
+    print(f"  kaikki 命中 {len(kk):,}/{len(words):,} 词 ({time.time()-t0:.0f}s)", flush=True)
+    return kk
+
+
+def rejudge(path, conc, chunk, with_src=False):
+    """回归验证:拿上一轮**被标出的那些 id**,用**同一判官同一判据**重判其当前库值。
+    ⚠️ 为什么不是重跑 --ipa 3000:分层条件依赖 phonetic 本身(如 `GLOB '*[cqv]*'`),
+      修完那一族就空了,同 seed 也抽不到同一批词 —— 只能按 id 配对。
+      同尺前后配对是硬要求,换判官的数字不能相减(见 [[llm-as-evaluator-discipline]] ②)。"""
+    p = Path(path)
+    if not p.is_absolute():
+        p = HERE / p
+    old = [json.loads(x) for x in open(p, encoding="utf-8") if x.strip()][1:]
+    conn = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
+    rows, gone = [], 0
+    for r in old:
+        cur = conn.execute("SELECT word, COALESCE(phonetic,'') FROM dict WHERE id=?",
+                           (r["id"],)).fetchone()
+        if not cur or not cur[1]:
+            gone += 1
+            continue
+        rows.append((r["id"], cur[0], cur[1], r.get("strat", ""), r.get("c", ""), r.get("ipa", "")))
+    conn.close()
+    changed = sum(1 for r in rows if r[2] != r[5])
+    print(f"上轮标出 {len(old)} 条 → 可复判 {len(rows)} 条(缺音标 {gone});"
+          f"其中音标已被改动 {changed} 条", flush=True)
+    kk = kaikki_ipa({r[1] for r in rows}) if with_src else {}
+
+    def build(r):
+        d = {"w": r[1], "ipa": r[2]}
+        if kk.get(r[1]):
+            d["src"] = kk[r[1]]
+        return d
+
+    metas, batches = chunked(rows, chunk, build)
+    if with_src:
+        n = sum(1 for r in rows if kk.get(r[1]))
+        print(f"  带 kaikki 权威源的 {n}/{len(rows)} 条", flush=True)
+    key = load_env()["DEEPSEEK_API_KEY"]
+    res, pin, cout, hit, fails = asyncio.run(run_job("rejudge", IPA_SYS, batches, key, conc))
+
+    still, cleared, per = [], [], {}
+    for meta, out in zip(metas, res):
+        out = out or {}
+        for k, r in enumerate(meta, 1):
+            st = r[3]
+            d = per.setdefault(st, {"n": 0, "still": 0, "fixed": 0})
+            d["n"] += 1
+            if isinstance(out.get(str(k)), dict):
+                d["still"] += 1; still.append((r, out[str(k)]))
+            else:
+                d["fixed"] += 1; cleared.append(r)
+    print("\n" + "=" * 74)
+    print("回归验证 · 同判官同判据,只判上轮被标出的那批")
+    print("=" * 74)
+    for st, d in sorted(per.items(), key=lambda x: -x[1]["n"]):
+        print(f"  【{st}】上轮标出 {d['n']} 条 → 本轮仍标出 {d['still']} 条,"
+              f"**已消解 {d['fixed']} 条({100*d['fixed']/max(d['n'],1):.1f}%)**")
+    print(f"\n  合计:{len(rows)} → 仍标出 {len(still)},消解 {len(cleared)} "
+          f"({100*len(cleared)/max(len(rows),1):.1f}%)")
+    print(f"  token 入 {pin:,} 出 {cout:,}  实付 ≈ {cost(pin,cout,hit):.2f} 元")
+    # ⚠️ 必须落盘:仍被标出的那批是**下一步要人工过的工单**,只打印前 12 条等于白跑一轮。
+    RUNS.mkdir(exist_ok=True)
+    outp = RUNS / (f"rejudge{'_src' if with_src else ''}_{len(rows)}_"
+                   f"{time.strftime('%Y%m%d-%H%M')}.jsonl")
+    with open(outp, "w", encoding="utf-8") as f:
+        f.write(json.dumps(dict(_meta=True, job="rejudge", with_src=with_src, n=len(rows),
+                                still=len(still), cleared=len(cleared),
+                                strata=per), ensure_ascii=False) + "\n")
+        for r, v in still:
+            f.write(json.dumps(dict(id=r[0], w=r[1], ipa=r[2], strat=r[3], src=kk.get(r[1], ""),
+                                    c=str(v.get("c", ""))[:1], sug=str(v.get("ipa", ""))[:60],
+                                    why=str(v.get("why", ""))[:40]), ensure_ascii=False) + "\n")
+    print("\n  仍被标出的样例(前 12):")
+    for r, v in still[:12]:
+        print(f"    [{v.get('c')}] {r[1][:24]:26} 现 {r[2][:24]:26} 建议 {str(v.get('ipa',''))[:22]}")
+    print(f"\n  → {outp.relative_to(HERE.parent)}（{len(still)} 条待人工过）")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--qa", type=int, metavar="N", help="释义抽检条数")
     ap.add_argument("--ipa", type=int, metavar="N", help="音标抽检条数")
+    ap.add_argument("--rejudge", metavar="JSONL", help="回归:复判上轮被标出的 id(同判官)")
+    ap.add_argument("--with-src", action="store_true",
+                    help="喂 kaikki 音位式原文当权威源(判官据此不再按 RAE 习惯误报)")
     ap.add_argument("--seed", type=int, default=20260731)
     ap.add_argument("--conc", type=int, default=24)
     ap.add_argument("--chunk", type=int, default=20)
@@ -469,5 +587,7 @@ if __name__ == "__main__":
         qa(a.qa, a.seed, a.conc, a.chunk)
     elif a.ipa:
         ipa(a.ipa, a.seed, a.conc, a.chunk)
+    elif a.rejudge:
+        rejudge(a.rejudge, a.conc, a.chunk, a.with_src)
     else:
         ap.print_help()
