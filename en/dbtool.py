@@ -38,7 +38,9 @@ HERE = Path(__file__).resolve().parent
 DB = paths.DB
 TABLE = "stardict"
 # 追踪的列：写库前后都会计数。**不在这张表里的列，出了问题不会被发现** —— 新增重要字段记得加进来。
-TRACK = ['phonetic', 'phonetic_uk', 'phonetic_us', 'translation', 'definition', 'exchange']
+TRACK = ['phonetic', 'phonetic_uk', 'phonetic_us',
+         'phonetic_uk_raw', 'phonetic_us_raw',
+         'translation', 'definition', 'exchange']
 
 
 def snapshot(conn=None):
@@ -63,7 +65,13 @@ def diff(before, after):
 
 
 def backup(tag):
-    dst = DB.with_name("%s.pre-%s-%s.bak" % (DB.stem, tag, time.strftime("%Y%m%d-%H%M%S")))
+    """备份落在 `data/backups/`。
+
+    ⚠️ 2026-08-01 重构后一度仍用 `DB.with_name(...)`，于是备份被写进了 `data/db/`，
+       和成品库混在一起 —— 目录分工形同虚设。改用 paths.BACKUPS。
+    """
+    paths.BACKUPS.mkdir(parents=True, exist_ok=True)
+    dst = paths.BACKUPS / ("%s.pre-%s-%s.bak" % (DB.stem, tag, time.strftime("%Y%m%d-%H%M%S")))
     shutil.copy2(DB, dst)
     return dst
 

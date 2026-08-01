@@ -63,7 +63,13 @@ def diff(before, after):
 
 
 def backup(tag):
-    dst = DB.with_name("%s.pre-%s-%s.bak" % (DB.stem, tag, time.strftime("%Y%m%d-%H%M%S")))
+    """备份落在 `data/backups/`。
+
+    ⚠️ 2026-08-01 重构后一度仍用 `DB.with_name(...)`，于是备份被写进了 `data/db/`，
+       和成品库混在一起 —— 目录分工形同虚设。改用 paths.BACKUPS。
+    """
+    paths.BACKUPS.mkdir(parents=True, exist_ok=True)
+    dst = paths.BACKUPS / ("%s.pre-%s-%s.bak" % (DB.stem, tag, time.strftime("%Y%m%d-%H%M%S")))
     shutil.copy2(DB, dst)
     return dst
 
