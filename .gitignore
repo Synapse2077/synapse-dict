@@ -16,6 +16,16 @@ data/
 *.bak*
 # 本仓无任何该进 git 的 jsonl：源 dump / 豆包输出(b_out/b_enrich_out) / 裁决输出
 *.jsonl
+# ⚠️ 2026-08-01 补：`*.jsonl` 拦不住压缩包。五个语言版 dump 叫 `xx-edition-extract.jsonl.gz`
+#    （共 1,145 MB），当时完全暴露在 git 面前，`git add -A` 会直接吞进去。
+#    这正是本文件上方注释警告过的那类漏洞——按扩展名写死，压缩一层就漏。
+#    压缩包一律不进 git：源数据靠下载，产物靠脚本重生成。
+*.gz
+*.zip
+*.tar
+*.xz
+*.bz2
+*.7z
 # 大源 dump csv（英语 stardict.csv 等，原先靠 data/ 忽略，归拢 en/ 后单列）
 *.csv
 # 冲突复核/裁决产物（conflict_review / decisions），可由 b_translate.py --merge 重新生成

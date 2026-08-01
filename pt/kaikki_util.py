@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
-"""kaikki dump 的正确读法 —— 唯一入口,别再自己写正则抓 word。见对话 2026-07-31。
+"""kaikki 葡萄牙语 dump 的正确读法 —— pt 的唯一入口。2026-08-01。
 
-🔴 **踩过的坑(2026-07-31,两个脚本都中招)**:用
-      re.search(r'"word":\\s*"([^"]*)"', line)
-   抓词头是**错的**。wiktextract 的顶层 key 顺序不固定,`word` 常常排在
-   `forms` / `descendants` / `related` 这些**内含 "word" 键的嵌套数组之后**。
-   实例:`estar` 那一行顶层 key 顺序是
-      ['pos','head_templates','forms','inflection_templates','descendants',
-       'etymology_text','etymology_templates','sounds', ... 'word' 在更后面]
-   正则抓到的第一个 "word" 是 descendants 里的 `istar` —— 于是 `estar` 整条被漏掉/张冠李戴。
-   后果有两种:① 大量条目查不到(低估 kaikki 覆盖);② 偶发**错误归属**(把 A 的音标记到 B 头上)。
+pt 独立文件，不 import 其他语种（见 multilang-decoupling-essence 铁律）。
 
-   → **必须 json.loads 整行再取 d["word"]**。慢一点(全量约 60-90s)但正确。
-     想省时间就先用 `if needle not in line` 这种**宽松**预筛(只能用来跳过,不能用来判定)。
+🔴 **踩过的坑**：用 `re.search(r'"word":\s*"([^"]*)"', line)` 抓词头是**错的**。
+   wiktextract 的顶层 key 顺序不固定，`word` 常排在 `forms` / `descendants` / `related`
+   这些**内含 "word" 键的嵌套数组之后**，正则会抓到嵌套里的别的词 →
+   大量条目漏掉，偶发张冠李戴（把 A 的音标记到 B 头上）。
+   → **必须 json.loads 整行再取 d["word"]**。慢一点但正确。
 """
 import gzip
 import json
@@ -20,17 +15,16 @@ import re
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-KK = HERE / "kaikki.org-dictionary-Spanish.jsonl"
+KK = HERE / "kaikki.org-dictionary-Portuguese.jsonl"
 
 
 def iter_entries(words=None):
-    """逐条产出 (word, entry)。words 给定时只产出这些词(仍然是先解析再判定)。"""
-    with open(KK, encoding="utf-8") as f:
+    """逐条产出英文版 dump 的 (word, entry)。words 给定时只产出这些词（仍先解析再判定）。"""
+    with open(KK, encoding="utf-8", errors="replace") as f:
         for ln in f:
             if not ln.strip():
                 continue
-            # 宽松预筛:整行连这个词的字面量都没有,才敢跳过(不能拿它当判定)
-            if words is not None and '"word"' not in ln:
+            if words is not None and '"word"' not in ln:   # 宽松预筛：只敢用来跳过
                 continue
             try:
                 d = json.loads(ln)
@@ -42,56 +36,22 @@ def iter_entries(words=None):
             yield w, d
 
 
-def phonemic_ipa(words):
-    """word → 音位式 /.../ 内容。同词多条时取第一条有音位式的。
-
-    🔴 坑:少数条目的 sounds.ipa 是**音位式与严式拼在一起**的整串,如
-       `gracias` → `/ˈɡɾaθjas/ [ˈɡɾa.θjas]`。`strip("/")` 只去首尾斜杠,
-       严式段会漏进返回值 → 拿它当真值比对时,那些词永远"不一致"。
-       必须**正则取第一对斜杠之间的内容**。
-    """
-    out = {}
-    for w, d in iter_entries(words):
-        if w in out:
-            continue
-        for s in (d.get("sounds") or []):
-            m = re.match(r"\s*/([^/]+)/", s.get("ipa", ""))
-            if m:
-                out[w] = m.group(1)
-                break
-    return out
-
-
-def form_of_pointers(words):
-    """word → {原形}。顶层 form_of 与各 sense 的 form_of 都收。"""
-    out = {}
-    for w, d in iter_entries(words):
-        acc = out.setdefault(w, set())
-        for fo in (d.get("form_of") or []):
-            if fo.get("word"):
-                acc.add(fo["word"])
-        for s in (d.get("senses") or []):
-            for fo in (s.get("form_of") or []):
-                if fo.get("word"):
-                    acc.add(fo["word"])
-    return {k: v for k, v in out.items() if v}
-
-
 # ═══════════════════════════════════════════════════════════════════════
 # 以下为 2026-08-01 新增：**各版 dump 的解析约定**。
 # 立此一节的原因：当天八次翻车里有三次出在解析层，每一次都差点让我们
 # 放弃一个真实存在的数据源（西语版、pt 巴葡、fr 版整体）。
 # 解析知识必须只有一处实现、且被 test_tools.py 覆盖。
 #
-# · **英文版**少数条目的 `sounds.ipa` 是「音位式+严式拼一起」的整串：
-#   `gracias` → `/ˈɡɾaθjas/ [ˈɡɾa.θjas]`。必须**只取第一对定界符之间**，`strip("/")` 会漏严式段。
-# · **西语版**用 `[…]`，且同一词常同时给 `seseante` / `no seseante` 两种变体 ——
-#   2026-08-01 曾**只取第一个拿到 seseante**，据此断言"西语版没用"，是错的。本项目取 `no seseante`（区分 θ/s）。
-# · **fr 版的西语 82.4% 是多读音，且是方言变体**（`des`→`ˈdes`/`ˈdeh` s 弱化）——
-#   取第一个＝随机选方言。要用必须先定跟哪个方言。
+# · **`X-SAMPA` 是 `sounds.tags` 里的标签，不是字符串格式** —— 2026-08-01 曾把它当格式判断，
+#   解析全废、把葡语版可用音标从 30,618 词误报成 193 词（158 倍）。按标签排除即可。
+# · 地区标签：`Brazil` / `Portugal`（另有 `Rio de Janeiro` 等更细的），分别进 `ipa_br` / `ipa_pt`。
+# · **🔴 fr 版的葡语条目同时带欧葡和巴葡两个读音，顺序是 ① 欧葡 ② 巴葡。**
+#   287,422 词有 ≥2 个读音：`falar` → `\fɐ.lˈaɾ\`(EP) + `\fa.lˈa\`(BP)。
+#   独立音系判据检验：①欧葡②巴葡 72.2% / 反向 2.0% = **36:1**，顺序确凿。
+#   2026-08-01 曾**只取第一个**，据此断言"巴葡补不上"，是错的 —— 双列各能补约 17.9 万行。
 # ═══════════════════════════════════════════════════════════════════════
 
-EDITION = HERE / "es-edition-extract.jsonl.gz"      # 语言版 dump（gz）
+EDITION = HERE / "pt-edition-extract.jsonl.gz"      # 语言版 dump（gz）
 
 # 三种定界符都要认：it/pt `/…/`、es/de `[…]`、fr `\…\`
 _IPA_DELIM = re.compile(r"^\s*[\\/\[]([^\\/\]]+)[\\/\]]")
