@@ -30,9 +30,11 @@ import acceptance_en as A
 import sweep_core as S
 import buckets as B
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "ledgers/elision_fix.tsv"
+DB = paths.DB
+LOG = paths.WORK / "ledgers/elision_fix.tsv"
 GLOSSES = ["anchors/b1_kaikki_gloss.json", "anchors/b2_kaikki_gloss.json",
            "anchors/c3_kaikki_gloss.json", "anchors/c356_kaikki_gloss.json"]
 

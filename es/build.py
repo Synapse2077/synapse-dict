@@ -21,9 +21,11 @@ from pathlib import Path
 
 from infl_compose import compose, COMPOSE_TAGS
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-JSONL_PATH = HERE / "kaikki.org-dictionary-Spanish.jsonl"
-DB_PATH = HERE / "synapse-dict-es.sqlite"
+JSONL_PATH = paths.KK
+DB_PATH = paths.DB
 
 DROP_TAGS = {"form-of", "alt-of", "combined-form"}
 # 缩写/首字母词：不是变位，是独立词条，全称即其义 → 当真义留着(交B组翻)，不进 exchange

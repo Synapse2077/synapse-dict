@@ -15,9 +15,11 @@ from pathlib import Path
 
 from fix_misalign import load_env, run_batches   # 复用鲁棒批处理（本地键+容错解析+重试）
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-pt.sqlite"
-OVERRIDES = HERE / "overrides.tsv"
+DB = paths.DB
+OVERRIDES = paths.WORK / "overrides.tsv"
 CHUNK = 20
 
 SYS = """你是资深葡萄牙语→简体中文词典审校专家。给你一批词条（这些是标记为"存疑"的词），每条含：词形 w、词性 pos、英文 gloss（消歧参考，可能有误或过窄）、当前中文译文数组 zh。

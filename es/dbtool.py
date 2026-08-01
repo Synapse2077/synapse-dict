@@ -32,8 +32,10 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
+DB = paths.DB
 TABLE = "dict"
 # 追踪的列：写库前后都会计数。**不在这张表里的列，出了问题不会被发现** —— 新增重要字段记得加进来。
 TRACK = ['phonetic', 'phonetic_raw', 'translation', 'gender', 'pos', 'infl', 'level']

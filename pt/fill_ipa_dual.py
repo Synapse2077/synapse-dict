@@ -8,9 +8,11 @@
 import argparse, asyncio, json, re, shutil, sqlite3, time
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-pt.sqlite"
-ENV = HERE.parent / ".env"
+DB = paths.DB
+ENV = paths.ENV
 CHUNK, CONC = 20, 20
 
 IPA_SYS = """你是葡萄牙语语音专家。给你一批词（可能含外来词、地名、缩写、词缀、古拼写等），逐个给**两个**音位式 IPA：

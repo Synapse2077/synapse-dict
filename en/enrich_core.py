@@ -10,9 +10,11 @@ ECDICT 译文准确但偏老偏简:常缺现代常用义、偶有错译、个别
 import argparse, asyncio, json, re, shutil, sqlite3, random, time
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-DB = str(HERE / "synapse-dict-en.sqlite")
+DB = str(paths.DB)
 ENV = ROOT / ".env"
 CHUNK, CONC, TIMEOUT = 20, 100, 1800
 CORE = "(collins>0 OR oxford>0 OR frq>0 OR bnc>0 OR (tag IS NOT NULL AND TRIM(tag)<>''))"
@@ -152,7 +154,7 @@ def enrich(rows, env, batch=True):
 def do_pilot(n):
     # 过采样:优先取 acceptance 判过 bad/warn 的词,掺入 ok 的,看能否修好且不改坏
     verdict = {}
-    jp = HERE / "runs/acceptance_en.jsonl"
+    jp = paths.WORK / "runs/acceptance_en.jsonl"
     if jp.exists():
         for l in open(jp):
             o = json.loads(l); verdict[o["w"].lower()] = o["v"]
@@ -224,7 +226,7 @@ def do_run():
     env = load_env()
     metas, results, tok = enrich(rows, env, batch=True)
     conn = sqlite3.connect(DB)
-    ov = HERE / "ledgers/overrides.tsv"
+    ov = paths.WORK / "ledgers/overrides.tsv"
     fixed = same = skip = 0
     ov_lines = []
     for meta, res in zip(metas, results):

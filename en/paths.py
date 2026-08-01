@@ -1,18 +1,25 @@
+#!/usr/bin/env python3
+"""英语数据路径 —— **本语种数据位置的唯一真相源**。2026-08-01。
+
+═══ 为什么有这个文件 ═══
+2026-08-01 之前，数据（sqlite / dump / bak / tsv / jsonl）和代码混在同一个语种目录下，
+127 个脚本各自硬写 `HERE / "synapse-dict-xx.sqlite"` 这类字面量。后果是：
+  · 数据没有"户口" —— 哪来的、哪天下的、多少条、谁在用，全靠人记；
+  · 想挪动任何一份数据，就得改上百处；
+  · 一个目录里既有 1.9 GB 数据又有 35 个脚本，三个月后自己都读不懂。
+→ 数据全部迁到仓库根的 `data/`，代码目录下不再存放任何数据字节。
+   路径只在本文件声明一次，其余脚本 `import paths` 取用。
+
+清单见 `data/MANIFEST.md`。
+"""
 from pathlib import Path
 
-# en/paths.py：英语管线路径中枢。所有英语脚本 `from paths import ...`。
-# 2026-07-26 整理：英语从 data/ 归拢到 en/，与其他语种目录(es/ it/ …)结构一致。
-ROOT = Path(__file__).resolve().parent.parent  # 仓库根（en/ 在根下一层）
-EN_DIR = ROOT / "en"
+ROOT = Path(__file__).resolve().parent.parent      # 仓库根
+DATA = ROOT / "data"
 
-# 兼容旧变量名（原先指向 data/ 与 data/raw、data/intermediate，现全归 en/）
-DATA_DIR = EN_DIR
-RAW_DIR = EN_DIR
-INTERMEDIATE_DIR = EN_DIR
-
-DB_PATH = EN_DIR / "synapse-dict-en.sqlite"
-KAIKKI_JSONL_PATH = EN_DIR / "kaikki.org-dictionary-English.jsonl"
-ECDICT_PATH = EN_DIR / "ecdict.sqlite"
-STARDICT_CSV_PATH = EN_DIR / "stardict.csv"
-DOUBAO_TRANSLATION_PATH = EN_DIR / "doubao-translation.jsonl"
-MANUAL_TRANSLATION_PATH = EN_DIR / "manual-translation.jsonl"
+DB      = DATA / "db" / "synapse-dict-en.sqlite"                    # 成品库
+KK      = DATA / "dumps" / "kaikki.org-dictionary-English.jsonl"                 # 英文版 per-language 切片（建库源）
+WORK    = DATA / "work" / "en"                  # 过程产物：runs / 冲突表 / 模型输出
+BACKUPS = DATA / "backups"                          # 写库前的自动备份
+DUMPS   = DATA / "dumps"
+ENV     = ROOT / ".env"

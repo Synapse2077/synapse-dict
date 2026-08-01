@@ -14,9 +14,11 @@ from pathlib import Path
 
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB_PATH = HERE / "synapse-dict-es.sqlite"
-TODO = HERE / "b_ipa_todo.txt"
+DB_PATH = paths.DB
+TODO = paths.WORK / "b_ipa_todo.txt"
 
 
 def main(dry=False):

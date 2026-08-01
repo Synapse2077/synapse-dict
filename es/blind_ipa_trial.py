@@ -41,10 +41,12 @@ from pathlib import Path
 import kaikki_util
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
-ENV = HERE.parent / ".env"
-RUNS = HERE / "runs"
+DB = paths.DB
+ENV = paths.ENV
+RUNS = paths.WORK / "runs"
 
 # ═════════════════════════════════════════════════ 转写约定(原样给两家)
 # ⚠️ 从 b_ipa.py / spanish.ts 逐条提取的**行为**,不含对错评价、不含来历说明。

@@ -21,9 +21,11 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "ledgers/low_keep_promoted.tsv"
+DB = paths.DB
+LOG = paths.WORK / "ledgers/low_keep_promoted.tsv"
 
 
 def main():

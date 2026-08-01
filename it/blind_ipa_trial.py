@@ -38,10 +38,12 @@ from pathlib import Path
 import kaikki_util
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-it.sqlite"
-ENV = HERE.parent / ".env"
-RUNS = HERE / "runs"
+DB = paths.DB
+ENV = paths.ENV
+RUNS = paths.WORK / "runs"
 
 THINK = True
 CALL_TIMEOUT = 600          # 单次调用硬上限(秒)

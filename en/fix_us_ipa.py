@@ -34,9 +34,11 @@ import acceptance_en as A
 import sweep_core as S
 from judge_sample import ds_call
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "ledgers/us_ipa_fix.tsv"
+DB = paths.DB
+LOG = paths.WORK / "ledgers/us_ipa_fix.tsv"
 CHUNK = 25
 
 # 美式列里出现即为"没美式化"的英式独有标记

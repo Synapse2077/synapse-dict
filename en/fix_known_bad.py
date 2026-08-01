@@ -27,9 +27,11 @@ from pathlib import Path
 
 import acceptance_en as A
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "ledgers/known_bad_fix.tsv"
+DB = paths.DB
+LOG = paths.WORK / "ledgers/known_bad_fix.tsv"
 CHUNK = 10
 
 SOURCES = [

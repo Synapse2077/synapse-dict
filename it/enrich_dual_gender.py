@@ -22,8 +22,10 @@ from pathlib import Path
 
 import build  # 复用 meta_of_sense / gender_of_senses / POS_MAP / JSONL_PATH
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-it.sqlite"
+DB = paths.DB
 
 
 def _iter_it_entries():

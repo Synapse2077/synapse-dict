@@ -41,12 +41,14 @@ import sweep_core as S
 import buckets as B
 import rewrite_residue_anchored as R
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-BASE_GLOSS = HERE / "anchors/a1_base_gloss.json"       # 原形 → kaikki 首个实义(非元描述)
-LOG = HERE / "ledgers/a1_turbo_fix.tsv"
-WORD_IN_KAIKKI = HERE / "runs/a1_pseudo_kaikki.json"  # 词条本身在 kaikki 有条目 = 该复数形式真实存在
-PSEUDO = HERE / "ledgers/a1_pseudoplural_candidates.tsv"   # 伪复数删除候选清单(本脚本只落盘,不删)
+DB = paths.DB
+BASE_GLOSS = paths.WORK / "anchors/a1_base_gloss.json"       # 原形 → kaikki 首个实义(非元描述)
+LOG = paths.WORK / "ledgers/a1_turbo_fix.tsv"
+WORD_IN_KAIKKI = paths.WORK / "runs/a1_pseudo_kaikki.json"  # 词条本身在 kaikki 有条目 = 该复数形式真实存在
+PSEUDO = paths.WORK / "ledgers/a1_pseudoplural_candidates.tsv"   # 伪复数删除候选清单(本脚本只落盘,不删)
 CHUNK = 20
 MODEL_KEY = "DOUBAO_MODEL_BATCH_LITE"   # ⭐ 同批 1000 条实测 lite vs turbo:bad 只差约 1pt、token 用量相同
 HEDGE_AFTER = 1200   # ⚠️ 别用 300:batch 队列一堵就**全部**切 online pro,单价差一个数量级

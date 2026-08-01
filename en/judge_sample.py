@@ -30,8 +30,10 @@ import acceptance_en as A
 import buckets as B
 from verify_bucket import JUDGE_SYS
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
+DB = paths.DB
 CHUNK = 20
 SPACE = "COALESCE(qual,'') NOT IN ('core','fixed')"
 ARK_MODELS = {"mini": "DOUBAO_MODEL_ONLINE_MINI", "lite": "DOUBAO_MODEL_ONLINE_LITE",
@@ -191,7 +193,7 @@ def main():
 
     seeded = set()
     if a.eval_set:
-        ev = json.load(open(HERE / "runs/eval_set.json", encoding="utf-8"))
+        ev = json.load(open(paths.WORK / "runs/eval_set.json", encoding="utf-8"))
         seeded = {r["id"] for r in ev}
         a.n = len(seeded)          # 只判这批,不补随机样本
         print(f"[评测集] 只判人工标注的 {len(seeded)} 条", flush=True)

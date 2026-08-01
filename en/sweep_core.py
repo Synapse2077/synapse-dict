@@ -9,9 +9,11 @@ turbo batch 半价 + pro 超时兜底(同 enrich)。用法(仓库根):
 import argparse, asyncio, json, re, sqlite3, time
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-DB = str(HERE / "synapse-dict-en.sqlite")
+DB = str(paths.DB)
 ENV = ROOT / ".env"
 CHUNK, CONC = 20, 50   # ⚠️ CONC 曾用 100:大活儿(C6 4,854 批)一次性砸进 batch 队列会把它压堵,
                        #   前 100 个 worker 全部等满 hedge 后切 online pro(单价差一个量级),已止损重来。
@@ -156,7 +158,7 @@ def main(limit):
     metas, results, tok = asyncio.run(go())
     from collections import Counter
     tally = Counter()
-    outp = HERE / "runs/sweep_core.jsonl"
+    outp = paths.WORK / "runs/sweep_core.jsonl"
     with open(outp, "w", encoding="utf-8") as f:
         for meta, res in zip(metas, results):
             res = res or {}

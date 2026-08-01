@@ -18,9 +18,11 @@ from pathlib import Path
 
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-JSONL_PATH = HERE / "kaikki.org-dictionary-Italian.jsonl"
-DB_PATH = HERE / "synapse-dict-it.sqlite"
+JSONL_PATH = paths.KK
+DB_PATH = paths.DB
 ACC = set("àèéìíòóù")
 
 

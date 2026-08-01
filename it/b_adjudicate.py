@@ -18,12 +18,14 @@ import json
 import sqlite3
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB_PATH = HERE / "synapse-dict-it.sqlite"
-CONFLICT_FILE = HERE / "conflict_review.tsv"
-OUT_FILE = HERE / "adjudicate_out.jsonl"       # 每批一行 {field:{rid:vote}}，续跑
-DECISIONS = HERE / "decisions.tsv"
-ENV_PATH = HERE.parent / ".env"
+DB_PATH = paths.DB
+CONFLICT_FILE = paths.WORK / "conflict_review.tsv"
+OUT_FILE = paths.WORK / "adjudicate_out.jsonl"       # 每批一行 {field:{rid:vote}}，续跑
+DECISIONS = paths.WORK / "decisions.tsv"
+ENV_PATH = paths.ENV
 FIELDS = ("gender", "aux", "plural")           # 只裁离散词法字段；ipa 不投
 CHUNK = 50
 CONC = 40

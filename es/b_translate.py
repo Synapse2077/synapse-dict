@@ -26,12 +26,14 @@ import re
 import sqlite3
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
 
 # ============== CONFIG（可改）==============
-DB_PATH = HERE / "synapse-dict-es.sqlite"
-OUT_DIR = HERE / "b_out"
-ENV_PATH = HERE.parent / ".env"
+DB_PATH = paths.DB
+OUT_DIR = paths.WORK / "b_out"
+ENV_PATH = paths.ENV
 MODE = "batch"          # "batch"(ep-bi) 或 "online"(ep-m)。batch 高并发不慢
 CHUNK = 50             # 每批词数（不设 max_tokens，用模型默认上限；超了自动拆半）
 CONC = 50              # 并发批数（AsyncArk 异步，提速关键）
@@ -80,7 +82,7 @@ IPA_PROMPT = """你是西班牙语语音专家。我给你一批词（可能含�
 
 def ipatodo():
     """给 b_ipa_todo.txt 里规则搞不定的词（外文字符/古拼写）做 ipa-only 豆包补。"""
-    todo = HERE / "b_ipa_todo.txt"
+    todo = paths.WORK / "b_ipa_todo.txt"
     words = [w.strip() for w in todo.read_text(encoding="utf-8").splitlines() if w.strip()]
     print(f"ipa-todo {len(words)} 词，MODE={MODE}")
     endpoint, model = get_client_model()

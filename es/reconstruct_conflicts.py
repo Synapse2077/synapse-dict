@@ -14,10 +14,12 @@ import tarfile
 from collections import Counter
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
-BOUT = HERE / "b_out.tar.gz"
-OUT = HERE / "conflict_review.tsv"
+DB = paths.DB
+BOUT = paths.WORK / "b_out.tar.gz"
+OUT = paths.WORK / "conflict_review.tsv"
 
 
 def load_bout():

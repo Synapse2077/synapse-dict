@@ -27,10 +27,12 @@ import acceptance_en as A
 import sweep_core as S
 import buckets as B
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-GLOSS = HERE / "anchors/c3_kaikki_gloss.json"
-LOG = HERE / "ledgers/c3_abbr_fix.tsv"
+DB = paths.DB
+GLOSS = paths.WORK / "anchors/c3_kaikki_gloss.json"
+LOG = paths.WORK / "ledgers/c3_abbr_fix.tsv"
 CHUNK = 20
 
 SYS = """你是英汉词典编纂专家。给你一批英语**缩写/首字母词**,每条含:

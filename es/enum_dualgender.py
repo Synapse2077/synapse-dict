@@ -9,8 +9,10 @@ from pathlib import Path
 
 import enrich  # 复用 extract_noun / JSONL_PATH
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
+DB = paths.DB
 
 # pass: 累积每词性别（原子 m/f）
 genders = {}

@@ -28,9 +28,11 @@ from pathlib import Path
 
 import kaikki_util
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
-KK = HERE / "kaikki.org-dictionary-Spanish.jsonl"
+DB = paths.DB
+KK = paths.KK
 
 
 def db_pointers():

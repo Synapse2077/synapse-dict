@@ -11,9 +11,11 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import enrich_core as ec
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = str(HERE / "synapse-dict-en.sqlite")
-FIXSET = HERE / "runs/sweep_core_fixset.jsonl"
+DB = str(paths.DB)
+FIXSET = paths.WORK / "runs/sweep_core_fixset.jsonl"
 CJK = re.compile(r'[一-鿿]')
 
 
@@ -33,7 +35,7 @@ def main():
     metas, results, tok = ec.enrich(rows, env, batch=True)
 
     conn = sqlite3.connect(DB)
-    ov = HERE / "ledgers/overrides.tsv"
+    ov = paths.WORK / "ledgers/overrides.tsv"
     fixed = same = skip = 0
     ov_lines = []
     for meta, res in zip(metas, results):

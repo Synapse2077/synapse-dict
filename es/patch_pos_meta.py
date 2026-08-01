@@ -26,9 +26,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build import is_infl_sense, base_of, POS_MAP, ABBR_TAGS
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB_PATH = HERE / "synapse-dict-es.sqlite"
-JSONL_PATH = HERE / "kaikki.org-dictionary-Spanish.jsonl"
+DB_PATH = paths.DB
+JSONL_PATH = paths.KK
 AFFIX = ("suffix", "prefix", "infix", "interfix")
 
 

@@ -20,11 +20,13 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-de.sqlite"
-BOUT = HERE / "b_out.jsonl"       # de 是单文件 jsonl（每行一个 batch dict，键=rid），非 it 的 chunk 目录
-ENV = HERE.parent / ".env"
-OUT = HERE / "quality_study.tsv"
+DB = paths.DB
+BOUT = paths.WORK / "b_out.jsonl"       # de 是单文件 jsonl（每行一个 batch dict，键=rid），非 it 的 chunk 目录
+ENV = paths.ENV
+OUT = paths.WORK / "quality_study.tsv"
 CHUNK, CONC = 20, 20
 
 SYS = """你是资深德语→简体中文词典审校专家。给你一批词条，每条含：词形 w、词性 pos、英文 gloss（消歧参考，可能有误）、中文译文数组 zh。

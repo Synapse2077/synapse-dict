@@ -27,8 +27,10 @@ from pathlib import Path
 
 import buckets as B
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
+DB = paths.DB
 
 # 本项目改动过的留痕(id 在第 1 列;reverted 类要扣除)
 FILL_LOGS = ["ledgers/a1a_fill.tsv", "ledgers/a1d_fill.tsv", "ledgers/a1_rewrite.tsv",
@@ -65,7 +67,7 @@ def main():
     conn = sqlite3.connect(DB)
     fixed = ids_of(FILL_LOGS) - ids_of(REV_LOGS)
     judged = set()
-    p = HERE / "runs/sweep_a1.jsonl"
+    p = paths.WORK / "runs/sweep_a1.jsonl"
     if p.exists():
         import json
         for ln in open(p, encoding="utf-8"):

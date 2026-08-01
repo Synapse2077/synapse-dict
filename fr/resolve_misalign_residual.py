@@ -11,9 +11,11 @@ chunk 并发；要求 zh 数组长度严格==gloss 数组，对齐成功写库�
 import argparse, asyncio, json, re, shutil, sqlite3, time
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-fr.sqlite"
-ENV = HERE.parent / ".env"
+DB = paths.DB
+ENV = paths.ENV
 CHUNK, CONC = 20, 20
 
 SYS = """你是法语→简体中文词典翻译专家。给你一批法语词条，每条含词形 w、词性 pos、英文释义数组 gloss（每个元素是一个义项）。

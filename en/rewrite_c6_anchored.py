@@ -37,10 +37,12 @@ import sweep_core as S
 import buckets as B
 import rewrite_residue_anchored as R
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-GLOSS = HERE / "anchors/residue_kaikki_gloss.json"      # 词形 → kaikki 首义
-ALLSENSE = HERE / "anchors/c56_all_senses.json"         # 词形 → **全部** sense(去元描述)
+DB = paths.DB
+GLOSS = paths.WORK / "anchors/residue_kaikki_gloss.json"      # 词形 → kaikki 首义
+ALLSENSE = paths.WORK / "anchors/c56_all_senses.json"         # 词形 → **全部** sense(去元描述)
 CHUNK = 20
 HEDGE_AFTER = 1200   # ⚠️ 别用 300:batch 队列一堵会每批都切 online pro,单价差一个量级
 

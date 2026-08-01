@@ -24,10 +24,12 @@ import re
 import sqlite3
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB_PATH = HERE / "synapse-dict-es.sqlite"
-OUT_FILE = HERE / "b_enrich_out.jsonl"   # 单文件续跑：每批一行 JSON，不再一 chunk 一文件
-ENV_PATH = HERE.parent / ".env"
+DB_PATH = paths.DB
+OUT_FILE = paths.WORK / "b_enrich_out.jsonl"   # 单文件续跑：每批一行 JSON，不再一 chunk 一文件
+ENV_PATH = paths.ENV
 MODE = "batch"
 CHUNK = 60
 CONC = 50

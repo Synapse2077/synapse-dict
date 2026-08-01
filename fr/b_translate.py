@@ -26,11 +26,13 @@ import re
 import sqlite3
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB_PATH = HERE / "synapse-dict-fr.sqlite"
-OUT_FILE = HERE / "b_out.jsonl"   # 单文件续跑：每批一行 JSON，不再一 chunk 一文件
-CONFLICT_FILE = HERE / "conflict_review.tsv"   # merge 时 kaikki↔豆包 冲突留痕，供人工复核
-ENV_PATH = HERE.parent / ".env"
+DB_PATH = paths.DB
+OUT_FILE = paths.WORK / "b_out.jsonl"   # 单文件续跑：每批一行 JSON，不再一 chunk 一文件
+CONFLICT_FILE = paths.WORK / "conflict_review.tsv"   # merge 时 kaikki↔豆包 冲突留痕，供人工复核
+ENV_PATH = paths.ENV
 MODE = "batch"          # batch(ep-bi 便宜) / online(ep-m 快，测试)
 CHUNK = 50
 CONC = 50

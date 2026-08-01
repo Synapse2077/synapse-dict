@@ -24,9 +24,11 @@ import sqlite3
 from collections import Counter
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-JSONL_PATH = HERE / "kaikki.org-dictionary-Spanish.jsonl"
-DEFAULT_DB = HERE / "synapse-dict-es.new.sqlite"
+JSONL_PATH = paths.KK
+DEFAULT_DB = paths.DB
 
 ES_ALPHA = "A-Za-záéíóúñüÁÉÍÓÚÑÜ"
 WORDRE = f"[{ES_ALPHA}][{ES_ALPHA}\\-]*"

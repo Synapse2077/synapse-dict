@@ -21,9 +21,11 @@ from pathlib import Path
 import acceptance_en as A
 import sweep_core as S
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-OUT = HERE / "runs/sweep_a1.jsonl"
+DB = paths.DB
+OUT = paths.WORK / "runs/sweep_a1.jsonl"
 CHUNK = 20
 
 JUDGE_SYS = """你是英汉词典质检专家。给你一批英语词条,每条含 word(英语词)、zh(中文译文)。
@@ -129,7 +131,7 @@ def main():
     shutil.copy2(DB, DB.with_name(f"synapse-dict-en.pre-a1sweep-{tag}.bak"))
     conn = sqlite3.connect(DB)
     # 追加进禁止重填名单(a1a_reverted.tsv 同时是 fix_a1a.py 的 blocklist)
-    with open(HERE / "ledgers/a1a_reverted.tsv", "a", encoding="utf-8") as f:
+    with open(paths.WORK / "ledgers/a1a_reverted.tsv", "a", encoding="utf-8") as f:
         for rid, w, before, note in bad:
             conn.execute("UPDATE stardict SET translation=? WHERE id=?", (before, rid))
             f.write("\t".join([str(rid), w, "", before.replace("\n", "\\n"), "J_全量judge判bad"]) + "\n")

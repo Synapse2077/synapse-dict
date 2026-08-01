@@ -33,10 +33,12 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "ledgers/a1a_fill.tsv"
-OUT = HERE / "ledgers/a1a_reverted.tsv"
+DB = paths.DB
+LOG = paths.WORK / "ledgers/a1a_fill.tsv"
+OUT = paths.WORK / "ledgers/a1a_reverted.tsv"
 
 PROP = re.compile(r"人名|地名|姓氏|《|城市|首府|州名|国家|品牌")
 ABBR = re.compile(r"^\s*(abbr\.|\[?=)")

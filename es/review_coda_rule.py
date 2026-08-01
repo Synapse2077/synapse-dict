@@ -39,11 +39,13 @@ import httpx
 
 import ipa_norm as N
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
-EDITION = HERE / "es-edition-extract.jsonl.gz"
-ENV = HERE.parent / ".env"
-OUT = HERE / "runs" / "coda_rule_review.json"
+DB = paths.DB
+EDITION = paths.EDITION   # 见 dumps/README.md
+ENV = paths.ENV
+OUT = paths.WORK / "runs" / "coda_rule_review.json"
 
 RULE_DOC = """【本词典的西语音标约定】
 1. 只存音位式，不存严式；不标音节点、不标长音符、不带连结弧。
@@ -56,16 +58,22 @@ RULE_DOC = """【本词典的西语音标约定】
 输入：词形 word、已完成第 1、2 条归一化的音位式串 s。
 ① 从**词形拼写**取出处于 coda 的塞音字母序列，按出现顺序，映射到目标音位：
    p→p, t→t, c/k/q→k, b/v→b, d→d, g→ɡ
-   "处于 coda" 的判定：该字母后面紧跟一个辅音字母，且这个辅音**不是** l、r、h。
-   （排除 l/r：西语 br/pl/tr/kl 是合法音节起始丛，libro=li.bro；
-     排除 h：ch 是二合字母 /t͡ʃ/，其余位置 h 不发音）
+   判定：该字母后面紧跟一个辅音字母，且这个辅音**不是 h**
+   （h 要跳过：`ch` 是二合字母 /t͡ʃ/，其余位置 h 不发音）。
 ② 从**音位式**取出处于 coda 的塞音（p b t d k ɡ）位置，按出现顺序。
-   "处于 coda" 的判定：该音段后面紧跟的音段**不是**元音 a e i o u、
-   不是滑音 j w、不是流音 l ɾ r ʎ、不是 ʃ ʒ（塞音+ʃ 是塞擦音 t͡ʃ，不是 coda）。
+   判定：该音段后面紧跟的音段**不是**元音 a e i o u、不是滑音 j w、
+   不是 ʃ ʒ（塞音+ʃ 是塞擦音 t͡ʃ，不是 coda）。
 ③ **两个序列长度相等才动手**，逐位把音位式里的塞音替换成词形给出的目标音位；
    长度不等则**整条不动**（x→/ks/ 一对多、缩写按字母名读、静音字母等情况）。
+④ 改完若**产生了原本没有的叠塞音**（西语音系不允许 /pp tt kk/），整条不动
+   —— 外来词 vedette / yuppie / rockers 的双写字母会撞上本规则。
 
-【全量实测】76.3 万行中该规则改动 20,518 行；两侧长度不等而跳过的 2,985 行。"""
+【全量实测】76.3 万行中该规则改动 19,967 行；两侧长度不等而跳过 2,985 行、
+因叠塞音而跳过 664 行。
+
+⚠️ 本文档已更新到**当前**规则。2026-08-01 那次评审送出的是更早一版，
+   当时 ① 还额外排除了流音 l/r —— 豆包正是据此指出 `tl`/`dl` 族被漏掉，
+   回西语版 dump 核实后已采纳并去掉了该排除。"""
 
 SYS = """你是西班牙语音系与词典编纂专家。下面给你一条本词典正在使用的音标归一化规则，
 以及它在真实数据上的一批输出（含它改过的、它故意跳过的、以及它不涉及的）。

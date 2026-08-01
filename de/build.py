@@ -35,9 +35,11 @@ from pathlib import Path
 
 from infl_compose import compose, COMPOSE_TAGS
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-JSONL_PATH = HERE / "kaikki.org-dictionary-German.jsonl"
-DB_PATH = HERE / "synapse-dict-de.sqlite"
+JSONL_PATH = paths.KK
+DB_PATH = paths.DB
 
 POS_MAP = {
     "noun": "n", "verb": "v", "adj": "adj", "adv": "adv",
@@ -471,7 +473,7 @@ def main(dump_infl=False):
                             dropped[tg] += 1
 
     if dump_infl:
-        out = HERE / "infl_combos.txt"
+        out = paths.WORK / "infl_combos.txt"
         with open(out, "w", encoding="utf-8") as fo:
             for combo, n in infl_combos.most_common():
                 fo.write(f"{n:7}  {compose(list(combo))!r:40}  {'+'.join(combo)}\n")

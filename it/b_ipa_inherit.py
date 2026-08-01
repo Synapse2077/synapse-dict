@@ -28,9 +28,11 @@ import sqlite3
 import unicodedata
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-JSONL_PATH = HERE / "kaikki.org-dictionary-Italian.jsonl"
-DB_PATH = HERE / "synapse-dict-it.sqlite"
+JSONL_PATH = paths.KK
+DB_PATH = paths.DB
 
 VOWELS = set("aeiouɛɔ")
 # 重读韵核为 e类/o类 时，抓 (ˈ 之后的声母串, 韵核字母)

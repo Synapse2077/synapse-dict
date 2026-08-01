@@ -20,11 +20,13 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-it.sqlite"
-BOUT = HERE / "b_out"
-ENV = HERE.parent / ".env"
-OUT = HERE / "quality_study.tsv"
+DB = paths.DB
+BOUT = paths.WORK / "b_out"
+ENV = paths.ENV
+OUT = paths.WORK / "quality_study.tsv"
 CHUNK, CONC = 20, 20
 
 SYS = """你是资深意大利语→简体中文词典审校专家。给你一批词条，每条含：词形 w、词性 pos、英文 gloss（消歧参考，可能有误）、中文译文数组 zh。

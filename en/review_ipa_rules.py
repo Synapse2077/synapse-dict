@@ -14,6 +14,8 @@ from pathlib import Path
 import acceptance_en as A
 from judge_sample import ds_call
 
+import paths
+
 HERE = Path(__file__).resolve().parent
 RULES = HERE.parent / "packages/dict-core/src/index.ts"
 
@@ -102,7 +104,7 @@ def main():
     print(f"待评审:{len(code)} 字符,{code.count('.replace')} 条 replace 规则")
     env = A.load_env()
     ark, ds = asyncio.run(_both(env, code))
-    out = HERE / "runs/ipa_rule_review.json"
+    out = paths.WORK / "runs/ipa_rule_review.json"
     json.dump({"ark_pro": ark, "ds_v4_pro": ds}, open(out, "w", encoding="utf-8"),
               ensure_ascii=False, indent=1)
     print(f"原始回复已存 → {out.name}")     # ⚠️ 别只 print:上一轮被 head 截断,重跑要再花钱

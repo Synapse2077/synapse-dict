@@ -23,10 +23,12 @@ from pathlib import Path
 
 import fix_a1a_guard as G
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "ledgers/a1d_fill.tsv"
-REVLOG = HERE / "ledgers/a1d_reverted.tsv"   # 禁止重填名单(pro 判 bad 撤回过的,别再填回去)
+DB = paths.DB
+LOG = paths.WORK / "ledgers/a1d_fill.tsv"
+REVLOG = paths.WORK / "ledgers/a1d_reverted.tsv"   # 禁止重填名单(pro 判 bad 撤回过的,别再填回去)
 
 CORE = ("(COALESCE(collins,0)>0 OR COALESCE(oxford,0)>0 OR COALESCE(frq,0)>0 "
         "OR COALESCE(bnc,0)>0 OR COALESCE(TRIM(tag),'')<>'')")

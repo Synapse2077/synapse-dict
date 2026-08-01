@@ -18,8 +18,10 @@ import sqlite3
 import time
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
+DB = paths.DB
 
 
 def meta_is_mf(meta_json):

@@ -18,8 +18,10 @@ from pathlib import Path
 
 import acceptance_en as A  # 复用 load_env/run_batches
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-LOG = HERE / "ledgers/a1a_fill.tsv"
+LOG = paths.WORK / "ledgers/a1a_fill.tsv"
 CHUNK = 20
 
 JUDGE_SYS = """你是英汉词典质检专家。给你一批英语词条,每条含 word(英语词)、zh(该词条的中文译文)。
@@ -33,8 +35,8 @@ JUDGE_SYS = """你是英汉词典质检专家。给你一批英语词条,每条�
 严格输出 JSON {"1":{"v":"ok"},"2":{"v":"bad","note":"..."},...},键与输入一致,无多余文字。"""
 
 
-REV = HERE / "ledgers/a1a_reverted.tsv"
-PREV = HERE / "runs/verify_a1a.jsonl"
+REV = paths.WORK / "ledgers/a1a_reverted.tsv"
+PREV = paths.WORK / "runs/verify_a1a.jsonl"
 
 
 def load_rows(kept_only, fresh):

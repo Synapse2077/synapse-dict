@@ -46,10 +46,12 @@ import argparse, asyncio, json, random, re, sqlite3, time
 from collections import Counter
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
-ENV = HERE.parent / ".env"
-RUNS = HERE / "runs"
+DB = paths.DB
+ENV = paths.ENV
+RUNS = paths.WORK / "runs"
 MODEL = "deepseek-v4-pro"
 THINK = True      # 🔴 见文件头负控表,关掉会让判官摆烂返回 {}。除非重跑负控证明没问题,不要改。
 
@@ -484,7 +486,7 @@ def kaikki_ipa(words):
     在本库刻意对齐 kaikki 的地方(coda 浊化、短语次重音)必然误报。2026-07-31 四次误报的共同根因。"""
     import re as _re
     kk, t0 = {}, time.time()
-    with open(HERE / "kaikki.org-dictionary-Spanish.jsonl", encoding="utf-8") as f:
+    with open(paths.KK, encoding="utf-8") as f:
         for ln in f:
             m = _re.search(r'"word":\s*"((?:[^"\\]|\\.)*)"', ln)
             if not m or m.group(1) not in words or m.group(1) in kk:

@@ -28,10 +28,12 @@ from pathlib import Path
 import acceptance_en as A
 import sweep_core as S
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-REV = HERE / "ledgers/a1d_reverted.tsv"
-LOG = HERE / "ledgers/derivational_fix.tsv"
+DB = paths.DB
+REV = paths.WORK / "ledgers/a1d_reverted.tsv"
+LOG = paths.WORK / "ledgers/derivational_fix.tsv"
 CHUNK = 20
 
 PAT = re.compile(r"([A-Za-z][\w'’\- ]*?)\s*的(变形|变化形式)")

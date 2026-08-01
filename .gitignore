@@ -3,53 +3,37 @@ dist/
 .DS_Store
 .env
 .env.local
-# Data directory (too large for git)
-data/
 
-# 多语言词典大文件（GitHub 放不下；源 dump 靠下载、成品 sqlite 靠 scp 上线）
-# 每语言目录 es/ fr/ it/ pt/ no/ 只把脚本+README 进 git，数据不进。
-# 用宽模式，别再按具体文件名写死（旧规则漏了 .sqlite.*.bak / b_out.jsonl / *_out.jsonl）。
-# 成品库 + 所有派生：.sqlite / .sqlite.premerge.bak / .sqlite-wal …
+# ═══════════════════════════════════════════════════════════════════════
+# 数据（2026-08-01 起全部集中在 data/）
+# ═══════════════════════════════════════════════════════════════════════
+# 此前数据散在各语种目录里，忽略规则得按扩展名一条条写，**每次都漏**：
+#   · 旧规则漏了 .sqlite.*.bak / b_out.jsonl / *_out.jsonl；
+#   · `*.jsonl` 拦不住 `.jsonl.gz`，五个语言版整包共 1,145 MB 一度完全暴露；
+#   · `*.bak` 拦不住 SQLite 连带产生的 xxx.bak-wal / xxx.bak-shm。
+# 数据集中之后，一条规则解决：**整个 data/ 不进 git，只放行清单**。
+# 源数据靠下载、产物靠脚本重生成、备份靠本地保管（⚠️ data/work/*/ledgers 是回滚账本，
+# 本地绝不能删，只是不该进版本库）。
+# ⚠️ 必须写成 `data/*` 而非 `data/`：父目录整个被排除时，git 无法再用 `!` 放行子文件。
+data/*
+!data/MANIFEST.md
+
+# tsc 若不带 outDir 会把 .js/.d.ts 吐在 src 旁边（2026-08-01 手滑跑过一次）
+packages/*/src/*.js
+packages/*/src/*.d.ts
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 兜底：万一有数据文件漏在代码目录里，也别进 git
 *.sqlite*
-# 一切备份。用 *.bak* 而非 *.bak：SQLite 备份会连带 xxx.bak-wal / xxx.bak-shm，
-# 这俩既不以 .bak 结尾、名字里也没有 .sqlite，两条旧规则正好都擦肩而过。
 *.bak*
-# 本仓无任何该进 git 的 jsonl：源 dump / 豆包输出(b_out/b_enrich_out) / 裁决输出
 *.jsonl
-# ⚠️ 2026-08-01 补：`*.jsonl` 拦不住压缩包。五个语言版 dump 叫 `xx-edition-extract.jsonl.gz`
-#    （共 1,145 MB），当时完全暴露在 git 面前，`git add -A` 会直接吞进去。
-#    这正是本文件上方注释警告过的那类漏洞——按扩展名写死，压缩一层就漏。
-#    压缩包一律不进 git：源数据靠下载，产物靠脚本重生成。
+*.csv
+*.tsv
 *.gz
 *.zip
 *.tar
 *.xz
-*.bz2
-*.7z
-# 大源 dump csv（英语 stardict.csv 等，原先靠 data/ 忽略，归拢 en/ 后单列）
-*.csv
-# 冲突复核/裁决产物（conflict_review / decisions），可由 b_translate.py --merge 重新生成
-*.tsv
-b_out/
-b_out.tar.gz
-# 跑批日志（sweep/rewrite 的 stdout 留痕），过程痕迹不进 git
 *.log
-# en/ 的 kaikki 提取物、候选池、抽验样本（约 156MB，前四个就占 128MB）。
-# 全部可由 en/ 下脚本从 kaikki dump 重新生成。en/ 是 2026-07-26 才从 data/ 归拢过来的，
-# 旧的 data/ 整目录忽略随之失效，这里补上。
-# 只挡未跟踪文件：已在库的 en/prune_llm_ids.json、en/rejudge.json 不受影响。
-en/*.json
-
-# Python 缓存（当年 git add -A 误提交了 __pycache__/*.pyc，一并忽略）
-__pycache__/
-*.pyc
-
-# 跑批产出与证据链：体积大、每轮都变，留在本地不进 git。
-# ⚠️ ledgers/ 是回滚账本，本地绝不能删（见 en/README.md），只是不该进版本库。
-# 2026-07-31 由 en/ 专用改为**通配所有语种目录**：es/ 当天长出 es/runs/ 时漏网，
-# 而 fr/ it/ pt/ de/ 迟早同样会有 —— 按语种写死就得每次补一遍。
-*/runs/
-*/ledgers/
-*/logs/
-*/backups/
-*/anchors/

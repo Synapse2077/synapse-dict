@@ -31,10 +31,12 @@ from pathlib import Path
 
 import fix_a1a_guard as G  # 七道闸:A专名 B缩写 C形态 D词头大写 E全大写 F裸音译 G变形之上再造变形
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "ledgers/a1a_fill.tsv"
-REVLOG = HERE / "ledgers/a1a_reverted.tsv"
+DB = paths.DB
+LOG = paths.WORK / "ledgers/a1a_fill.tsv"
+REVLOG = paths.WORK / "ledgers/a1a_reverted.tsv"
 
 CORE = ("(COALESCE(collins,0)>0 OR COALESCE(oxford,0)>0 OR COALESCE(frq,0)>0 "
         "OR COALESCE(bnc,0)>0 OR COALESCE(TRIM(tag),'')<>'')")

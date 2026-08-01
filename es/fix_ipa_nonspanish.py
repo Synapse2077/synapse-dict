@@ -30,8 +30,10 @@ import argparse, re, shutil, sqlite3, time
 from collections import Counter
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
+DB = paths.DB
 
 # ─────────────────────────────────────────── 族定义
 # 每族: (说明, 命中判据 lambda, 改写 lambda(word, ipa) -> 新 ipa)

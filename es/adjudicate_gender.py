@@ -21,11 +21,13 @@ from pathlib import Path
 
 from fix_misalign import load_env, run_batches   # 复用鲁棒批处理
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
-CONFLICT = HERE / "conflict_review.tsv"
-OVERRIDES = HERE / "overrides.tsv"
-DECISIONS = HERE / "gender_decisions.tsv"
+DB = paths.DB
+CONFLICT = paths.WORK / "conflict_review.tsv"
+OVERRIDES = paths.WORK / "overrides.tsv"
+DECISIONS = paths.WORK / "gender_decisions.tsv"
 CHUNK, CONC = 30, 100
 
 VOTE_SYS = """你是西班牙语词典专家。给你一批西语名词（含中文词义消歧）。判断每个词的语法性别，只回：

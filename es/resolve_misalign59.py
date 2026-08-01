@@ -12,9 +12,11 @@
 import argparse, asyncio, json, re, shutil, sqlite3, time
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
-ENV = HERE.parent / ".env"
+DB = paths.DB
+ENV = paths.ENV
 
 SYS = """你是西班牙语→简体中文词典翻译专家。给你一批西语词条，每条含词形 w、词性 pos、英文释义数组 gloss（每个元素是一个义项）。
 逐义项翻译成地道简体中文，返回 "zh" 数组：

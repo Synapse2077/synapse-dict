@@ -38,8 +38,10 @@ from pathlib import Path
 
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
+DB = paths.DB
 
 # 字符级替换表。**顺序是判据的一部分**,双字母组合必须排在单字母前面:
 #   ch → t͡ʃ 若不先做,`fecha` 会变成 ˈfekha(c→k 之后剩个孤零零的 h);

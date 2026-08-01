@@ -14,8 +14,10 @@ import json
 import re
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-KK = HERE / "kaikki.org-dictionary-Portuguese.jsonl"
+KK = paths.KK
 
 
 def iter_entries(words=None):
@@ -51,7 +53,12 @@ def iter_entries(words=None):
 #   2026-08-01 曾**只取第一个**，据此断言"巴葡补不上"，是错的 —— 双列各能补约 17.9 万行。
 # ═══════════════════════════════════════════════════════════════════════
 
-EDITION = HERE / "pt-edition-extract.jsonl.gz"      # 语言版 dump（gz）
+EDITION = paths.EDITION
+# ⚠️ 这个包是**该社区用该语言写的多语种词典整包**，不是「该语言的词典」。
+#    es 版 100 万条覆盖 853 种语言、本语言只占 84.5%；fr 版 743 万条里法语只占 28.4%。
+#    所以它放在 dumps/ 而不是某个语种目录下 —— 目录结构必须说实话；
+#    2026-08-01 之前它叫 `<lang>/<lang>-edition-extract.jsonl.gz`，那个位置本身就在误导。
+#    用 iter_edition() 读，务必按 entry["lang_code"] 过滤。
 
 # 三种定界符都要认：it/pt `/…/`、es/de `[…]`、fr `\…\`
 _IPA_DELIM = re.compile(r"^\s*[\\/\[]([^\\/\]]+)[\\/\]]")

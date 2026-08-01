@@ -31,10 +31,12 @@ from pathlib import Path
 import buckets as B
 import fix_a1a as F
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-GLOSS = HERE / "anchors/b1_kaikki_gloss.json"
-LOG = HERE / "ledgers/b1_kaikki_fill.tsv"
+DB = paths.DB
+GLOSS = paths.WORK / "anchors/b1_kaikki_gloss.json"
+LOG = paths.WORK / "ledgers/b1_kaikki_fill.tsv"
 
 # ⚠️ 捕获组 [\w'’\- ]* 必须含空格与连字符,否则多词原形被截断(bum wine → bum)
 KINDS = [

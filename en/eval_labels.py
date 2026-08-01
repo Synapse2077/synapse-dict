@@ -21,9 +21,11 @@ import argparse, json, sqlite3
 from collections import Counter
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-OUT = HERE / "runs/eval_set.json"
+DB = paths.DB
+OUT = paths.WORK / "runs/eval_set.json"
 
 # (word, 我的判决, split, 理由)
 LABELS = [

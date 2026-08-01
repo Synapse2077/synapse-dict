@@ -26,8 +26,10 @@ from pathlib import Path
 import kaikki_util
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-it.sqlite"
+DB = paths.DB
 ORDER = ["kaikki原生", "规则生成", "kaikki有但被改写", "规则算得出但不同", "豆包/未知"]
 
 

@@ -17,9 +17,11 @@ import sqlite3
 import time
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-de.sqlite"
-ENV = HERE.parent / ".env"
+DB = paths.DB
+ENV = paths.ENV
 CHUNK, CONC = 15, 100      # batch 喜欢高并发；chunk 小些降截断风险
 TIMEOUT = 1800
 

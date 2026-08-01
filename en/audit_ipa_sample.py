@@ -23,8 +23,10 @@ import acceptance_en as A
 from ipa_normalize import normalize
 from judge_sample import ds_call, ark_call
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
+DB = paths.DB
 CHUNK = 25
 
 SYS = """你是英语语音学 + 词典编纂双背景的专家。审核一个**中文用户划词弹窗**里实际显示的音标。

@@ -18,8 +18,10 @@ from pathlib import Path
 
 import build  # 复用 extract_noun / compose_noun_variants / JSONL_PATH
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-de.sqlite"
+DB = paths.DB
 
 
 def collect_noun_forms():

@@ -26,10 +26,12 @@ from pathlib import Path
 import acceptance_en as A
 import sweep_core as S
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-FILL = HERE / "ledgers/b1_kaikki_fill.tsv"
-LOG = HERE / "ledgers/b1_rewrite.tsv"
+DB = paths.DB
+FILL = paths.WORK / "ledgers/b1_kaikki_fill.tsv"
+LOG = paths.WORK / "ledgers/b1_rewrite.tsv"
 CHUNK = 10
 
 VERB = ("的现在分词", "的动名词", "的过去分词", "的过去式", "的第三人称单数")

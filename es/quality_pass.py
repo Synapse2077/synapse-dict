@@ -21,10 +21,12 @@ import sqlite3
 from collections import Counter
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB_PATH = HERE / "synapse-dict-es.sqlite"
-ENV_PATH = HERE.parent / ".env"
-QA_REPORT = HERE / "qa_report.tsv"
+DB_PATH = paths.DB
+ENV_PATH = paths.ENV
+QA_REPORT = paths.WORK / "qa_report.tsv"
 CHUNK = 20
 CONC = 20
 TEMP = 0.1

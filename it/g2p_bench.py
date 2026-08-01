@@ -31,8 +31,10 @@ from pathlib import Path
 import kaikki_util
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-it.sqlite"
+DB = paths.DB
 VOWELS = set("aeiouɛɔ")
 
 

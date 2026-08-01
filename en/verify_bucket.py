@@ -22,8 +22,10 @@ import acceptance_en as A
 import sweep_core as S
 import buckets as B
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
+DB = paths.DB
 CHUNK = 20
 
 JUDGE_SYS = """你是英汉词典质检专家。给你一批英语词条,每条含 word(英语词或短语)、zh(中文译文)。

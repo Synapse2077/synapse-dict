@@ -10,9 +10,11 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import enrich_core as ec
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = str(HERE / "synapse-dict-en.sqlite")
-IDS = HERE / "runs/prune_llm_ids.json"
+DB = str(paths.DB)
+IDS = paths.WORK / "runs/prune_llm_ids.json"
 CJK = re.compile(r'[一-鿿]')
 
 PRUNE_SYS = """你是英汉词典编辑,负责给词条**删繁纠错**(不是补充)。给你一批英语词条,每条含 word、pos、def(英文释义,可能空)、zh(现有中文译文,混进了不属于该词的错误或冗余)。请**删掉**混入项,只留该词真正、正确的义项:
@@ -59,7 +61,7 @@ def main():
     metas, results, tok = enrich_prune(rows, env)
 
     conn = sqlite3.connect(DB)
-    ov = HERE / "ledgers/overrides.tsv"
+    ov = paths.WORK / "ledgers/overrides.tsv"
     fixed = same = skip = 0
     ov_lines = []
     for meta, res in zip(metas, results):

@@ -26,8 +26,10 @@ import acceptance_en as A
 import sweep_core as S
 import buckets as B
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
+DB = paths.DB
 CHUNK = 20
 
 # ⭐ 词频分层。frq/bnc 是**排名**(the=1,最大 47062),不是计数 —— 直接拿来当权重是错的。

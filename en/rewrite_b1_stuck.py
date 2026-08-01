@@ -35,10 +35,12 @@ from pathlib import Path
 import acceptance_en as A
 import sweep_core as S
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-POOL = HERE / "runs/b1_stuck_pool.json"
-LOG = HERE / "ledgers/b1_stuck_fill.tsv"
+DB = paths.DB
+POOL = paths.WORK / "runs/b1_stuck_pool.json"
+LOG = paths.WORK / "ledgers/b1_stuck_fill.tsv"
 CHUNK = 10
 
 SYS = """你是英汉词典编纂专家。给你一批英语词条,每条含:

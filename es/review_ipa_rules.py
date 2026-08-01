@@ -29,10 +29,12 @@ import argparse, asyncio, glob, json, re, sqlite3, time
 from collections import Counter
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
-ENV = HERE.parent / ".env"
-RUNS = HERE / "runs"
+DB = paths.DB
+ENV = paths.ENV
+RUNS = paths.WORK / "runs"
 TS = HERE.parent / "packages/dict-core/src/spanish.ts"
 
 SYS = """你是西班牙语语音学 + 词典工程双背景的评审专家。评审一套**已经上线**的西语词典音标流水线。

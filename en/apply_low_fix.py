@@ -30,9 +30,11 @@ from pathlib import Path
 
 import buckets as B
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-LOG = HERE / "ledgers/low_fix.tsv"
+DB = paths.DB
+LOG = paths.WORK / "ledgers/low_fix.tsv"
 HAN = re.compile(r"[一-鿿]")
 esc = lambda s: (s or "").replace("\t", "\\t").replace("\n", "\\n")
 une = lambda s: (s or "").replace("\\t", "\t").replace("\\n", "\n")

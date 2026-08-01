@@ -21,10 +21,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from volcenginesdkarkruntime import AsyncArk
 
+import paths
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-DB_PATH = HERE / "synapse-dict-it.sqlite"
-OUT_PATH = HERE / "doubao-it.jsonl"
+DB_PATH = paths.DB
+OUT_PATH = paths.WORK / "doubao-it.jsonl"
 
 load_dotenv(ROOT / ".env")
 load_dotenv(ROOT / ".env.local", override=True)

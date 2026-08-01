@@ -37,16 +37,18 @@ import kaikki_util
 import enrich                      # 🔴 复现原抽取路径，不自己重写一遍正则
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
+DB = paths.DB
 # 🔴 书面记录只剩这两份，而且都不完整 —— 这正是 provenance 列要解决的问题本身：
 #    · overrides.tsv 原本是 gender 裁决产物，2026-07-26 被**译文**覆盖流程重写覆盖了，
 #      gender 的那份记录已不可恢复；现在它装的是 305 条译文覆盖。
 #    · gender_decisions.tsv 是 turbo 那轮的裁决表；后来 pro 权威重裁的结果没有单独留档。
 #    → 能证明的只有「这个词进过 gender 裁决流程」，证不到「最终是哪一轮定的」。
 #      对 _src 来说前者就够了。
-OVERRIDES = HERE / "overrides.tsv"            # 译文覆盖记录（305 条）
-GENDER_DECISIONS = HERE / "gender_decisions.tsv"   # 进过 gender 裁决的词
+OVERRIDES = paths.WORK / "overrides.tsv"            # 译文覆盖记录（305 条）
+GENDER_DECISIONS = paths.WORK / "gender_decisions.tsv"   # 进过 gender 裁决的词
 
 # 变形层语法译文的模板形态：`pie 的 阳性·复数` / `piar 的 虚拟式·现在时·…`
 # 用**半角空格包裹的「的」**作判据 —— lemma 译文（`免费的，免费`）不会长这样。

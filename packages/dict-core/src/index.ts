@@ -195,7 +195,9 @@ export function normalizePronunciation(ipa: string | null, accent: Accent = 'uk'
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_DB_PATH = path.resolve(__dirname, '../../../en/synapse-dict-en.sqlite');
+// 2026-08-01：数据全部迁到仓库根 `data/`，代码目录下不再存放任何数据字节。
+// 位置只在这里和各语种的 paths.py 声明；清单见 data/MANIFEST.md。
+const DEFAULT_DB_PATH = path.resolve(__dirname, '../../../data/db/synapse-dict-en.sqlite');
 
 function mapEntry(row: DictionaryRow): DictionaryEntry {
   return {
@@ -353,7 +355,7 @@ function dbPathFor(code: string): string {
   const override = process.env[`DATABASE_PATH_${code.toUpperCase()}`];
   if (override) return path.resolve(override);
   if (code === 'en') return DEFAULT_DB_PATH;
-  return path.resolve(REPO_ROOT, `${code}/synapse-dict-${code}.sqlite`);
+  return path.resolve(REPO_ROOT, `data/db/synapse-dict-${code}.sqlite`);
 }
 
 // 只暴露 DB 文件确实存在的语言（前端据此渲染切换器）。

@@ -12,9 +12,11 @@
 import argparse, asyncio, json, re, sqlite3, random, sys
 from pathlib import Path
 
+import paths
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-DB = str(HERE / "synapse-dict-en.sqlite")
+DB = str(paths.DB)
 ENV = ROOT / ".env"
 CHUNK, CONC, TIMEOUT = 20, 80, 600
 
@@ -154,7 +156,7 @@ def do_run(n):
     metas, results, tok = asyncio.run(go())
     from collections import Counter
     tally = Counter(); bad = []
-    outp = HERE / "runs/acceptance_en.jsonl"
+    outp = paths.WORK / "runs/acceptance_en.jsonl"
     with open(outp, "w", encoding="utf-8") as f:
         for meta, res in zip(metas, results):
             res = res or {}

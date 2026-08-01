@@ -10,8 +10,10 @@ from pathlib import Path
 from collections import Counter
 import acceptance_en as A  # 复用 load_env/acall/run_batches/loads_lenient
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = str(HERE / "synapse-dict-en.sqlite")
+DB = str(paths.DB)
 CORE = A.CORE
 CHUNK = 20
 
@@ -61,7 +63,7 @@ def do_run(n):
 
     metas, results, tok = asyncio.run(go())
     tally = Counter(); bad = []
-    outp = HERE / "runs/verify_translit.jsonl"
+    outp = paths.WORK / "runs/verify_translit.jsonl"
     with open(outp, "w", encoding="utf-8") as f:
         for meta, res in zip(metas, results):
             res = res or {}

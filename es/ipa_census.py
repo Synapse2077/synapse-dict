@@ -26,9 +26,11 @@ from pathlib import Path
 import kaikki_util
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-es.sqlite"
-KK = HERE / "kaikki.org-dictionary-Spanish.jsonl"
+DB = paths.DB
+KK = paths.KK
 
 
 def load_kaikki(words):

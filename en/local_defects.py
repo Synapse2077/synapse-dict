@@ -23,9 +23,11 @@ from pathlib import Path
 
 import buckets as B
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
-WORDSET = HERE / "anchors/kaikki_wordset.json"
+DB = paths.DB
+WORDSET = paths.WORK / "anchors/kaikki_wordset.json"
 
 # ---------- P:比较级/最高级 ----------
 # exchange 的 1: 字段含 r=比较级 t=最高级
@@ -209,7 +211,7 @@ def main():
         return
 
     if a.eval:
-        gold = {r["id"]: r for r in json.load(open(HERE / "runs/eval_set.json", encoding="utf-8"))}
+        gold = {r["id"]: r for r in json.load(open(paths.WORK / "runs/eval_set.json", encoding="utf-8"))}
         known = load_known()
         lz = {}
         for w, t in conn.execute("SELECT word,translation FROM stardict"):

@@ -28,8 +28,10 @@ import acceptance_en as A
 import buckets as B
 from judge_sample import ARK_MODELS, ark_call, ds_call
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = HERE / "synapse-dict-en.sqlite"
+DB = paths.DB
 CHUNK = 10          # 输出比判官重(要写译文),批小一点降低单批失败代价
 GLOSS = ["anchors/b1_kaikki_gloss.json", "anchors/b2_kaikki_gloss.json",
          "anchors/c3_kaikki_gloss.json", "anchors/residue_kaikki_gloss.json"]

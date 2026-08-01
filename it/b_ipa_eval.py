@@ -21,8 +21,10 @@ from pathlib import Path
 
 from b_ipa import word_to_ipa
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-JSONL_PATH = HERE / "kaikki.org-dictionary-Italian.jsonl"
+JSONL_PATH = paths.KK
 ACC = set("àèéìíòóù")
 
 

@@ -11,8 +11,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import enrich_core as ec
 
+import paths
+
 HERE = Path(__file__).resolve().parent
-DB = str(HERE / "synapse-dict-en.sqlite")
+DB = str(paths.DB)
 CORE = "(collins>0 OR oxford>0 OR frq>0 OR bnc>0 OR (tag IS NOT NULL AND TRIM(tag)<>''))"
 NOPH = "(COALESCE(TRIM(phonetic),'')='' AND COALESCE(TRIM(phonetic_uk),'')='' AND COALESCE(TRIM(phonetic_us),'')='')"
 IPA_OK = re.compile(r'^/[^/]+/$')
@@ -87,7 +89,7 @@ def do_run(names):
     env = ec.load_env()
     metas, results, tok = gen(rows, env)
     conn = sqlite3.connect(DB)
-    ov = HERE / "ledgers/overrides.tsv"
+    ov = paths.WORK / "ledgers/overrides.tsv"
     wrote = skip = 0
     ov_lines = []
     for meta, res in zip(metas, results):
