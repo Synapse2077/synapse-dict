@@ -116,6 +116,15 @@ def _coda_stops_from_spelling(word):
     w = unicodedata.normalize("NFC", word.lower())
     out = []
     for i, ch in enumerate(w):
+        # 🔴 字母 x = /ks/，那个 k 后面永远跟着 s，**永远处于 coda**，必须计入序列。
+        #    不计入会导致跨词错位：`óxido de magnesio` 的 want 只剩 magnesio 的 ɡ、
+        #    pos 只剩 óxido 的 k，长度"恰好都是 1"→ 把 ˈoksido 改回 ˈoɡsido，
+        #    正好**撤销** fixes/fix_x_gs.py 刚修好的东西。2026-08-02 实测到 4 行。
+        #    ⚠️ 词首 x 读 /s/ 不是 /ks/（`xerocopia`→seɾoˈkopja），不计。
+        if ch == "x":
+            if i > 0:
+                out.append("k")
+            continue
         if ch not in LETTER_STOP:
             continue
         nxt = w[i + 1] if i + 1 < len(w) else ""

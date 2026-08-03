@@ -115,12 +115,16 @@ class Coda清音(unittest.TestCase):
         上一个用例的 pos 全是空表，把 want 截断到 0 长度等于什么都没做 ——
         变异测试第一次没被拦住就是因为这个，用例形同虚设。
         这里的案例两侧都非空，强行对齐会真的改错字符：
-            expectorate  拼写要 ['k']            音标有 ['ɡ','ɡ']（第一个 ɡ 其实来自 x→/ks/）
             backgammon   拼写要 ['k','k']        音标有 ['ɡ']
             rights       拼写要 ['t']            音标有 ['ɡ','d']
+
+        ⚠️ **2026-08-02：`expectorate` 从本用例移走了**（移到下面那个用例）。
+           本用例原来的注释自己写着"第一个 ɡ 其实来自 x→/ks/" —— 那正是病根：
+           `_coda_stops_from_spelling` 当时不认字母 x，拼写侧少算一个 k，于是长度对不上。
+           给 x 补上之后拼写侧是 ['k','k']、音标侧 ['ɡ','ɡ']，**能正确对齐了**，
+           该修就得修，不该继续躺在"必须跳过"的名单里。
         """
-        for w, s in (("expectorate", "eɡspeɡtoˈɾate"),
-                     ("backgammon", "baɡˈɡamon"),
+        for w, s in (("backgammon", "baɡˈɡamon"),
                      ("rights", "ˈriɡds"),
                      ("blackjack", "ˈblaɡʝak")):
             want = N._coda_stops_from_spelling(w)
@@ -128,6 +132,27 @@ class Coda清音(unittest.TestCase):
             self.assertTrue(want and pos, w)                            # 两边都非空
             self.assertNotEqual(len(want), len(pos), w)                 # 但长度不等
             self.assertEqual(N.devoice_coda(w, s), s, w)                # 一个字符都不许改
+
+    def test_字母x必须计入拼写侧的coda序列(self):
+        """🔴 2026-08-02 修：字母 `x` = /ks/，那个 k 后面永远跟着 s，**永远是 coda**。
+        拼写侧不算它，会出两种错：
+
+        ① **跨词错位、撤销别处的修复**（实测 4 行）：
+           `óxido de magnesio` 拼写侧只剩 magnesio 的 ɡ、音标侧只剩 óxido 的 k，
+           长度"恰好都是 1"→ 把刚修好的 `ˈoksido` 改回 `ˈoɡsido`。
+        ② **该修的修不了**：`expectorate` 因长度对不上被整条跳过，
+           `ekspeɡtoˈɾate` 里 `ct` 的浊化一直没被清掉。
+
+        ⚠️ 词首 x 读 /s/ 不是 /ks/（`xerocopia` → `seɾoˈkopja`），不计入。
+        """
+        self.assertEqual(N._coda_stops_from_spelling("expectorate"), ["k", "k"])
+        self.assertEqual(N._coda_stops_from_spelling("examen"), ["k"])
+        self.assertEqual(N._coda_stops_from_spelling("xerocopia"), [])      # 词首 x 不计
+        # ① 不再被撤销
+        self.assertEqual(N.devoice_coda("óxido de magnesio", "ˈoksido de maˈxnesjo"),
+                         "ˈoksido de maˈxnesjo")
+        # ② 现在能修了
+        self.assertEqual(N.devoice_coda("expectorate", "ekspeɡtoˈɾate"), "ekspektoˈɾate")
 
     def test_ch二合字母绝不能被当成coda(self):
         """🔴 全量普查逮到的严重错误（测试里一个 ch 词都没有，只跑测试发现不了）：

@@ -25,6 +25,7 @@
 只读快照：
     python3 dbtool.py
 """
+import json
 import shutil
 import sqlite3
 import sys
@@ -38,7 +39,8 @@ HERE = Path(__file__).resolve().parent
 DB = paths.DB
 TABLE = "dict"
 # 追踪的列：写库前后都会计数。**不在这张表里的列，出了问题不会被发现** —— 新增重要字段记得加进来。
-TRACK = ['phonetic', 'phonetic_raw', 'translation', 'gender', 'pos', 'infl', 'level']
+TRACK = ['phonetic', 'phonetic_raw', 'phonetic_src', 'phonetic_confirm',
+         'translation', 'gender', 'pos', 'infl', 'level', 'meta']
 
 
 def snapshot(conn=None):
@@ -163,6 +165,37 @@ def session(tag, expect=None, dry=False, verbose=True):
         raise SystemExit(1)
     if verbose:
         print("■ 不变量核对通过 ✓")
+
+
+
+def align_check(verbose=True, limit=8):
+    """三列逐行对齐校验：definition 行数 == translation 行数 == meta 数组长度。
+
+    🔴 2026-08-02 立。起因：从中文版补义项要同时动三列，
+    **`session()` 的不变量闸门查的是"非空计数"，查不出"行数错位"** ——
+    topics 那次就是列对了、义项位置错了，闸门照样放行。
+    这个校验补的正是那个盲区：内容级的结构不变量。
+    """
+    conn = sqlite3.connect("file:%s?mode=ro" % DB, uri=True)
+    rows = conn.execute(
+        "SELECT word, definition, translation, meta FROM %s WHERE is_lemma=1 "
+        "AND TRIM(COALESCE(definition,''))<>''" % TABLE).fetchall()
+    conn.close()
+    bad = []
+    for w, d, t, m in rows:
+        try:
+            n_m = len(json.loads(m)) if m else 0
+        except Exception:
+            bad.append((w, "meta 不是合法 JSON", 0, 0, 0))
+            continue
+        n_d, n_t = len(d.split("\n")), len((t or "").split("\n"))
+        if not (n_d == n_t == n_m):
+            bad.append((w, "", n_d, n_t, n_m))
+    if verbose:
+        print("■ 三列对齐：检查 {:,} 个 lemma，错位 {:,}".format(len(rows), len(bad)))
+        for x in bad[:limit]:
+            print("   {:22} {:14} definition{} / translation{} / meta{}".format(*x))
+    return bad
 
 
 def sample_check(rows, n=10, cols=("词", "改前", "改后")):

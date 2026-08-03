@@ -128,11 +128,20 @@ def sounds_variants(entry, drop_tags=DROP_TAGS, dedupe=True):
       ① 西语版取到 `seseante` → 断言"西语版没用"（实际它两种变体都给）；
       ② fr 版葡语取到欧葡 → 断言"巴葡补不上"（实际 ①欧葡 ②巴葡，双列各能补 17.9 万行）。
     → **任何取值之前，先看这个列表有多长、每个变体的 tags 是什么。**
+
+    🔴 **2026-08-01 第三次栽在这个函数上：方言标签在 `raw_tags` 里，不在 `tags` 里。**
+    只读 `tags` 时，西语版 122 万个变体全部显示"无 tag"，于是我准备靠**从音标串猜方言**
+    （看有没有 θ/ʃ/ʎ）来定取哪一条 —— 而源头明明白白标着：
+        gracias → [{"ipa":"[ˈgɾasjas]","raw_tags":["seseante"]},
+                   {"ipa":"[ˈgɾaθjas]","raw_tags":["no seseante"]}]
+    实测标签分布：no seseante 87,398 / seseante 86,795 / yeísta 15,215 / sheísta 21,264 …
+    → **两个键都要读**，否则既选不对变体，`drop_tags` 也拦不住写在 raw_tags 里的 X-SAMPA。
     """
     out = []
     seen = set()
     for s in (entry.get("sounds") or []):
-        tags = tuple(s.get("tags") or [])
+        tags = tuple(s.get("tags") or []) + tuple(
+            t.strip() for raw in (s.get("raw_tags") or []) for t in raw.split(","))
         if drop_tags and set(tags) & set(drop_tags):
             continue
         ip = parse_ipa(s.get("ipa"))
@@ -159,7 +168,8 @@ def audio_urls(entry):
     """返回该条目的真人录音直链：[(url, 文件名, tags元组), ...]。
 
     来源是 Wikimedia Commons（大量出自 Lingua Libre 母语者众包），CC 授权。
-    **必须用语言版 dump** —— 英文版几乎没有（西语英文版 36 词 vs 西语版 15,697 词，436 倍）。
+    **必须用语言版 dump**，但西语是个例外：西语版只有 **2,272** 个词形带录音
+    （2026-08-01 实测；此处原写 15,697 是错的）。de/fr 才是录音富矿，es 这一项近乎空。
     """
     out = []
     for s in (entry.get("sounds") or []):
