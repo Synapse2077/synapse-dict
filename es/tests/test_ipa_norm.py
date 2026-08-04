@@ -206,5 +206,100 @@ class 叠塞音闸(unittest.TestCase):
         self.assertEqual(N.normalize("raptor", "rabˈtoɾ"), "rapˈtoɾ")
 
 
+class 同位异音字母(unittest.TestCase):
+    """2026-08-03：西语版 36.9 万行入库后的全列字符普查逮到的第三类漏网。
+
+    `canon_edition` 只剥 NFD 组合附加符，`ʲ`(U+02B2)、`ɱ`(U+0271) 是独立字母，
+    整批漏进了音位式格子。左边是库里的现值（源值见 `phonetic_raw`），
+    ⭐ **右边不是我推的，是库内同一位置的既有写法**（`ancho→ˈantʃo` 等，来自 kaikki-en）。
+    """
+
+    GOLD = [("pinchila", "pinʲˈtʃila", "pinˈtʃila"),         # n 在 ch 前腭化
+            ("bolchevizar", "bolʲtʃebiˈθaɾ", "boltʃebiˈθaɾ"),  # l 在 ch 前腭化
+            ("confricar", "koɱfɾiˈkaɾ", "konfɾiˈkaɾ"),        # n 在 f 前唇齿化
+            ("conjunción final", "konxunˈθjoɱ fiˈnal", "konxunˈθjon fiˈnal")]
+
+    def test_腭化与唇齿化归回n(self):
+        for w, cur, want in self.GOLD:
+            self.assertEqual(N.assimilated_nasals(cur), want, w)
+
+    def test_唇音前的m不动(self):
+        """🔴 `convertir→kombeɾˈtiɾ` 是全库六个来源一致的写法（7,216 行），
+        本函数不许顺手改 —— 改它是产品决策，不是一致性修复。"""
+        for s in ("kombeɾˈtiɾ", "um ˈpoko", "imˈmenso", "emˈbudo"):
+            self.assertEqual(N.assimilated_nasals(s), s)
+
+
+class 可选段落定(unittest.TestCase):
+    def test_滑音前的括号是插音_整组删(self):
+        """不止 (ɡ)：西语版对 /w/ 前的强化辅音一律加括号，(k)/(d)/(t) 同理。"""
+        for w, cur, want in (("moyuelo", "moʝˈ(ɡ)welo", "moʝˈwelo"),
+                             ("wicca", "ˈ(k)wika", "ˈwika"),
+                             ("Siwady", "siˈ(d)wadi", "siˈwadi"),
+                             ("Lower Hutt", "loˈ(t)weɾ ˈut", "loˈweɾ ˈut")):
+            self.assertEqual(N.resolve_optional(w, cur), want, w)
+
+    def test_拼写里真有那个辅音时_源头写在括号外_不会丢音(self):
+        self.assertEqual(N.resolve_optional("Lagwira", "laɡˈ(ɡ)wiɾa"), "laɡˈwiɾa")
+        self.assertEqual(N.resolve_optional("talweg", "talˈ(ɡ)weɡ"), "talˈweɡ")
+        self.assertEqual(N.resolve_optional("Rackwitz", "rakˈ(k)witθ"), "rakˈwitθ")
+
+    def test_词尾可选塞音按拼写末字母定形(self):
+        """与 devoice_coda 同一判据（字母是 t，音就该是 t），只是位置在词尾。"""
+        self.assertEqual(N.resolve_optional("president", "pɾesiˈden(d)"), "pɾesiˈdent")
+        self.assertEqual(N.resolve_optional("Piquet", "piˈke(d)"), "piˈket")
+        self.assertEqual(N.resolve_optional("Broussard", "bɾuˈsaɾ(d)"), "bɾuˈsaɾd")
+
+    def test_其余括号_拼写里有就留没有就删(self):
+        self.assertEqual(N.resolve_optional("extraño", "e(k)sˈtɾaɲo"), "eksˈtɾaɲo")  # x=/ks/
+        self.assertEqual(N.resolve_optional("dseta", "ˈ(d)seta"), "ˈdseta")
+        self.assertEqual(N.resolve_optional("Islas Falkland", "ˌislas ˈfo(l)kland"),
+                         "ˌislas ˈfolkland")
+        # 拼写里没有 e —— 那是口语加音，不进音位式
+        self.assertEqual(N.resolve_optional("ftalocianina", "(e)ftaloθjaˈnina"),
+                         "ftaloθjaˈnina")
+
+    def test_括号里的塞音必须先落定再算coda(self):
+        """`(ɡ)` 也是塞音。若 `devoice_coda` 先跑，"第 n 个塞音"的对位就会错。
+
+        ⚠️ 入口值取 `canon_edition` 之后的形态（齿音符等组合附加符由它剥，不归 normalize）。
+        """
+        self.assertEqual(N.normalize("hardware", "aɾdˈ(ɡ)waɾe"), "aɾdˈwaɾe")
+
+
+class 滑音折叠(unittest.TestCase):
+    """2026-08-01 已决策（FRAMEWORK §五之二：跟英文版 `ˈeuɾo`），2026-08-03 才实现。"""
+
+    def test_后置滑音折成元音字母(self):
+        self.assertEqual(N.fold_glides("aˈxewsja"), "aˈxeusja")      # ageusia
+        self.assertEqual(N.fold_glides("awɾifiˈkaɾ"), "auɾifiˈkaɾ")  # aurificar
+        self.assertEqual(N.fold_glides("ˈkoktejl"), "ˈkokteil")      # cocktail
+        self.assertEqual(N.fold_glides("ˈʃow"), "ˈʃou")              # show
+
+    def test_前置滑音一个字符都不碰(self):
+        """`bjen` `aɡwa` 全库六个来源写法一致（18.7 万行），折了就是自造记法。"""
+        for s in ("ˈɡɾaθjas", "ˈaɡwa", "ˈbjen", "ˈtɾjunfo", "eˈkwestɾe"):
+            self.assertEqual(N.fold_glides(s), s)
+
+    def test_紧跟元音的滑音不折(self):
+        """后面**紧跟**元音的 j/w 是下一音节的起始，不是降双元音的第二成分。"""
+        self.assertEqual(N.fold_glides("kaˈjendo"), "kaˈjendo")
+        self.assertEqual(N.fold_glides("aˈɡwanta"), "aˈɡwanta")
+
+    def test_中间隔着重音符时要折(self):
+        """⚠️ 这条我第一版写反了，回库核对才发现：全库 7 条 `V+滑音+ˈ+V`，
+        每一条的滑音都是**前一个降双元音的尾巴**，不是后一音节的起始 ——
+        `tau-ónicos` `krisna-ísta` `agro-urbano` `tiro-hioideo`。所以要折。"""
+        self.assertEqual(N.fold_glides("tawˈonikos"), "tauˈonikos")
+        self.assertEqual(N.fold_glides("kɾisnajˈista"), "kɾisnaiˈista")
+
+    def test_与库内老约定一致(self):
+        """右边是库里 kaikki-en 的现值 —— 折叠的目的就是让新收的行与它们同形。"""
+        for w, src, want in (("euro", "ˈewɾo", "ˈeuɾo"), ("aire", "ˈajɾe", "ˈaiɾe"),
+                             ("veinte", "ˈbejnte", "ˈbeinte"),
+                             ("causa", "ˈkawsa", "ˈkausa")):
+            self.assertEqual(N.normalize(w, src), want, w)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

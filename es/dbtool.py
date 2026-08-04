@@ -40,17 +40,29 @@ DB = paths.DB
 TABLE = "dict"
 # 追踪的列：写库前后都会计数。**不在这张表里的列，出了问题不会被发现** —— 新增重要字段记得加进来。
 TRACK = ['phonetic', 'phonetic_raw', 'phonetic_src', 'phonetic_confirm',
-         'translation', 'gender', 'pos', 'infl', 'level', 'meta']
+         'definition', 'definition_es', 'translation', 'gender', 'pos', 'infl',
+         'exchange', 'level', 'meta']
+
+
+def _cols(conn):
+    return {r[1] for r in conn.execute("PRAGMA table_info(%s)" % TABLE)}
 
 
 def snapshot(conn=None):
-    """当前不变量：总行数 + 各追踪列的非空行数。"""
+    """当前不变量：总行数 + 各追踪列的非空行数。
+
+    TRACK 里还不存在的列跳过 —— 这样"先把列写进 TRACK、再由脚本 ALTER 出来"
+    的顺序是安全的（加列前后各取一次快照，列在中途出现，前快照没有它、后快照有）。
+    """
     own = conn is None
     if own:
         conn = sqlite3.connect("file:%s?mode=ro" % DB, uri=True)
     try:
+        have = _cols(conn)
         out = {"__rows__": conn.execute("SELECT COUNT(*) FROM %s" % TABLE).fetchone()[0]}
         for c in TRACK:
+            if c not in have:
+                continue
             out[c] = conn.execute(
                 "SELECT COUNT(*) FROM %s WHERE TRIM(COALESCE(%s,''))<>''" % (TABLE, c)
             ).fetchone()[0]
@@ -61,7 +73,11 @@ def snapshot(conn=None):
 
 
 def diff(before, after):
-    return {k: after[k] - before[k] for k in before if after.get(k) != before[k]}
+    """两次快照之差。**必须取两边键的并集** —— 会话中途 ALTER 出来的新列只在
+    after 里有，只遍历 before 的话它从 0 涨到 36 万也看不见。"""
+    keys = set(before) | set(after)
+    return {k: after.get(k, 0) - before.get(k, 0) for k in keys
+            if after.get(k, 0) != before.get(k, 0)}
 
 
 def backup(tag):
@@ -79,6 +95,8 @@ def backup(tag):
 def _line(snap, d=None):
     parts = ["总行 {:,}".format(snap["__rows__"])]
     for c in TRACK:
+        if c not in snap:
+            continue
         s = "{} {:,}".format(c, snap[c])
         if d and c in d:
             s += " ({:+,})".format(d[c])
@@ -99,6 +117,14 @@ class _S:
         self.written += len(seq)
         return len(seq)
 
+    def addcolumn(self, name, decl="TEXT"):
+        """幂等加列。加列本身不改任何行，不计入 written。"""
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(%s)" % TABLE)}
+        if name in cols:
+            return False
+        self.conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (TABLE, name, decl))
+        return True
+
     def execute(self, sql, args=()):
         return self.conn.execute(sql, args)
 
@@ -110,7 +136,12 @@ def session(tag, expect=None, dry=False, verbose=True):
     expect: {列名: 期望的非空计数变化}
         · 显式写出的列：变化必须**恰好等于**期望值；写 None 表示"允许变但不校验数值"。
         · **没写出的列：变化必须为 0。**
-        · 总行数 `__rows__` 永远必须为 0（本项目所有写库都是原地更新，不增删行）。
+        · 总行数 `__rows__` 默认必须为 0；要插行就得**显式**写出期望的增量，
+          写不对就报错退出。
+          🔴 2026-08-03 才放开这一条：此前本项目所有写库都是原地更新，闸门直接
+          写死"行数不许变"。西语版收词要插 36.9 万行 —— 但**不能因此把这道闸拆掉**，
+          只能从"永远 0"改成"必须显式声明具体数字"。插行时所有列的非空计数都会跟着涨，
+          所以那一批列也必须逐个写进 expect，闸门才拦得住"多写了一列"。
     """
     expect = dict(expect or {})
     before = snapshot()
@@ -144,8 +175,9 @@ def session(tag, expect=None, dry=False, verbose=True):
 
     d = diff(before, after)
     bad = []
-    if d.get("__rows__"):
-        bad.append("总行数变了 {:+,}（本项目写库不应增删行）".format(d["__rows__"]))
+    want_rows = expect.get("__rows__", 0)
+    if d.get("__rows__", 0) != want_rows:
+        bad.append("总行数变了 {:+,}，期望 {:+,}".format(d.get("__rows__", 0), want_rows))
     for c in TRACK:
         got = d.get(c, 0)
         if c in expect:
@@ -168,33 +200,47 @@ def session(tag, expect=None, dry=False, verbose=True):
 
 
 
+ALIGN_COLS = ("definition", "definition_es", "translation")
+
+
 def align_check(verbose=True, limit=8):
-    """三列逐行对齐校验：definition 行数 == translation 行数 == meta 数组长度。
+    """义项级逐行对齐校验：每个释义列的行数都必须 == meta 数组长度。
 
     🔴 2026-08-02 立。起因：从中文版补义项要同时动三列，
     **`session()` 的不变量闸门查的是"非空计数"，查不出"行数错位"** ——
     topics 那次就是列对了、义项位置错了，闸门照样放行。
     这个校验补的正是那个盲区：内容级的结构不变量。
+
+    🔴 2026-08-03 改：原来的 WHERE 是 `definition 非空`。西语版收进来的 5.4 万个新
+    lemma **`definition` 是空的**（英文版没这个词，释义在 `definition_es` 里），
+    照旧写法这批新行会被整批跳过 —— 校验对最需要校验的数据静默失效。
+    → 改成**以 meta 为锚**：meta 有几项，每个非空的释义列就必须有几行。
     """
     conn = sqlite3.connect("file:%s?mode=ro" % DB, uri=True)
+    cols = [c for c in ALIGN_COLS if c in _cols(conn)]
     rows = conn.execute(
-        "SELECT word, definition, translation, meta FROM %s WHERE is_lemma=1 "
-        "AND TRIM(COALESCE(definition,''))<>''" % TABLE).fetchall()
+        "SELECT word, meta, %s FROM %s WHERE is_lemma=1 "
+        "AND TRIM(COALESCE(meta,''))<>''" % (",".join(cols), TABLE)).fetchall()
     conn.close()
     bad = []
-    for w, d, t, m in rows:
+    for r in rows:
+        w, m = r[0], r[1]
         try:
-            n_m = len(json.loads(m)) if m else 0
+            n_m = len(json.loads(m))
         except Exception:
-            bad.append((w, "meta 不是合法 JSON", 0, 0, 0))
+            bad.append((w, "meta 不是合法 JSON", ""))
             continue
-        n_d, n_t = len(d.split("\n")), len((t or "").split("\n"))
-        if not (n_d == n_t == n_m):
-            bad.append((w, "", n_d, n_t, n_m))
+        for c, v in zip(cols, r[2:]):
+            if v is None or not v.strip():
+                continue
+            n = len(v.split("\n"))
+            if n != n_m:
+                bad.append((w, c, "%d 行 vs meta %d 项" % (n, n_m)))
     if verbose:
-        print("■ 三列对齐：检查 {:,} 个 lemma，错位 {:,}".format(len(rows), len(bad)))
+        print("■ 义项对齐：检查 {:,} 个 lemma（列 {}），错位 {:,}".format(
+            len(rows), "/".join(cols), len(bad)))
         for x in bad[:limit]:
-            print("   {:22} {:14} definition{} / translation{} / meta{}".format(*x))
+            print("   {:22} {:16} {}".format(*x))
     return bad
 
 
@@ -222,4 +268,6 @@ if __name__ == "__main__":
     print("%s  表 %s" % (DB.name, TABLE))
     print("  总行 {:,}".format(s["__rows__"]))
     for c in TRACK:
-        print("  {:16}{:>12,}  {:>6.2f}%".format(c, s[c], 100 * s[c] / max(s["__rows__"], 1)))
+        if c in s:
+            print("  {:16}{:>12,}  {:>6.2f}%".format(
+                c, s[c], 100 * s[c] / max(s["__rows__"], 1)))

@@ -108,6 +108,86 @@ def spirants_to_stops(s):
              .replace("ɣ", "ɡ").replace("ŋ", "n"))
 
 
+def assimilated_nasals(s):
+    """鼻音/边音的同位异音字母 → 音位：`ʲ` 删除、`ɱ` → n。
+
+    西语版 dump 写的是严式：`pĩnʲˈt͡ʃila`（n 在 ch 前腭化）、`kõɱfɾiˈkaɾ`（n 在 f 前唇齿化）。
+    `canon_edition` 只剥 NFD 分解得到的**组合附加符**，而 `ʲ`(U+02B2)、`ɱ`(U+0271)
+    是独立字母 —— 于是整批漏了进来（2026-08-03 普查：ʲ 5,591 行、ɱ 3,923 行）。
+
+    🔴 判据不是我的偏好，是**库内既有约定**（同一位置库里写什么）：
+        ancho → ˈantʃo    colcha → ˈkoltʃa    enfermo → enˈfeɾmo    triunfo → ˈtɾjunfo
+    所以这不是新决策，是把新收的 36.9 万行拉回同一套记法 —— 与
+    `spirants_to_stops`（ð/β/ɣ/ŋ → d/b/ɡ/n）同族、同理由。
+
+    ⚠️ **唇音前的 n→m 不在本函数里，故意的。** `convertir → kombeɾˈtiɾ`、
+    `un poco → um ˈpoko` 是**全库六个来源一致**的写法（kaikki-en 611 / 我们自己的
+    G2P 4,677 / es-edition 1,907，合计 7,216 行），改它是产品决策不是一致性修复。
+    """
+    if not s:
+        return s
+    return s.replace("ʲ", "").replace("ɱ", "n")
+
+
+# 括号 = 源头标注的"可选音段"。音位式格子里不该有括号，必须落定成一个值。
+_EPENTHESIS = re.compile(r"\([^)]*\)(?=w)")     # 滑音前的插音
+_OPTIONAL_FINAL = re.compile(r"\(([ptkbdɡ])\)$")  # 词尾可选塞音
+_OPTIONAL_ANY = re.compile(r"\(([^)]*)\)")
+# 音位 → 可能对应的拼写字母（LETTER_STOP 的反向，另加非塞音的自身）
+_PHONEME_LETTERS = {"k": "ckqx", "ɡ": "g", "b": "bv", "d": "d", "t": "t", "p": "p"}
+
+
+def resolve_optional(word, s):
+    """可选音段落定成一个值。**判据全部来自拼写**，三条，按顺序：
+
+    ① **滑音前的括号是插音，整组删**（922 行）。西语版对词首/词中的 /w/ 一律标
+       可选强化：`moyuelo → moʝˈ(ɡ)welo`、`hardware → aɾdˈ(ɡ)waɾe`、`wicca → ˈ(k)wika`。
+       那个辅音拼写里没有；拼写里真有的（`Seogwipo` `talweg` `Rackwitz`）
+       源头本来就写在括号外，删掉括号组不丢音。
+    ② **词尾的可选塞音按拼写末字母定形**（5 行）：`president → pɾesiˈden(d)`
+       拼写末字母是 t → 写 t。这与 `devoice_coda` 是同一条判据（字母是 t，音就该是 t），
+       只是位置在词尾、后面没有辅音，`devoice_coda` 圈不到它。
+    ③ 其余：**内容字母在拼写里有就保留，没有就删**（15 行）。
+       `extraño → e(k)sˈtɾaɲo` 的 x = /ks/ → 保留；
+       `ftalocianina → (e)ftaloθjaˈnina` 拼写里没有 e（那是口语加音）→ 删。
+    """
+    if not s:
+        return s
+    s = _EPENTHESIS.sub("", s)
+    w = unicodedata.normalize("NFC", (word or "").lower())
+
+    m = _OPTIONAL_FINAL.search(s)
+    if m:
+        tail = w[-1] if w else ""
+        s = s[:m.start()] + LETTER_STOP.get(tail, "")
+
+    def keep(m):
+        c = m.group(1)
+        letters = _PHONEME_LETTERS.get(c, c)
+        return c if any(ch in w for ch in letters) else ""
+
+    return _OPTIONAL_ANY.sub(keep, s)
+
+
+# 后置滑音（降双元音的第二个成分）。**前置滑音不动**：`ˈɡɾaθjas` `ˈaɡwa` 全库一致。
+_POSTVOCALIC_GLIDE = re.compile(r"(?<=[aeiou])([jw])(?![aeiou])")
+
+
+def fold_glides(s):
+    """后置滑音写成元音字母：`aw/ej` → `au/ei`。
+
+    2026-08-01 已决策"跟英文版：`ˈeuɾo` 而非 `ˈewɾo`"（docs/FRAMEWORK.md §五之二），
+    但入库西语版时**没有实现** —— 于是同一列里两套记法并存：
+        老约定（kaikki-en + 我们的 G2P）  au/eu/ai/ei   97,829 行
+        新收（es-edition）               aw/ew/aj/ej   55,705 行
+    折叠只动**元音后、且后面不是元音**的 j/w；前置滑音（`bjen` `aɡwa`，18.7 万行、
+    六个来源写法一致）一个字符都不碰。两者音值相同，折叠是纯记法层、可逆。
+    """
+    if not s:
+        return s
+    return _POSTVOCALIC_GLIDE.sub(lambda m: "i" if m.group(1) == "j" else "u", s)
+
+
 def _coda_stops_from_spelling(word):
     """词形里处于 coda（后面紧跟辅音字母）的塞音字母 → 目标音位，按出现顺序。
 
@@ -193,14 +273,23 @@ def devoice_coda(word, s):
 def normalize(word, s):
     """完整流水线。**顺序是判据，别改**（见 es-dict-pipeline：字符替换表顺序踩过坑）。
 
-    严式 → 记法 → 擦音归音位 → coda 清音。
-    `devoice_coda` 放最后，是因为它只认 b/d/ɡ；若在 `spirants_to_stops` 之前跑，
-    `β/ð/ɣ` 还没变成塞音，会漏掉一批。
+    严式 → 记法 → 鼻音同位异音 → 擦音归音位 → 可选段落定 → coda 清音 → 滑音折叠。
+
+    三处顺序是判据：
+    · `spirants_to_stops` 必须在 `devoice_coda` 之前 —— 后者只认 b/d/ɡ，
+      `β/ð/ɣ` 没先变塞音会漏掉一批；
+    · `resolve_optional` 必须在 `devoice_coda` 之前 —— 括号里的 `(ɡ)` 也是塞音，
+      不先落定会把 `devoice_coda` 的"第 n 个塞音"对位算错；
+    · `fold_glides` 放最后 —— 它把元音后的 j/w 变成 i/u，而前面几步用 j/w
+      判断"这个塞音后面是滑音（音节起始，不是 coda）"，先折就把判据抹了。
     """
     s = strip_narrow(s)
     s = basic(s)
+    s = assimilated_nasals(s)
     s = spirants_to_stops(s)
+    s = resolve_optional(word, s)
     s = devoice_coda(word, s)
+    s = fold_glides(s)
     return s
 
 

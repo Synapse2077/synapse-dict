@@ -105,6 +105,13 @@ def build_plan():
 
     plan, stat, samples = [], collections.Counter(), []
     for rid, w, ph, src in rows:
+        # 🔴 **音标本来就取自西语版的行，不能再由西语版"确认"** —— 那是自己确认自己。
+        #    2026-08-03 收词落库后，库里多了 36.9 万条 phonetic_src='es-edition' 的行，
+        #    不挡住的话可回核率会凭空从 59.5% 跳到 87%，而那 27 个百分点一个字节的
+        #    独立证据都没有。背书的定义是「**另一个**源独立说了同样的话」。
+        if src == "es-edition":
+            stat[("E 音标即来自本源（不自我背书）", src)] += 1
+            continue
         v = ed.get(w)
         if not v:
             continue
@@ -130,8 +137,9 @@ def main():
     a = ap.parse_args()
 
     plan, stat, samples = build_plan()
-    srcs = ["rule", "kaikki-en", "unknown", "NULL"]
-    keys = ["es-edition", "es-edition-notation", "D 真·音段不同（不背书）"]
+    srcs = ["rule", "kaikki-en", "unknown", "es-edition", "NULL"]
+    keys = ["es-edition", "es-edition-notation", "D 真·音段不同（不背书）",
+            "E 音标即来自本源（不自我背书）"]
     print("■ 试算（分母＝库内有音标的行）")
     print("%-26s" % "" + "".join("%12s" % s for s in srcs) + "%12s" % "合计")
     for k in keys:
