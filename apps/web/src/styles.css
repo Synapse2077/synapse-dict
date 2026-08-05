@@ -673,6 +673,27 @@ body {
   margin-top: 2px;
 }
 
+/* 源语言锚点（es）：英文 gloss 或西语单语定义，前缀一个语种小标签。
+   与 .sense-en 同一视觉层级，只是多了标签 —— 它不该抢中文释义的注意力。 */
+.sense-src {
+  font-size: 13.5px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.sense-src-lang {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 15px;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+  opacity: 0.72;
+}
+
 .sense-missing {
   color: var(--text-tertiary);
   font-style: italic;
@@ -1003,4 +1024,60 @@ body {
   color: var(--accent);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   font-weight: 600;
+}
+
+/* ============================================================
+   真人录音（es）—— Commons 母语者录音，与上方 TTS 音标行并列。
+   ============================================================ */
+.audio-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.audio-row-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-right: 2px;
+}
+
+.audio-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.audio-chip:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.audio-chip.playing {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 死链：标灰但不移除 —— 让用户知道"这条本该有"，而不是悄悄少一个按钮 */
+.audio-chip.dead {
+  opacity: 0.45;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+/* 地区是按录音人推定的（非原始标注），用一个不显眼的 ~ 标出来，不装作是确定的 */
+.audio-inferred {
+  font-size: 11px;
+  opacity: 0.5;
 }

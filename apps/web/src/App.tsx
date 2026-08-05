@@ -32,7 +32,8 @@ type EnEntry = {
 
 // Spanish entry (西语专属；数据源自 kaikki，经 es/build.py 产出扁平 dict 表)
 type SpanishSense = {
-  en: string | null;
+  en: string | null;   // 英文版的英文 gloss
+  es: string | null;   // 西语版的西语单语定义；与 en 互斥互补，同一行呈现
   zh: string | null;
   pos: string | null;
   gender: string | null;
@@ -41,6 +42,11 @@ type SpanishSense = {
   numbers: string[];
 };
 type SpanishCollocation = { text: string; zh: string | null };
+type SpanishAudio = {
+  file: string; url: string | null; ipa: string | null;
+  speaker: string | null; region: string | null;
+  regionSrc: string | null; kind: string;
+};
 type SpanishBase = {
   word: string;
   pos: string | null;
@@ -67,6 +73,7 @@ type SpanishEntry = {
   level: string | null;          // CEFR
   senses: SpanishSense[];
   collocations: SpanishCollocation[];
+  audios: SpanishAudio[];
   baseForms: string[];
   bases: SpanishBase[];
   inflNotes: string[];
@@ -375,6 +382,84 @@ function posLabel(raw: string | null): string {
   return raw.split('/').map((p) => POS_LABELS[p] || p).join('/');
 }
 
+const REGION_ZH: Record<string, string> = {
+  Spain: '西班牙', Venezuela: '委内瑞拉', Colombia: '哥伦比亚', Peru: '秘鲁',
+  Mexico: '墨西哥', 'Costa Rica': '哥斯达黎加', Bolivia: '玻利维亚',
+  Chile: '智利', Argentina: '阿根廷', Uruguay: '乌拉圭', Chiloé: '智洛埃',
+};
+
+// 真人录音行。音频托管在 Wikimedia Commons，我们只存 URL、在线播，不下载字节。
+// 🔴 dump 里的 URL 实测约 **10% 已失效**（404/302），所以播放失败必须有兜底：
+//    自动降到浏览器 TTS，并把这条标灰，不能让用户点了没反应。
+function HumanAudioRow({ audios, word, fallback }: {
+  audios: SpanishAudio[]; word: string; fallback: () => void;
+}) {
+  const [playing, setPlaying] = useState<string | null>(null);
+  const [dead, setDead] = useState<Record<string, true>>({});
+  const usable = audios.filter((a) => a.url);
+  if (usable.length === 0) return null;
+
+  const play = (a: SpanishAudio) => {
+    if (!a.url || dead[a.file]) return;
+    const el = new Audio(a.url);
+    setPlaying(a.file);
+    const giveUp = () => {
+      setPlaying(null);
+      setDead((d) => ({ ...d, [a.file]: true }));
+      fallback();                       // 死链 → 立刻用 TTS 补上，别静默失败
+    };
+    el.onended = () => setPlaying(null);
+    el.onerror = giveUp;
+    el.play().catch(giveUp);
+  };
+
+  return (
+    <div className="audio-row">
+      <span className="audio-row-label">真人发音</span>
+      {usable.map((a) => {
+        const region = a.region ? (REGION_ZH[a.region] || a.region) : '未标注';
+        const hint = [
+          a.speaker ? `录音人 ${a.speaker}` : null,
+          a.regionSrc === 'speaker' ? '地区按录音人推定' :
+            a.regionSrc === 'tag' ? '地区为原始标注' :
+            a.regionSrc === 'filename' ? '地区取自文件名' : null,
+          a.ipa ? `对应读音 ${a.ipa}` : null,
+          dead[a.file] ? '⚠️ 该录音链接已失效，已改用合成音' : null,
+        ].filter(Boolean).join(' · ');
+        return (
+          <button
+            key={a.file}
+            className={'audio-chip' + (playing === a.file ? ' playing' : '') + (dead[a.file] ? ' dead' : '')}
+            onClick={() => play(a)}
+            title={hint || word}
+            type="button"
+          >
+            <SpeakerIcon />
+            <span className="audio-region">{region}</span>
+            {a.regionSrc === 'speaker' && <span className="audio-inferred" title="地区按录音人推定">~</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// 变形指针行：`amigo 的 阴性`、`amigar 的 命令式·第二人称·单数`。
+// 这类不是释义，是指回原形的元描述，已由「变位形式」区块（取自 infl 列）呈现，
+// 不该再进「释义」。判据是**半角空格包着的「的」** —— 中文释义里的「的」不带空格
+// （`品德高尚的女性`），所以不会误伤。
+const ES_INFL_LABEL = /^.+ 的 \S+$/;
+
+// 真释义 = 剔掉变形指针后剩下的义项。
+// 🔴 2026-08-04：此前「释义」区块由 `entry.isLemma` 整块闸住，变形行一律不显示释义。
+// 那时变形行确实只有指针，闸门看不出问题；2026-08-03 补回 4,285 条「阴性对应词」
+// 真义之后（`amiga → 女的朋友、女朋友`），这批释义**写进了库却在界面上完全看不到**，
+// 左侧结果列表显示得出、点进去详情反而只剩变位形式。
+// → 闸门改为「有没有真释义」，而不是「是不是原形」。
+function realSenses(senses: SpanishSense[]): SpanishSense[] {
+  return senses.filter((s) => !(s.zh && ES_INFL_LABEL.test(s.zh.trim())));
+}
+
 // 义项按相邻相同词性分组（definition 本就按词性成段，相邻聚合即可）。
 function groupSensesByPos(senses: SpanishSense[]): { pos: string | null; senses: SpanishSense[] }[] {
   const groups: { pos: string | null; senses: SpanishSense[] }[] = [];
@@ -398,16 +483,38 @@ if (typeof window !== 'undefined' && window.speechSynthesis) {
   window.speechSynthesis.addEventListener('voiceschanged', refreshVoices);
 }
 
-// 按 locale 找语音：先精确匹配（es-ES），再退到同语言（任意 es-*）。找不到返回 null。
+// 🔴 macOS 附带一批**搞笑音**（Ventura 起还给它们配了各语言版本）。实测这台机器上
+// 西语语音共 18 个，其中 16 个是 Eddy / Flo / Grandma / Grandpa / Reed / Rocko /
+// Sandy / Shelley（每个 ×es_ES/es_MX），**真发音人只有 Mónica 和 Paulina 两个**。
+// 原来的 `find(第一个语言匹配)` 按字母序会先撞上 Eddy ⇒ 用户听到的是滑稽音，
+// 还会以为"这词典发音真难听"。词典的发音是**权威性的一部分**，不能交给运气。
+const NOVELTY_VOICES = new Set([
+  'eddy', 'flo', 'grandma', 'grandpa', 'reed', 'rocko', 'sandy', 'shelley',
+  'albert', 'bad news', 'bahh', 'bells', 'boing', 'bubbles', 'cellos',
+  'deranged', 'good news', 'hysterical', 'jester', 'junior', 'kathy', 'organ',
+  'superstar', 'trinoids', 'whisper', 'wobble', 'zarvox', 'bruce', 'fred',
+  'ralph', 'agnes', 'princess', 'victoria', 'zuzana',
+]);
+
+// 搞笑音的名字形如 `Eddy (西班牙语（西班牙）)` —— 取括号前那截来判定。
+function isNovelty(v: SpeechSynthesisVoice): boolean {
+  const base = v.name.split(/[(（]/)[0].trim().toLowerCase();
+  return NOVELTY_VOICES.has(base);
+}
+
+// 按 locale 找语音：先剔搞笑音，再精确匹配（es-ES），再退到同语言（任意 es-*）。
+// 全被剔光时才回到未过滤的列表 —— 宁可用搞笑音，也好过完全没声音。
 function findVoice(locale: string): SpeechSynthesisVoice | null {
   if (voiceCache.length === 0) refreshVoices();
   const lc = locale.toLowerCase();
   const base = lc.split('-')[0];
-  return (
-    voiceCache.find((v) => v.lang.toLowerCase() === lc) ||
-    voiceCache.find((v) => v.lang.toLowerCase().startsWith(base)) ||
-    null
-  );
+  const pick = (pool: SpeechSynthesisVoice[]) =>
+    pool.find((v) => v.lang.toLowerCase() === lc) ||
+    pool.find((v) => v.lang.toLowerCase().replace('_', '-') === lc) ||
+    pool.find((v) => v.lang.toLowerCase().startsWith(base)) ||
+    null;
+  const real = voiceCache.filter((v) => !isNovelty(v));
+  return pick(real) || pick(voiceCache);
 }
 
 // 读词。挑到匹配语音就用它并返回 true；一个都没有 → 返回 false（调用方给提示，
@@ -997,6 +1104,7 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   entry: SpanishEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  const shownSenses = realSenses(entry.senses);
   const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
   const posParts = entry.pos ? entry.pos.split('/') : [];
   const isVerb = posParts.includes('v');
@@ -1032,6 +1140,15 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         </div>
       ) : null}
 
+      {/* 上面那排是合成音（TTS）；这一排是 Commons 上的母语者真人录音。
+          方针④三级兜底：真人 > 工具生成 > 浏览器 TTS —— 真人有就该优先展示。 */}
+      <HumanAudioRow
+        audios={entry.audios}
+        word={entry.word}
+        fallback={() => speak(entry.word, speakLocale)}
+      />
+
+
       {/* 西语本质徽标：CEFR 贯穿；名词性别 el/la/复数/阴性，动词变位类/词干变化/过去分词/及物性 */}
       <div className="entry-meta-row entry-badges">
         {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
@@ -1053,11 +1170,12 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
       </div>
 
-      {/* 真义 lemma：按词性分组，组内逐义项中文 + 英文锚点 + 性别/地区/语域 chip */}
-      {entry.isLemma && entry.senses.length > 0 && (
+      {/* 真释义：按词性分组，组内逐义项中文 + 英文锚点 + 性别/地区/语域 chip。
+          变形行只要有真释义也显示（`amiga` 的「女的朋友」），指针行则整块不出现。 */}
+      {shownSenses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          {groupSensesByPos(entry.senses).map((grp, gi) => (
+          {groupSensesByPos(shownSenses).map((grp, gi) => (
             <div className="pos-group" key={gi}>
               {grp.pos && (
                 <div className="pos-group-label">{posLabel(grp.pos)}</div>
@@ -1069,7 +1187,15 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
                       {s.zh || <span className="sense-missing">（待补）</span>}
                       <SenseChips sense={s} />
                     </div>
-                    {s.en && <div className="sense-en">{s.en}</div>}
+                    {/* 源语言锚点。英文版给英文 gloss、西语版给西语单语定义，两者
+                        **互斥互补**（并集覆盖 98.2% 的 lemma），共用这一行；挂 EN/ES
+                        小标签让用户知道这条背书来自哪一版。 */}
+                    {(s.en || s.es) && (
+                      <div className="sense-src" lang={s.en ? 'en' : 'es'}>
+                        <span className="sense-src-lang">{s.en ? 'EN' : 'ES'}</span>
+                        {s.en || s.es}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ol>

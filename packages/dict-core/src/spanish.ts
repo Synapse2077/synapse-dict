@@ -16,6 +16,10 @@ export type SpanishSearchItem = {
 
 export type SpanishSense = {
   en: string | null;       // 英文 gloss 锚点
+  // 西语单语定义锚点。与 `en` **互斥且互补**：英文版没有的 5.4 万个词条（西语版收进来的
+  // 新词）英文释义天生为空，它们的原文证据在这一列。两列并集覆盖 98.2% 的 lemma，
+  // 而在 2026-08-04 之前只有 `en` 被读取 ⇒ 三分之一的义项底下是空的。
+  es: string | null;
   zh: string | null;       // 中文释义（变位形式时为语法说明）
   pos: string | null;      // 逐义项词性（n/adj/adv/v…；补充义项定不了时为 null）
   gender: string | null;   // f / m / mf / n（仅名词）
@@ -25,6 +29,19 @@ export type SpanishSense = {
 };
 
 export type SpanishCollocation = { text: string; zh: string | null };
+
+// Wikimedia Commons 上的真人录音。**只存 URL 不存字节**：单条 mp3 约 24 KB，
+// es 全量 11,094 个文件 ≈ 260 MB，六语种合计 ≈ 36 GB —— 塞进 SQLite 会让
+// `dbtool` 每次写库前的全文件备份跟着膨胀，而九成九的文件一辈子不会被请求。
+export type SpanishAudio = {
+  file: string;
+  url: string | null;      // 优先 mp3（浏览器 <audio> 兼容性最好）
+  ipa: string | null;      // 这条录音对应哪个读音
+  speaker: string | null;
+  region: string | null;
+  regionSrc: string | null;  // tag(标注) / speaker(按录音人推) / filename
+  kind: string;              // human / tts-tool / browser-tts
+};
 
 // 变位形式指向的原形（连同其词义，供变位页内联展示）。
 export type SpanishBase = {
@@ -55,6 +72,7 @@ export type SpanishEntry = {
   level: string | null;        // CEFR A1-C2（豆包）
   senses: SpanishSense[];
   collocations: SpanishCollocation[];
+  audios: SpanishAudio[];
   baseForms: string[];         // 变位形式 → 原形词（来自 exchange "0:原形"）
   bases: SpanishBase[];        // 原形词连同其词义（服务端解析，供内联展示）
   inflNotes: string[];         // 该词形的语法说明（来自 infl 列，可多行）
@@ -69,6 +87,7 @@ type EsRow = {
   is_lemma: number;
   reflexive: number | null;
   definition: string | null;
+  definition_es: string | null;
   translation: string | null;
   meta: string | null;
   infl: string | null;
@@ -119,9 +138,22 @@ function normalizeSpanishIpa(ipa: string | null): string | null {
   return s;
 }
 
+// 列表型的列（infl / collocation …）：丢空行没关系。
 function splitLines(s: string | null): string[] {
   if (!s) return [];
   return s.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+}
+
+// 🔴 义项三列（definition / translation / meta）是**按行号一一对应**的：第 i 行
+// 是同一个义项的英文与中文。空行不是噪声，是「这个义项没有英文」的**占位**，
+// 丢掉就会让后面所有行整体上移、张冠李戴。
+// 2026-08-04 实例：`novia` 的 definition 是 `\n\n\na type of sweet roll`
+// （前三条阴性义无英文，第四条才是甜面包卷）。`filter(Boolean)` 把它塌成 1 行后，
+// 按下标 zip 的结果是「女朋友 / a type of sweet roll」—— 中英完全对不上。
+// 库里是对的、错的是这里，所以修在这一层，不许回头去改数据迁就它。
+function splitAligned(s: string | null): string[] {
+  if (!s) return [];
+  return s.split(/\r?\n/).map((x) => x.trim());
 }
 
 function firstLine(s: string | null): string | null {
@@ -151,22 +183,25 @@ function parseBaseForms(raw: string | null): string[] {
 }
 
 function buildSenses(row: EsRow): SpanishSense[] {
-  const defs = splitLines(row.definition);
-  const zhs = splitLines(row.translation);
+  const defs = splitAligned(row.definition);
+  const defsEs = splitAligned(row.definition_es);
+  const zhs = splitAligned(row.translation);
   let metaArr: Array<Record<string, unknown>> = [];
   try {
     metaArr = row.meta ? (JSON.parse(row.meta) as Array<Record<string, unknown>>) : [];
   } catch {
     metaArr = [];
   }
-  const n = Math.max(defs.length, zhs.length, metaArr.length);
+  const n = Math.max(defs.length, defsEs.length, zhs.length, metaArr.length);
   const asArr = (v: unknown) => (Array.isArray(v) ? (v as string[]) : []);
   const senses: SpanishSense[] = [];
   for (let i = 0; i < n; i++) {
     const m = metaArr[i] ?? {};
     senses.push({
-      en: defs[i] ?? null,
-      zh: zhs[i] ?? null,
+      // 占位空串要还原成 null，否则会渲染出一行空的英文锚点
+      en: defs[i] || null,
+      es: defsEs[i] || null,
+      zh: zhs[i] || null,
       pos: typeof m.pos === 'string' ? m.pos : null,
       gender: typeof m.g === 'string' ? m.g : null,
       regions: asArr(m.reg),
@@ -199,6 +234,8 @@ function mapEntry(row: EsRow): SpanishEntry {
     level: row.level,
     senses: buildSenses(row),
     collocations: parseCollocations(row.collocation),
+    audios: [],                       // 另表，由 getEntry 填
+
     baseForms: parseBaseForms(row.exchange),
     bases: [],
     inflNotes: splitLines(row.infl),
@@ -213,6 +250,7 @@ export class SpanishDictService {
   private readonly statsQuery;
   private readonly exactQuery;
   private readonly prefixQuery;
+  private readonly audioQuery;
 
   constructor(databasePath: string) {
     this.databasePath = databasePath;
@@ -230,7 +268,7 @@ export class SpanishDictService {
 
     this.exactQuery = this.db.prepare(`
       SELECT id, word, phonetic, pos, is_lemma, reflexive,
-             definition, translation, meta, infl, exchange, collocation, flag,
+             definition, definition_es, translation, meta, infl, exchange, collocation, flag,
              gender, plural, feminine, conjugation, stem_change, pp,
              transitivity, comparative, level
       FROM dict
@@ -250,6 +288,23 @@ export class SpanishDictService {
         LENGTH(word) ASC,
         word ASC
       LIMIT ?
+    `);
+
+    // 真人录音。排序即"该先播哪条"：
+    //   ① 地区是**标注**的排在**按录音人推**的前面（region_src='tag' 更可信）；
+    //   ② 西班牙本土优先 —— 我们的音标展示层默认是半岛音（含 θ），
+    //      录音得跟音标对得上，否则用户看着 /θ/ 却听到 /s/；
+    //   ③ 其余按地区名稳定排序，保证同一个词每次播的是同一条。
+    // ⚠️ 录音实际分布严重偏拉美（委内瑞拉 4,598 + 哥伦比亚 2,769 = 65%，
+    //    西班牙仅 1,411），全因 Marreromarco 一人录了 4,597 条。不排序就会默认播拉美音。
+    this.audioQuery = this.db.prepare(`
+      SELECT file, url_mp3, url_ogg, ipa, speaker, region, region_src, kind
+      FROM audio
+      WHERE word = ? COLLATE NOCASE
+      ORDER BY
+        CASE WHEN region = 'Spain' THEN 0 ELSE 1 END,
+        CASE WHEN region_src = 'tag' THEN 0 WHEN region_src IS NULL THEN 2 ELSE 1 END,
+        region, file
     `);
   }
 
@@ -288,6 +343,21 @@ export class SpanishDictService {
       const bm = mapEntry(br);
       entry.bases.push({ word: bm.word, pos: bm.pos, phonetic: bm.phonetic, senses: bm.senses });
     }
+
+    const au = this.audioQuery.all(entry.word) as Array<{
+      file: string; url_mp3: string | null; url_ogg: string | null;
+      ipa: string | null; speaker: string | null; region: string | null;
+      region_src: string | null; kind: string;
+    }>;
+    entry.audios = au.map((r) => ({
+      file: r.file,
+      url: r.url_mp3 || r.url_ogg,   // mp3 优先：<audio> 对它的兼容性最好
+      ipa: r.ipa,
+      speaker: r.speaker,
+      region: r.region,
+      regionSrc: r.region_src,
+      kind: r.kind,
+    }));
     return entry;
   }
 
