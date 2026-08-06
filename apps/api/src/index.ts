@@ -2,7 +2,8 @@ import './assertNodeVersion'; // 必须放最前：抢在 dict-core 的 node:sql
 import cors from 'cors';
 import express from 'express';
 import type { Request } from 'express';
-import { availableLanguages, closeAllServices, getService } from '@synapse-dict/dict-core';
+import fs from 'node:fs';
+import { availableLanguages, closeAllServices, getService, ttsDirFor } from '@synapse-dict/dict-core';
 import { createRateLimiter, rateLimitOptionsFromEnv } from './rateLimit';
 
 const app = express();
@@ -37,6 +38,21 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/langs', (_req, res) => {
   res.json({ languages: langs, default: defaultLang });
 });
+
+// 合成发音的音频文件（`es/pipeline/gen_tts.py` 产物）。挂在 /api/… 之下是为了
+// 复用前端已有的 vite 代理（只代理了 /api），不必再开一条转发规则。
+// 放在限流**之前**：一个词条页会连着取音频，按 API 调用限流会把播放掐掉；
+// 而这里是纯静态小文件（约 10 KB），交给 express.static 走 sendfile，不碰 SQLite。
+// 文件名是 sha1，天然不可枚举；目录不存在的语种直接跳过。
+for (const l of langs) {
+  const dir = ttsDirFor(l.code);
+  if (!fs.existsSync(dir)) continue;
+  app.use(`/api/audio/${l.code}`, express.static(dir, {
+    immutable: true,            // 内容由 sha1 定址，永不变
+    maxAge: '365d',
+    fallthrough: false,         // 没有就 404，别掉到后面的路由里
+  }));
+}
 
 // Throttle the query endpoints — these hit the synchronous, shared SQLite that
 // synapse-web also reads, so an unbounded flood here can starve web too.

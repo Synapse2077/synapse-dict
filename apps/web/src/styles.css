@@ -461,6 +461,13 @@ body {
   background: var(--accent-soft);
 }
 
+/* 有成品合成音（Piper 文件）时的标记。只做**正向**加重，不去调淡默认态——
+   `.phonetic-speaker` 是全站共用的（英语词条、真人录音行都在用它），
+   把基础样式改淡会波及其他语种，而那些语种根本还没有合成音这一级。 */
+.phonetic-btn.has-tts {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
 .phonetic-speaker {
   color: var(--accent);
   flex-shrink: 0;
@@ -1080,4 +1087,123 @@ body {
 .audio-inferred {
   font-size: 11px;
   opacity: 0.5;
+}
+
+/* ══ 西语版释义（sense_es，2026-08-05）══
+   默认折叠：hacer 有 59 条，平铺出来会把上面的中文释义挤没。
+   视觉上刻意比主释义弱一档 —— 它是「另一版怎么说」的旁证，不是本词典的结论。 */
+.es-senses {
+  margin-top: 14px;
+}
+
+.es-senses-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.es-senses-toggle:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.es-senses-caret {
+  display: inline-block;
+  transition: transform 0.15s;
+  font-size: 11px;
+}
+
+.es-senses-caret.open {
+  transform: rotate(90deg);
+}
+
+.es-senses-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* 来源就写在按钮上：用户该一眼看出这不是我们编的 */
+.es-senses-src {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.es-senses-body {
+  padding: 10px 4px 2px;
+}
+
+.es-sense-group + .es-sense-group {
+  margin-top: 12px;
+}
+
+/* 西语版自己的语法口径（Sustantivo ambiguo / Verbo pronominal），比我们的短码细，原样保留 */
+.es-sense-pos {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.es-sense-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.es-sense-list li {
+  margin-bottom: 5px;
+  line-height: 1.55;
+}
+
+/* 中文在上、西语原文在下 —— 与主释义区同一套阅读顺序。
+   原文视觉上弱一档，但不能省：它才是这条义项的权威源，中文是我们译的。 */
+.es-sense-zh {
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.es-sense-gloss {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 1px;
+  line-height: 1.5;
+}
+
+/* 「英文版没有这个义项」——这批才是展开之后真正的新内容 */
+.es-sense-new {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  vertical-align: 1px;
+}
+
+.es-senses-extra {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.es-sense-tags {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
 }

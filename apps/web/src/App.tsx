@@ -47,6 +47,16 @@ type SpanishAudio = {
   speaker: string | null; region: string | null;
   regionSrc: string | null; kind: string;
 };
+// 工具合成音（Piper）。方针④三级兜底的中间那级：真人 > 工具生成 > 浏览器 TTS。
+// 服务端已经 stat 过文件，出现在这个数组里就是**确实有**，前端不必再探 404。
+type SpanishTts = { accent: 'spain' | 'latam'; url: string; voice: string };
+// 西语版自有义项。与 SpanishSense.es 不同：那是按行号对齐的同一条义项的西语说法，
+// 这是西语版自己的一套编号（hacer 我们 15 条、它 59 条），独立成块展示。
+type SpanishEsSense = {
+  idx: number; gloss: string; posTitle: string | null; tags: string[];
+  zh: string | null;
+  enI: number | null;   // 对应上面第几条义项；null = 英文版没有这个义项
+};
 type SpanishBase = {
   word: string;
   pos: string | null;
@@ -74,6 +84,8 @@ type SpanishEntry = {
   senses: SpanishSense[];
   collocations: SpanishCollocation[];
   audios: SpanishAudio[];
+  esSenses: SpanishEsSense[];
+  tts: SpanishTts[];
   baseForms: string[];
   bases: SpanishBase[];
   inflNotes: string[];
@@ -441,6 +453,72 @@ function HumanAudioRow({ audios, word, fallback }: {
         );
       })}
     </div>
+  );
+}
+
+// 西语版释义区块。2026-08-05 补收 16.1 万条后接入。
+//
+// 为什么单独成块、而不是并进上面的「释义」：西语版的义项是**另一套切分**，
+// `hacer` 我们 15 条、它 59 条，且第 1 义不是同一个义项。硬并会张冠李戴。
+// 合并要靠语义匹配，那是另一件事，且合错就拆不回来 —— 先让它以原样可见。
+//
+// 🔴 默认折叠。产品是划词弹窗，59 条义项平铺出来等于把答案埋了。
+//    展开后按西语版自己的语法口径分组（Verbo transitivo / Verbo pronominal…）——
+//    那个口径比我们的短码 n/v 细，正好当分组依据，不用自己再造一套。
+function EsSenseBlock({ esSenses }: { esSenses: SpanishEsSense[] }) {
+  const [open, setOpen] = useState(false);
+  if (esSenses.length === 0) return null;
+
+  // 「上面没有」的条数：enI === null 表示英文版没有这个义项，也就是展开才看得到的净增内容。
+  // 放在折叠按钮上，用户才有理由点开——否则一个「25 条」不说明这里面有没有新东西。
+  const extra = esSenses.filter((s) => s.enI === null).length;
+
+  // 按 posTitle 保序分组（西语版本来就是按词性块组织的，顺序有意义，别排序）
+  const groups: Array<{ title: string; items: SpanishEsSense[] }> = [];
+  for (const s of esSenses) {
+    const t = s.posTitle || '其他';
+    const last = groups[groups.length - 1];
+    if (last && last.title === t) last.items.push(s);
+    else groups.push({ title: t, items: [s] });
+  }
+
+  return (
+    <section className="es-senses">
+      <button className="es-senses-toggle" onClick={() => setOpen(!open)} type="button">
+        <span className={'es-senses-caret' + (open ? ' open' : '')}>▸</span>
+        西语版释义
+        <span className="es-senses-count">{esSenses.length} 条</span>
+        {extra > 0 && <span className="es-senses-extra">{extra} 条上面没有</span>}
+        <span className="es-senses-src">es.wiktionary</span>
+      </button>
+      {open && (
+        <div className="es-senses-body">
+          {groups.map((g, gi) => (
+            <div className="es-sense-group" key={gi}>
+              <div className="es-sense-pos">{g.title}</div>
+              <ol className="es-sense-list">
+                {g.items.map((s) => (
+                  <li key={s.idx}>
+                    {/* 中文在上、西语原文在下 —— 与上面「释义」区块同一套阅读顺序。
+                        西语原文不能省：它才是这一条的**权威源**，中文是我们译的。 */}
+                    <div className="es-sense-zh">
+                      {s.zh || <span className="sense-missing">（待补）</span>}
+                      {s.enI === null && (
+                        <span className="es-sense-new" title="英文版没有这个义项">新</span>
+                      )}
+                    </div>
+                    <div className="es-sense-gloss" lang="es">{s.gloss}</div>
+                    {s.tags.length > 0 && (
+                      <span className="es-sense-tags">{s.tags.join(' · ')}</span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1105,6 +1183,24 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   speak: (word: string, locale: string) => void;
 }) {
   const shownSenses = realSenses(entry.senses);
+
+  // 方针④三级兜底在音标行上的落法：有成品合成音就播文件，没有才降到浏览器 TTS。
+  // 🔴 **不能拿拉美那份去顶半岛按钮**：用户看着 /θeɾˈbeθa/ 却听到 serˈbesa，
+  //    比听浏览器音更糟——错的音比没有音更伤。缺哪个口音就用哪个 locale 交给浏览器。
+  const ttsOf = (accent: 'spain' | 'latam') =>
+    entry.tts.find((t) => t.accent === accent) || null;
+
+  const playAccent = (accent: 'spain' | 'latam', locale: string) => {
+    const t = ttsOf(accent);
+    if (!t) { speak(entry.word, locale); return; }
+    const el = new Audio(t.url);
+    // 文件可能被挪走/清掉（音频不进 git，换台机器就没有）⇒ 播不出照样要有声音
+    el.onerror = () => speak(entry.word, locale);
+    el.play().catch(() => speak(entry.word, locale));
+  };
+
+  const tierHint = (accent: 'spain' | 'latam') =>
+    ttsOf(accent) ? '合成音（工具生成）' : '合成音（浏览器）';
   const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
   const posParts = entry.pos ? entry.pos.split('/') : [];
   const isVerb = posParts.includes('v');
@@ -1117,23 +1213,37 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         <h2 className="entry-word">{entry.word}</h2>
       </header>
 
-      {/* 双音：ES 半岛(distinción θ) / LA 拉美(seseo s)，格式同英语 UK/US——字母标签+音标同在一标签内 */}
+      {/* 双音：ES 半岛(distinción θ) / LA 拉美(seseo s)，格式同英语 UK/US——字母标签+音标同在一标签内。
+          分两个按钮的前提就是这个词含 θ、两地读法不同，所以两边各取各的音色。 */}
       {entry.phonetic && entry.phoneticLatam ? (
         <div className="phonetic-row">
-          <button className="phonetic-btn" onClick={() => speak(entry.word, 'es-ES')} title="播放 西班牙(半岛) 发音" type="button">
+          <button
+            className={'phonetic-btn' + (ttsOf('spain') ? ' has-tts' : '')}
+            onClick={() => playAccent('spain', 'es-ES')}
+            title={`播放 西班牙(半岛) 发音 · ${tierHint('spain')}`} type="button"
+          >
             <span className="phonetic-label">西</span>
             <span className="phonetic-value">/{entry.phonetic}/</span>
             <SpeakerIcon />
           </button>
-          <button className="phonetic-btn" onClick={() => speak(entry.word, 'es-MX')} title="播放 拉美 发音" type="button">
+          <button
+            className={'phonetic-btn' + (ttsOf('latam') ? ' has-tts' : '')}
+            onClick={() => playAccent('latam', 'es-MX')}
+            title={`播放 拉美 发音 · ${tierHint('latam')}`} type="button"
+          >
             <span className="phonetic-label">拉美</span>
             <span className="phonetic-value">/{entry.phoneticLatam}/</span>
             <SpeakerIcon />
           </button>
         </div>
       ) : entry.phonetic ? (
+        /* 单按钮 = 音标无 θ = 两地读法本来就相同 ⇒ 拉美那份音色通用，直接拿来播。 */
         <div className="phonetic-row">
-          <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
+          <button
+            className={'phonetic-btn' + (ttsOf('latam') ? ' has-tts' : '')}
+            onClick={() => playAccent('latam', speakLocale)}
+            title={`播放发音 · ${tierHint('latam')}`} type="button"
+          >
             <span className="phonetic-value">/{entry.phonetic}/</span>
             <SpeakerIcon />
           </button>
@@ -1201,6 +1311,14 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
               </ol>
             </div>
           ))}
+        </section>
+      )}
+
+      {/* 西语版释义。**不能放进上面那个 `shownSenses.length > 0` 的条件里** ——
+          没有可显示义项、却有西语版释义的词，恰恰是这一块唯一能救的情况。 */}
+      {entry.esSenses.length > 0 && (
+        <section className="entry-section">
+          <EsSenseBlock esSenses={entry.esSenses} />
         </section>
       )}
 

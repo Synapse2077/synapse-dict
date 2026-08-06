@@ -5,6 +5,9 @@
 // IPA 入库为维基式精确源，读取时经 normalizeSpanishIpa 转 RAE 本土标准（见函数注释）。
 // ============================================================================
 
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 export type SpanishSearchItem = {
@@ -43,6 +46,39 @@ export type SpanishAudio = {
   kind: string;              // human / tts-tool / browser-tts
 };
 
+// 西语版（es.wiktionary）自己那套单语义项，`sense_es` 表。2026-08-05 补收。
+//
+// 🔴 **它和 `SpanishSense.es` 不是一回事，别混。**
+//   · `SpanishSense.es` 走 `dict.definition_es`，与英文/中文**按行号对齐**，是同一条义项的西语说法；
+//   · 这里是西语版**自己的一套义项编号**，与我们的义项切分无关（`hacer` 我们 15 条、它 59 条）。
+//   按行号塞进前者会造成系统性错配（放大版的 `novia`），所以另立门户。
+// 两者互斥：`definition_es` 有值的词，西语义项已经内联显示了，这里就返回空数组，不重复推给前端。
+export type SpanishEsSense = {
+  idx: number;
+  gloss: string;               // 西语单语定义原文
+  posTitle: string | null;     // 西语版语法口径（Sustantivo ambiguo / Verbo transitivo…），比我们的短码细
+  tags: string[];
+  zh: string | null;           // 中文；补收时留空，翻译那步再填
+  // 这条西语义项对应上面 `senses` 的第几条；null = 英文版没有这个义项。
+  // 2026-08-06 与翻译同一次调用产出（输入本来就要喂英文义项消歧，只多吐一个下标）。
+  // 全库 22.7% 为 null，且分布自洽：「西语义项更多」的词 33.0%、「两边条数相同」仅 5.5%。
+  enI: number | null;
+};
+
+// 工具合成发音（Piper），方针④三级兜底「真人 > 工具生成 > 浏览器 TTS」的**中间那级**。
+// 真人录音只覆盖 5.5% 的 lemma，这一级把常用词补齐；两级都没有才落到浏览器 TTS。
+export type SpanishTts = {
+  accent: 'spain' | 'latam';   // 与音标行的「西 / 拉美」两个标签一一对应
+  url: string;                 // /api/audio/es/<xx>/<sha1>.m4a
+  voice: string;               // 音色标识，换音色后排查用
+};
+
+// 音色 → 口音。半岛音只给音标含 θ 的词生成（其余两地读法相同，拉美那份通用）。
+const TTS_VOICES: Array<{ tag: string; accent: 'spain' | 'latam'; voice: string }> = [
+  { tag: 'mx', accent: 'latam', voice: 'es_MX-claude-high' },
+  { tag: 'es', accent: 'spain', voice: 'es_ES-sharvard-medium#0' },
+];
+
 // 变位形式指向的原形（连同其词义，供变位页内联展示）。
 export type SpanishBase = {
   word: string;
@@ -73,6 +109,8 @@ export type SpanishEntry = {
   senses: SpanishSense[];
   collocations: SpanishCollocation[];
   audios: SpanishAudio[];
+  esSenses: SpanishEsSense[];  // 西语版自有义项组（与 senses 不对齐，独立成块展示）
+  tts: SpanishTts[];           // 工具合成音（有哪个口音就给哪个，缺的由前端落到浏览器 TTS）
   baseForms: string[];         // 变位形式 → 原形词（来自 exchange "0:原形"）
   bases: SpanishBase[];        // 原形词连同其词义（服务端解析，供内联展示）
   inflNotes: string[];         // 该词形的语法说明（来自 infl 列，可多行）
@@ -235,6 +273,8 @@ function mapEntry(row: EsRow): SpanishEntry {
     senses: buildSenses(row),
     collocations: parseCollocations(row.collocation),
     audios: [],                       // 另表，由 getEntry 填
+    esSenses: [],                     // 另表，由 getEntry 填
+    tts: [],                          // 文件系统，由 getEntry 填
 
     baseForms: parseBaseForms(row.exchange),
     bases: [],
@@ -247,13 +287,17 @@ export class SpanishDictService {
   readonly databasePath: string;
   readonly lang = 'es';
   private readonly db: DatabaseSync;
+  private readonly ttsDir: string;
   private readonly statsQuery;
   private readonly exactQuery;
   private readonly prefixQuery;
   private readonly audioQuery;
+  private readonly esSenseQuery;
 
-  constructor(databasePath: string) {
+  constructor(databasePath: string, ttsDir?: string) {
     this.databasePath = databasePath;
+    // 默认由 DB 路径推出：data/db/synapse-dict-es.sqlite → data/tts/es
+    this.ttsDir = ttsDir ?? path.resolve(path.dirname(databasePath), '../tts/es');
     this.db = new DatabaseSync(databasePath);
     this.db.exec('PRAGMA query_only = ON');
 
@@ -306,10 +350,43 @@ export class SpanishDictService {
         CASE WHEN region_src = 'tag' THEN 0 WHEN region_src IS NULL THEN 2 ELSE 1 END,
         region, file
     `);
+
+    // 西语版自有义项。`sense_es.word` 是从 `dict.word` 原样带过来的，用精确匹配即可
+    // （查询入口的大小写归一已由 exactQuery 的 COLLATE NOCASE 做过，这里拿到的是库内词形）。
+    this.esSenseQuery = this.db.prepare(`
+      SELECT idx, gloss, pos_title, tags, zh, en_i
+      FROM sense_es
+      WHERE word = ?
+      ORDER BY idx
+    `);
   }
 
   getStats() {
     return this.statsQuery.get() as Record<string, number>;
+  }
+
+  // 合成音查找。**路径是算出来的，不查表**：文件名就是 sha1(`词|音色`)，
+  // 与 `es/pipeline/gen_tts.py` 里的 `digest()` 必须逐字一致，否则全库对不上。
+  //
+  // 🔴 为什么还要 existsSync：路径算得出来 ≠ 文件一定在。
+  //    ① 半岛音只给音标含 θ 的词生成（其余 83.5% 根本没有这个文件）；
+  //    ② 标点条目（`¿ ?`、`« »` 等 6 个）合成不出音频，一份都没有；
+  //    ③ 音频按层铺开，没铺到的层就是没有。
+  //    让前端拿路径去试、靠 404 兜底要多一个来回，而 `getEntry` 本来就是一次请求
+  //    ⇒ 在服务端 stat 一下（微秒级），把"有没有"直接写进返回的 JSON。
+  //
+  // ⚠️ 必须用 **DB 里的词形** 算哈希，不能用用户输入的：`exactQuery` 是 COLLATE NOCASE，
+  //    用户搜 "GRACIAS" 也能命中 `gracias`，但音频是按 DB 词形生成的。
+  private ttsFor(word: string): SpanishTts[] {
+    const out: SpanishTts[] = [];
+    for (const v of TTS_VOICES) {
+      const h = createHash('sha1').update(`${word}|${v.tag}`).digest('hex');
+      const rel = `${h.slice(0, 2)}/${h}.m4a`;
+      if (fs.existsSync(path.join(this.ttsDir, rel))) {
+        out.push({ accent: v.accent, url: `/api/audio/es/${rel}`, voice: v.voice });
+      }
+    }
+    return out;
   }
 
   search(query: string, limit = 20): SpanishSearchItem[] {
@@ -358,6 +435,30 @@ export class SpanishDictService {
       regionSrc: r.region_src,
       kind: r.kind,
     }));
+    // 西语版自有义项。`definition_es` 有值 = 西语义项已按行号内联在 senses 里，
+    // 这里再给一份就是同样内容显示两遍 ⇒ 返回空。两者由构造保证互斥
+    // （实测 54,206 个有 definition_es 的词，英文释义非空的恰好 0 个）。
+    if (!row.definition_es) {
+      const es = this.esSenseQuery.all(entry.word) as Array<{
+        idx: number; gloss: string; pos_title: string | null;
+        tags: string | null; zh: string | null; en_i: number | null;
+      }>;
+      entry.esSenses = es.map((r) => {
+        let tags: string[] = [];
+        try {
+          const p = r.tags ? JSON.parse(r.tags) : [];
+          if (Array.isArray(p)) tags = p as string[];
+        } catch {
+          tags = [];
+        }
+        return {
+          idx: r.idx, gloss: r.gloss, posTitle: r.pos_title, tags, zh: r.zh,
+          enI: typeof r.en_i === 'number' ? r.en_i : null,
+        };
+      });
+    }
+
+    entry.tts = this.ttsFor(entry.word);
     return entry;
   }
 

@@ -24,3 +24,11 @@ WORK    = DATA / "work" / "es"                  # 过程产物：runs / 冲突�
 BACKUPS = DATA / "backups"                          # 写库前的自动备份
 DUMPS   = DATA / "dumps"
 ENV     = ROOT / ".env"
+
+# ═══ 合成发音（2026-08-05）═══
+# 音频字节**不进 SQLite**（理由同 ingest_audio.py：dbtool 每次写库前全文件复制备份）。
+# TTS_VOICES 是 Piper 模型（跨语种共用一个目录，各语种取自己的那几个）。
+# TTS_OUT 下按 sha1(word) 前两位分 256 个子目录 —— 单目录放 16 万文件时
+# macOS 上 `ls` 和 Finder 都会卡，分片后每个目录 600 来个文件。
+TTS_VOICES = DATA / "tts" / "voices"
+TTS_OUT    = DATA / "tts" / "es"                 # 成品音频 + manifest.tsv

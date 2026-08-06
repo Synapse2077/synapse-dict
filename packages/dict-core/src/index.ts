@@ -363,6 +363,15 @@ export function availableLanguages(): LanguageMeta[] {
   return LANGUAGES.filter((l) => fs.existsSync(dbPathFor(l.code)));
 }
 
+// 合成发音的音频目录（`es/pipeline/gen_tts.py` 的产物，与 es/paths.py 的 TTS_OUT 同址）。
+// 音频**不进 SQLite**、也不进 git；API 把这个目录静态挂在 /api/audio/<code> 下。
+// 目前只有 es 有；其余语种目录不存在 ⇒ 静态挂载会跳过，前端自动落到浏览器 TTS。
+export function ttsDirFor(code: string): string {
+  const override = process.env[`TTS_PATH_${code.toUpperCase()}`];
+  if (override) return path.resolve(override);
+  return path.resolve(REPO_ROOT, `data/tts/${code}`);
+}
+
 type AnyService = DictionaryService | SpanishDictService | ItalianDictService
   | FrenchDictService | PortugueseDictService | GermanDictService;
 const serviceCache = new Map<string, AnyService>();
