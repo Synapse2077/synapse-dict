@@ -310,6 +310,16 @@ export class SpanishDictService {
       FROM dict
     `);
 
+    // 🔴 排序第一键是**精确大小写命中**，不是 is_lemma。2026-08-06 补收 573 个
+    //    大写专名词头之后必须如此：西语靠大小写区分词汇，而这里是 COLLATE NOCASE。
+    //
+    //      cefalópodo    Adjetivo/Sustantivo    属于头足纲的        （lemma）
+    //      cefalópodos   ← 上一条的阳性复数变形                      is_lemma=0
+    //      Cefalópodos   Sustantivo propio      头足纲（Cephalopoda） is_lemma=1  ← 新收
+    //
+    //    只按 `is_lemma DESC` 排，用户查 `cefalópodos`（正文里的复数形）会拿到
+    //    **分类单元**那条 —— 569 个词都会这样翻转。同族还有 virgo/Virgo、be/Be、chile/Chile。
+    //    先按大小写完全一致排，再按 is_lemma，两条都在时各归各位。
     this.exactQuery = this.db.prepare(`
       SELECT id, word, phonetic, pos, is_lemma, reflexive,
              definition, definition_es, translation, meta, infl, exchange, collocation, flag,
@@ -317,7 +327,7 @@ export class SpanishDictService {
              transitivity, comparative, level
       FROM dict
       WHERE word = ? COLLATE NOCASE
-      ORDER BY is_lemma DESC
+      ORDER BY CASE WHEN word = ? THEN 0 ELSE 1 END, is_lemma DESC
       LIMIT 1
     `);
 
@@ -408,14 +418,14 @@ export class SpanishDictService {
   getEntry(word: string): SpanishEntry | null {
     const keyword = word.trim();
     if (!keyword) return null;
-    const row = this.exactQuery.get(keyword) as EsRow | undefined;
+    const row = this.exactQuery.get(keyword, keyword) as EsRow | undefined;
     if (!row) return null;
     const entry = mapEntry(row);
 
     // 解析每个原形的词义（单层，供变位页内联展示各原形分别是什么意思）。
     for (const bw of entry.baseForms) {
       if (bw === entry.word) continue;
-      const br = this.exactQuery.get(bw) as EsRow | undefined;
+      const br = this.exactQuery.get(bw, bw) as EsRow | undefined;
       if (!br) continue;
       const bm = mapEntry(br);
       entry.bases.push({ word: bm.word, pos: bm.pos, phonetic: bm.phonetic, senses: bm.senses });

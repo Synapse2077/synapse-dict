@@ -48,6 +48,27 @@
 ⇒ 宁可让 54,075 个词的义项与 `dict.definition_es` 内容重复（同一份 dump 的冻结副本，
    不存在「两个真相源会漂移」的问题），换一张含义均匀的表。代价是几十 MB。
 
+═══ 🔴 2026-08-06 补：去掉 `is_lemma=1` 闸门 ═══
+上一版这里写的是 `... from dict where is_lemma=1`。那道闸门违反了上面刚立的规矩
+——它让本表的含义变成「西语版对**我们判成原形的**词说了什么」，又一条得靠人记的历史。
+后果实测：
+
+    西语版当词条（`pos_title` 不以 "Forma " 开头）、我们判成变形层的词   5,701
+    因此收不进来的义项                                              8,506
+
+这批不是零头，是 `levantarse`（起床，2,323 个 Verbo pronominal 之一）、`absuelto`、
+`elecciones`、`ratoncito` 这类**界面上一条释义都没有**的词。
+
+⚠️ 判据两边并不矛盾，两边都对：kaikki 英文版说 `levantarse` 是 `levantar` 的自复不定式
+   （真的），西语版说它是个有三条自己的释义的词条（也是真的）。
+   ⇒ 本脚本只做**收录**，`dict.is_lemma` 一个字节不动 —— 「反身动词/指小词算不算
+     独立词条」是词典学取舍，不是这里能顺手决定的事，留给 `docs/SCHEMA.md` 的词/词形重设计。
+   （另有 3,890 个**异体拼写**被误判成变形层，那批是源头判据被误用、不是取舍问题，
+     已由 `fixes/fix_altof_lemma.py` 确定性修掉并翻成 lemma。）
+
+`dict.word` 全库唯一（1,136,294 行 = 1,136,294 个 distinct word），所以去掉闸门后
+`dict_id` 的挂载依然无歧义。
+
 ═══ 闸门 ═══
 建新表不碰 `dict` ⇒ `expect={}`。
 ⚠️ `dbtool.snapshot()` 只统计 `dict` 的列，新表不在它视野里，本脚本自己做计数断言。
@@ -151,10 +172,16 @@ def main() -> None:
     print(f"西语版词头（西语、非变形、有义项）：{len(cache):,}")
 
     con = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
-    lemmas = {w: (i, de, des) for w, i, de, des in con.execute(
-        "select word, id, definition, definition_es from dict where is_lemma=1")}
+    # 🔴 不加 is_lemma 闸门，理由见 docstring「2026-08-06 补」
+    lemmas = {w: (i, de, des, lem) for w, i, de, des, lem in con.execute(
+        "select word, id, definition, definition_es, is_lemma from dict")}
+    have = {w for (w,) in con.execute("select distinct word from sense_es")} \
+        if con.execute("select count(*) from sqlite_master where type='table' "
+                       "and name='sense_es'").fetchone()[0] else set()
     con.close()
-    print(f"我们的 lemma：{len(lemmas):,}")
+    print(f"库内词条：{len(lemmas):,}（其中 lemma "
+          f"{sum(1 for v in lemmas.values() if v[3]):,}）")
+    print(f"sense_es 已有的词：{len(have):,}")
 
     def nlines(s):
         return len([x for x in (s or "").split("\n") if x.strip()])
@@ -166,7 +193,16 @@ def main() -> None:
     print(f"  缺 definition_es（真缺口）  {len(gap):,}   义项 {sum(len(cache[w]) for w in gap):,} 条")
     print(f"  已有 definition_es（重复收） {len(already):,}   义项 {sum(len(cache[w]) for w in already):,} 条")
     only_dump = len(cache) - len(both)
-    print(f"  只在 dump 里、我们没这个 lemma  {only_dump:,}  ← 不收，本表只服务库内词条")
+    print(f"  只在 dump 里、我们库里没这个词  {only_dump:,}  ← 不收，本表只服务库内词条")
+
+    # 本轮相对上一轮的净增 —— 「跳过/新增」那一栏必须逐条看得见，不能只报总数
+    new = [w for w in both if w not in have]
+    n_lem = sum(1 for w in new if lemmas[w][3])
+    print(f"\n本轮净增 {len(new):,} 个词 / {sum(len(cache[w]) for w in new):,} 条义项")
+    print(f"    其中已是 lemma {n_lem:,}    仍判在变形层 {len(new) - n_lem:,}")
+    for w in sorted(new, key=lambda x: -len(cache[x]))[:8]:
+        print(f"      {w:<20}{len(cache[w]):>3} 条  is_lemma={lemmas[w][3]}  "
+              f"{cache[w][0]['g'][:44]}")
 
     # 🔴 项目教训：统计里"跳过"那一栏必须逐条看得见
     print(f"\n真缺口那批，英文/西语义项数对比：")
@@ -181,7 +217,21 @@ def main() -> None:
         print("\n--scan：不写库，到此为止。")
         return
 
-    words = sorted(both)
+    # ═══ 🔴 续跑判据必须是**词级**，不能靠 (word, idx) 的 UNIQUE 去重 ═══
+    # 2026-08-06 踩到：缓存是 dump 的原样快照，而库里的行已经被
+    # `clean_sense_es_residue.py`（删 87 条 wikitext 残渣）和
+    # `fix_sense_es_residue2.py`（拆分/重编号）修过。两边 idx 于是对不上：
+    #
+    #     caer 原本 25 条，[23] 是残渣 → 清掉并重编号后只剩 [0..23]
+    #     重跑时 idx=24 空着，`INSERT OR IGNORE` 就把缓存里的第 25 条又塞了回来
+    #
+    # ⇒ 13 条已删的残渣（`:*Sinónimos:`、`*Derivado:`、`:*Ámbito: Perú`）复活。
+    # 这是项目教训「改完数据，旧的续跑记录就作废」的又一次现形：UNIQUE 约束
+    # 保证的是「不重复」，**不保证「不倒退」**。
+    # 词级判据对重编号免疫 —— 一个词要么整体没收过，要么已经收过（且可能已被修正）。
+    skip = [w for w in both if w in have]
+    words = sorted(w for w in both if w not in have)
+    print(f"\n已收过、跳过 {len(skip):,} 个词；本轮处理 {len(words):,} 个")
     if args.limit:
         words = words[:args.limit]
     rows = []

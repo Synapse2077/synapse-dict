@@ -114,7 +114,20 @@ def copy_stage(apply: bool) -> None:
         elif cur:
             misfit.append(w)
 
-    print(f"可复制 {len(plan):,} 条（{len({p[2] for p in plan}):,} 个词）")
+    # 🔴 只填空，不覆盖 —— 与 merge() 同一条规矩，理由见那里的 docstring。
+    #    2026-08-06 实测：`ramplug` 的 2 条已由 LLM 译好的义项，因为清掉重复行之后
+    #    行数恰好对上了，被复制段**默默改写**成 dict 里的版本。这次两版内容都对，
+    #    但「本该只补 584 条新行、实际动了 586 行」本身就是不该发生的事。
+    con2 = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+    pending = {(w, i) for w, i in
+               con2.execute("SELECT word, idx FROM sense_es WHERE zh IS NULL")}
+    con2.close()
+    n_all = len(plan)
+    plan = [p for p in plan if (p[2], p[3]) in pending]
+
+    print(f"可复制 {n_all:,} 条，其中待填空的 {len(plan):,} 条"
+          f"（{len({p[2] for p in plan}):,} 个词）")
+    print(f"  已有译文、跳过不覆盖：{n_all - len(plan):,}")
     print(f"对不上、留给 LLM：{len(misfit):,} 个词")
     # 🔴 项目教训：「跳过」那栏必须看得见
     print(f"  样例：{misfit[:8]}")
@@ -151,7 +164,16 @@ def llm_items(limit=None):
     out = []
     for w, sens in need.items():
         de, tr, pos = meta[w]
-        out.append({"w": w, "pos": pos, "en": nl(de), "zh": nl(tr),
+        # 🔴 `en` 为空时 `translation` 装的**不是释义，是指针文本**
+        #    （`build.py:395`：`translation = None if is_lemma else infl`，
+        #     值形如 `-ido 的 过去分词·阴性·单数`）。
+        #    prompt 里 `zh` 那一栏写明是「我们已有的中文（与 en 逐条对应）」，
+        #    en 空着却塞进一句指针，是在给模型喂噪声 —— 2026-08-06 收进
+        #    7,138 条变形层义项时才暴露出来（此前本表只服务 lemma，`en` 必非空）。
+        has_en = bool((de or "").strip())
+        out.append({"w": w, "pos": pos,
+                    "en": nl(de) if has_en else [],
+                    "zh": nl(tr) if has_en else [],
                     "es": [g for _, g in sens], "_idx": [i for i, _ in sens]})
         if limit and len(out) >= limit:
             break
@@ -271,7 +293,21 @@ async def run_llm(limit=None):
           f"共 {usage['total_tokens']:,}")
 
 
-def merge(apply: bool) -> None:
+def merge(apply: bool, overwrite: bool = False) -> None:
+    """把 RAW 里的模型产出写回 `sense_es`。
+
+    🔴 **默认只填空（`zh IS NULL`），绝不覆盖已有译文。** 2026-08-06 立此规矩：
+    RAW 是**只追加**的历史全量（此刻 112,381 条），而 `--merge` 原先是无差别重放。
+    库里的行在那之后被别的脚本改过，重放就会把修复**撤销**：
+
+      · `clear_invalid_en_i.py` 把 945 条越界 `en_i` 清成了 null（确定性判定为无效），
+        RAW 里存的还是那些越界值 —— 重放 = 越界值原样回来
+      · `fix_sense_es_residue2.py` 拆分并**重新编号**过若干词，RAW 里的旧 idx
+        会套到新编号上 —— 重放 = `esquela` 那个错位坑再来一次
+
+    「只填空」让本步骤幂等且单调：跑多少次结果都一样，且任何后续修复都不会被回卷。
+    真要重译某批，先显式把那批 `zh` 清成 NULL，或用 `--overwrite`（危险，见上）。
+    """
     if not RAW.exists():
         sys.exit("没有 LLM 产出文件")
     plan, bad = [], 0
@@ -288,7 +324,21 @@ def merge(apply: bool) -> None:
                 ei = s.get("en_i")
                 plan.append((zh, ei if isinstance(ei, int) else None,
                              "llm-flash", d["w"], i))
-    print(f"待写回 {len(plan):,} 条；条数不符丢弃 {bad}")
+    print(f"RAW 累计 {len(plan):,} 条；条数不符丢弃 {bad}")
+
+    con = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+    pending = {(w, i) for w, i in
+               con.execute("SELECT word, idx FROM sense_es WHERE zh IS NULL")}
+    con.close()
+    if not overwrite:
+        skipped = len(plan)
+        plan = [p for p in plan if (p[3], p[4]) in pending]
+        print(f"  已有译文、跳过不覆盖：{skipped - len(plan):,}   ← 见 merge() docstring")
+    else:
+        print("  ⚠️ --overwrite：连已有译文一起重写，会撤销后续修复")
+    print(f"待写回 {len(plan):,} 条")
+    missing = len(pending) - len({(p[3], p[4]) for p in plan})
+    print(f"  库里仍待译、RAW 里也没有的：{missing:,}")
     newn = sum(1 for p in plan if p[1] is None)
     print(f"  判为「英文版没有」的新义项：{newn:,}  {newn/max(len(plan),1)*100:.1f}%")
     if not apply:
@@ -312,6 +362,8 @@ def main() -> None:
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--addcols", action="store_true", help="给 sense_es 加 en_i / zh_src 列")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="🔴 危险：连已有译文一起重写，会撤销后续修复（见 merge docstring）")
     args = ap.parse_args()
 
     if args.addcols:
@@ -324,7 +376,7 @@ def main() -> None:
     elif args.llm:
         asyncio.run(run_llm(args.limit))
     elif args.merge:
-        merge(args.apply)
+        merge(args.apply, args.overwrite)
     else:
         ap.error("要 --copy / --llm / --merge / --addcols 之一")
 
