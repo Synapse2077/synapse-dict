@@ -52,7 +52,7 @@ def scan():
         if not var and not aud:
             continue
         r = agg.setdefault(w, {"word": w, "var": [], "aud": [], "seen": set()})
-        for ip, tags in var:
+        for ip, tags, _nota in var:
             if ip not in r["seen"]:
                 r["seen"].add(ip)
                 r["var"].append([ip, list(tags)])

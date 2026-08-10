@@ -83,13 +83,53 @@ type SpanishEntry = {
   level: string | null;          // CEFR
   senses: SpanishSense[];
   collocations: SpanishCollocation[];
+  examples: SpanishExample[];
+  relations: SpanishRelation[];
   audios: SpanishAudio[];
   esSenses: SpanishEsSense[];
+  unifiedSenses: SpanishUnifiedSense[];
   tts: SpanishTts[];
   baseForms: string[];
   bases: SpanishBase[];
   inflNotes: string[];
+  homographs: SpanishHomograph[];
   flag: string | null;
+};
+
+// 统一义项层（`sense`/`sense_gloss`/`sense_tag` 三张表）。2026-08-07。
+// 取代 `senses` + `esSenses` 两块：那两块是**同一个词的两套义项并列**
+// （`banco` 显示 4+7=11 条，「银行」出现两次），新的是归并后的一套（7 条，一条不丢）。
+// `title` 是最短的那条中文、`detail` 是明显更长的那条，服务端已挑好，前端不再判断。
+// 例句与词汇关系。2026-08-07 接入 —— 库里躺了很久、界面一条没显示过。
+// 两者都带 `senseId`，所以挂在**对应的义项下面**，不是笼统堆在词条末尾。
+type SpanishExample = {
+  id: number; senseId: number | null; text: string; zh: string | null; ref: string | null;
+};
+type SpanishRelation = {
+  senseId: number | null; kind: string; target: string; tags: string[]; linkable: boolean;
+};
+
+// 同形词：拼写只差大小写的另一个词条。同页并列显示（像纸质词典的 virgo¹ / Virgo²）。
+// 🔴 西语用大小写承载词汇区别，而查询是 NOCASE —— 用户输 `sandwich` 得看得到
+//    `Sandwich`（地名），否则那个词条对他不存在。
+type SpanishHomograph = {
+  id: number; word: string; pos: string | null; phonetic: string | null;
+  senses: SpanishUnifiedSense[];
+};
+
+type SpanishUnifiedSense = {
+  id: number;
+  rank: number;
+  pos: string | null;
+  gender: string | null;
+  title: string;
+  detail: string | null;
+  en: string | null;
+  es: string | null;
+  topics: string[];
+  regions: string[];
+  registers: string[];
+  numbers: string[];
 };
 
 // Italian entry (意语专属 schema：本质字段 aux/conj/gender/plural 为一等公民)
@@ -456,97 +496,56 @@ function HumanAudioRow({ audios, word, fallback }: {
   );
 }
 
-// 西语版释义区块。2026-08-05 补收 16.1 万条后接入。
-//
-// 为什么单独成块、而不是并进上面的「释义」：西语版的义项是**另一套切分**，
-// `hacer` 我们 15 条、它 59 条，且第 1 义不是同一个义项。硬并会张冠李戴。
-// 合并要靠语义匹配，那是另一件事，且合错就拆不回来 —— 先让它以原样可见。
-//
-// 🔴 默认折叠。产品是划词弹窗，59 条义项平铺出来等于把答案埋了。
-//    展开后按西语版自己的语法口径分组（Verbo transitivo / Verbo pronominal…）——
-//    那个口径比我们的短码 n/v 细，正好当分组依据，不用自己再造一套。
-function EsSenseBlock({ esSenses }: { esSenses: SpanishEsSense[] }) {
-  const [open, setOpen] = useState(false);
-  if (esSenses.length === 0) return null;
+// 词汇关系的中文名。`derived` 是「派生词/习语」（`pie` → `a contrapié`），
+// 与「相关词」分开：前者是从这个词长出来的，后者只是语义相邻。
+const REL_LABELS: Record<string, string> = {
+  synonym: '近义', antonym: '反义', hypernym: '上位', hyponym: '下位',
+  holonym: '整体', meronym: '部分', coordinate: '同类', related: '相关',
+  derived: '派生',
+};
 
-  // 「上面没有」的条数：enI === null 表示英文版没有这个义项，也就是展开才看得到的净增内容。
-  // 放在折叠按钮上，用户才有理由点开——否则一个「25 条」不说明这里面有没有新东西。
-  const extra = esSenses.filter((s) => s.enI === null).length;
-
-  // 按 posTitle 保序分组（西语版本来就是按词性块组织的，顺序有意义，别排序）
-  const groups: Array<{ title: string; items: SpanishEsSense[] }> = [];
-  for (const s of esSenses) {
-    const t = s.posTitle || '其他';
-    const last = groups[groups.length - 1];
-    if (last && last.title === t) last.items.push(s);
-    else groups.push({ title: t, items: [s] });
+// 关系组：同一 kind 的目标词并成一行，可点的给锚点链接。
+function RelationRow({ rels, onWord }: {
+  rels: SpanishRelation[]; onWord: (w: string) => void;
+}) {
+  if (rels.length === 0) return null;
+  const byKind = new Map<string, SpanishRelation[]>();
+  for (const r of rels) {
+    const a = byKind.get(r.kind);
+    if (a) a.push(r); else byKind.set(r.kind, [r]);
   }
-
   return (
-    <section className="es-senses">
-      <button className="es-senses-toggle" onClick={() => setOpen(!open)} type="button">
-        <span className={'es-senses-caret' + (open ? ' open' : '')}>▸</span>
-        西语版释义
-        <span className="es-senses-count">{esSenses.length} 条</span>
-        {extra > 0 && <span className="es-senses-extra">{extra} 条上面没有</span>}
-        <span className="es-senses-src">es.wiktionary</span>
-      </button>
-      {open && (
-        <div className="es-senses-body">
-          {groups.map((g, gi) => (
-            <div className="es-sense-group" key={gi}>
-              <div className="es-sense-pos">{g.title}</div>
-              <ol className="es-sense-list">
-                {g.items.map((s) => (
-                  <li key={s.idx}>
-                    {/* 中文在上、西语原文在下 —— 与上面「释义」区块同一套阅读顺序。
-                        西语原文不能省：它才是这一条的**权威源**，中文是我们译的。 */}
-                    <div className="es-sense-zh">
-                      {s.zh || <span className="sense-missing">（待补）</span>}
-                      {s.enI === null && (
-                        <span className="es-sense-new" title="英文版没有这个义项">新</span>
-                      )}
-                    </div>
-                    <div className="es-sense-gloss" lang="es">{s.gloss}</div>
-                    {s.tags.length > 0 && (
-                      <span className="es-sense-tags">{s.tags.join(' · ')}</span>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            </div>
+    <div className="rel-groups">
+      {[...byKind].map(([kind, list]) => (
+        <div className="rel-group" key={kind}>
+          <span className="rel-kind">{REL_LABELS[kind] || kind}</span>
+          {list.map((r, i) => (
+            <span key={i} className="rel-item">
+              {r.linkable
+                ? <a className="rel-link" href={`#${encodeURIComponent(r.target)}`}
+                     onClick={(ev) => { ev.preventDefault(); onWord(r.target); }}>{r.target}</a>
+                : <span className="rel-plain">{r.target}</span>}
+              {r.tags.length > 0 && <span className="rel-tag">{r.tags.join('·')}</span>}
+            </span>
           ))}
         </div>
-      )}
-    </section>
+      ))}
+    </div>
   );
 }
 
-// 变形指针行：`amigo 的 阴性`、`amigar 的 命令式·第二人称·单数`。
-// 这类不是释义，是指回原形的元描述，已由「变位形式」区块（取自 infl 列）呈现，
-// 不该再进「释义」。判据是**半角空格包着的「的」** —— 中文释义里的「的」不带空格
-// （`品德高尚的女性`），所以不会误伤。
-const ES_INFL_LABEL = /^.+ 的 \S+$/;
-
-// 真释义 = 剔掉变形指针后剩下的义项。
-// 🔴 2026-08-04：此前「释义」区块由 `entry.isLemma` 整块闸住，变形行一律不显示释义。
-// 那时变形行确实只有指针，闸门看不出问题；2026-08-03 补回 4,285 条「阴性对应词」
-// 真义之后（`amiga → 女的朋友、女朋友`），这批释义**写进了库却在界面上完全看不到**，
-// 左侧结果列表显示得出、点进去详情反而只剩变位形式。
-// → 闸门改为「有没有真释义」，而不是「是不是原形」。
-function realSenses(senses: SpanishSense[]): SpanishSense[] {
-  return senses.filter((s) => !(s.zh && ES_INFL_LABEL.test(s.zh.trim())));
-}
-
-// 义项按相邻相同词性分组（definition 本就按词性成段，相邻聚合即可）。
-function groupSensesByPos(senses: SpanishSense[]): { pos: string | null; senses: SpanishSense[] }[] {
-  const groups: { pos: string | null; senses: SpanishSense[] }[] = [];
+// 统一义项按相邻相同词性分组。**相邻聚合而非按 pos 归类** ——
+// 义项顺序本身有意义（`rank`），按 pos 重排会打乱它。
+function groupUnifiedByPos(
+  senses: SpanishUnifiedSense[],
+): { pos: string | null; senses: SpanishUnifiedSense[] }[] {
+  const out: { pos: string | null; senses: SpanishUnifiedSense[] }[] = [];
   for (const s of senses) {
-    const last = groups[groups.length - 1];
+    const last = out[out.length - 1];
     if (last && last.pos === s.pos) last.senses.push(s);
-    else groups.push({ pos: s.pos, senses: [s] });
+    else out.push({ pos: s.pos, senses: [s] });
   }
-  return groups;
+  return out;
 }
 
 // 语音列表是异步加载的，首帧 getVoices() 常为空 → 缓存 + onvoiceschanged 兜底。
@@ -1157,9 +1156,12 @@ function EnglishEntry({ entry, onWord, speak }: {
 
 // --- Spanish entry detail ---
 
-function SenseChips({ sense }: { sense: SpanishSense }) {
+// 两种 sense shape 共用（旧的 SpanishSense 与新的 SpanishUnifiedSense），
+// 后者多一个 topics（主题标签，`escalera` 的"顺子"义带 poker）。
+function SenseChips({ sense }: { sense: SpanishSense | SpanishUnifiedSense }) {
   const chips: { cls: string; text: string }[] = [];
   if (sense.gender) chips.push({ cls: `g g-${sense.gender}`, text: GENDER_LABELS[sense.gender] || sense.gender });
+  for (const t of ('topics' in sense ? sense.topics : [])) chips.push({ cls: 'top', text: t });
   for (const r of sense.regions) chips.push({ cls: 'reg', text: REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
   for (const n of sense.numbers) chips.push({ cls: 'num', text: NUMBER_LABELS[n] || n });
@@ -1182,8 +1184,6 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   entry: SpanishEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
-  const shownSenses = realSenses(entry.senses);
-
   // 方针④三级兜底在音标行上的落法：有成品合成音就播文件，没有才降到浏览器 TTS。
   // 🔴 **不能拿拉美那份去顶半岛按钮**：用户看着 /θeɾˈbeθa/ 却听到 serˈbesa，
   //    比听浏览器音更糟——错的音比没有音更伤。缺哪个口音就用哪个 locale 交给浏览器。
@@ -1280,30 +1280,47 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
       </div>
 
-      {/* 真释义：按词性分组，组内逐义项中文 + 英文锚点 + 性别/地区/语域 chip。
-          变形行只要有真释义也显示（`amiga` 的「女的朋友」），指针行则整块不出现。 */}
-      {shownSenses.length > 0 && (
+      {/* 释义。数据来自统一义项层（`sense`/`sense_gloss`/`sense_tag`）。
+          🔴 2026-08-07 之前这里是**两个并列区块**：上面「释义」读 `dict` 的行号对齐列，
+             下面「西语版释义」读 `sense_es` 表 —— 同一个词的两套义项摆在一起，
+             `banco` 显示 4+7=11 条、「银行」出现两次。现在按 `en_i` 对齐结果归并成一套
+             （`banco` 7 条、`ojo` 29→25），一条不丢，每条自带主键。
+          标题行取最短的那条中文、副行取明显更长的那条 —— 服务端已挑好（见
+          `spanish.ts` 的 `buildUnified`），前端不再判断。 */}
+      {entry.unifiedSenses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          {groupSensesByPos(shownSenses).map((grp, gi) => (
+          {groupUnifiedByPos(entry.unifiedSenses).map((grp, gi) => (
             <div className="pos-group" key={gi}>
               {grp.pos && (
                 <div className="pos-group-label">{posLabel(grp.pos)}</div>
               )}
               <ol className="sense-list">
-                {grp.senses.map((s, i) => (
-                  <li className="sense-item" key={i}>
+                {grp.senses.map((s) => (
+                  <li className="sense-item" key={s.id}>
                     <div className="sense-zh">
-                      {s.zh || <span className="sense-missing">（待补）</span>}
+                      {s.title}
                       <SenseChips sense={s} />
                     </div>
-                    {/* 源语言锚点。英文版给英文 gloss、西语版给西语单语定义，两者
-                        **互斥互补**（并集覆盖 98.2% 的 lemma），共用这一行；挂 EN/ES
-                        小标签让用户知道这条背书来自哪一版。 */}
-                    {(s.en || s.es) && (
-                      <div className="sense-src" lang={s.en ? 'en' : 'es'}>
-                        <span className="sense-src-lang">{s.en ? 'EN' : 'ES'}</span>
-                        {s.en || s.es}
+                    {s.detail && <div className="sense-detail">{s.detail}</div>}
+                    <RelationRow rels={entry.relations.filter((r) => r.senseId === s.id)}
+                                 onWord={onWord} />
+                    {entry.examples.filter((x) => x.senseId === s.id).slice(0, 3).map((x) => (
+                      <div className="sense-example" key={x.id}>
+                        <div className="ex-es" lang="es">{x.text}</div>
+                        {x.zh && <div className="ex-zh">{x.zh}</div>}
+                      </div>
+                    ))}
+                    {/* 源语言锚点：英文对应词与西语单语定义。归并之后**同一条义项
+                        可能两者都有**（旧结构下它们分属两条），所以不再是二选一。 */}
+                    {s.en && (
+                      <div className="sense-src" lang="en">
+                        <span className="sense-src-lang">EN</span>{s.en}
+                      </div>
+                    )}
+                    {s.es && (
+                      <div className="sense-src" lang="es">
+                        <span className="sense-src-lang">ES</span>{s.es}
                       </div>
                     )}
                   </li>
@@ -1314,11 +1331,50 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      {/* 西语版释义。**不能放进上面那个 `shownSenses.length > 0` 的条件里** ——
-          没有可显示义项、却有西语版释义的词，恰恰是这一块唯一能救的情况。 */}
-      {entry.esSenses.length > 0 && (
+      {/* 同形词：拼写只差大小写的另一个词条，同页并列。
+          放在本词条释义之后、其余区块之前 —— 它是"另一个词"，不是本词的补充。 */}
+      {entry.homographs.map((h) => (
+        <section className="entry-section homograph" key={h.id}>
+          <div className="homograph-head">
+            <span className="homograph-word">{h.word}</span>
+            {h.pos && <span className="badge pos">{posLabel(h.pos)}</span>}
+            {h.phonetic && <span className="homograph-ipa">/{h.phonetic}/</span>}
+          </div>
+          {h.senses.length > 0 ? (
+            <ol className="sense-list">
+              {h.senses.map((s) => (
+                <li className="sense-item" key={s.id}>
+                  <div className="sense-zh">
+                    {s.title}
+                    <SenseChips sense={s} />
+                  </div>
+                  {s.detail && <div className="sense-detail">{s.detail}</div>}
+                </li>
+              ))}
+            </ol>
+          ) : <div className="sense-missing">（无释义）</div>}
+        </section>
+      ))}
+
+      {/* 词级关系：`derived`（派生词/习语）没有义项归属，单独成块。
+          义项级的已经跟着各自的义项显示了。 */}
+      {entry.relations.some((r) => !r.senseId) && (
         <section className="entry-section">
-          <EsSenseBlock esSenses={entry.esSenses} />
+          <h3>相关词</h3>
+          <RelationRow rels={entry.relations.filter((r) => !r.senseId)} onWord={onWord} />
+        </section>
+      )}
+
+      {/* 没挂上义项的例句（src_gloss 匹配不上那 21%）：仍要显示，只是归不到某条义项下 */}
+      {entry.examples.some((x) => !x.senseId) && (
+        <section className="entry-section">
+          <h3>例句</h3>
+          {entry.examples.filter((x) => !x.senseId).slice(0, 6).map((x) => (
+            <div className="sense-example" key={x.id}>
+              <div className="ex-es" lang="es">{x.text}</div>
+              {x.zh && <div className="ex-zh">{x.zh}</div>}
+            </div>
+          ))}
         </section>
       )}
 

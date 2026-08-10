@@ -38,11 +38,37 @@
 备份，360 MB / 0.6 秒；塞进音频后每改一行译文都要复制好几 GB。
 ⇒ 本脚本**完全不碰数据库**（只读 `dict` 取词表），因此没有 `dbtool` 闸门。
 
+═══ 🔴 取词判据用 `freq_zipf`，不用 `level`（2026-08-10 改）═══
+第一轮核心层是按 `--level A1,A2,B1` 挑的 16,236 个词。接上频次层后一比对，**挑错了**：
+
+    没合成、频次却排最前的        合成了、频次却垫底的
+    es    7.02   me   6.70       lavaparabrisas  1.01  (B1)
+    hay   6.23   está 6.22       escurreplatos   1.01  (B1)
+    fue   6.22   son  6.26       decembrino      1.01  (B1)
+
+`es / me / hay / está / fue / son` 这些西语最常用词一个合成音都没有。根因是 `level`
+只给内容词打了标，语法词和变形词全是 NULL —— 而 `level` 本来就是全库唯一没有源、
+无法回源的字段（见 `build_frequency_layer.py` 开头）。拿它当调度依据必然漏掉高频区。
+
+⇒ **`--freq` 取代 `--level` 成为默认判据。** 分层实测（体积按实测 12.0 KB/个）：
+
+    zipf ≥ 4      7,622 个   占跑动文本 90.0%    0.09 G
+    zipf ≥ 3     33,144 个              97.7%    0.38 G
+    全部有频次   190,616 个             100%     2.18 G   ← 2026-08-10 用户拍板做到这层
+
+⭐ 「全部有频次」是**自然分界线**，不是拍脑袋的阈值：库里另外 920,663 个单词形
+（`Elizathe`、`Basolo` 这类巴斯克地名、`esquizotimia` 这类生僻派生）在 wordfreq 里
+根本查不到 = 跑动文本里量不出来，按方针④落到第三级浏览器 TTS。
+旧记录「全词形 10.9 G」把它们全算进去了，才显得贵 —— 真正有频次的只占 17%。
+
 ═══ 用法 ═══
-    python -m es.pipeline.gen_tts --level A1,A2,B1              # 核心层，主力音
-    python -m es.pipeline.gen_tts --level A1,A2,B1 --peninsular # 再补 θ 词的半岛音
-    python -m es.pipeline.gen_tts --lemma                       # 全部 lemma
-    python -m es.pipeline.gen_tts --all-forms                   # 全部词形
+    python -m es.pipeline.gen_tts --freq                        # 全部有频次的词形（推荐）
+    python -m es.pipeline.gen_tts --freq 3                      # 只要 zipf ≥ 3
+    python -m es.pipeline.gen_tts --freq --peninsular           # 再补 θ 词的半岛音
+    python -m es.pipeline.gen_tts --level A1,A2,B1              # 旧判据，保留仅为复现
+    python -m es.pipeline.gen_tts --lemma / --all-forms
+    python -m es.pipeline.gen_tts --verify                      # 验收闸：清单↔磁盘↔哈希契约
+    python -m es.pipeline.gen_tts --mutate                      # 变异验证：闸抓不抓得住
 已存在的文件默认跳过（可中断可续跑），`--force` 重生成。
 """
 import argparse
@@ -107,6 +133,140 @@ def synth_wav(voice, text: str, spk, ls: float, dst: Path) -> float:
     return len(data) / (c0.sample_rate * c0.sample_width * c0.sample_channels)
 
 
+# ═══════════════════════════ 验收闸（2026-08-10 补）═══════════════════════
+# 这一层不写数据库，`dbtool` 那三道闸够不着它，但它有一个别处没有的风险：
+# 🔴 **哈希契约在两种语言里各写了一遍** —— 这里的 `digest()` 和
+#    `packages/dict-core/src/spanish.ts` 的 `ttsFor()`。两边差一个字节，
+#    前端就永远 `existsSync` 失败、**静默**全部降级到浏览器 TTS：不报错、不 404，
+#    只是所有词突然都"没有合成音"。闸③专门盯这个。
+# ⭐ 一条永远通过的检查等于没检查 ⇒ `--mutate` 造 6 种错，闸全抓住才算数。
+
+MIN_BYTES = 1200          # 实测最短的真音频（`y` 0.20 秒）约 4.6 KB，1.2 KB 是宽松下界
+DUR_RANGE = (0.05, 30.0)
+
+
+def verify(root: Path, manifest_path: Path, quiet: bool = False) -> bool:
+    """核对合成层：清单 ↔ 磁盘 ↔ 哈希契约。全量，非抽样。"""
+    def say(*a):
+        if not quiet:
+            print(*a)
+
+    say("\n═══ 合成层验收（全量，非抽样）═══")
+    if not manifest_path.exists():
+        say("🔴 清单不存在")
+        return False
+
+    lines, bad_shape = [], 0
+    with manifest_path.open(encoding="utf-8") as f:
+        header = next(f, "")
+        if header.rstrip("\n").split("\t") != ["word", "voice", "path", "bytes", "dur"]:
+            say(f"🔴 清单表头不对：{header!r}")
+            return False
+        for ln in f:
+            p = ln.rstrip("\n").split("\t")
+            if len(p) != 5:
+                bad_shape += 1
+                continue
+            lines.append(p)
+
+    missing, size_bad, hash_bad, tiny, dur_bad = [], [], [], [], []
+    seen: dict[tuple[str, str], int] = {}
+    dup = []
+    listed = set()
+    for word, tag, rel, nbytes, dur in lines:
+        key = (word, tag)
+        if key in seen:
+            dup.append(key)
+        seen[key] = 1
+        listed.add(rel)
+        # 闸③ 哈希契约：路径必须能从 (词, 音色) 原样重算出来
+        if tag in VOICES:
+            h = digest(word, tag)
+            if rel != f"{h[:2]}/{h}.m4a":
+                hash_bad.append((word, tag, rel))
+        f = root / rel
+        if not f.exists():
+            missing.append((word, tag, rel))
+            continue
+        real = f.stat().st_size
+        if real != int(nbytes):
+            size_bad.append((word, tag, int(nbytes), real))
+        if real < MIN_BYTES:
+            tiny.append((word, tag, real))
+        if not (DUR_RANGE[0] <= float(dur) <= DUR_RANGE[1]):
+            dur_bad.append((word, tag, float(dur)))
+
+    on_disk = {f"{p.parent.name}/{p.name}" for p in root.glob("*/*.m4a")}
+    orphans = sorted(on_disk - listed)
+
+    checks = [
+        ("清单行格式不对（不是 5 列）", bad_shape, []),
+        ("清单里有、磁盘上没有", len(missing), missing),
+        ("字节数与磁盘对不上", len(size_bad), size_bad),
+        ("🔴 路径 ≠ sha1(词|音色)（与 spanish.ts 的契约）", len(hash_bad), hash_bad),
+        (f"文件小于 {MIN_BYTES} 字节（疑似空音频）", len(tiny), tiny),
+        (f"时长不在 {DUR_RANGE} 内", len(dur_bad), dur_bad),
+        ("同一 (词, 音色) 登记了多次", len(dup), dup),
+        ("磁盘上有、清单里没有（孤儿）", len(orphans), orphans),
+    ]
+    ok = True
+    say(f"  清单 {len(lines):,} 行 / 磁盘 {len(on_disk):,} 个文件")
+    for name, n, ex in checks:
+        say(f"  {'🔴' if n else '  '} {name:<44}{n:>8,}")
+        for e in ex[:3]:
+            say(f"       {e}")
+        ok &= n == 0
+    say("  ✅ 全部通过" if ok else "  🔴 有闸没过")
+    return ok
+
+
+def mutate_verify() -> None:
+    """⭐ 变异验证。用**硬链接**搭一棵 300 个文件的小树（秒级、不占空间），
+    在上面造 6 种错，逐个看闸抓不抓得住。真实音频一个字节都不动。"""
+    import shutil
+    import tempfile
+    root, mf = paths.TTS_OUT, paths.TTS_OUT / "manifest.tsv"
+    with mf.open(encoding="utf-8") as f:
+        head = next(f)
+        rows = [next(f).rstrip("\n").split("\t") for _ in range(300)]
+
+    def build(td: Path, rows_):
+        for _, _, rel, _, _ in rows_:
+            (td / rel).parent.mkdir(parents=True, exist_ok=True)
+            if not (td / rel).exists():
+                os.link(root / rel, td / rel)
+        p = td / "manifest.tsv"
+        p.write_text(head + "".join("\t".join(r) + "\n" for r in rows_), encoding="utf-8")
+        return p
+
+    muts = [
+        ("① 清单登记的文件其实不在", lambda r, td: (td / r[0][2]).unlink()),
+        ("② 字节数与磁盘对不上", lambda r, td: r[0].__setitem__(3, "999999")),
+        ("🔴③ 路径不是 sha1(词|音色)（契约破了）",
+         lambda r, td: r[0].__setitem__(2, "ff/" + "f" * 40 + ".m4a")),
+        ("④ 空音频（0 字节）",
+         lambda r, td: (td / r[0][2]).unlink() or (td / r[0][2]).write_bytes(b"")),
+        ("⑤ 同一 (词,音色) 登记两次", lambda r, td: r.append(list(r[0]))),
+        ("⑥ 磁盘上有、清单里没有（孤儿）", lambda r, td: r.pop(0)),
+    ]
+    print("\n" + "=" * 62)
+    print("⭐ 变异验证：小树上造 6 种错，看闸的反应（真实音频不动）")
+    print("=" * 62)
+    caught = 0
+    for name, apply_mut in muts:
+        with tempfile.TemporaryDirectory() as t:
+            td = Path(t)
+            rr = [list(r) for r in rows]
+            build(td, rr)                 # 先按原样建树（文件按原路径落好）
+            apply_mut(rr, td)             # 再破坏
+            p = td / "manifest.tsv"
+            p.write_text(head + "".join("\t".join(r) + "\n" for r in rr), encoding="utf-8")
+            good = verify(td, p, quiet=True)
+            caught += not good
+            print(f"  {'✅ 抓住' if not good else '🔴 漏过'}  {name}")
+    print(f"\n  {caught}/6 被抓住" + ("" if caught == 6 else "  🔴 有闸是摆设，必须修"))
+
+
 def selftest(voice, out_dir: Path) -> None:
     """坑①的自证：先合成一个词，确认不是 0 字节。"""
     p = out_dir / "_selftest.wav"
@@ -121,7 +281,12 @@ def selftest(voice, out_dir: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--level", help="逗号分隔，如 A1,A2,B1")
+    g.add_argument("--verify", action="store_true", help="只跑验收闸，不合成")
+    g.add_argument("--mutate", action="store_true", help="变异验证：闸抓不抓得住")
+    g.add_argument("--freq", nargs="?", const=-1.0, type=float, metavar="ZIPF",
+                   help="按频次取词（默认判据）：不给数字＝全部有 freq_zipf 的词形；"
+                        "给数字则只取 zipf ≥ 该值")
+    g.add_argument("--level", help="旧判据，逗号分隔如 A1,A2,B1。见 docstring：会漏掉高频区")
     g.add_argument("--lemma", action="store_true", help="全部 lemma")
     g.add_argument("--all-forms", action="store_true", help="全部词形")
     ap.add_argument("--peninsular", action="store_true",
@@ -133,12 +298,25 @@ def main() -> None:
     ap.add_argument("--jobs", type=int, default=4, help="afconvert 并发数（默认 4）")
     args = ap.parse_args()
 
+    if args.verify or args.mutate:
+        ok = verify(paths.TTS_OUT, paths.TTS_OUT / "manifest.tsv")
+        if args.mutate:
+            mutate_verify()
+        sys.exit(0 if ok else 1)
+
     if args.only_peninsular:
         args.peninsular = True
 
     # ── 取词表 ──────────────────────────────────────────────────────────
     con = sqlite3.connect(paths.DB)
-    if args.level:
+    if args.freq is not None:
+        # `dict.word` 全库唯一（1,139,125 行 = 1,139,125 个不同词形），所以这里
+        # 取出来不会有同词重复行，不需要去重。换表结构后这条要重新验。
+        rows = con.execute(
+            "select word, phonetic from dict where freq_zipf is not null "
+            "and freq_zipf >= ? order by freq_zipf desc", (args.freq,)).fetchall()
+        scope = ("全部有频次的词形" if args.freq < 0 else f"zipf ≥ {args.freq}")
+    elif args.level:
         levels = [x.strip() for x in args.level.split(",")]
         sql = (f"select word, phonetic from dict where level in "
                f"({','.join('?' * len(levels))})")

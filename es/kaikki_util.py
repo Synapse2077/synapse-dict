@@ -17,6 +17,7 @@
 import gzip
 import json
 import re
+from typing import NamedTuple
 from pathlib import Path
 
 import paths
@@ -120,6 +121,27 @@ def parse_ipa(raw):
     return m.group(1) if m else None
 
 
+class Variant(NamedTuple):
+    """一条读音变体。前两项与旧的 `(裸音标, tags)` 兼容，可直接解包。"""
+    ipa: str
+    tags: tuple
+    notation: str          # phonemic | narrow
+
+
+def notation_of(raw):
+    """`sounds.ipa` 原文的定界符 → 记法。`/…/` 音位式、`[…]` 严式、`\\…\\` 按音位式算。
+
+    ⭐ 2026-08-07：**判据在源头里明摆着，不必从附标猜**。
+    实测 kaikki 西语切片 `/` 23,650 : `[` 23,636，几乎一比一配对 ——
+    同一个读音同时给了音位式与严式两种写法（`/ˈɡɾatis/` 与 `[ˈɡɾa.t̪is]`）。
+    先前把它们当成"两个不同读音"，会把「多变体」的规模从 7.7% 虚报成 98.8%。
+    """
+    if not raw:
+        return None
+    r = raw.strip()
+    return "narrow" if r.startswith("[") else "phonemic"
+
+
 def sounds_variants(entry, drop_tags=DROP_TAGS, dedupe=True):
     """返回该条目的**全部**读音变体：[(裸音标, tags元组), ...]。
 
@@ -150,7 +172,11 @@ def sounds_variants(entry, drop_tags=DROP_TAGS, dedupe=True):
         if dedupe and ip in seen:
             continue
         seen.add(ip)
-        out.append((ip, tags))
+        # ⚠️ 从 `(ipa, tags)` 二元组改成三字段具名元组（2026-08-07 加 `notation`）。
+        #    **这会打断 `for ip, tags in …` 这种解包**（我一度以为不会，被金标准测试
+        #    当场逮住）。调用点已全部改成 `v.ipa` / `v.tags` / `v.notation`；
+        #    用具名元组而非裸三元组，是为了下次再加字段不必再改一遍。
+        out.append(Variant(ip, tags, notation_of(s.get("ipa"))))
     return out
 
 
@@ -161,7 +187,7 @@ def first_phonemic(entry):
     否则用 `sounds_variants` 看全貌 —— 见上面那个函数的注释。
     """
     v = sounds_variants(entry)
-    return v[0][0] if v else None
+    return v[0].ipa if v else None
 
 
 def audio_urls(entry):

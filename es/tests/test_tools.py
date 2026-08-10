@@ -36,18 +36,18 @@ class 解析(unittest.TestCase):
     def test_romanization等非音位式被排除(self):
         e = {"sounds": [{"ipa": "/ok/"}, {"ipa": "/x/", "tags": ["romanization"]},
                         {"ipa": "/y/", "tags": ["rhymes"]}]}
-        self.assertEqual([ip for ip, _ in K.sounds_variants(e)], ["ok"])
+        self.assertEqual([v.ipa for v in K.sounds_variants(e)], ["ok"])
 
     def test_sounds是列表而非单值(self):
         """🔴 本项目最贵的一类错误：把 `sounds` 当单值、只取第一个。
         2026-08-01 因此两次断言某个数据源『没用』，两次都是错的。"""
         e = {"sounds": [{"ipa": "/a/"}, {"ipa": "/b/"}, {"ipa": "/c/"}]}
-        self.assertEqual([ip for ip, _ in K.sounds_variants(e)], ["a", "b", "c"])
+        self.assertEqual([v.ipa for v in K.sounds_variants(e)], ["a", "b", "c"])
         self.assertEqual(K.first_phonemic(e), "a")
 
     def test_变体去重但保序(self):
         e = {"sounds": [{"ipa": "/a/"}, {"ipa": "/a/"}, {"ipa": "/b/"}]}
-        self.assertEqual([ip for ip, _ in K.sounds_variants(e)], ["a", "b"])
+        self.assertEqual([v.ipa for v in K.sounds_variants(e)], ["a", "b"])
 
     def test_无sounds时返回空表而不是报错(self):
         self.assertEqual(K.sounds_variants({}), [])
@@ -73,7 +73,29 @@ class 解析(unittest.TestCase):
                         {"ipa": "[kaˈθa]", "tags": ["no seseante"]}]}
         v = K.sounds_variants(e)
         self.assertEqual(len(v), 2)
-        self.assertIn("no seseante", dict((t2, ip) for ip, tg in v for t2 in tg))
+        self.assertIn("no seseante", dict((t2, x.ipa) for x in v for t2 in x.tags))
+
+
+    def test_记法取自定界符而非附标(self):
+        """`/…/` 音位式、`[…]` 严式 —— 判据在源头里明摆着，不必从附标猜。
+
+        🔴 2026-08-07 的教训：先前把 `/ˈɡɾatis/` 与 `[ˈɡɾa.t̪is]` 当成**两个不同读音**，
+           于是「多变体」的规模从真实的 7.7% 虚报成 98.8%。它们是同一个读音的两种记法。
+        """
+        e = {"sounds": [{"ipa": "/ˈɡɾatis/"}, {"ipa": "[ˈɡɾa.t̪is]"},
+                        {"ipa": "\\ɡʁatis\\"}]}
+        v = K.sounds_variants(e)
+        self.assertEqual([x.notation for x in v],
+                         ["phonemic", "narrow", "phonemic"])
+
+    def test_变体是具名元组_加字段不该悄悄改回二元组(self):
+        """`Variant` 有 ipa/tags/notation 三个字段。
+
+        钉住它：调用点用 `v.ipa` 而不是 `v[0]`，将来再加字段（region 等）
+        不必回头改一遍；而如果有人把它改回二元组，这条会红。
+        """
+        v = K.sounds_variants({"sounds": [{"ipa": "/a/", "tags": ["x"]}]})[0]
+        self.assertEqual((v.ipa, v.tags, v.notation), ("a", ("x",), "phonemic"))
 
 
 class 写库闸门(unittest.TestCase):

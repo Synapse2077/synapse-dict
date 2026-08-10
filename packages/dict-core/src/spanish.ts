@@ -33,6 +33,28 @@ export type SpanishSense = {
 
 export type SpanishCollocation = { text: string; zh: string | null };
 
+// 例句。2026-08-07 接入 —— 库里 50,766 条原文躺了很久，界面一条没显示过。
+// `senseId` 已由 `example.src_gloss` × `sense_src.text` 精确匹配挂好（79.0%），
+// 所以例句能跟着义项走，而不是笼统堆在词条末尾。
+export type SpanishExample = {
+  id: number;
+  senseId: number | null;
+  text: string;                // 西语原句
+  zh: string | null;
+  ref: string | null;          // 出处（书名/作者/年份）
+};
+
+// 词汇关系。源头一直有，2026-08-07 才收进库（`sense_relation` 121,647 条）。
+// `target` 是词形原样，**不解析成外键** —— 源头给的可能是短语（`a cuatro pies`）
+// 或库里没有的词。`linkable` 告诉前端这个词点得动（实测 90.6% 点得动）。
+export type SpanishRelation = {
+  senseId: number | null;
+  kind: string;                // synonym / antonym / hypernym / hyponym / derived / related …
+  target: string;
+  tags: string[];
+  linkable: boolean;
+};
+
 // Wikimedia Commons 上的真人录音。**只存 URL 不存字节**：单条 mp3 约 24 KB，
 // es 全量 11,094 个文件 ≈ 260 MB，六语种合计 ≈ 36 GB —— 塞进 SQLite 会让
 // `dbtool` 每次写库前的全文件备份跟着膨胀，而九成九的文件一辈子不会被请求。
@@ -65,6 +87,35 @@ export type SpanishEsSense = {
   enI: number | null;
 };
 
+// 统一义项：`sense` / `sense_gloss` / `sense_tag` 三张表的读出结果。2026-08-07。
+//
+// 🔴 **它是 `senses` 与 `esSenses` 两者的替代**，不是第三种东西：
+//    那两者分别读 `dict` 的行号对齐列和 `sense_es` 表，同一个「锁孔」义在 `ojo` 下
+//    出现两次（英文版一次、西语版一次）。新表已按 `en_i` 对齐结果归并（`ojo` 29 → 25），
+//    每条义项自带主键，例句/搭配将来可直接挂上去。
+//    过渡期两套并存，展示层切过去、验证无误后再删旧的。
+//
+// ⭐ **`title` 取「最短的那条中文」，与 `kind` 无关。**
+//    `kind` 记的是**来源**（从英文对应词翻来 = equivalent、从西语定义翻来 = definition），
+//    溯源上自洽，但**不能直接拿来选标题行**：2026-08-07 实测，被判成 definition 的
+//    17.2 万条里 56% 本来就 ≤10 字（`妓女` / `污水排水管` / `兰科植物属`），
+//    它们就是合格的标题。按 kind 选会漏掉这批，还会误判出「需要再翻译 17 万条」
+//    这种三倍于实际的工作量。按长度选是零成本的正确做法。
+export type SpanishUnifiedSense = {
+  id: number;
+  rank: number;
+  pos: string | null;
+  gender: string | null;
+  title: string;               // 标题行：最短的那条中文
+  detail: string | null;       // 副行：明显更长的那条中文（没有则 null）
+  en: string | null;           // 英文对应词（溯源用）
+  es: string | null;           // 西语单语定义（溯源用）
+  topics: string[];
+  regions: string[];
+  registers: string[];
+  numbers: string[];
+};
+
 // 工具合成发音（Piper），方针④三级兜底「真人 > 工具生成 > 浏览器 TTS」的**中间那级**。
 // 真人录音只覆盖 5.5% 的 lemma，这一级把常用词补齐；两级都没有才落到浏览器 TTS。
 export type SpanishTts = {
@@ -78,6 +129,24 @@ const TTS_VOICES: Array<{ tag: string; accent: 'spain' | 'latam'; voice: string 
   { tag: 'mx', accent: 'latam', voice: 'es_MX-claude-high' },
   { tag: 'es', accent: 'spain', voice: 'es_ES-sharvard-medium#0' },
 ];
+
+// 同形词：拼写只差大小写的另一个词条。2026-08-07 接入。
+//
+// 🔴 **西语用大小写承载词汇区别**，而查询入口是 `COLLATE NOCASE`（用户不会记得
+//    要大写）。库里已有 573 组同形对（`sandwich`/`Sandwich`、`aves`/`Aves`），
+//    做完「小写专名与普通名词压成一行」的拆分后会到 ~3,000 组。
+//    此前 `exactQuery` 是 `LIMIT 1` —— 输 `sandwich` 只看到「sándwich 的常见误拼」，
+//    `Sandwich`（三明治群岛）**完全不可见**。
+//
+// ⇒ 同页并列显示，像纸质词典的 virgo¹ / Virgo²。左侧结果列表本来就两个都列，
+//   问题只在点进详情之后那一页。
+export type SpanishHomograph = {
+  id: number;
+  word: string;
+  pos: string | null;
+  phonetic: string | null;
+  senses: SpanishUnifiedSense[];
+};
 
 // 变位形式指向的原形（连同其词义，供变位页内联展示）。
 export type SpanishBase = {
@@ -108,12 +177,16 @@ export type SpanishEntry = {
   level: string | null;        // CEFR A1-C2（豆包）
   senses: SpanishSense[];
   collocations: SpanishCollocation[];
+  examples: SpanishExample[];
+  relations: SpanishRelation[];
   audios: SpanishAudio[];
   esSenses: SpanishEsSense[];  // 西语版自有义项组（与 senses 不对齐，独立成块展示）
+  unifiedSenses: SpanishUnifiedSense[];  // 新义项层（sense/sense_gloss/sense_tag），取代上面两者
   tts: SpanishTts[];           // 工具合成音（有哪个口音就给哪个，缺的由前端落到浏览器 TTS）
   baseForms: string[];         // 变位形式 → 原形词（来自 exchange "0:原形"）
   bases: SpanishBase[];        // 原形词连同其词义（服务端解析，供内联展示）
   inflNotes: string[];         // 该词形的语法说明（来自 infl 列，可多行）
+  homographs: SpanishHomograph[];  // 拼写只差大小写的其他词条（同页并列显示）
   flag: string | null;
 };
 
@@ -201,14 +274,6 @@ function firstLine(s: string | null): string | null {
 }
 
 // 搭配存 "西语短语 中文"；从首个 CJK 字符处切分（西语部分含空格）。
-function parseCollocations(raw: string | null): SpanishCollocation[] {
-  return splitLines(raw).map((line) => {
-    const m = line.match(/^(.+?)\s+([一-鿿　-〿＀-￯].*)$/);
-    if (m) return { text: m[1].trim(), zh: m[2].trim() };
-    return { text: line, zh: null };
-  });
-}
-
 // exchange 每行 "0:原形"，收集去重后的原形词。
 function parseBaseForms(raw: string | null): string[] {
   const out: string[] = [];
@@ -271,14 +336,18 @@ function mapEntry(row: EsRow): SpanishEntry {
     comparative: row.comparative,
     level: row.level,
     senses: buildSenses(row),
-    collocations: parseCollocations(row.collocation),
+    collocations: [],                 // 另表，由 getEntry 填
+    examples: [],                     // 另表，由 getEntry 填
+    relations: [],                    // 另表，由 getEntry 填
     audios: [],                       // 另表，由 getEntry 填
     esSenses: [],                     // 另表，由 getEntry 填
+    unifiedSenses: [],                // 另表，由 getEntry 填
     tts: [],                          // 文件系统，由 getEntry 填
 
     baseForms: parseBaseForms(row.exchange),
     bases: [],
     inflNotes: splitLines(row.infl),
+    homographs: [],                   // 另表，由 getEntry 填
     flag: row.flag,
   };
 }
@@ -293,6 +362,12 @@ export class SpanishDictService {
   private readonly prefixQuery;
   private readonly audioQuery;
   private readonly esSenseQuery;
+  private readonly unifiedSenseQuery;
+  private readonly unifiedTagQuery;
+  private readonly collocationQuery;
+  private readonly exampleQuery;
+  private readonly relationQuery;
+  private readonly homographQuery;
 
   constructor(databasePath: string, ttsDir?: string) {
     this.databasePath = databasePath;
@@ -369,6 +444,67 @@ export class SpanishDictService {
       WHERE word = ?
       ORDER BY idx
     `);
+
+    // 统一义项层。两条查询而非一条 JOIN：义项与释义是 1:N、义项与标签也是 1:N，
+    // 一条 JOIN 会把两个 N 乘起来（`ojo` 25 条义项 × 释义 × 标签），
+    // 分开取再在内存里拼，行数是加法而不是乘法。
+    this.unifiedSenseQuery = this.db.prepare(`
+      SELECT s.id, s.rank, s.pos, s.gender, g.lang, g.kind, g.text
+      FROM sense s
+      JOIN sense_gloss g ON g.sense_id = s.id
+      WHERE s.word_id = ?
+      ORDER BY s.rank, g.seq
+    `);
+    // 搭配。2026-08-07 从 `dict.collocation` 那一列拆出来 —— 那一列把西语短语与中文
+    // 粘在同一个字符串里，展示层靠「从第一个汉字处切开」的正则分离：
+    //   · 实测 **95 条切不开**（`rayos X X射线`：第一个汉字前面是字母不是空格），
+    //     用户看到的是整串当西语、中文为空，而且**切分发生在每次渲染时，不留痕迹**
+    //   · 🔴 越南语用拉丁字母，找不到「第一个汉字」⇒ 这一列不改就做不了多语言
+    this.pronQuery = this.db.prepare(`
+      SELECT ipa, region FROM pronunciation
+      WHERE word_id = ? AND notation = 'phonemic' AND is_primary = 1
+    `);
+
+    this.collocationQuery = this.db.prepare(`
+      SELECT c.id, c.text, g.text AS zh
+      FROM collocation c
+      LEFT JOIN collocation_gloss g ON g.collocation_id = c.id AND g.lang = 'zh'
+      WHERE c.word_id = ?
+      ORDER BY c.rank
+    `);
+
+    // 例句：`bold`（关键词位置）与 `src_gloss`（源头义项）不推给前端 ——
+    // 前者前端还没用上，后者是溯源信息不是展示内容。
+    this.exampleQuery = this.db.prepare(`
+      SELECT e.id, e.sense_id, e.text, g.text AS zh, e.ref
+      FROM example e
+      LEFT JOIN example_gloss g ON g.example_id = e.id AND g.lang = 'zh'
+      WHERE e.word = ?
+      ORDER BY (e.sense_id IS NULL), e.sense_id, e.id
+    `);
+
+    // 词汇关系。`linkable` 在 SQL 里判，省得前端为每个 target 再发一次查询。
+    this.relationQuery = this.db.prepare(`
+      SELECT r.sense_id, r.kind, r.target, r.tags,
+             EXISTS(SELECT 1 FROM dict d2 WHERE d2.word = r.target) AS linkable
+      FROM sense_relation r
+      WHERE r.word_id = ?
+      ORDER BY r.kind, r.id
+    `);
+
+    // 同形词：拼写 NOCASE 相同、但**不是同一行**的其他词条。
+    // 排除自己用 id 而非 word —— 大小写完全相同的两行不存在（word 唯一）。
+    this.homographQuery = this.db.prepare(`
+      SELECT id, word, pos, phonetic FROM dict
+      WHERE word = ? COLLATE NOCASE AND id <> ?
+      ORDER BY is_lemma DESC, word
+    `);
+
+    this.unifiedTagQuery = this.db.prepare(`
+      SELECT t.sense_id, t.kind, t.value
+      FROM sense_tag t JOIN sense s ON s.id = t.sense_id
+      WHERE s.word_id = ?
+    `);
   }
 
   getStats() {
@@ -387,14 +523,30 @@ export class SpanishDictService {
   //
   // ⚠️ 必须用 **DB 里的词形** 算哈希，不能用用户输入的：`exactQuery` 是 COLLATE NOCASE，
   //    用户搜 "GRACIAS" 也能命中 `gracias`，但音频是按 DB 词形生成的。
-  private ttsFor(word: string): SpanishTts[] {
+  //
+  // 🔴 **没有 θ 的词，拉美那份就是半岛音**（2026-08-10 补）。
+  //    `TTS_VOICES` 的注释早就写了"其余两地读法相同，拉美那份通用"，但代码没落实：
+  //    半岛音文件不存在时直接不给 `spain`，前端于是把「西」这个按钮降到浏览器 TTS。
+  //    结果同一个词 —— 比如 `hola`，两地读法一模一样 —— 点「拉美」是 Piper、
+  //    点「西」是系统音，音色突然换人，听着像我们有两份录音而其中一份很差。
+  //    孤立单词上半岛↔拉美的实际差别只有 `z`/`ce`/`ci` 读 /θ/ 还是 /s/（同 `gen_tts.py`），
+  //    ⇒ 音标里没有 θ 就把主力音同时挂到 `spain`。有 θ 而又没生成半岛音的，
+  //    才继续落到浏览器 TTS —— 那种词拿拉美音冒充半岛音是真的读错了。
+  private ttsFor(word: string, ipaSpain: string | null): SpanishTts[] {
     const out: SpanishTts[] = [];
-    for (const v of TTS_VOICES) {
-      const h = createHash('sha1').update(`${word}|${v.tag}`).digest('hex');
+    const url = (tag: string): string | null => {
+      const h = createHash('sha1').update(`${word}|${tag}`).digest('hex');
       const rel = `${h.slice(0, 2)}/${h}.m4a`;
-      if (fs.existsSync(path.join(this.ttsDir, rel))) {
-        out.push({ accent: v.accent, url: `/api/audio/es/${rel}`, voice: v.voice });
-      }
+      return fs.existsSync(path.join(this.ttsDir, rel)) ? `/api/audio/es/${rel}` : null;
+    };
+    const mx = TTS_VOICES.find((v) => v.tag === 'mx')!;
+    const es = TTS_VOICES.find((v) => v.tag === 'es')!;
+    const uMx = url(mx.tag);
+    const uEs = url(es.tag);
+    if (uMx) out.push({ accent: mx.accent, url: uMx, voice: mx.voice });
+    if (uEs) out.push({ accent: es.accent, url: uEs, voice: es.voice });
+    else if (uMx && !(ipaSpain ?? '').includes('θ')) {
+      out.push({ accent: es.accent, url: uMx, voice: mx.voice });
     }
     return out;
   }
@@ -413,6 +565,77 @@ export class SpanishDictService {
       pos: r.pos,
       brief: firstLine(r.translation) || firstLine(r.definition),
     }));
+  }
+
+  // 读音。2026-08-07 从 `dict.phonetic` 那一列升级到 `pronunciation` 表。
+  //
+  // 🔴 **`phoneticLatam` 原先是用规则 θ→s 从半岛音派生的，而源头本来就直接给了。**
+  //    实测含 θ 的 29,134 个词头里，源头给了 seseo 形的 29,118 个，
+  //    其中 **630 个与规则派生不一致** —— 规则错得有规律：
+  //      irascible  半岛 iɾasˈθible  规则 iɾasˈsible ❌  源头 iɾaˈsible ✅（sc 在拉美是单个 s）
+  //      Madrid     半岛 maˈdɾiθ     规则 maˈdɾis   ❌  源头 maˈdɾid  ✅（词尾 -d）
+  //    ⇒ 有权威源就用权威源；只有源头没给（16 个）才派生，且这一层只取源头。
+  //
+  // 只取 `notation='phonemic'` 的 primary：严式（`[ˈɡɾa.t̪is]`）也在库里，
+  // **存不存与展不展示是两个独立开关**，这里选择不展示。
+  private readonly pronQuery;
+
+  // 统一义项层的读取与拼装。
+  //
+  // ⭐ `title` = **最短的那条中文**（理由见 SpanishUnifiedSense 的注释）。
+  //    `detail` 只在「明显更长」时才给：长度差 ≤4 个字的两条中文（`平局；打平` vs
+  //    `平局，打平`）是同一句话的两次翻译，并排显示只会让用户以为是两个意思。
+  private buildUnified(wordId: number): SpanishUnifiedSense[] {
+    const rows = this.unifiedSenseQuery.all(wordId) as Array<{
+      id: number; rank: number; pos: string | null; gender: string | null;
+      lang: string; kind: string; text: string;
+    }>;
+    const tags = this.unifiedTagQuery.all(wordId) as Array<{
+      sense_id: number; kind: string; value: string;
+    }>;
+    const byTag = new Map<number, Record<string, string[]>>();
+    for (const t of tags) {
+      let m = byTag.get(t.sense_id);
+      if (!m) byTag.set(t.sense_id, (m = {}));
+      (m[t.kind] ||= []).push(t.value);
+    }
+
+    const order: number[] = [];
+    const acc = new Map<number, {
+      rank: number; pos: string | null; gender: string | null;
+      zh: string[]; en: string[]; es: string[];
+    }>();
+    for (const r of rows) {
+      let a = acc.get(r.id);
+      if (!a) {
+        acc.set(r.id, (a = { rank: r.rank, pos: r.pos, gender: r.gender,
+                             zh: [], en: [], es: [] }));
+        order.push(r.id);
+      }
+      if (r.lang === 'zh') a.zh.push(r.text);
+      else if (r.lang === 'en') a.en.push(r.text);
+      else if (r.lang === 'es') a.es.push(r.text);
+    }
+
+    const out: SpanishUnifiedSense[] = [];
+    for (const id of order) {
+      const a = acc.get(id)!;
+      if (a.zh.length === 0) continue;      // 断言保证不会发生，防御性跳过
+      const sorted = [...a.zh].sort((x, y) => x.length - y.length);
+      const title = sorted[0];
+      const longest = sorted[sorted.length - 1];
+      const t = byTag.get(id) || {};
+      out.push({
+        id, rank: a.rank, pos: a.pos, gender: a.gender,
+        title,
+        detail: longest.length > title.length + 4 ? longest : null,
+        en: a.en[0] ?? null,
+        es: a.es[0] ?? null,
+        topics: t.topic || [], regions: t.region || [],
+        registers: t.register || [], numbers: t.number || [],
+      });
+    }
+    return out;
   }
 
   getEntry(word: string): SpanishEntry | null {
@@ -445,6 +668,46 @@ export class SpanishDictService {
       regionSrc: r.region_src,
       kind: r.kind,
     }));
+    // 读音：源头给了半岛/拉美两条就各用各的；只有一条通用形就两边都显示它。
+    const pr = this.pronQuery.all(row.id) as Array<{ ipa: string; region: string | null }>;
+    if (pr.length) {
+      const es = pr.find((p) => p.region === 'es-ES');
+      const la = pr.find((p) => p.region === 'es-419');
+      const gen = pr.find((p) => p.region === null);
+      entry.phonetic = normalizeSpanishIpa((es || gen || pr[0]).ipa);
+      // 拉美音与半岛音相同时不另示（沿用既有约定，避免重复显示同一串）
+      const l = la ? normalizeSpanishIpa(la.ipa) : null;
+      entry.phoneticLatam = l && l !== entry.phonetic ? l : null;
+    }
+
+    entry.unifiedSenses = this.buildUnified(row.id);
+    entry.homographs = (this.homographQuery.all(entry.word, row.id) as Array<{
+      id: number; word: string; pos: string | null; phonetic: string | null;
+    }>).map((h) => ({
+      id: h.id, word: h.word, pos: h.pos,
+      phonetic: normalizeSpanishIpa(h.phonetic),
+      senses: this.buildUnified(h.id),
+    }));
+
+    entry.examples = (this.exampleQuery.all(entry.word) as Array<{
+      id: number; sense_id: number | null; text: string; zh: string | null; ref: string | null;
+    }>).map((r) => ({ id: r.id, senseId: r.sense_id, text: r.text, zh: r.zh, ref: r.ref }));
+    entry.relations = (this.relationQuery.all(row.id) as Array<{
+      sense_id: number | null; kind: string; target: string;
+      tags: string | null; linkable: number;
+    }>).map((r) => {
+      let tags: string[] = [];
+      try {
+        const p = r.tags ? JSON.parse(r.tags) : [];
+        if (Array.isArray(p)) tags = p as string[];
+      } catch { tags = []; }
+      return { senseId: r.sense_id, kind: r.kind, target: r.target,
+               tags, linkable: r.linkable === 1 };
+    });
+    entry.collocations = (this.collocationQuery.all(row.id) as Array<{
+      id: number; text: string; zh: string | null;
+    }>).map((r) => ({ text: r.text, zh: r.zh }));
+
     // 西语版自有义项。`definition_es` 有值 = 西语义项已按行号内联在 senses 里，
     // 这里再给一份就是同样内容显示两遍 ⇒ 返回空。两者由构造保证互斥
     // （实测 54,206 个有 definition_es 的词，英文释义非空的恰好 0 个）。
@@ -468,7 +731,7 @@ export class SpanishDictService {
       });
     }
 
-    entry.tts = this.ttsFor(entry.word);
+    entry.tts = this.ttsFor(entry.word, entry.phonetic);
     return entry;
   }
 

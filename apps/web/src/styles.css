@@ -680,6 +680,15 @@ body {
   margin-top: 2px;
 }
 
+/* 义项副行：同一条义项的定义式中文（标题行是最短的那条，这里是明显更长的那条）。
+   比标题弱、比源语言锚点强 —— 它仍是中文，用户会读；EN/ES 那两行多数人只是瞥一眼。 */
+.sense-detail {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
 /* 源语言锚点（es）：英文 gloss 或西语单语定义，前缀一个语种小标签。
    与 .sense-en 同一视觉层级，只是多了标签 —— 它不该抢中文释义的注意力。 */
 .sense-src {
@@ -755,6 +764,14 @@ body {
 .sense-chip.num {
   background: var(--surface-soft);
   color: var(--text-secondary);
+}
+
+/* 主题标签（medicine / anatomy / poker …）。2026-08-07 新义项层才有 ——
+   此前 `meta` 里的 `top` 一直没被展示层读过。 */
+.sense-chip.top {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  border-color: transparent;
 }
 
 /* ---- Inflection → lemma notes ---- */
@@ -1205,5 +1222,97 @@ body {
 .es-sense-tags {
   margin-left: 6px;
   font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ---- 例句（2026-08-07 接入）----
+   挂在义项下面而不是堆在词条末尾 —— `example.sense_id` 已由 `src_gloss`
+   与 `sense_src.text` 精确匹配挂好（79.0%），剩下 21% 单独成块。 */
+.sense-example {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.sense-example .ex-es {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.sense-example .ex-zh {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+
+/* ---- 词汇关系（近义/反义/派生…）----
+   `linkable=false` 的目标词不给链接：源头给的可能是短语或库里没收的词
+   （实测 9.4% 点不动，多为词缀 `-achón` 这类）。 */
+.rel-groups {
+  margin-top: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rel-group {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.rel-kind {
+  display: inline-block;
+  min-width: 30px;
+  margin-right: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--surface-soft);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  vertical-align: 1px;
+}
+
+.rel-item { margin-right: 8px; }
+
+.rel-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.rel-link:hover { border-bottom-style: solid; }
+
+.rel-plain { color: var(--text-secondary); }
+
+.rel-tag {
+  margin-left: 3px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+/* ---- 同形词（仅大小写不同的另一个词条）----
+   西语用大小写承载词汇区别（virgo 处女 / Virgo 处女座），而查询入口是 NOCASE。
+   同页并列，视觉上明确「这是另一个词」：左侧一道竖线 + 词头加粗。 */
+.entry-section.homograph {
+  border-left: 3px solid var(--border-strong);
+  padding-left: 14px;
+}
+
+.homograph-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.homograph-word {
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.homograph-ipa {
+  font-size: 13px;
   color: var(--text-tertiary);
 }

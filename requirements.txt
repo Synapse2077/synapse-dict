@@ -1,2 +1,7 @@
 python-dotenv
 volcengine-python-sdk[ark]
+wordfreq==3.1.1   # Apache-2.0，离线频次表；版本要钉死，换版本 = 换尺子（见 es/pipeline/build_frequency_layer.py）
+piper-tts         # 合成发音（es/pipeline/gen_tts.py）。带 onnxruntime，约 55 MB。
+                  # 🔴 还需要 espeak-ng 数据：ESPEAK_DATA_PATH=/usr/local/share，
+                  #    不设的话 piper 静默产出 0 字节文件（脚本启动时自证一次）。
+                  # ⚠️ 这台是 Intel Mac，PyTorch macOS x86 停在 2.2.2 ⇒ 只能用 ONNX 系。

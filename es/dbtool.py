@@ -41,7 +41,8 @@ TABLE = "dict"
 # 追踪的列：写库前后都会计数。**不在这张表里的列，出了问题不会被发现** —— 新增重要字段记得加进来。
 TRACK = ['phonetic', 'phonetic_raw', 'phonetic_src', 'phonetic_confirm',
          'definition', 'definition_es', 'translation', 'gender', 'pos', 'infl',
-         'exchange', 'level', 'meta']
+         'exchange', 'level', 'meta',
+         'freq_zipf', 'freq_lemma_zipf', 'freq_src']
 
 
 def _cols(conn):
