@@ -26,6 +26,8 @@
     python3 dbtool.py
 """
 import json
+import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -81,8 +83,68 @@ def diff(before, after):
             if after.get(k, 0) != before.get(k, 0)}
 
 
+#  ── 保留策略（2026-08-11 加）─────────────────────────────────────────────
+#  每次写库前全量复制 697 MB，十天攒了 118 个 es 备份、**56 GB**，
+#  其中大量是同一天同一个 tag 隔一两分钟的重复（8-07 光 translate-examples 就 7 个）。
+#  当天清掉 120 个、释放 50.9 GB（台账 data/work/_shared/backup_prune_20260811.json）。
+#  不加策略的话两周后原样复发 —— 清理是一次性的，产生速度不是。
+#
+#  🔴 里程碑用文件名豁免，不靠"记得手动留"：
+#     tag 里带 `keep` 的（`dbtool.session("keep-v2-schema")`）永不淘汰。
+#     结构大改之前请用这个前缀 —— 那种备份删了就真回不去了。
+KEEP_TAG = "keep"
+MAX_BACKUPS = 12          # 同一语种保留的非豁免备份数上限
+
+
+def prune_backups(verbose=True, dry=False):
+    """同一 tag 同一天只留最新的一个；再按时间保留最近 MAX_BACKUPS 个。带 keep 的豁免。
+
+    `dry=True` 只列不删 —— **改这个函数之后先 dry 跑一遍**。
+    它是本仓库里唯一一个会自动删数据的地方，写错了没有第二次机会。
+    """
+    pat = re.compile(r"^%s\.pre-(.+)-(\d{8})-(\d{4,6})\.bak$" % re.escape(DB.stem))
+    rows = []
+    for p in paths.BACKUPS.glob("%s.pre-*.bak" % DB.stem):
+        m = pat.match(p.name)
+        if m:
+            rows.append((p, m.group(1), m.group(2)))
+    keep, drop = set(), []
+    # ① 同 (tag, 日期) 只留最新
+    newest = {}
+    for p, tag, day in rows:
+        if KEEP_TAG in tag:
+            keep.add(p)
+            continue
+        k = (tag, day)
+        if k not in newest or p.stat().st_mtime > newest[k].stat().st_mtime:
+            if k in newest:
+                drop.append(newest[k])
+            newest[k] = p
+        else:
+            drop.append(p)
+    # ② 剩下的按时间取最近 MAX_BACKUPS 个
+    rest = sorted(newest.values(), key=lambda p: -p.stat().st_mtime)
+    keep |= set(rest[:MAX_BACKUPS])
+    drop += rest[MAX_BACKUPS:]
+
+    freed = sum(p.stat().st_size for p in drop)
+    if dry:
+        print("■ 试算：会保留 %d 个、删 %d 个（%.1f GB）" % (len(keep), len(drop), freed / 1024 ** 3))
+        for p in sorted(keep):
+            print("   保留  " + p.name)
+        for p in sorted(drop):
+            print("   删除  " + p.name)
+        return len(drop), freed
+    for p in drop:
+        p.unlink()
+    if verbose and drop:
+        print("■ 备份保留策略：清掉 %d 个旧备份，释放 %.1f GB（保留 %d 个）"
+              % (len(drop), freed / 1024 ** 3, len(keep)))
+    return len(drop), freed
+
+
 def backup(tag):
-    """备份落在 `data/backups/`。
+    """备份落在 `data/backups/`，并顺手执行保留策略。
 
     ⚠️ 2026-08-01 重构后一度仍用 `DB.with_name(...)`，于是备份被写进了 `data/db/`，
        和成品库混在一起 —— 目录分工形同虚设。改用 paths.BACKUPS。
@@ -90,6 +152,8 @@ def backup(tag):
     paths.BACKUPS.mkdir(parents=True, exist_ok=True)
     dst = paths.BACKUPS / ("%s.pre-%s-%s.bak" % (DB.stem, tag, time.strftime("%Y%m%d-%H%M%S")))
     shutil.copy2(DB, dst)
+    # 🔴 淘汰放在**复制之后**：万一复制失败就抛异常了，不会先把旧的删掉再发现新的没建成。
+    prune_backups()
     return dst
 
 
@@ -198,6 +262,44 @@ def session(tag, expect=None, dry=False, verbose=True):
         raise SystemExit(1)
     if verbose:
         print("■ 不变量核对通过 ✓")
+    _regression_check(verbose)
+
+
+def _regression_check(verbose=True):
+    """写库之后跑一遍回归闸。2026-08-11 加。
+
+    ═══ 为什么这道闸必须在这里，而不是"记得跑一下" ═══
+    用户 2026-08-11：「同一个问题你修了，隔天修其他问题，你又发现之前的问题又出现了。」
+    根因是修复写在**输出层**，而输出层会被 DROP 重建 —— 已知三次：
+      · `split_case_homographs` 的 4,501 条归属被 `build_sense_layer` 重建抹掉；
+      · `example_gloss` 的 50,289 条译文被 `build_example_layer` 删光；
+      · 7-31~8-03 整轮音标修复被 8-07 新建的 `pronunciation` 表**绕过**
+        （数据还在 `dict.phonetic`，但展示层改读新表了）。
+    三次全是**事后偶然撞见**的，间隔一周到十天。上面那两道不变量闸拦不住它们：
+    行数没变、列的非空计数没变，**变的是内容对不对**。
+    ⇒ 这里必须跑一遍「过去每个修复现在还在不在」，让回归在**产生它的那次写库**上报出来。
+
+    ⚠️ 它**只报不拦**。理由：写库已经 commit 了（回归闸要读最终状态才准），
+       而且不是每次红都该回滚 —— 有些是这次写库有意为之。报出来 + 备份路径就够决策了。
+    不想跑（比如批量小写循环）：`SKIP_REGRESSION_CHECK=1`。约 10 秒。
+    """
+    if os.environ.get("SKIP_REGRESSION_CHECK") == "1":
+        return
+    try:
+        sys.path.insert(0, str(HERE))
+        from tests.test_no_regression import check_brief
+        red = check_brief()
+    except Exception as e:                      # 闸自己坏了不能挡住写库，但必须喊出来
+        print("\n⚠️ 回归闸没跑起来（%s）—— 这本身要查" % e, file=sys.stderr)
+        return
+    if not red:
+        if verbose:
+            print("■ 回归闸通过 ✓（过去的修复都还在）")
+        return
+    print("\n🔴 回归闸报警：有 %d 条过去的修复现在失效了" % len(red), file=sys.stderr)
+    for cid, name, why in red:
+        print("   %-5s %-38s %s" % (cid, name, why), file=sys.stderr)
+    print("   明细：python3 tests/test_no_regression.py", file=sys.stderr)
 
 
 

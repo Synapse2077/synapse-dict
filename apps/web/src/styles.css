@@ -665,6 +665,24 @@ body {
   line-height: 1.6;
 }
 
+/* 义项折叠开关。产品是划词弹窗，`mano` 的 26 条义项一屏铺不下，
+   冷僻义会把「手」淹掉；折叠的只是显示，数据仍可检索、展开即见。 */
+.sense-more {
+  margin-top: 12px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.sense-more:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .sense-zh {
   font-size: 16px;
   color: var(--text);
@@ -917,6 +935,16 @@ body {
 .badge.g-f { background: color-mix(in srgb, var(--gender-f) 16%, transparent); color: var(--gender-f); }
 .badge.g-mf { background: color-mix(in srgb, var(--gender-mf) 18%, transparent); color: var(--gender-mf); }
 .badge.g-n { background: var(--surface-soft); color: var(--text-secondary); }
+
+/* 词头性别徽章上的 `*`：主义项是这个性别，但个别义项不同（mano 的第 8 义是墨西哥
+   俚语「兄弟」，在 kaikki/DRAE 里是另一个阳性词条）。不把两种性别折叠成 `阴/阳`
+   显示在词头 —— 那看着像「手」也能说 el mano。细节由各义项自己的性别徽章承担。 */
+.badge .g-varies {
+  margin-left: 1px;
+  font-size: 0.85em;
+  vertical-align: super;
+  opacity: 0.75;
+}
 
 /* 助动词是意语动词的灵魂——essere/avere 分色，最显眼 */
 .badge.aux { border: 1px solid transparent; }

@@ -429,9 +429,28 @@ def collect(con):
                 kid_n[(w_, p_)] += 1
         ENUM_MIN = 4
 
-        for aid, w, did, lang, gl, apos, apt, tj, mj, zh, zsrc, dup in con.execute(
+        # 🔴 判重复核（2026-08-11）：`dup_verdict` ∈ {bad, weak} 的**不采纳合并**。
+        #    186 条判重里 21 条错配、28 条存疑（v4-pro 全量普查，186/186；
+        #    负控 28/28 该家可用，豆包同批 4/30 已作废）。典型错配：
+        #      peón「pawn / checker」并进「行人。」 / fierro「race car」并进「油门」
+        #    用户 2026-08-07：「不要把义项和释义错配了，那才是真灾难。」
+        #    ⚠️ 判决存在 `sense_add.dup_verdict`，`dup_zh` **原样保留** ——
+        #       想改主意（比如放行 weak）只改下面这个集合，不必重跑判官。
+        DUP_BLOCK = ("bad", "weak")
+        has_verdict = bool(con.execute(
+            "SELECT COUNT(*) FROM pragma_table_info('sense_add') "
+            "WHERE name='dup_verdict'").fetchone()[0])
+        vsel = ", dup_verdict" if has_verdict else ", NULL"
+        if not has_verdict:
+            print("  ⚠️ `sense_add` 没有 dup_verdict 列 —— 判重复核结论未落库，"
+                  "本轮按「全部采纳」重建（先跑 fixes/apply_dup_verdicts.py）")
+
+        for aid, w, did, lang, gl, apos, apt, tj, mj, zh, zsrc, dup, dver in con.execute(
                 "SELECT id, word, dict_id, lang, gloss, pos, pos_title, tags, meta, "
-                "zh, zh_src, dup_zh FROM sense_add ORDER BY id"):
+                "zh, zh_src, dup_zh" + vsel + " FROM sense_add ORDER BY id"):
+            if dver in DUP_BLOCK:
+                stat[f"C① 判重复核不通过（{dver}）⇒ 独立成条"] += 1
+                dup = None
             if did is None:
                 stat["C 组 dict_id 为空（跳过）"] += 1
                 continue

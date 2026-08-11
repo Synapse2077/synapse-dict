@@ -109,6 +109,11 @@ _IPA_DELIM = re.compile(r"^\s*[\\/\[]([^\\/\]]+)[\\/\]]")
 DROP_TAGS = frozenset({"X-SAMPA", "romanization", "rhymes", "Hyphenation", "hyphenation"})
 
 
+# `/ˈɡɾaθjas/ [ˈɡɾa.θjas]` 这种一字段两音标，按「上一段的收尾定界符 + 空白 +
+# 下一段的起始定界符」切开。全库仅 6 个词 / 19 处，但不切就丢窄式那一半。
+_MULTI_IPA = re.compile(r"(?<=[/\]])\s+(?=[/\[])")
+
+
 def parse_ipa(raw):
     """从 `sounds.ipa` 原文取出裸音标串；取不到返回 None。
 
@@ -166,17 +171,26 @@ def sounds_variants(entry, drop_tags=DROP_TAGS, dedupe=True):
             t.strip() for raw in (s.get("raw_tags") or []) for t in raw.split(","))
         if drop_tags and set(tags) & set(drop_tags):
             continue
-        ip = parse_ipa(s.get("ipa"))
-        if not ip:
-            continue
-        if dedupe and ip in seen:
-            continue
-        seen.add(ip)
-        # ⚠️ 从 `(ipa, tags)` 二元组改成三字段具名元组（2026-08-07 加 `notation`）。
-        #    **这会打断 `for ip, tags in …` 这种解包**（我一度以为不会，被金标准测试
-        #    当场逮住）。调用点已全部改成 `v.ipa` / `v.tags` / `v.notation`；
-        #    用具名元组而非裸三元组，是为了下次再加字段不必再改一遍。
-        out.append(Variant(ip, tags, notation_of(s.get("ipa"))))
+        # 🔴 一个 `ipa` 字段里可能塞着**两个**音标：`/ˈɡɾaθjas/ [ˈɡɾa.θjas]`。
+        #    `parse_ipa` 只取第一对定界符（那是对的，防止 strip 把严式带出来），
+        #    但那样窄式那一段就**整段丢掉**。2026-08-10 由外锚闸
+        #    `verify_vs_dump.py` 逮到：6 个词 / 19 处 / 丢 10 条窄式音标
+        #    （`gracias` 的 `ˈɡɾa.θjas`、`etcétera`、`Matamoros`、`trabajadora`…）。
+        #    ⇒ 在这里按定界符边界切开，每一段各自定 notation。
+        #    **不改 `parse_ipa`** —— 它被 pick_ipa / first_phonemic 等多处共用，
+        #    契约是「返回一个」，改它等于把风险摊到全项目。
+        for seg in _MULTI_IPA.split((s.get("ipa") or "").strip()):
+            ip = parse_ipa(seg)
+            if not ip:
+                continue
+            if dedupe and ip in seen:
+                continue
+            seen.add(ip)
+            # ⚠️ 从 `(ipa, tags)` 二元组改成三字段具名元组（2026-08-07 加 `notation`）。
+            #    **这会打断 `for ip, tags in …` 这种解包**（我一度以为不会，被金标准测试
+            #    当场逮住）。调用点已全部改成 `v.ipa` / `v.tags` / `v.notation`；
+            #    用具名元组而非裸三元组，是为了下次再加字段不必再改一遍。
+            out.append(Variant(ip, tags, notation_of(seg)))
     return out
 
 

@@ -285,6 +285,25 @@ function parseBaseForms(raw: string | null): string[] {
   return [...new Set(out)];
 }
 
+// 自复不定式的指针文本：`levantar 的 不定式·自复`。**只认这一种**。
+// 别扩大到所有指针（`^.+ 的 \S+$`）—— 那样会命中 4,515 条，其中 2,141 条换掉是倒退：
+//   han  指针「haber 的 陈述式·现在时·第三人称·复数」，义项中文是「中国的汉族」
+//   lean 指针「leer 的 虚拟式…」，义项中文是「一种娱乐性毒品饮料」
+//   pula 指针「pulir 的 虚拟式…」，义项中文是「博茨瓦纳的货币单位」
+// 这些词**主要就是那个变形**，另一个义项是罕见外来词，指针才是有用的摘要。
+// 自复不定式不一样：用户搜 levantarse 要的就是「站起来」，不是「levantar 的 不定式·自复」。
+const REFLEXIVE_PTR = /^.+ 的 不定式·自复$/;
+
+// 搜索下拉的摘要。v1 的 `dict.translation` 优先（既有摘要零回归），两种情况例外：
+//   ① 该列为空 ⇒ 落到义项层（3,130 条，全是补收的词头和姓氏，原先一片空白）
+//   ② 该列首行是**自复不定式指针** ⇒ 用义项中文（2,374 条）
+function briefOf(r: { translation: string | null; definition: string | null;
+                      sense_zh: string | null }): string {
+  const t = firstLine(r.translation);
+  if (t && !(REFLEXIVE_PTR.test(t) && r.sense_zh)) return t;
+  return r.sense_zh || t || firstLine(r.definition) || '';
+}
+
 function buildSenses(row: EsRow): SpanishSense[] {
   const defs = splitAligned(row.definition);
   const defsEs = splitAligned(row.definition_es);
@@ -402,21 +421,69 @@ export class SpanishDictService {
              transitivity, comparative, level
       FROM dict
       WHERE word = ? COLLATE NOCASE
-      ORDER BY CASE WHEN word = ? THEN 0 ELSE 1 END, is_lemma DESC
+      ORDER BY
+        -- 🔴 第一排序键：**既没有义项、又不是变形形**的行排到最后（2026-08-10）。
+        --    大小写拆分（split_case_homographs）把义项挪给了大写专名，留下 858 个
+        --    空壳小写行。其中 847 个是**变形形**（cefalópodos 是复数、
+        --    estonia 是 estonio 的阴性），空着是对的 —— 界面走 infl/exchange
+        --    指针跳原形，绝不能让它们排后面，否则搜 cefalópodos 会返回
+        --    分类单元 Cefalópodos，正是下面那条精确大小写规则要防的 bug。
+        --    真空壳只有 11 个：arca de la alianza / Imperio romano /
+        --    islas Turcas y Caicos 这类多词专名的另一种拼法，没有义项也没有指针，
+        --    点进去是一页空的。判据 = 无 sense 且 infl/exchange 皆空。
+        CASE WHEN infl IS NULL AND exchange IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM sense s WHERE s.word_id = dict.id)
+             THEN 1 ELSE 0 END,
+        -- 精确大小写命中优先（2026-08-06 为 Cefalópodos/cefalópodos 加）
+        CASE WHEN word = ? THEN 0 ELSE 1 END,
+        is_lemma DESC
       LIMIT 1
     `);
 
     // 前缀检索：命中 word 或 word_norm（去重音，便于无重音输入）；lemma 优先、短词优先。
+    //
+    // 🔴 摘要 `zh` 取自 `sense_gloss`，不再只靠 `dict.translation`（2026-08-10）。
+    //    `translation` 是 v1 遗留列，v2 已把释义搬进 `sense_gloss`，词条页早就切过去了，
+    //    **只有这里的搜索摘要还在读老列** ⇒ 3,130 个词在下拉列表里是一片空白
+    //    （`A`、`AVE`、`API`、几百个姓氏，以及 2026-08-10 补收新建的 872 个词头）。
+    //    这 3,130 条 100% 都有义项中文可用，一条都不用重新翻译。
+    // ⭐ 不走「把义项中文抄一份回 `dict.translation`」那条路：那是 v2 特意废掉的
+    //    按行号对齐的列，抄回去等于数据存两份、再造一次已经咬过三次的契约。
+    // ⚠️ 摘要取 **rank 最靠前**那条义项的中文，**不是最短的那条**。
+    //    词条页 buildUnified 取最短当 title 是对的 —— 它把最长的一并当 detail 显示，
+    //    两条都在。但搜索下拉只显示一条，取最短会挑出边角义项：
+    //    搜 A 摘要成了「主教」（国际象棋 alfil），而不是「西班牙语字母表的第一个字母」。
+    //    同一条数据、两个场景，判据不能照抄。
+    // 🔴 摘要的子查询必须写在**外层**，套在已经 LIMIT 过的结果上（2026-08-10）。
+    //    第一版把它放进内层 SELECT ⇒ 前缀 AVE% 匹配上千行，每行都跑一次
+    //    sense/sense_gloss 关联，而 LIMIT 20 是最后才截的 ⇒ 搜索 10.4 秒。
+    //    挪到外层后只对最终 20 行求值 ⇒ 0.01 秒。
+    //    ⚠️ 同一个教训在同一天出现两次（另一次是 relationQuery 用不上 NOCASE 索引）：
+    //    O(n) 的子查询乘上"还没截断的行数"，就是 O(n²)。
     this.prefixQuery = this.db.prepare(`
-      SELECT id, word, is_lemma, pos, translation, definition
-      FROM dict
-      WHERE word LIKE ? COLLATE NOCASE OR word_norm LIKE ? COLLATE NOCASE
-      ORDER BY
-        CASE WHEN lower(word) = lower(?) THEN 0 ELSE 1 END,
-        is_lemma DESC,
-        LENGTH(word) ASC,
-        word ASC
-      LIMIT ?
+      -- 🔴 写法必须是「**先定位第 1 条义项，再取它的中文**」，不能写成
+      --    sense JOIN sense_gloss ... WHERE s.word_id=? AND g.lang='zh'。
+      --    后者规划器会从 idx_gloss_lang (lang='zh') 那一头入手，
+      --    **扫遍 34 万条中文 gloss**，20 行就是 680 万次 ⇒ 搜索 3–4 秒。
+      --    改成先取 sense.id 再按 sense_gloss 主键 (sense_id, lang) 命中 ⇒ 0.028 秒。
+      --    EXPLAIN QUERY PLAN 里看 g 那一行走的是哪个索引，是唯一可靠的判据。
+      SELECT h.*,
+             (SELECT g.text FROM sense_gloss g
+              WHERE g.sense_id = (SELECT s.id FROM sense s
+                                  WHERE s.word_id = h.id ORDER BY s.rank LIMIT 1)
+                AND g.lang = 'zh'
+              ORDER BY LENGTH(g.text) LIMIT 1) AS sense_zh
+      FROM (
+        SELECT id, word, is_lemma, pos, translation, definition
+        FROM dict
+        WHERE word LIKE ? COLLATE NOCASE OR word_norm LIKE ? COLLATE NOCASE
+        ORDER BY
+          CASE WHEN lower(word) = lower(?) THEN 0 ELSE 1 END,
+          is_lemma DESC,
+          LENGTH(word) ASC,
+          word ASC
+        LIMIT ?
+      ) h
     `);
 
     // 真人录音。排序即"该先播哪条"：
@@ -485,8 +552,19 @@ export class SpanishDictService {
 
     // 词汇关系。`linkable` 在 SQL 里判，省得前端为每个 target 再发一次查询。
     this.relationQuery = this.db.prepare(`
+      -- 🔴 COLLATE NOCASE 不是放宽判据，是**为了走上索引**（2026-08-10）。
+      --    dict 上唯一的词形索引是 idx_word ON dict(word COLLATE NOCASE)；
+      --    写成二进制比较 d2.word = r.target 用不上它 ⇒ 每条关系全表扫 113 万行。
+      --    mano 有 135 条关系 ⇒ 这一句查询 6.3 秒，整个词条页转圈 5–6 秒。
+      --    加上 COLLATE NOCASE 后 0.009 秒（快 850 倍）。
+      --    口径也因此与 exactQuery 一致（那里一直是 NOCASE：搜 gracias 命中 Gracias），
+      --    可链接数 115 → 116，多出来的正是只差大小写的那一个，点得开。
+      -- ⚠️ 这个坑是今天补齐 derived（关系 121,585 → 142,602）之后才暴露的：
+      --    以前 mano 只有几条关系，全表扫几次看不出来。O(n²) 要等数据长大才咬人。
+      -- ⚠️ 本文件的 SQL 写在模板字符串里，注释中**绝不能出现反引号**（会提前闭合字符串）。
       SELECT r.sense_id, r.kind, r.target, r.tags,
-             EXISTS(SELECT 1 FROM dict d2 WHERE d2.word = r.target) AS linkable
+             EXISTS(SELECT 1 FROM dict d2
+                    WHERE d2.word = r.target COLLATE NOCASE) AS linkable
       FROM sense_relation r
       WHERE r.word_id = ?
       ORDER BY r.kind, r.id
@@ -557,13 +635,13 @@ export class SpanishDictService {
     const like = `${keyword}%`;
     const rows = this.prefixQuery.all(like, like, keyword, limit) as Array<{
       id: number; word: string; pos: string | null;
-      translation: string | null; definition: string | null;
+      translation: string | null; definition: string | null; sense_zh: string | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
       word: r.word,
       pos: r.pos,
-      brief: firstLine(r.translation) || firstLine(r.definition),
+      brief: briefOf(r),
     }));
   }
 

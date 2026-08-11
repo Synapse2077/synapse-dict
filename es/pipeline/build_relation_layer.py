@@ -63,8 +63,14 @@ KINDS = {"synonyms": "synonym", "antonyms": "antonym",
          "holonyms": "holonym", "meronyms": "meronym",
          "coordinate_terms": "coordinate", "related": "related",
          "derived": "derived"}
-SENSE_KEYS = ("synonyms", "antonyms", "hypernyms", "hyponyms",
-              "holonyms", "meronyms", "coordinate_terms", "related")
+# 🔴 `derived` **两级都有**，第一版只把它放进 ENTRY_KEYS ⇒ 义项级的一条没收，
+#    漏掉 20,460 条（`agente` 的 17 个派生词 `agente comercial`/`agente de bolsa`…
+#    全挂在义项级，条目级是空的）。2026-08-10 由外锚闸
+#    `verify_vs_dump.py` 逮到 —— 库内自证的闸永远发现不了这种漏：
+#    收进来的每一条都对得上，只是少了两万条。
+# ⇒ 两个集合都取 KINDS 全集。同一条关系两级都出现时由末尾的
+#    `(did, sid, kind, target)` 去重收掉。
+SENSE_KEYS = tuple(KINDS)
 ENTRY_KEYS = tuple(KINDS)
 
 DDL = """CREATE TABLE sense_relation (

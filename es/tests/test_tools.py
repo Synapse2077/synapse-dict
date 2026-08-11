@@ -67,6 +67,18 @@ class 解析(unittest.TestCase):
     def test_西语版方括号(self):
         self.assertEqual(K.parse_ipa("[aβ̞ð̞ukˈt̪oɾ]"), "aβ̞ð̞ukˈt̪oɾ")
 
+    def test_一字段两音标时sounds_variants要两条都给(self):
+        """`parse_ipa` 只取音位式是对的（见上一条），但 `sounds_variants`
+        必须把两段都产出来 —— 否则窄式整段丢掉。
+
+        2026-08-10：全库 6 个词 / 19 处这种写法，丢了 10 条窄式音标，
+        由外锚闸 `verify_vs_dump.py` 逮到（库内自证的闸看不见"少了什么"）。
+        """
+        e = {"sounds": [{"ipa": "/ˈɡɾaθjas/ [ˈɡɾa.θjas]"}]}
+        v = K.sounds_variants(e)
+        self.assertEqual([(x.ipa, x.notation) for x in v],
+                         [("ˈɡɾaθjas", "phonemic"), ("ˈɡɾa.θjas", "narrow")])
+
     def test_seseante与no_seseante都要返回(self):
         """2026-08-01：只取第一个拿到 seseante，据此断言『西语版没用』——错的。"""
         e = {"sounds": [{"ipa": "[kaˈsa]", "tags": ["seseante"]},

@@ -1184,6 +1184,18 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   entry: SpanishEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  // 义项折叠（2026-08-11）。产品是**划词弹窗**，"字段轻快够用"是既定范围，
+  // 而 `mano` 有 26 条义项、一屏铺不下，冷僻义（一令纸的二十分之一 / 狩猎围猎的每一次）
+  // 会把「手」淹掉。
+  // ⚠️ 只折叠**显示**，不删数据 —— 冷僻义仍然可检索、展开即见。
+  // 🔴 阈值取固定条数而不是「只展开两版都收录的那些」：后者虽然更"聪明"
+  //    （`mano` 恰好在第 8 条断开：1–8 两版都有，9–26 只有西语版），
+  //    但对用户是**不可预测**的 —— 这个词展开 3 条、那个展开 12 条，说不出理由。
+  //    固定条数至少是可解释的。
+  const [showAllSenses, setShowAllSenses] = useState(false);
+  const SENSE_FOLD_AT = 8;
+  useEffect(() => { setShowAllSenses(false); }, [entry.id]);   // 换词回到折叠态
+
   // 方针④三级兜底在音标行上的落法：有成品合成音就播文件，没有才降到浏览器 TTS。
   // 🔴 **不能拿拉美那份去顶半岛按钮**：用户看着 /θeɾˈbeθa/ 却听到 serˈbesa，
   //    比听浏览器音更糟——错的音比没有音更伤。缺哪个口音就用哪个 locale 交给浏览器。
@@ -1203,10 +1215,41 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
     ttsOf(accent) ? '合成音（工具生成）' : '合成音（浏览器）';
   const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
   const posParts = entry.pos ? entry.pos.split('/') : [];
-  const isVerb = posParts.includes('v');
-  const isNoun = posParts.some((p) => p === 'n' || p === 'name');
-  const isAdj = posParts.some((p) => p === 'adj' || p === 'adv');
-  const g0 = entry.gender ? entry.gender.split('/')[0] : null;
+
+  // 🔴 2026-08-11 用户实测 `mano` 逮到的两个标注错误，根因是同一个：
+  //    词头徽标读的是 `dict` 上的**跨义项折叠列**（v1 遗留），而逐义项的真值就在
+  //    `unifiedSenses` 里躺着没被用。
+  //
+  //    ① 及物/不及物：`mano` 的 `pos` 是 `n/v` —— 因为它同时是 `manar` 的
+  //       第一人称变位（“我流出”）。及物性来自那个**动词读法**，却显示在名词义项旁边。
+  //       kaikki 里 mano 的 verb 块只有一条 `form-of`，没有任何及物性语义。
+  //       同病 **3,670 个词形**：peso(pesar)、amigo(amigar)、llama(llamar)…
+  //       ⇒ 判据换成「**有没有 pos='v' 的义项**」，光靠词形能当动词读不算。
+  //
+  //    ② 性别 el/la：`mano` 25 条义项是阴性，只有第 8 条（墨西哥俚语「兄弟」）是阳性
+  //       —— 那在 kaikki 里是**另一个词条** `mano m`（DRAE 记作 mano²）。
+  //       数据没错，错的是把它俩折叠成 `mf` 显示在词头，看着像「手」也能说 el mano。
+  //       ⇒ 词头只显示**主义项（rank 1）**的性别，其余义项由各自的性别徽章承担。
+  //
+  //    ⚠️ 都要保留回退：变形形、无义项的词条在 `unifiedSenses` 里是空的，
+  //       那时仍用词级列，否则这些词的徽标会整片消失。
+  const senseHasPos = entry.unifiedSenses.some((s) => !!s.pos);
+  const isVerb = senseHasPos
+    ? entry.unifiedSenses.some((s) => s.pos === 'v')
+    : posParts.includes('v');
+  const isNoun = senseHasPos
+    ? entry.unifiedSenses.some((s) => s.pos === 'n' || s.pos === 'name')
+    : posParts.some((p) => p === 'n' || p === 'name');
+  const isAdj = senseHasPos
+    ? entry.unifiedSenses.some((s) => s.pos === 'adj' || s.pos === 'adv')
+    : posParts.some((p) => p === 'adj' || p === 'adv');
+
+  // 主义项性别；义项没给就退回词级列。
+  const senseGenders = entry.unifiedSenses.map((s) => s.gender).filter(Boolean) as string[];
+  const headGender = senseGenders[0] || entry.gender;
+  // 其余义项里出现过别的性别 ⇒ 词头不该把它说死，给个提示，细节看各义项徽章。
+  const genderVaries = senseGenders.some((g) => g !== senseGenders[0]);
+  const g0 = headGender ? headGender.split('/')[0] : null;
   return (
     <article className="entry-detail">
       <header className="entry-header">
@@ -1262,8 +1305,12 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
       {/* 西语本质徽标：CEFR 贯穿；名词性别 el/la/复数/阴性，动词变位类/词干变化/过去分词/及物性 */}
       <div className="entry-meta-row entry-badges">
         {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
-        {isNoun && entry.gender && (
-          <span className={`badge g g-${g0}`}>{ES_ARTICLE[entry.gender] || ''} · {GENDER_LABELS[entry.gender] || entry.gender}</span>
+        {isNoun && headGender && (
+          <span className={`badge g g-${g0}`}
+                title={genderVaries ? '个别义项性别不同，见各义项标注' : undefined}>
+            {ES_ARTICLE[headGender] || ''} · {GENDER_LABELS[headGender] || headGender}
+            {genderVaries && <span className="g-varies">*</span>}
+          </span>
         )}
         {isNoun && entry.plural && <span className="badge plural">复数 {entry.plural}</span>}
         {(isNoun || isAdj) && entry.feminine && <span className="badge fem">阴性 {entry.feminine}</span>}
@@ -1290,7 +1337,9 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.unifiedSenses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          {groupUnifiedByPos(entry.unifiedSenses).map((grp, gi) => (
+          {groupUnifiedByPos(
+            showAllSenses ? entry.unifiedSenses : entry.unifiedSenses.slice(0, SENSE_FOLD_AT),
+          ).map((grp, gi) => (
             <div className="pos-group" key={gi}>
               {grp.pos && (
                 <div className="pos-group-label">{posLabel(grp.pos)}</div>
@@ -1328,6 +1377,14 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
               </ol>
             </div>
           ))}
+          {entry.unifiedSenses.length > SENSE_FOLD_AT && (
+            <button type="button" className="sense-more"
+                    onClick={() => setShowAllSenses((v) => !v)}>
+              {showAllSenses
+                ? '收起'
+                : `展开其余 ${entry.unifiedSenses.length - SENSE_FOLD_AT} 条义项`}
+            </button>
+          )}
         </section>
       )}
 

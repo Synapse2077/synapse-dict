@@ -195,9 +195,25 @@ export function normalizePronunciation(ipa: string | null, accent: Accent = 'uk'
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 // 2026-08-01：数据全部迁到仓库根 `data/`，代码目录下不再存放任何数据字节。
 // 位置只在这里和各语种的 paths.py 声明；清单见 data/MANIFEST.md。
-const DEFAULT_DB_PATH = path.resolve(__dirname, '../../../data/db/synapse-dict-en.sqlite');
+//
+// 🔴 2026-08-11：`SYNAPSE_DATA_DIR` 不是「可选的方便」，是**打包后唯一可靠的锚**。
+//    下面的默认值是从**本源文件的位置**往上数三层推出来的（src → dict-core → packages → 根）。
+//    这个推法只在「源码原地跑」时成立：一旦 `npm run build:server` 把整个服务
+//    打成 `dist/server.js`，`import.meta.url` 就变成 `<部署目录>/dist/server.js`，
+//    往上三层指到一个根本不存在的地方，而症状是「所有语言都不可用」——
+//    一条 SQLite 报错都不会有，因为 `availableLanguages()` 用的是 `fs.existsSync`，
+//    文件不存在就静默地从列表里消失。
+//    ⇒ 部署时**必须**显式给 `SYNAPSE_DATA_DIR`（14 GB 数据本来也不该跟代码放一起）。
+//       启动自检 `assertDataDir()` 会在 0 个语种可用时直接拒绝启动并把推算路径打出来。
+export function dataDir(): string {
+  const override = process.env.SYNAPSE_DATA_DIR;
+  return override ? path.resolve(override) : path.resolve(__dirname, '../../../data');
+}
+
+const DEFAULT_DB_PATH = path.resolve(dataDir(), 'db/synapse-dict-en.sqlite');
 
 function mapEntry(row: DictionaryRow): DictionaryEntry {
   return {
@@ -348,19 +364,74 @@ export const LANGUAGES: LanguageMeta[] = [
   // 后续：no(Norsk/nb-NO)
 ];
 
-const REPO_ROOT = path.resolve(__dirname, '../../..');
-
 // 大文件不进 git，路径可用 DATABASE_PATH_<CODE> 覆盖（线上 scp 到别处时用）。
-function dbPathFor(code: string): string {
+export function dbPathFor(code: string): string {
   const override = process.env[`DATABASE_PATH_${code.toUpperCase()}`];
   if (override) return path.resolve(override);
   if (code === 'en') return DEFAULT_DB_PATH;
-  return path.resolve(REPO_ROOT, `data/db/synapse-dict-${code}.sqlite`);
+  return path.resolve(dataDir(), `db/synapse-dict-${code}.sqlite`);
 }
 
 // 只暴露 DB 文件确实存在的语言（前端据此渲染切换器）。
+// ⚠️ 这里只看**文件在不在**，不看**打不打得开**。文件存在但损坏 / 权限不足 / 是个空文件时，
+//    它照样出现在列表里，然后在第一个真实请求上抛异常。要判「能不能真的服务」用 `probeLanguages()`。
 export function availableLanguages(): LanguageMeta[] {
   return LANGUAGES.filter((l) => fs.existsSync(dbPathFor(l.code)));
+}
+
+export type LanguageProbe = LanguageMeta & {
+  ok: boolean;
+  /** 该语种词条总数（探活顺带取到，健康检查直接用，不必再查一次）。 */
+  rows: number | null;
+  /** ok=false 时的原因，给运维看的一句话。 */
+  error: string | null;
+  path: string;
+};
+
+/**
+ * 逐语种**真开一次库并跑一条查询**，返回谁能服务、谁不能。启动自检与 /health 共用。
+ *
+ * 🔴 为什么不能只用 `availableLanguages()`：那是 `fs.existsSync`，
+ *    「文件在」和「库能用」是两件事。真实故障形态是——scp 传了一半、
+ *    挂载盘掉线后留下 0 字节占位、跑数据脚本时把库锁住、备份还原成了别的 schema。
+ *    这几种 `existsSync` 全部返回 true，然后用户在第一个请求上收到 500。
+ * ⚠️ 查的是 `sqlite_master` 而不是 `SELECT count(*) FROM <主表>` ——
+ *    后者在 114 万行的库上要几十毫秒且随数据长大，探活不该随数据变慢。
+ *    行数改用 `max(rowid)` 近似（只读索引末端，O(log n)）。
+ *
+ * 🔴 主表名**不是每门语言都一样**：英语库是 ECDICT 底座、主表叫 `stardict`，
+ *    其余五门是本项目自建的 `dict`。第一版探活把 `dict` 写死，结果启动自检
+ *    把好端端的英语库判成「schema 不对」并从可用列表里摘掉 —— 连带把默认语种
+ *    从 en 换成了 es。**探活写错造成的假故障，和真故障一样会停服**，
+ *    所以这张表跟着 LANGUAGES 走，加语言时必须一起填。
+ */
+const MAIN_TABLE: Record<string, string> = {
+  en: 'stardict',   // ECDICT 底座（见 en/ 目录），与其余语种不同构
+  es: 'dict', it: 'dict', fr: 'dict', pt: 'dict', de: 'dict',
+};
+
+export function probeLanguages(): LanguageProbe[] {
+  return LANGUAGES.map((l) => {
+    const p = dbPathFor(l.code);
+    const tbl = MAIN_TABLE[l.code] ?? 'dict';
+    if (!fs.existsSync(p)) {
+      return { ...l, ok: false, rows: null, error: 'DB 文件不存在', path: p };
+    }
+    let db: DatabaseSync | null = null;
+    try {
+      db = new DatabaseSync(p, { readOnly: true });
+      const t = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(tbl) as
+        { name?: string } | undefined;
+      if (!t?.name) throw new Error(`库里没有 ${tbl} 表（schema 不对）`);
+      const r = db.prepare(`SELECT max(rowid) AS n FROM ${tbl}`).get() as { n: number | null };
+      return { ...l, ok: true, rows: r?.n ?? 0, error: null, path: p };
+    } catch (e) {
+      return { ...l, ok: false, rows: null, error: (e as Error).message.slice(0, 200), path: p };
+    } finally {
+      try { db?.close(); } catch { /* 探活失败时 close 也可能抛，忽略 */ }
+    }
+  });
 }
 
 // 合成发音的音频目录（`es/pipeline/gen_tts.py` 的产物，与 es/paths.py 的 TTS_OUT 同址）。
@@ -369,7 +440,7 @@ export function availableLanguages(): LanguageMeta[] {
 export function ttsDirFor(code: string): string {
   const override = process.env[`TTS_PATH_${code.toUpperCase()}`];
   if (override) return path.resolve(override);
-  return path.resolve(REPO_ROOT, `data/tts/${code}`);
+  return path.resolve(dataDir(), `tts/${code}`);
 }
 
 type AnyService = DictionaryService | SpanishDictService | ItalianDictService
