@@ -6,7 +6,10 @@ export const EXCHANGE_LABELS: Record<string, string> = {
   r: '比较级', t: '最高级', s: '复数', '0': '原形',
 };
 
-export const GENDER_LABELS: Record<string, string> = { f: '阴', m: '阳', mf: '阴/阳', n: '中' };
+// `mf` 写作「阴阳」而非「阴/阳」：斜杠容易被读成"二选一"，而 mf 的语义是"两者都是"。
+// 词头徽标处它还要同时承担两种现象 —— 义项间分属（`radio`：la radio 收音机 / el radio 半径）
+// 与义项内两性通用（`fiscal`：el/la fiscal，跟着人的性别走）—— 用词得中性一些。
+export const GENDER_LABELS: Record<string, string> = { f: '阴', m: '阳', mf: '阴阳', n: '中' };
 
 // 逐义项词性 → 中文标签（对应 build.py POS_MAP 的短码）。
 export const POS_LABELS: Record<string, string> = {
