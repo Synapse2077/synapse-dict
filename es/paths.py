@@ -33,12 +33,7 @@ ENV     = ROOT / ".env"
 TTS_VOICES = DATA / "tts" / "voices"
 TTS_OUT    = DATA / "tts" / "es"                 # 成品音频 + manifest.tsv
 
-# ═══ 真人录音落盘（2026-08-11）═══
-# 此前 `audio` 表只存 Commons 的 URL，播放时由浏览器直接向 upload.wikimedia.org 取。
-# 代价是**质量最高的那一级发音是唯一有外网依赖的**，而且 `HumanAudioRow` 的死链回落
-# 是静默的（chip 变灰 + 换成 TTS），URL 烂掉多少界面上根本看不出来。
-# 实测全量 11,203 条 mp3 中位 23.7 KB ⇒ 约 276 MB，只有合成音的 1/8 ⇒ 直接落盘。
-# 布局与 TTS 一致：按 sha1(Commons文件名) 前两位分 256 个子目录。
-# 🔴 分片键是**文件名**不是 URL —— 同一条录音在 Commons 上有 mp3/ogg/wav 多个 URL，
-#    按 URL 去重会把 11,203 条算成 22,367（ingest_audio.py 踩过）。
-AUDIO_OUT  = DATA / "audio" / "es"               # 真人录音 + manifest.tsv
+# ⚠️ 2026-08-11 曾加过 `AUDIO_OUT`（真人录音落盘目录），同日删除：用户决定
+#    **页面不展示真人录音**（见 App.tsx 的 SHOW_HUMAN_AUDIO），落盘就没有意义了。
+#    结论留在 [[audio-from-commons-not-tts]]：全量仅 276 MB，但没有整包可下，
+#    `upload.wikimedia.org` 有意限流，逐条抓要 6–9 小时。真要做再建。

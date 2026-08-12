@@ -443,6 +443,26 @@ const REGION_ZH: Record<string, string> = {
 // 真人录音行。音频托管在 Wikimedia Commons，我们只存 URL、在线播，不下载字节。
 // 🔴 dump 里的 URL 实测约 **10% 已失效**（404/302），所以播放失败必须有兜底：
 //    自动降到浏览器 TTS，并把这条标灰，不能让用户点了没反应。
+// 🔴 2026-08-11 用户定：**页面不展示真人录音，但库里的数据不删**。
+//
+// 决定的依据是实测出来的三个数，不是嫌它质量差：
+//   · 覆盖上几乎无损 —— 有真人录音的 9,709 个词形里 **95.5% 已经有合成音**，
+//     真正「只有真人、没有合成音」的只剩 **434 个**；而合成音铺了 196,122 个词形（20 倍）。
+//   · 代价却是永久的 —— 真人录音是三级兜底里**唯一有外网依赖**的一级：
+//     字节在 Commons，落盘要 276 MB / 6–9 小时，且 `upload.wikimedia.org` 是面向读者的
+//     媒体 CDN、**有意限流**（8 并发只涨到 0.6 条/秒，却换来 220 次重试 + 25 条 429），
+//     没有整包可下（Commons 媒体不进 dump；Lingua Libre 的 Download ZIP 也是浏览器端逐条抓）。
+//   · 而且降级是**静默**的 —— 死链时这个组件会悄悄换成 TTS，用户以为自己听到的是真人。
+//
+// ⚠️ 做成开关而不是删掉组件，是因为**前提还没验**：`gen_tts.py:338` 喂给 Piper 的是
+//    **词形拼写**（`speech_text(word)`），不是我们已核过的 IPA —— 这违反 2026-08-01 定的
+//    TTS 硬条件①。西语正字法规则强，多数词无妨，但外来词（`software ˈsofdw̝eɾ`、
+//    `web ˈw̝eb`、`Kuwait kuˈw̝ait`）很可能被 Piper 按西语规则念错，而那正是
+//    「标着 A、念出来是 B」——以音频的权威姿态给错读音，比没有音频更伤。
+//    ⇒ 等 Piper 音素化 vs 库内 IPA 的逐条 diff 跑出来，再决定这个开关是删还是留。
+//    数据一直在 `audio` 表里（11,203 条，仅 5.47 MB），改回 true 即可恢复。
+const SHOW_HUMAN_AUDIO = false;
+
 function HumanAudioRow({ audios, word, fallback }: {
   audios: SpanishAudio[]; word: string; fallback: () => void;
 }) {
@@ -1293,13 +1313,14 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         </div>
       ) : null}
 
-      {/* 上面那排是合成音（TTS）；这一排是 Commons 上的母语者真人录音。
-          方针④三级兜底：真人 > 工具生成 > 浏览器 TTS —— 真人有就该优先展示。 */}
-      <HumanAudioRow
-        audios={entry.audios}
-        word={entry.word}
-        fallback={() => speak(entry.word, speakLocale)}
-      />
+      {/* 上面那排是合成音（TTS）。真人录音这一排 2026-08-11 起不展示，见 SHOW_HUMAN_AUDIO。 */}
+      {SHOW_HUMAN_AUDIO && (
+        <HumanAudioRow
+          audios={entry.audios}
+          word={entry.word}
+          fallback={() => speak(entry.word, speakLocale)}
+        />
+      )}
 
 
       {/* 西语本质徽标：CEFR 贯穿；名词性别 el/la/复数/阴性，动词变位类/词干变化/过去分词/及物性 */}
