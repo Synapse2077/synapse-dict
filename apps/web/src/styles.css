@@ -24,6 +24,10 @@
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.06);
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
   --en-accent: #3763c4;
+  --en-soft: rgba(55, 99, 196, 0.12);
+  --es-accent: #b45309;   /* 源语言标识：ES 琥珀，与 EN 蓝拉开色相 */
+  --es-soft: rgba(180, 83, 9, 0.12);
+  --topic: #0f7a5f;       /* 学科标签 绿 —— 必须避开阳性的 --accent 蓝 */
 }
 
 :root[data-theme='dark'] {
@@ -47,6 +51,10 @@
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --en-accent: #8fb0ff;
+  --en-soft: rgba(143, 176, 255, 0.18);
+  --es-accent: #f2b155;   /* 源语言标识：ES 琥珀（暗色下提亮） */
+  --es-soft: rgba(242, 177, 85, 0.18);
+  --topic: #4fc3a1;       /* 学科标签 绿（暗色下提亮） */
 }
 
 * {
@@ -708,7 +716,9 @@ body {
 }
 
 /* 源语言锚点（es）：英文 gloss 或西语单语定义，前缀一个语种小标签。
-   与 .sense-en 同一视觉层级，只是多了标签 —— 它不该抢中文释义的注意力。 */
+   正文保持低权重，不抢中文释义；但**标签本身要认得出来** —— 原本是 72% 透明度的
+   描边小字，和后面的正文糊成一片（用户实测把 `ES` + `Apellido.` 读成了一个词）。
+   ⇒ 填色 + 加粗 + 分色：EN 蓝 / ES 琥珀，扫一眼就知道这行是哪种语言的原文。 */
 .sense-src {
   font-size: 13.5px;
   color: var(--text-tertiary);
@@ -717,15 +727,24 @@ body {
 
 .sense-src-lang {
   display: inline-block;
-  margin-right: 6px;
-  padding: 0 4px;
-  border: 1px solid var(--border);
+  margin-right: 7px;
+  padding: 0 5px;
   border-radius: 3px;
   font-size: 10px;
-  line-height: 15px;
-  letter-spacing: 0.04em;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0.06em;
   vertical-align: 1px;
-  opacity: 0.72;
+}
+
+.sense-src[lang='en'] .sense-src-lang {
+  background: var(--en-soft);
+  color: var(--en-accent);
+}
+
+.sense-src[lang='es'] .sense-src-lang {
+  background: var(--es-soft);
+  color: var(--es-accent);
 }
 
 .sense-missing {
@@ -784,12 +803,17 @@ body {
   color: var(--text-secondary);
 }
 
-/* 主题标签（medicine / anatomy / poker …）。2026-08-07 新义项层才有 ——
-   此前 `meta` 里的 `top` 一直没被展示层读过。 */
+/* 学科标签（解剖学 / 医学 / 扑克 …）。2026-08-07 新义项层才有 ——
+   此前 `meta` 里的 `top` 一直没被展示层读过。
+   🔴 2026-08-12：原本用的是 `--accent` 蓝，**和阳性 chip（.g-m）同色**，
+      浓度只差 4%，用户实测「阳」和「化学」两个标签分不出来。
+      ⇒ 换成绿 `--topic` + **描边式**（透明底 + 实色边框）。两条轴都和性别 chip 不同：
+      性别是实心浅底、学科是描边空心 —— 只靠色相在 11px 的胶囊上不够稳。 */
 .sense-chip.top {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-  border-color: transparent;
+  background: transparent;
+  color: var(--topic);
+  border-color: color-mix(in srgb, var(--topic) 45%, transparent);
+  font-weight: 500;
 }
 
 /* ---- Inflection → lemma notes ---- */
@@ -935,16 +959,6 @@ body {
 .badge.g-f { background: color-mix(in srgb, var(--gender-f) 16%, transparent); color: var(--gender-f); }
 .badge.g-mf { background: color-mix(in srgb, var(--gender-mf) 18%, transparent); color: var(--gender-mf); }
 .badge.g-n { background: var(--surface-soft); color: var(--text-secondary); }
-
-/* 词头性别徽章上的 `*`：主义项是这个性别，但个别义项不同（mano 的第 8 义是墨西哥
-   俚语「兄弟」，在 kaikki/DRAE 里是另一个阳性词条）。不把两种性别折叠成 `阴/阳`
-   显示在词头 —— 那看着像「手」也能说 el mano。细节由各义项自己的性别徽章承担。 */
-.badge .g-varies {
-  margin-left: 1px;
-  font-size: 0.85em;
-  vertical-align: super;
-  opacity: 0.75;
-}
 
 /* 助动词是意语动词的灵魂——essere/avere 分色，最显眼 */
 .badge.aux { border: 1px solid transparent; }

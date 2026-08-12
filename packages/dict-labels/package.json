@@ -1,0 +1,6 @@
+{
+  "name": "@synapse-dict/dict-labels",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts"
+}

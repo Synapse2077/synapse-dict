@@ -1,4 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  GENDER_LABELS, POS_LABELS, REGISTER_LABELS, NUMBER_LABELS, TOPIC_LABELS,
+  REL_LABELS, EXCHANGE_LABELS, TRANS_LABELS,
+  ES_REGION_LABELS, ES_ARTICLE, ES_CONJ_LABELS,
+  IT_REGION_LABELS, IT_ARTICLE, IT_AUX_LABELS, IT_CONJ_LABELS, IT_NUMBER_NOTE_LABELS,
+  FR_AUX_LABELS, FR_VGROUP_LABELS, FR_ADJPOS_LABELS, FR_REGION_LABELS, FR_ARTICLE,
+  PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE,
+  DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS,
+} from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
 
@@ -347,10 +356,6 @@ function parseDefinition(raw: string | null): { pos: string; text: string }[] {
   });
 }
 
-const EXCHANGE_LABELS: Record<string, string> = {
-  p: '过去式', d: '过去分词', i: '现在分词', '3': '第三人称单数',
-  r: '比较级', t: '最高级', s: '复数', '0': '原形',
-};
 const EXCHANGE_SKIP_KEYS = new Set(['1']);
 
 function parseExchange(raw: string | null): { label: string; words: string[] }[] {
@@ -376,69 +381,11 @@ function parseTags(raw: string | null): string[] {
 
 // --- Spanish display helpers ---
 
-const GENDER_LABELS: Record<string, string> = { f: '阴', m: '阳', mf: '阴/阳', n: '中' };
-
-// 逐义项词性 → 中文标签（对应 build.py POS_MAP 的短码）。
-const POS_LABELS: Record<string, string> = {
-  n: '名词', name: '专名', adj: '形容词', adv: '副词', v: '动词', pron: '代词',
-  prep: '介词', conj: '连词', det: '限定词', num: '数词', intj: '感叹词',
-  pref: '前缀', suf: '后缀', phr: '短语', contr: '缩合', art: '冠词', prov: '谚语',
-};
-
-// 地区标签 → 中文（对应 build.py REGIONS）。映射不到回退原文。
-const REGION_LABELS: Record<string, string> = {
-  Spain: '西班牙', 'Canary-Islands': '加那利群岛', Andalusia: '安达卢西亚',
-  'Latin-America': '拉美', Mexico: '墨西哥', Chile: '智利', Colombia: '哥伦比亚',
-  Peru: '秘鲁', Venezuela: '委内瑞拉', Cuba: '古巴', Bolivia: '玻利维亚',
-  Ecuador: '厄瓜多尔', Guatemala: '危地马拉', Honduras: '洪都拉斯', Nicaragua: '尼加拉瓜',
-  'Costa-Rica': '哥斯达黎加', Paraguay: '巴拉圭', Uruguay: '乌拉圭',
-  'Dominican-Republic': '多米尼加', 'Puerto-Rico': '波多黎各', Caribbean: '加勒比',
-  Rioplatense: '拉普拉塔河地区', Argentina: '阿根廷', Panama: '巴拿马',
-  'El-Salvador': '萨尔瓦多', 'Central-America': '中美洲', 'South-America': '南美洲',
-  'North-America': '北美洲', Philippines: '菲律宾', US: '美国', UK: '英国',
-  Canada: '加拿大', Australia: '澳大利亚', Louisiana: '路易斯安那', Texas: '得州',
-  California: '加州', 'New-York-City': '纽约市', Aragon: '阿拉贡', Asturias: '阿斯图里亚斯',
-  Galicia: '加利西亚', Navarre: '纳瓦拉', Tenerife: '特内里费', Seville: '塞维利亚',
-  Valencia: '巴伦西亚', Catalonia: '加泰罗尼亚', Mallorca: '马略卡', Belize: '伯利兹',
-  Antilles: '安的列斯', Guerrero: '格雷罗', Puebla: '普埃布拉', Bogota: '波哥大',
-  Manila: '马尼拉', Llanos: '亚诺斯平原', Morocco: '摩洛哥', Angola: '安哥拉',
-  'Equatorial-Guinea': '赤道几内亚', Iberian: '伊比利亚', European: '欧洲',
-  'European-Union': '欧盟', EU: '欧盟', Lunfardo: '隆法多黑话', 'Southern-Spain': '西班牙南部',
-  Northern: '北部', Southern: '南部', Eastern: '东部', Western: '西部',
-  Northeastern: '东北部', Northwestern: '西北部', Southeastern: '东南部',
-  Southwestern: '西南部', Central: '中部',
-};
-
-// 语域标签 → 中文（对应 build.py REGISTERS）。
-const REGISTER_LABELS: Record<string, string> = {
-  colloquial: '口语', vulgar: '粗俗', slang: '俚语', derogatory: '贬义',
-  offensive: '冒犯', humorous: '诙谐', literary: '文学', dated: '旧式',
-  euphemistic: '委婉', informal: '非正式', formal: '正式', pejorative: '贬义',
-  childish: '童语', poetic: '诗歌', familiar: '亲昵', proscribed: '非规范',
-  nonstandard: '非标准', obsolete: '废弃', historical: '历史', archaic: '古语',
-  rare: '罕见', uncommon: '少见', neologism: '新词', Internet: '网络',
-  misspelling: '误拼', 'pronunciation-spelling': '音写', dialectal: '方言',
-  regional: '地区性', jargon: '行话', slur: '蔑称', ironic: '反讽',
-  sarcastic: '讽刺', endearing: '亲昵', emphatic: '强调', rhetoric: '修辞',
-  bureaucratese: '官腔', Leet: 'Leet黑话', figuratively: '比喻',
-};
-
-// 数属性 → 中文（对应 build.py NUMBER）。
-const NUMBER_LABELS: Record<string, string> = {
-  uncountable: '不可数', 'plural-only': '仅复数', invariable: '单复同形', collective: '集合',
-};
-
 // 词性短码 → 中文（支持 "n/v" 这种聚合，逐段映射后再拼），全站统一显示。
 function posLabel(raw: string | null): string {
   if (!raw) return '';
   return raw.split('/').map((p) => POS_LABELS[p] || p).join('/');
 }
-
-const REGION_ZH: Record<string, string> = {
-  Spain: '西班牙', Venezuela: '委内瑞拉', Colombia: '哥伦比亚', Peru: '秘鲁',
-  Mexico: '墨西哥', 'Costa Rica': '哥斯达黎加', Bolivia: '玻利维亚',
-  Chile: '智利', Argentina: '阿根廷', Uruguay: '乌拉圭', Chiloé: '智洛埃',
-};
 
 // 真人录音行。音频托管在 Wikimedia Commons，我们只存 URL、在线播，不下载字节。
 // 🔴 dump 里的 URL 实测约 **10% 已失效**（404/302），所以播放失败必须有兜底：
@@ -489,7 +436,7 @@ function HumanAudioRow({ audios, word, fallback }: {
     <div className="audio-row">
       <span className="audio-row-label">真人发音</span>
       {usable.map((a) => {
-        const region = a.region ? (REGION_ZH[a.region] || a.region) : '未标注';
+        const region = a.region ? (ES_REGION_LABELS[a.region] || a.region) : '未标注';
         const hint = [
           a.speaker ? `录音人 ${a.speaker}` : null,
           a.regionSrc === 'speaker' ? '地区按录音人推定' :
@@ -515,14 +462,6 @@ function HumanAudioRow({ audios, word, fallback }: {
     </div>
   );
 }
-
-// 词汇关系的中文名。`derived` 是「派生词/习语」（`pie` → `a contrapié`），
-// 与「相关词」分开：前者是从这个词长出来的，后者只是语义相邻。
-const REL_LABELS: Record<string, string> = {
-  synonym: '近义', antonym: '反义', hypernym: '上位', hyponym: '下位',
-  holonym: '整体', meronym: '部分', coordinate: '同类', related: '相关',
-  derived: '派生',
-};
 
 // 关系组：同一 kind 的目标词并成一行，可点的给锚点链接。
 function RelationRow({ rels, onWord }: {
@@ -824,9 +763,21 @@ export default function App() {
         const data = await response.json();
         const items = (data.items || []) as SearchItem[];
         setResults(items);
-        setActiveIndex(0);
+        // 🔴 2026-08-12 修闪动：这里原本无条件 `selectWord(items[0].word)`，
+        //    会把**用户已经点中的词**在 200ms 后踢掉换成搜索首条 ——
+        //    点词条内链接走 `goToWord`，它同时 setQuery(触发本效应) 和 selectWord(立即加载)，
+        //    本效应回来后就覆盖了后者。实测 200 个高频词有 19 个(9.5%)会自己变：
+        //    `a`→`A`、`como`→`Como`、`ser`→`SER`、`vida`→`Vida`（小写词被大写专名顶掉，
+        //    根因是 /api/search 没把精确大小写当第一排序键）。用户体感即"页面无端闪一下"。
+        // ⇒ 查询词精确出现在结果里就选它；只有前缀搜索（`cas` 尚未匹配到词）才退回首条，
+        //    这样"边搜边预览"的行为不变。同时让高亮跟着实际选中的那条走。
         if (items.length > 0) {
-          selectWord(items[0].word);
+          const exactIndex = items.findIndex((i) => i.word === keyword);
+          const pick = exactIndex >= 0 ? exactIndex : 0;
+          setActiveIndex(pick);
+          selectWord(items[pick].word);
+        } else {
+          setActiveIndex(0);
         }
       } catch (e) {
         setResults([]);
@@ -1181,8 +1132,8 @@ function EnglishEntry({ entry, onWord, speak }: {
 function SenseChips({ sense }: { sense: SpanishSense | SpanishUnifiedSense }) {
   const chips: { cls: string; text: string }[] = [];
   if (sense.gender) chips.push({ cls: `g g-${sense.gender}`, text: GENDER_LABELS[sense.gender] || sense.gender });
-  for (const t of ('topics' in sense ? sense.topics : [])) chips.push({ cls: 'top', text: t });
-  for (const r of sense.regions) chips.push({ cls: 'reg', text: REGION_LABELS[r] || r });
+  for (const t of ('topics' in sense ? sense.topics : [])) chips.push({ cls: 'top', text: TOPIC_LABELS[t] || t });
+  for (const r of sense.regions) chips.push({ cls: 'reg', text: ES_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
   for (const n of sense.numbers) chips.push({ cls: 'num', text: NUMBER_LABELS[n] || n });
   if (chips.length === 0) return null;
@@ -1192,13 +1143,6 @@ function SenseChips({ sense }: { sense: SpanishSense | SpanishUnifiedSense }) {
     </span>
   );
 }
-
-// 西语定冠词（按性别；共性 mf 两冠词）
-const ES_ARTICLE: Record<string, string> = { m: 'el', f: 'la', mf: 'el/la', n: 'lo' };
-// 西语三变位类
-const ES_CONJ_LABELS: Record<string, string> = {
-  '1': '第一变位 -ar', '2': '第二变位 -er', '3': '第三变位 -ir',
-};
 
 function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   entry: SpanishEntry; speakLocale: string; onWord: (w: string) => void;
@@ -1248,8 +1192,8 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   //
   //    ② 性别 el/la：`mano` 25 条义项是阴性，只有第 8 条（墨西哥俚语「兄弟」）是阳性
   //       —— 那在 kaikki 里是**另一个词条** `mano m`（DRAE 记作 mano²）。
-  //       数据没错，错的是把它俩折叠成 `mf` 显示在词头，看着像「手」也能说 el mano。
-  //       ⇒ 词头只显示**主义项（rank 1）**的性别，其余义项由各自的性别徽章承担。
+  //       ⚠️ 这里原本的结论是「词头只显示主义项性别」，**2026-08-12 已被推翻**，
+  //       改为词头做粗分、义项做细分 —— 见下面 `headGender` 处的判据。
   //
   //    ⚠️ 都要保留回退：变形形、无义项的词条在 `unifiedSenses` 里是空的，
   //       那时仍用词级列，否则这些词的徽标会整片消失。
@@ -1264,11 +1208,29 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
     ? entry.unifiedSenses.some((s) => s.pos === 'adj' || s.pos === 'adv')
     : posParts.some((p) => p === 'adj' || p === 'adv');
 
-  // 主义项性别；义项没给就退回词级列。
+  // 词头性别 = **粗分**：这个词会不会碰到两种性别。细分（每条义项到底是哪个性别）
+  // 由义项自己的小圆片承担，词头不重复也不替它回答。
+  //
+  // 🔴 2026-08-12 定的判据：只要该词的义项**合起来**同时涉及阴与阳，词头就标双性 ——
+  //    不区分这两性来自不同义项（`radio`：la radio 收音机 / el radio 半径）还是
+  //    来自同一义项内部（`fiscal` 第 5 义 `mf`：el/la fiscal，跟着人的性别走）。
+  //    两者对读者的意思是同一句话：「这个词你会遇到两种冠词，往下看哪条是哪个」。
+  //
+  //    ⚠️ 这条**取代**了上面第②条「词头只显示主义项性别」的旧决定。旧决定是为了避免
+  //    `mano` 词头印出 `el` 而被读成「手也能说 el mano」，代价是词头多了一个
+  //    `*` 号 / 「另有阳性义项」这类要额外解释的符号 —— 用户实测两者都看不懂。
+  //    现在把这份精度交还给义项圆片，词头只做粗分。
+  //
+  // `mf` 展开成阴阳两支再取并集：它自己就已经把两性都说了。
   const senseGenders = entry.unifiedSenses.map((s) => s.gender).filter(Boolean) as string[];
-  const headGender = senseGenders[0] || entry.gender;
-  // 其余义项里出现过别的性别 ⇒ 词头不该把它说死，给个提示，细节看各义项徽章。
-  const genderVaries = senseGenders.some((g) => g !== senseGenders[0]);
+  const expandG = (g: string) => (g === 'mf' ? ['m', 'f'] : [g]);
+  const genderSet = new Set(
+    (senseGenders.length ? senseGenders : (entry.gender ? [entry.gender] : []))
+      .flatMap(expandG),
+  );
+  const headGender = genderSet.has('m') && genderSet.has('f')
+    ? 'mf'
+    : (senseGenders[0] || entry.gender);
   const g0 = headGender ? headGender.split('/')[0] : null;
   return (
     <article className="entry-detail">
@@ -1327,14 +1289,12 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
       <div className="entry-meta-row entry-badges">
         {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
         {isNoun && headGender && (
-          <span className={`badge g g-${g0}`}
-                title={genderVaries ? '个别义项性别不同，见各义项标注' : undefined}>
+          <span className={`badge g g-${g0}`}>
             {ES_ARTICLE[headGender] || ''} · {GENDER_LABELS[headGender] || headGender}
-            {genderVaries && <span className="g-varies">*</span>}
           </span>
         )}
         {isNoun && entry.plural && <span className="badge plural">复数 {entry.plural}</span>}
-        {(isNoun || isAdj) && entry.feminine && <span className="badge fem">阴性 {entry.feminine}</span>}
+        {(isNoun || isAdj) && entry.feminine && <span className="badge fem">阴性形 {entry.feminine}</span>}
         {(isAdj || isVerb) && entry.comparative && <span className="badge cmp">比较级 {entry.comparative}</span>}
         {isVerb && entry.conjugation && (
           <span className="badge conj">{ES_CONJ_LABELS[entry.conjugation] || entry.conjugation}</span>
@@ -1517,33 +1477,6 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
 // 自包含，不复用西语的 SpanishEntryView。
 // ============================================================================
 
-const AUX_LABELS: Record<string, string> = {
-  avere: '助动词 avere', essere: '助动词 essere', both: '助动词 avere/essere',
-};
-const CONJ_LABELS: Record<string, string> = {
-  '1': '第一变位 -are', '2': '第二变位 -ere', '3': '第三变位 -ire', '3isc': '第三变位 -ire (-isc-)',
-};
-const TRANS_LABELS: Record<string, string> = { t: '及物', i: '不及物', ti: '及物/不及物' };
-const NUMBER_NOTE_LABELS: Record<string, string> = {
-  invariable: '单复同形', 'plural-only': '仅复数', 'singular-only': '仅单数',
-  uncountable: '不可数', collective: '集合名词',
-};
-// 意语地区标签（意语专属，不复用西语 REGION_LABELS）。映射不到回退原文。
-const IT_REGION_LABELS: Record<string, string> = {
-  Italy: '意大利', Tuscany: '托斯卡纳', Switzerland: '瑞士意语区', Sardinia: '撒丁岛',
-  Sicily: '西西里', Naples: '那不勒斯', Rome: '罗马', Florence: '佛罗伦萨', Milan: '米兰',
-  Venice: '威尼斯', Turin: '都灵', Genoa: '热那亚', Bologna: '博洛尼亚', Lombardy: '伦巴第',
-  Piedmont: '皮埃蒙特', Veneto: '威尼托', Campania: '坎帕尼亚', Calabria: '卡拉布里亚',
-  Apulia: '普利亚', Abruzzo: '阿布鲁佐', Lazio: '拉齐奥', Liguria: '利古里亚',
-  Umbria: '翁布里亚', Marche: '马尔凯', Molise: '莫利塞', Basilicata: '巴西利卡塔',
-  Friuli: '弗留利', Trentino: '特伦蒂诺', 'Northern-Italy': '意大利北部',
-  'Southern-Italy': '意大利南部', 'Central-Italy': '意大利中部', Northern: '北部',
-  Southern: '南部', Eastern: '东部', Western: '西部', Central: '中部',
-  regional: '地区性', dialectal: '方言', 'Ancient-Rome': '古罗马', Roman: '罗马',
-};
-
-const IT_ARTICLE: Record<string, string> = { m: 'il', f: 'la', mf: 'il/la' };
-
 function ItSenseChips({ sense, dualGender }: { sense: ItSense; dualGender?: boolean }) {
   const chips: { cls: string; text: string }[] = [];
   // 仅双性名词逐义项标性别（il 半径 / la 收音机），单性词与词头徽标重复故略
@@ -1604,13 +1537,13 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
           </span>
         )}
         {isNoun && entry.numberNote && (
-          <span className="badge num">{NUMBER_NOTE_LABELS[entry.numberNote] || entry.numberNote}</span>
+          <span className="badge num">{IT_NUMBER_NOTE_LABELS[entry.numberNote] || entry.numberNote}</span>
         )}
         {isVerb && entry.aux && (
-          <span className={`badge aux aux-${entry.aux}`}>{AUX_LABELS[entry.aux]}</span>
+          <span className={`badge aux aux-${entry.aux}`}>{IT_AUX_LABELS[entry.aux]}</span>
         )}
         {isVerb && entry.conj && (
-          <span className="badge conj">{CONJ_LABELS[entry.conj] || entry.conj}</span>
+          <span className="badge conj">{IT_CONJ_LABELS[entry.conj] || entry.conj}</span>
         )}
         {isVerb && entry.transitivity && (
           <span className="badge tag">{TRANS_LABELS[entry.transitivity] || entry.transitivity}</span>
@@ -1668,7 +1601,7 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
                     {bw}
                   </a>
                   {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
-                  {base?.aux && <span className="base-pos">{AUX_LABELS[base.aux]}</span>}
+                  {base?.aux && <span className="base-pos">{IT_AUX_LABELS[base.aux]}</span>}
                   {base?.gender && <span className="base-pos">{GENDER_LABELS[base.gender]}性</span>}
                   {base && base.senses.length > 0 && (() => {
                     const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
@@ -1710,31 +1643,6 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
 // 助动词 avoir/être 徽标、动词三组、过去分词、形容词阴性形、名词不规则复数、不变形。
 // 自包含，不复用 es/it 的视图。
 // ============================================================================
-
-const FR_AUX_LABELS: Record<string, string> = {
-  avoir: '助动词 avoir', être: '助动词 être', both: '助动词 avoir/être',
-};
-const FR_VGROUP_LABELS: Record<string, string> = {
-  '1': '第一组 -er', '2': '第二组 -ir (-iss-)', '3': '第三组（不规则）',
-};
-// 形容词位置：前置/后置/两可（BAGS 类前置，颜色国籍等后置，ancien/grand 两可且变义）
-const FR_ADJPOS_LABELS: Record<string, string> = {
-  pre: '名词前', post: '名词后', both: '前/后（位置变义）',
-};
-// 法语地区标签（法语专属，不复用 es/it 的地区表）。映射不到回退原文。
-const FR_REGION_LABELS: Record<string, string> = {
-  France: '法国', Belgium: '比利时', Switzerland: '瑞士法语区', Quebec: '魁北克',
-  Canada: '加拿大', 'Canadian-French': '加拿大法语', Louisiana: '路易斯安那',
-  Acadia: '阿卡迪亚', Africa: '非洲', Wallonia: '瓦隆', Haiti: '海地',
-  Luxembourg: '卢森堡', Normandy: '诺曼底', Brittany: '布列塔尼', Provence: '普罗旺斯',
-  Occitania: '奥克西塔尼', Savoie: '萨瓦', Languedoc: '朗格多克', Picardy: '皮卡第',
-  Ontario: '安大略', Newfoundland: '纽芬兰', Antilles: '安的列斯', Guyana: '圭亚那',
-  Northern: '北部', Southern: '南部', Eastern: '东部', Western: '西部', Central: '中部',
-  regional: '地区性', dialectal: '方言', 'Old-French': '古法语', 'Middle-French': '中古法语',
-};
-
-// 法语冠词（逐义项性别用）：le 阳 / la 阴。
-const FR_ARTICLE: Record<string, string> = { m: 'le', f: 'la', mf: 'le/la' };
 
 function FrSenseChips({ sense, dualGender }: { sense: FrSense; dualGender?: boolean }) {
   const chips: { cls: string; text: string }[] = [];
@@ -1797,7 +1705,7 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
         {(isNoun || isAdj) && entry.invariable && <span className="badge num">不变形 inv.</span>}
         {/* 阴性形：形容词 grand→grande；名词 acteur→actrice */}
         {(isAdj || isNoun) && entry.feminine && (
-          <span className="badge fem">阴性 {entry.feminine}</span>
+          <span className="badge fem">阴性形 {entry.feminine}</span>
         )}
         {isAdj && entry.adjPos && (
           <span className="badge apos">{FR_ADJPOS_LABELS[entry.adjPos] || entry.adjPos}</span>
@@ -1907,25 +1815,6 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
 // 自包含，不复用 es/it/fr 的视图。
 // ============================================================================
 
-const PT_VCONJ_LABELS: Record<string, string> = {
-  '1': '第一变位 -ar', '2': '第二变位 -er', '3': '第三变位 -ir', por: 'pôr 类',
-};
-// 葡语地区标签（葡语专属，不复用其它语种地区表）。映射不到回退原文。
-const PT_REGION_LABELS: Record<string, string> = {
-  Brazil: '巴西', Portugal: '葡萄牙', Brazilian: '巴西', European: '欧洲葡语',
-  'Southern-Brazil': '巴西南部', 'South-Brazil': '巴西南部', 'North-Brazil': '巴西北部',
-  'Rio-de-Janeiro': '里约', 'São-Paulo': '圣保罗', Caipira: '内陆方言',
-  Bahia: '巴伊亚', 'Minas-Gerais': '米纳斯', Paraná: '巴拉那',
-  'Northeastern-Brazil': '巴西东北', Lisbon: '里斯本', Porto: '波尔图',
-  Angola: '安哥拉', Mozambique: '莫桑比克', Macau: '澳门', 'Cape-Verde': '佛得角',
-  'East-Timor': '东帝汶', Galicia: '加利西亚', Azores: '亚速尔', Madeira: '马德拉',
-  Northern: '北部', Southern: '南部', Central: '中部', regional: '地区性',
-  dialectal: '方言', 'Old-Portuguese': '古葡语',
-};
-
-// 葡语冠词（逐义项性别用）：o 阳 / a 阴。
-const PT_ARTICLE: Record<string, string> = { m: 'o', f: 'a', mf: 'o/a' };
-
 function PtSenseChips({ sense, dualGender }: { sense: PtSense; dualGender?: boolean }) {
   const chips: { cls: string; text: string }[] = [];
   // 仅双性名词逐义项标性别（o 收音机 / a 镭），单性词与词头徽标重复故略
@@ -2004,7 +1893,7 @@ function PortugueseEntryView({ entry, onWord, speak }: {
           <span className={`badge g g-${entry.gender}`}>{GENDER_LABELS[entry.gender] || entry.gender}性</span>
         )}
         {isNoun && entry.plural && <span className="badge plural">复数 {entry.plural}</span>}
-        {(isAdj || isNoun) && entry.feminine && <span className="badge fem">阴性 {entry.feminine}</span>}
+        {(isAdj || isNoun) && entry.feminine && <span className="badge fem">阴性形 {entry.feminine}</span>}
         {(isAdj || isVerb) && entry.comparative && <span className="badge cmp">比较级 {entry.comparative}</span>}
         {isAdj && entry.adjPos && (
           <span className="badge apos">{FR_ADJPOS_LABELS[entry.adjPos] || entry.adjPos}</span>
@@ -2107,23 +1996,6 @@ function PortugueseEntryView({ entry, onWord, speak }: {
 // Partizip II）+ 完成时助动词 haben/sein + 强弱/可分；形容词比较级/最高级。
 // 自包含，不复用 es/it/fr/pt 的视图。
 // ============================================================================
-
-const DE_ARTICLE: Record<string, string> = { m: 'der', f: 'die', n: 'das', mf: 'der/die' };
-const DE_AUX_LABELS: Record<string, string> = {
-  haben: '完成时·haben', sein: '完成时·sein', both: '完成时·haben/sein',
-};
-const DE_VCLASS_BASE: Record<string, string> = {
-  weak: '弱变化', strong: '强变化', mixed: '混合变化', irregular: '不规则',
-};
-// 德语地区标签（德语专属）。映射不到回退原文。
-const DE_REGION_LABELS: Record<string, string> = {
-  Germany: '德国', Austria: '奥地利', Switzerland: '瑞士', 'South-Tyrol': '南蒂罗尔',
-  Bavaria: '巴伐利亚', Berlin: '柏林', Saxony: '萨克森', Swabia: '施瓦本',
-  'Low-German': '低地德语', 'High-German': '高地德语', 'Middle-High-German': '中古高地德语',
-  'Old-High-German': '古高地德语', Austrian: '奥地利', Swiss: '瑞士', German: '德国',
-  Viennese: '维也纳', 'Northern-German': '北德', 'Southern-German': '南德',
-  regional: '地区性', dialectal: '方言', Yiddish: '意第绪语', GDR: '东德', DDR: '东德',
-};
 
 function deVclassLabel(v: string): string {
   const [base, cls] = v.split('-');

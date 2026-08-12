@@ -1,0 +1,170 @@
+// 跨语种共用的展示映射：性别、词性、语域、数、学科领域、关系、变形、及物性。
+// 纯数据，零依赖 —— 浏览器（划词弹窗）与 Node 都能直接 import。
+
+export const EXCHANGE_LABELS: Record<string, string> = {
+  p: '过去式', d: '过去分词', i: '现在分词', '3': '第三人称单数',
+  r: '比较级', t: '最高级', s: '复数', '0': '原形',
+};
+
+export const GENDER_LABELS: Record<string, string> = { f: '阴', m: '阳', mf: '阴/阳', n: '中' };
+
+// 逐义项词性 → 中文标签（对应 build.py POS_MAP 的短码）。
+export const POS_LABELS: Record<string, string> = {
+  n: '名词', name: '专名', adj: '形容词', adv: '副词', v: '动词', pron: '代词',
+  prep: '介词', conj: '连词', det: '限定词', num: '数词', intj: '感叹词',
+  pref: '前缀', suf: '后缀', phr: '短语', contr: '缩合', art: '冠词', prov: '谚语',
+};
+
+// 语域标签 → 中文（对应 build.py REGISTERS）。
+export const REGISTER_LABELS: Record<string, string> = {
+  colloquial: '口语', vulgar: '粗俗', slang: '俚语', derogatory: '贬义',
+  offensive: '冒犯', humorous: '诙谐', literary: '文学', dated: '旧式',
+  euphemistic: '委婉', informal: '非正式', formal: '正式', pejorative: '贬义',
+  childish: '童语', poetic: '诗歌', familiar: '亲昵', proscribed: '非规范',
+  nonstandard: '非标准', obsolete: '废弃', historical: '历史', archaic: '古语',
+  rare: '罕见', uncommon: '少见', neologism: '新词', Internet: '网络',
+  misspelling: '误拼', 'pronunciation-spelling': '音写', dialectal: '方言',
+  regional: '地区性', jargon: '行话', slur: '蔑称', ironic: '反讽',
+  sarcastic: '讽刺', endearing: '亲昵', emphatic: '强调', rhetoric: '修辞',
+  bureaucratese: '官腔', Leet: 'Leet黑话', figuratively: '比喻',
+};
+
+// 数属性 → 中文（对应 build.py NUMBER）。
+export const NUMBER_LABELS: Record<string, string> = {
+  uncountable: '不可数', 'plural-only': '仅复数', invariable: '单复同形', collective: '集合',
+};
+
+// 学科领域 → 中文。库里 402 种取值 / 20,647 条标签 / 18,763 条义项，这里**全部覆盖**。
+//
+// 🔴 2026-08-12：地区、语域、数三张表早就有，唯独 topic 漏了 —— 英文原值
+//    （`anatomy`/`medicine`）就这么印在中文词典里，用户看 `radio` 时直接问「这是什么」。
+//    只翻一部分会让同一行胶囊中英混排（「解剖学 · nautical」），比全英文更难看，
+//    所以一次翻完，长尾也不留。
+//
+// ⚠️ kaikki 的取值有同义变体，一律映到同一个中文：连字符与空格两版
+//    （`martial-arts`/`martial arts`、`organic-chemistry`/`organic chemistry`）、
+//    英美拼写（`archaeology`/`archeology`、`color`/`colour`、`gemmology`/`gemology`）、
+//    单复数（`meat`/`meats`、`social-science`/`social-sciences`）、
+//    大小写（`Freemasonry`/`freemasonry`）。
+export const TOPIC_LABELS: Record<string, string> = {
+  medicine: '医学', anatomy: '解剖学', nautical: '航海', botany: '植物学',
+  'organic-chemistry': '有机化学', 'organic chemistry': '有机化学', music: '音乐',
+  biochemistry: '生物化学', architecture: '建筑', chemistry: '化学', cities: '城市',
+  pathology: '病理学', computing: '计算机', law: '法律', sports: '体育',
+  zoology: '动物学', biology: '生物学', soccer: '足球', history: '历史',
+  linguistics: '语言学', geology: '地质学', politics: '政治', religion: '宗教',
+  mythology: '神话', mineralogy: '矿物学', metrology: '计量学', food: '食品',
+  astronomy: '天文学', military: '军事', games: '游戏', geography: '地理',
+  physics: '物理', grammar: '语法', philosophy: '哲学', pharmacology: '药理学',
+  bullfighting: '斗牛', agriculture: '农业', geometry: '几何', economics: '经济学',
+  heraldry: '纹章学', mathematics: '数学', psychology: '心理学', war: '战争',
+  mammals: '哺乳动物', electronics: '电子', finance: '金融', Christianity: '基督教',
+  tools: '工具', baseball: '棒球', biblical: '圣经', art: '艺术', cytology: '细胞学',
+  chess: '国际象棋', 'inorganic-chemistry': '无机化学', electricity: '电学',
+  surgery: '外科', construction: '施工', mechanics: '力学', meteorology: '气象学',
+  fish: '鱼类', cooking: '烹饪', theater: '戏剧', genetics: '遗传学', insects: '昆虫',
+  textiles: '纺织', 'video-games': '电子游戏', LGBT: '性少数', education: '教育',
+  photography: '摄影', dance: '舞蹈', dancing: '舞蹈', literature: '文学',
+  mycology: '真菌学', printing: '印刷', folklore: '民俗', poetry: '诗歌',
+  countries: '国家', country: '国家', 'card-games': '纸牌', cycling: '自行车',
+  paleontology: '古生物学', phonetics: '语音学', sociology: '社会学', weaponry: '武器',
+  physiology: '生理学', aeronautics: '航空', neurology: '神经病学', psychiatry: '精神病学',
+  ecology: '生态学', Islam: '伊斯兰教', engineering: '工程', vehicles: '车辆',
+  automotive: '汽车', typography: '排版', climbing: '攀登', film: '电影',
+  Internet: '互联网', business: '商业', cinematography: '电影摄影', logic: '逻辑学',
+  mining: '采矿', transport: '运输', 'linear-algebra': '线性代数', television: '电视',
+  basketball: '篮球', boxing: '拳击', immunology: '免疫学', metallurgy: '冶金',
+  optics: '光学', tennis: '网球', aviation: '航空', fencing: '击剑', journalism: '新闻',
+  statistics: '统计学', astrology: '占星', carpentry: '木工', oncology: '肿瘤学',
+  taxonomy: '分类学', feminism: '女权主义', archaeology: '考古学', archeology: '考古学',
+  clothing: '服装', exercise: '健身', fantasy: '奇幻', lifestyle: '生活方式',
+  sewing: '缝纫', fishing: '渔业', 'motor-racing': '赛车', racing: '竞速',
+  science: '科学', sciences: '科学', 'science-fiction': '科幻', 'science fiction': '科幻',
+  'martial-arts': '武术', 'martial arts': '武术', ophthalmology: '眼科',
+  'rail-transport': '铁路', railways: '铁路', sex: '性', sexuality: '性', sexology: '性学',
+  'Roman-Catholicism': '天主教', Catholicism: '天主教', cosmetics: '化妆品',
+  dentistry: '牙科', odontology: '牙科', theology: '神学', ornithology: '鸟类学',
+  telecommunications: '电信', accounting: '会计', anthropology: '人类学',
+  athletics: '田径', equestrianism: '马术', technology: '技术', algebra: '代数',
+  bacteriology: '细菌学', cardiology: '心脏病学', entomology: '昆虫学',
+  horticulture: '园艺', microbiology: '微生物学', telephony: '电话', virology: '病毒学',
+  hunting: '狩猎', weightlifting: '举重', arithmetic: '算术', dermatology: '皮肤科',
+  neuroanatomy: '神经解剖学', numismatics: '钱币学', oenology: '酿酒学', poker: '扑克',
+  rugby: '橄榄球', semantics: '语义学', 'American-football': '美式橄榄球',
+  broadcasting: '广播', football: '足球', furniture: '家具', gaming: '游戏',
+  'graphical-user-interface': '图形界面', zootomy: '动物解剖学', banking: '银行',
+  narratology: '叙事学', swimming: '游泳', weather: '天气', alchemy: '炼金术',
+  comics: '漫画', manga: '漫画', electrical: '电气', fiction: '小说', firearms: '枪械',
+  ichthyology: '鱼类学', 'law-enforcement': '执法', phonology: '音系学',
+  programming: '编程', prosody: '韵律学', tourism: '旅游', trigonometry: '三角学',
+  veterinary: '兽医', ethics: '伦理学', fashion: '时尚', government: '政府',
+  hematology: '血液学', marketing: '市场营销', orthography: '正字法',
+  topography: '地形学', beekeeping: '养蜂', 'clinical-psychology': '临床心理学',
+  communication: '传播', electromagnetism: '电磁学', embryology: '胚胎学',
+  gymnastics: '体操', hydrology: '水文学', lichenology: '地衣学',
+  parapsychology: '超心理学', radio: '无线电', road: '道路', Buddhism: '佛教',
+  billiards: '台球', cryptozoology: '神秘动物学', geopolitics: '地缘政治',
+  golf: '高尔夫', handball: '手球', historiography: '史学',
+  'social-science': '社会科学', 'social-sciences': '社会科学', taxation: '税务',
+  technical: '技术', teratology: '畸形学', thermodynamics: '热力学', time: '时间',
+  Zoroastrianism: '琐罗亚斯德教', astrophysics: '天体物理学', bodybuilding: '健美',
+  chronology: '年代学', 'computer-graphics': '计算机图形学', copyright: '版权',
+  dogs: '犬', drama: '戏剧', dramaturgy: '戏剧学', insurance: '保险',
+  'intellectual-property': '知识产权', mechanical: '机械', networking: '网络',
+  philately: '集邮', pragmatics: '语用学', 'professional-wrestling': '职业摔角',
+  volleyball: '排球', wine: '葡萄酒', 'algebraic-geometry': '代数几何',
+  calculus: '微积分', communism: '共产主义', 'computer-hardware': '计算机硬件',
+  continents: '大洲', design: '设计', diving: '潜水', ecclesiastical: '教会',
+  farriery: '蹄铁术', financial: '金融', forestry: '林业', gambling: '赌博',
+  health: '健康', investment: '投资', jewelry: '珠宝', judo: '柔道',
+  lexicography: '词典学', management: '管理', media: '媒体', occultism: '神秘学',
+  planetology: '行星学', pool: '桌球', pornography: '色情', psychoanalysis: '精神分析',
+  snooker: '斯诺克', software: '软件', syntax: '句法', vegetable: '蔬菜',
+  wrestling: '摔跤', Gnosticism: '诺斯替教', 'alternative-medicine': '替代医学',
+  arachnology: '蛛形学', archery: '射箭', astronautics: '航天', blogging: '博客',
+  bridge: '桥牌', cartography: '制图学', climatology: '气候学', color: '颜色',
+  colour: '颜色', comedy: '喜剧', commerce: '商贸', commercial: '商业',
+  'computer-games': '电脑游戏', 'computer-languages': '计算机语言', cosmology: '宇宙学',
+  cryptography: '密码学', diplomacy: '外交', epidemiology: '流行病学',
+  espionage: '间谍', fabrics: '织物', firefighting: '消防', geomorphology: '地貌学',
+  'graph-theory': '图论', healthcare: '医疗保健', informatics: '信息学',
+  knitting: '编织', 'mobile-telephony': '移动通信', obstetrics: '产科',
+  pseudoscience: '伪科学', rowing: '赛艇', skiing: '滑雪', surfing: '冲浪',
+  toxicology: '毒理学', traffic: '交通', urology: '泌尿科', writing: '书写',
+  ACG: '二次元', 'Abrahamic-religions': '亚伯拉罕诸教', Ayurveda: '阿育吠陀',
+  Egyptology: '埃及学', Freemasonry: '共济会', freemasonry: '共济会',
+  'SI-units': '国际单位制', anarchism: '无政府主义', anime: '动画', baking: '烘焙',
+  biotechnology: '生物技术', bowling: '保龄球', brewing: '酿造',
+  'category-theory': '范畴论', ceramics: '陶瓷', checkers: '西洋跳棋',
+  'complex-analysis': '复分析', computer: '计算机', 'computing-theory': '计算理论',
+  criminology: '犯罪学', crystallography: '晶体学', databases: '数据库', drugs: '药物',
+  'emergency-medicine': '急救医学', endocrinology: '内分泌学', energy: '能源',
+  entertainment: '娱乐', epigraphy: '铭文学', falconry: '鹰猎', fascism: '法西斯主义',
+  fluids: '流体', gemmology: '宝石学', gemology: '宝石学', glaciology: '冰川学',
+  glassmaking: '玻璃制造', 'graphic-design': '平面设计', 'group-theory': '群论',
+  hairdressing: '美发', hairstyle: '发型', 'higher-education': '高等教育',
+  horology: '钟表学', horses: '马', hydraulics: '水力学', hydrography: '水文测绘',
+  illness: '疾病', 'information-science': '信息科学', legal: '法律',
+  limnology: '湖沼学', 'linguistic-morphology': '词法', location: '地点',
+  lutherie: '提琴制作', maritime: '海事', masonry: '砌筑',
+  'mathematical-analysis': '数学分析', meat: '肉类', meats: '肉类', monarchy: '君主制',
+  morphology: '形态学', motorcycling: '摩托车', mountaineering: '登山',
+  neuroscience: '神经科学', newspapers: '报刊', nobility: '贵族',
+  'number-theory': '数论', oceanography: '海洋学', officialese: '公文体',
+  palynology: '孢粉学', petrochemistry: '石油化学', petrology: '岩石学', pets: '宠物',
+  'political-science': '政治学', 'probability-theory': '概率论', 'real-estate': '房地产',
+  retail: '零售', sailing: '帆船', seismology: '地震学', semiotics: '符号学',
+  'speech-pathology': '言语病理学', state: '州省', stone: '石材', temperature: '温度',
+  'translation-studies': '翻译学', travel: '旅行', 'units-of-measure': '计量单位',
+  volcanology: '火山学', weaving: '织造', weekdays: '星期', woodworking: '木工',
+};
+
+// 词汇关系的中文名。`derived` 是「派生词/习语」（`pie` → `a contrapié`），
+// 与「相关词」分开：前者是从这个词长出来的，后者只是语义相邻。
+export const REL_LABELS: Record<string, string> = {
+  synonym: '近义', antonym: '反义', hypernym: '上位', hyponym: '下位',
+  holonym: '整体', meronym: '部分', coordinate: '同类', related: '相关',
+  derived: '派生',
+};
+
+export const TRANS_LABELS: Record<string, string> = { t: '及物', i: '不及物', ti: '及物/不及物' };
