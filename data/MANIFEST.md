@@ -3,7 +3,7 @@
 > 由 `scripts/gen_manifest.py` 生成。事实自动扫，**来历与用途**在该脚本的 `NOTES` 里手工维护。
 > 数据有增减时重跑：`python3 scripts/gen_manifest.py > data/MANIFEST.md`
 
-生成时间：2026-08-11 20:40
+生成时间：2026-08-12 22:03
 
 
 ## 成品库 `data/db/` —— 9 个文件，2.1 GB
@@ -17,10 +17,10 @@
 | `db/synapse-dict-de.sqlite` | 111.1 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/synapse-dict-pt.sqlite` | 109.2 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/synapse-dict-fr.sqlite` | 95.9 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
-| `db/synapse-dict-en.sqlite-shm` | 32 KB | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `db/synapse-dict-en.sqlite-shm` | 32 KB | 2026-08-12 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/synapse-dict-en.sqlite-wal` | 0 B | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 
-## 原始 dump `data/dumps/` —— 13 个文件，6.9 GB
+## 原始 dump `data/dumps/` —— 18 个文件，7.0 GB
 
 | 文件 | 大小 | 修改日 | 是什么 | 来历 |
 |---|---|---|---|---|
@@ -34,8 +34,13 @@
 | `dumps/stardict.csv` | 221.9 MB | 2025-01-02 | ECDICT 原始 CSV | 同上，建库源 |
 | `dumps/zhwiktionary.jsonl.gz` | 215.1 MB | 2026-08-01 | kaikki 各语言版**整包** | https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4 |
 | `dumps/eswiktionary.jsonl.gz` | 95.8 MB | 2026-08-01 | kaikki 各语言版**整包** | https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4 |
+| `dumps/kaikki.org-frwiktionary-Italian.jsonl.gz` | 61.7 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/itwiktionary.jsonl.gz` | 38.0 MB | 2026-08-01 | kaikki 各语言版**整包** | https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4 |
 | `dumps/ptwiktionary.jsonl.gz` | 33.6 MB | 2026-08-01 | kaikki 各语言版**整包** | https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4 |
+| `dumps/kaikki.org-zhwiktionary-Italian-trad.jsonl.gz` | 7.6 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
+| `dumps/kaikki.org-elwiktionary-Italian.jsonl.gz` | 2.7 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
+| `dumps/kaikki.org-trwiktionary-Italian.jsonl.gz` | 2.4 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
+| `dumps/kaikki.org-zhwiktionary-Italian-simp.jsonl.gz` | 233 KB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/README.md` | 2 KB | 2026-08-01 | — | — |
 
 ## 写库备份 `data/backups/` —— 13 个文件，3.7 GB
@@ -56,7 +61,7 @@
 | `backups/synapse-dict-en.pre-ipanorm-20260801-193715.bak-shm` | 32 KB | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-en.pre-ipanorm-20260801-193715.bak-wal` | 0 B | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 
-## 过程产物 `data/work/` —— 3275 个文件，794.4 MB
+## 过程产物 `data/work/` —— 3277 个文件，794.4 MB
 
 | 语种 | 文件数 | 大小 |
 |---|---|---|
@@ -65,7 +70,7 @@
 | en | 125 | 343.0 MB |
 | es | 67 | 315.8 MB |
 | fr | 6 | 22.8 MB |
-| it | 3059 | 46.0 MB |
+| it | 3061 | 46.0 MB |
 | pt | 6 | 29.0 MB |
 
 过程产物按语种分放；具体文件类型的来历见下表。

@@ -19,6 +19,8 @@ from pathlib import Path
 from fix_misalign import load_env, run_batches   # 复用鲁棒批处理（本地键+容错解析+重试）
 
 import paths
+import legacy_guard
+legacy_guard.frozen(__name__, __file__)   # 七月流水线，已跑完；重跑会覆盖其后的修复
 
 HERE = Path(__file__).resolve().parent
 DB = paths.DB

@@ -32,6 +32,8 @@ import unicodedata
 from pathlib import Path
 
 import paths
+import legacy_guard
+legacy_guard.frozen(__name__, __file__)   # 七月流水线，已跑完；重跑会覆盖其后的修复
 
 HERE = Path(__file__).resolve().parent
 JSONL_PATH = paths.KK

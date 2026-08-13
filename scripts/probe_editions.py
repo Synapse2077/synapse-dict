@@ -46,7 +46,11 @@ NAMES = {
     "en": r"^english$|anglais|engels|englisch|inglese|inglés|ingles|angiel|англ|αγγλ|英語|英语|영어|英文",
     "fr": r"^french$|français|francais|frans|französisch|francese|francês|francuski|франц|γαλλ|法語|法语|프랑스|フランス",
     "de": r"^german$|allemand|duits|deutsch|tedesco|alemán|aleman|alemão|niemiecki|немец|γερμαν|德語|德语|독일|ドイツ",
-    "it": r"^italian$|italien|italiaans|italienisch|italiano|włoski|wloski|итальян|ιταλ|意大利|義大利|이탈리아|イタリア",
+    # ⚠️ 2026-08-12：土耳其语的 `İtalyanca` 和捷克语的 `italština` 原来匹配不到 ——
+    #    tr 版藏着 154,681 条意语义项（排第 6），差点漏掉。土耳其语首字母是带点大写 İ (U+0130)，
+    #    `re.I` 折叠后是 i̇（i + 组合点），所以模式里写 `i̇?talyanca` 两种都认。
+    "it": r"^italian$|italien|italiaans|italienisch|italiano|włoski|wloski|итальян|ιταλ|"
+          r"i̇?talyanca|italšt|意大利|義大利|이탈리아|イタリア",
     "pt": r"^portuguese$|portugais|portugees|portugiesisch|portoghese|portugués|português|portugalski|"
           r"португал|πορτογαλ|葡萄牙|포르투갈|ポルトガル",
 }

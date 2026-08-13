@@ -26,6 +26,8 @@ from pathlib import Path
 import build  # 复用 meta_of_sense / gender_of_senses / POS_MAP / JSONL_PATH
 
 import paths
+import legacy_guard
+legacy_guard.frozen(__name__, __file__)   # 七月流水线，已跑完；重跑会覆盖其后的修复
 
 HERE = Path(__file__).resolve().parent
 DB = paths.DB

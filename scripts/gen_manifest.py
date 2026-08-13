@@ -26,6 +26,11 @@ NOTES = {
  "wiktionary.jsonl.gz": ("kaikki 各语言版**整包**",
    "https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），"
    "按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4"),
+ # 2026-08-12（it 阶段 -1）：非英文版也有 per-language 切片，rawdata 页说只有整包是不全的。
+ # 命名 `kaikki.org-<ed>wiktionary-<Language>.jsonl.gz`，与英文版切片、与整包都区分得开。
+ "wiktionary-": ("kaikki **非英文版** per-language 切片",
+   "https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；"
+   "取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md"),
  "b_out": ("豆包批量输出留档", "b_translate.py 的原始返回，可复用不必重花钱"),
  "b_enrich_out": ("豆包富化输出留档", "b_enrich.py 的原始返回"),
  "conflict_review": ("kaikki↔豆包冲突逐条", "merge 时留痕，归 conflict-deferred-final-pass 统一裁决"),

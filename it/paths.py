@@ -24,3 +24,15 @@ WORK    = DATA / "work" / "it"                  # 过程产物：runs / 冲突�
 BACKUPS = DATA / "backups"                          # 写库前的自动备份
 DUMPS   = DATA / "dumps"
 ENV     = ROOT / ".env"
+
+# ═══ 跨版切片（2026-08-12 阶段 -1 取数）═══
+# 取数依据是实测，不是印象：`probe_editions.py --lang it` 的完整输出存档在
+# `data/work/it/probe/`，各版本贡献的字段见 `docs/lang/it-CONVENTIONS.md` 的取数表。
+# 🔴 最反直觉的一条：**法语版的意语义项 1,309,451 条，是英文版（719,428）的 1.82 倍**。
+# ⚠️ 一律下 per-language 切片，不下整包：fr 切片 62 MB vs 整包 676 MB。
+KK_FR   = DATA / "dumps" / "kaikki.org-frwiktionary-Italian.jsonl.gz"       # 存量最大
+KK_ZH_T = DATA / "dumps" / "kaikki.org-zhwiktionary-Italian-trad.jsonl.gz"  # 中文版「意大利語」
+KK_ZH_S = DATA / "dumps" / "kaikki.org-zhwiktionary-Italian-simp.jsonl.gz"  # 中文版「意大利语」——
+                                                                            # 同一语言两个本地名是两个独立切片，都得取
+KK_EL   = DATA / "dumps" / "kaikki.org-elwiktionary-Italian.jsonl.gz"       # 只用于录音/词形并集
+KK_TR   = DATA / "dumps" / "kaikki.org-trwiktionary-Italian.jsonl.gz"       # 同上（探测器原来漏认 İtalyanca）
