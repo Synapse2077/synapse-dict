@@ -62,7 +62,8 @@ TRACK = ['ipa', 'ipa_src', 'pos',
 #    [[fix-regression-and-gate]]：es 的整轮音标修复就是被"换了读取路径"绕过的，
 #    查原列永远绿、用户看到的是错的。所以出版层这十一张表的行数一并进快照：
 #    **没在 expect 里显式声明的表，行数必须零变化**，删表 / 重建 / 少插一批都会当场报错。
-TRACK_TABLES = ['sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sense_relation',
+TRACK_TABLES = ['entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sense_relation',
+                'inflection',
                 'pronunciation', 'example', 'example_gloss',
                 'collocation', 'collocation_gloss', 'audio']
 

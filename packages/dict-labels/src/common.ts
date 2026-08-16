@@ -16,6 +16,8 @@ export const POS_LABELS: Record<string, string> = {
   n: '名词', name: '专名', adj: '形容词', adv: '副词', v: '动词', pron: '代词',
   prep: '介词', conj: '连词', det: '限定词', num: '数词', intj: '感叹词',
   pref: '前缀', suf: '后缀', phr: '短语', contr: '缩合', art: '冠词', prov: '谚语',
+  // 2026-08-15 补：对应 build.py POS_MAP 新增的四个 kaikki 取值
+  abbr: '缩写', affix: '词缀', onom: '拟声词',
 };
 
 // 语域标签 → 中文（对应 build.py REGISTERS）。

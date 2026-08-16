@@ -1560,7 +1560,14 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
         </div>
       )}
 
-      {entry.isLemma && entry.senses.length > 0 && (
+      {/* 🔴 2026-08-16 去掉 `entry.isLemma &&`（用户查 `TVTB` 时发现的）。
+          `is_lemma` 是七月压平结构时打的标，那会儿还没有 entry/sense 分层，
+          它被当成了「值不值得显示释义」的代理 —— 而**「不是变形」和「是词元」不是一回事**：
+          `TVTB`（缩写）、`e pur si muove`（伽利略名言）、`colibri`（蜂鸟）都被标 0，
+          于是有义项也整块不渲染。实测 **8,552 个词形**（有义项词形的 2.5%）中招。
+          现在判据就是事实本身：有可见义项就显示。es 早已是这个写法（它做过义项分层重构）；
+          fr/pt/de 三个渲染器仍留着老条件，记在 `it-CONVENTIONS` 待办，本轮不越界。 */}
+      {entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
           {groupItSenses(entry.senses).map((grp, gi) => (

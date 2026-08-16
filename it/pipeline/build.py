@@ -48,6 +48,11 @@ POS_MAP = {
     "prep_phrase": "phr", "proverb": "prov", "article": "art",
     "contraction": "contr", "particle": "part", "character": "char",
     "symbol": "sym", "interfix": "interfix", "punct": "punct",
+    # 2026-08-15 补：意语版实际出现、原表漏收的四个（共 364 条义项）。
+    # 用户从界面上看出来的 —— `tempo` 的新义项标题显示成了英文 `noun`，
+    # 根因是 sense.pos 混进了 kaikki 长写法，而展示层的 POS_LABELS 只认短码。
+    "adv_phrase": "phr",          # 与 prep_phrase 一致，都归短语
+    "abbrev": "abbr", "affix": "affix", "onomatopoeia": "onom",
 }
 
 # ---- meta 分桶（意语维度）。全 tag 逐个归桶，桶外建库报警（drop-ledger）----

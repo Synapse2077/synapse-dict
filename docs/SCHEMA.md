@@ -546,3 +546,132 @@ WHERE NOT EXISTS (SELECT 1 FROM sense_gloss g
 ⚠️ 反过来被推翻的一条：C1/C2 里 5 个「高频」词（`son` 6.3 / `mala` 5.1 / `deja` 5.2）
 经查**是我的尺子错了不是 `level` 错了** —— `son` 作名词（古巴松乐）确实是 C1，
 6.3 那个频次属于同形的 `ser` 第三人称复数。陷阱③的又一次现形。
+
+---
+
+## 十、v3：`entry` 层（2026-08-13，做意语时定）
+
+> v2 之后仍然存在的**同一个病**：§1 开篇诊断「我们把**词形**当成了**词条**」，
+> v2 只解决了义项那一半（`sense` 从行号变主键），**读音与语法本质那一半没解决**。
+> 本节是 it 上补的第二刀。es 尚未回补 —— 记在 `docs/PLAYBOOK.md` 的"下一门语言"里。
+
+### 10.1 病灶：一行 `dict` 塞了源头的多个 entry
+
+kaikki 的一个 **entry = (词形, 词性, 词源号)**，`build.py` 把同一词形的多个 entry
+**合并成一行 `dict`**：`pos` 拼成 `"n/v"`、`ipa` 只留第一个。意语实测（英文版切片）：
+
+| | |
+|---|---|
+| entry 总数 / 词形数 | 622,957 / 588,731 |
+| **有多个 entry 的词形** | **30,220 个（5.1%）**，合计 64,446 个 entry 压成 30,220 行 |
+| `pos` 被拼成 `n/v` 这类串的行 | 22,849 |
+| **同形异读（entry 间音标集合不相交）** | **1,944 个词形**（重音位置不同 1,380 / 元音开闭 460 / 音段 74 / 噪声 30） |
+
+后果是**用户看到错的读音**，且无法通过多存几个音标解决：
+
+```
+pesca  (noun,etym1) ˈpɛska 桃子·桃色      ← 一个读音对应「一组」义项
+       (noun,etym2) ˈpeska 捕鱼·渔船·抽奖
+ancora (adv ,etym1) anˈkora 仍然/再/更多
+       (noun,etym2) ˈankora 锚            ← 库里只有 anˈkora，「锚」配的是副词的重音
+abbagliati (verb,etym1) abˈbaʎʎati 命令式+ti
+           (adj/verb,etym2) abbaʎˈʎati 分词阳性复数   ← 变形形，没有义项行可挂
+```
+
+### 10.2 为什么不是"给 `pronunciation` 加 `sense_id`"
+
+**一个读音对应的是一组义项，不是一条。** `ˈpɛska` 对应「桃子」「桃色」两条义项。
+`pronunciation.sense_id` 只能一对一 ⇒ 要么给每条义项复制一行读音
+（`UNIQUE(word_id,ipa,notation)` 得拆开，`region/tags/src` 重复存 N 份），
+要么再加一张关联表。而**中间单位本来就存在，且是源头自己的单位** —— 那就是 entry。
+
+变形形（`abbagliati`）更直接：它**没有义项行**，`sense_id` 根本挂不上去。
+
+⚠️ 两家顾问在这一问上分歧，两边的前提都经回源核对被推翻，记录在案：
+- v4-pro 反对 entry 层，理由是「`abbagliati` 两条变形可能同词性同词源」——
+  **实测不成立**，它们分属 etym 1 与 etym 2。全量核：音标在 entry **内**是一致的，
+  8.1% 的 entry 内多音标是**真变体**（`robot` roˈbo/ˈrɔbot、`te` te/ˈte 重读与否）
+- 豆包支持 entry 层但警告「搜索会出现同词形重复结果」——
+  **前提错了**：entry 夹在 `dict` 与 `sense` 之间，`dict` 仍是一词形一行，搜索路径不变
+
+### 10.3 结构
+
+```sql
+entry(
+  id, word_id,          -- → dict.id（词形不变，仍是搜索与身份单位）
+  pos,                  -- 单一词性，不再是 "n/v" 这种串
+  etym_no,              -- 词源号；源头没编号记 0
+  seq,                  -- 同键内序号，正常 0（见下）
+  aux, conj,            -- 词条级语法本质（源头 forms[] 的 tags:["auxiliary"]）
+  src, src_ref,         -- en-edition / kk-en:<词>:<词性>:<词源号>:<seq>
+  UNIQUE(src_ref)
+)
+sense.entry_id          -- 义项归哪个 entry；NULL = 无 dump 来源（如只有中文的 22 条）
+pronunciation.entry_id  -- 读音归哪个 entry（阶段 4）
+inflection.entry_id     -- 变形指针拆表后归哪个 entry（阶段 2）
+```
+
+🔴 **主键必须是内容派生的稳定复合键，不能是行序**（v4-pro 提的，与 §2.0.1 同源）：
+`src_ref = kk-en:<词形>:<词性>:<词源号>:<seq>`。dump 重下、重排都不会失效。
+
+**`seq` 为什么存在**：wiktextract 会把同一个维基章节切成多条 JSON
+（`banana` 果实/颜色分两条、`finale` 两组义项分两条）。实测 1,813 组重复键中
+**1,811 组的音标与词源文本完全相同 ⇒ 合并成一个 entry**（这不是 A7 禁止的"义项判重合并"，
+是把 wiktextract 的切分还原成维基的一个章节，且**合并前断言音标与词源文本相同**，
+不同就不合并）。剩 **2 组音标不同**（`sorti` verb·2、`infrociare` verb·0），
+用 `seq=1` 分开。
+
+### 10.4 语法本质分两层（`aux` / `transitivity`）
+
+源头是**逐义项**给及物性、**逐词条**给助动词，我们此前两个都只存了词级单值：
+
+| 事实（全量扫英文版切片） | 数 |
+|---|---|
+| 动词义项 tags 带 `transitive` / `intransitive` | 12,652 / 5,395（合计 **18,047**，占动词真义项 31%）|
+| 建库时映射进 `meta` 的键 | 只有 `pos` / `lex` / `g` / `reg` ⇒ **这 18,047 条一条没收** |
+| 有 `forms[].tags:["auxiliary"]` 的动词词条 | 14,368 |
+| **两种助动词并存**的动词 | 819，其中 **635 个源头直接给了用法条件**（`èssere[goal]` / `avére[transitive]`）|
+
+⇒ `sense.transitivity` 直接从义项 tags 落；`entry.aux` 从 `forms[]` 落；
+那 635 个双助动词动词，用「义项及物性 ↔ 词条条件标签」**确定性推导**，不调模型。
+
+🔴 `dict.aux` / `dict.transitivity` 降级为**由下层聚合出的派生值**（`both` = 「下钻看义项」），
+不能与 `entry`/`sense` 各存一份真值 —— 否则就是本项目栽过的「两个真值长期漂移」。
+
+#### 10.4.1 实际落法（2026-08-13 完成，两处推翻上面的写法）
+
+**推翻①：不建 `sense.transitivity` 列，落成 `sense_tag(kind='grammar')` 行。**
+及物性是**多值**的 —— 实测有 `ditransitive+transitive`、`impersonal+intransitive`、
+`intransitive+pronominal+transitive`。塞进单列就要发明一套编码，发明的编码既失真、
+又会变成第二份真值。判据：**互斥单值的落列（`gender`），多值的落行。**
+值一律用源头原词（`transitive` / `intransitive` / `ditransitive` / `ambitransitive` /
+`reflexive` / `pronominal` / `impersonal` / `copulative`），不改写。
+
+**推翻②：`18,047` 这个数不准，全量重数是 `20,038`**（只算 transitive/intransitive 是 18,266）。
+落库 **18,007** 条，三个口径严丝合缝：
+
+    dump 带语法标签的义项 20,038 = 变形指针 1,849 + 按词形去重吃掉 182 + 落库 18,007
+
+`entry.aux` 14,260 个词条（avere 10,381 / essere 3,058 / **both 821**）。
+双助动词那 821 个里，**1,622 条义项**由「义项及物性 ↔ 词条条件标签」确定性定到了单一助动词，
+写进 `sense.aux`；定不下来的（源头两个助动词都没给条件标签，如 `sapere`）不写，停在 `both`。
+
+🔴 `sense.aux` 是**覆盖值不是复制值** —— 单助动词词条的义项一律留 NULL，
+读取时取 `sense.aux ?? entry.aux`。不复制 = 结构上不可能漂移（闸②有一条专门断言它）。
+
+**`dict.aux` 的处置**：本轮**不改数据**，但**读取路径已切走** —— 词头的助动词改为
+从 `entry` 层聚合（`ItalianDictService.rollupAux`），`dict.aux` 只在 entry 层没有值的
+变形词形上兜底（35,183 个，如 `nato`→essere 来自 `nascere`）。
+理由：`rallentare` 的旧值是 `avere`，而源头给的是 avére[及物]+èssere[不及物]，
+不切读取路径就会**同一页词头写 avere、义项写 essere**。
+彻底退休这一列要等阶段 2 建好变形层的 lemma 指针。
+
+### 10.5 顺序：entry 归属是阶段 1 的副产品
+
+阶段 1 本来就要建 `sense_src` 把每条义项锚回 dump 原文。
+`build.py` 生成 `definition` 的规则是确定性的（遍历该词形的所有 entry → 每个 entry 的
+senses → 取 `glosses[0]` 归一空白 → **按词形去重** → 按 dump 顺序追加），
+**复刻这个循环，每一行义项落在哪个 entry 上就同时算出来了**，不需要额外的对齐工作。
+
+⚠️ 那条去重规则有个副作用要记账：`accettano` 的两个 entry（`atˈtʃɛttano` / `atˈtʃettano`，
+两个不同的动词）释义文字**完全相同**，去重后只剩一行 —— 第二个 entry 连同它的读音**整个不可见**。
