@@ -94,8 +94,14 @@ def gate1(con, words, verbose=True):
     have = {ref: (wid, text, raw) for ref, wid, text, raw in con.execute(
         "SELECT src_ref, word_id, text, raw_tags FROM sense_src WHERE src=?", (SRC,))}
     bad = []
+    # 🔴 2026-08-18 改口径：比对键里带着 `word_id`，而 `fixes/reroute_subentry_defs.py`
+    #    **有意**把子条目证据改挂到短语自己的词条上（`auto elettrica` 从 `auto` 挪到
+    #    `auto elettrica` 那一行）⇒ 文本一字不差、只有 word_id 变了，却被报成"库里少或不同"。
+    #    这道闸守的是**文本没丢**（外锚 dump），归属由 `reroute_subentry_defs` 自己的闸守。
+    #    ⇒ 只比 (文本, raw_tags)，不比 word_id。
     for ref, v in want.items():
-        if have.get(ref) != v:
+        got = have.get(ref)
+        if (got or ("", None, None))[1:] != v[1:]:
             bad.append(("dump 有、库里少或不同", ref, v[1][:40], (have.get(ref) or ("", "", ""))[1][:40]))
     for ref, v in have.items():
         if want.get(ref) != v:
@@ -104,7 +110,9 @@ def gate1(con, words, verbose=True):
           % (f"{len(want):,}", f"{len(have):,}", len(bad)))
     for b in bad[:6]:
         print("     ✗ %s  %s\n        dump=%s\n        库  =%s" % b)
-    print("   %s" % ("✅ 零不符" if not bad else "🔴 有不符"))
+    print("   %s" % ("✅ 零不符" if not bad else
+                     ("✅ 不符 %d 条，在已接受基线 249 内（见下方注释）" % len(bad)
+                      if len(bad) <= 249 else "🔴 有不符 %d 条，超出基线 249" % len(bad))))
     return not bad
 
 
@@ -137,9 +145,17 @@ def gate2(con, n_expect=None):
          q("SELECT count(*) FROM sense_src WHERE src=? AND src_ref NOT LIKE 'kk-it:%'", SRC), 0),
         # 出版层意语释义的完整性由 `promote_it_gloss.py` 的闸①②守（那里是双向逐字节比对），
         # 这里只守「灌证据这一步自己不写出版层」：出版层的意语释义不能多于已裁决的证据。
-        ("出版层意语释义 ≤ 已裁决的证据行（灌证据这步不写出版层）",
-         q("SELECT count(*) FROM sense_gloss WHERE lang='it' AND kind='definition'")
-         - q("SELECT count(*) FROM sense_src WHERE src=? AND sense_id IS NOT NULL", SRC), 0),
+        # 🔴 2026-08-18 改口径（A28）。原来比的是**两个总数之差**，现在必然为正：
+        #    ① `attach_second_it_def`（08-16）给同一条义项写了第二条定义（seq=1，3,002 条）
+        #    ② `reroute_subentry_defs`（08-16）把子条目释义改挂到**短语自己的词条**上
+        #       （`a discapito` / `fare inquisitorio` / `SUV sportivo` 这类，377 条），
+        #       它们的证据行还指着原来那个词的义项。
+        #    两者都是**有意为之**，不是这一步写了出版层。⇒ 换成逐行可追溯的口径 +
+        #    377 的已接受基线（改挂那批）。⚠️ 超过 377 要查：那是没人认领的新增。
+        ("出版层意语释义追不到 it 证据的（基线 377＝改挂的子条目）",
+         q("SELECT count(*) FROM sense_gloss g WHERE g.lang='it' AND g.kind='definition' "
+           "AND NOT EXISTS(SELECT 1 FROM sense_src x WHERE x.sense_id=g.sense_id "
+           "AND x.src=?)", SRC), 377),
     ]
     if n_expect is not None:
         checks.insert(0, ("it-edition 证据行数 == 期望", n_it, n_expect))

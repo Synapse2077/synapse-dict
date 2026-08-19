@@ -101,7 +101,13 @@ def _parse(text):
 
 
 async def run(sys_prompt, batches, meta, out_path, mode="flash", conc=12,
-              every=10, on_row=None):
+              every=10, on_row=None, thinking="disabled"):
+    """thinking: "disabled"（默认，成批一律关）/ "enabled"。
+
+    🔴 默认必须是关。`consult-two-models-on-rules` 定的：思考只留给商量规则，
+       成批当判官/生成默认关；**能不能开由负控的数字决定，不由偏好决定**。
+       参数化只是为了让"开 vs 关"能在同一批题目上被量出来（2026-08-17 补）。
+    """
     import httpx
     env = Q.load_env()
     model = MODELS.get(mode, mode)
@@ -120,7 +126,7 @@ async def run(sys_prompt, batches, meta, out_path, mode="flash", conc=12,
           flush=True)
     if not todo:
         return 0
-    print("■ 模型 %s  并发 %d" % (model, conc), flush=True)
+    print("■ 模型 %s  并发 %d  思考 %s" % (model, conc, thinking), flush=True)
 
     q = asyncio.Queue()
     for i in todo:
@@ -141,7 +147,7 @@ async def run(sys_prompt, batches, meta, out_path, mode="flash", conc=12,
                 try:
                     r = await cl.post(URL, headers=hdr, timeout=300, json={
                         "model": model, "temperature": 0, "stream": False,
-                        "thinking": {"type": "disabled"},
+                        "thinking": {"type": thinking},
                         "messages": [{"role": "system", "content": sys_prompt},
                                      {"role": "user", "content": "输入：\n" + json.dumps(
                                          batches[i], ensure_ascii=False)}]})

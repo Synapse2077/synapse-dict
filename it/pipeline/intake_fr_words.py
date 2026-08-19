@@ -107,8 +107,11 @@ def gate(con):
         ("🔴 法语证据不许带「缺定义」占位符",
          q("SELECT count(*) FROM sense_src WHERE src=? AND "
            "(text LIKE '%Définition manquante%' OR text LIKE '%à compléter%')", SRC), 0),
-        ("🔴 英文版侧的义项一条没动",
-         q("SELECT count(*) FROM sense_src WHERE src='en-edition'"), 205928),
+        # 🔴 基线 +5：`fixes/fill_from_en_edition.py`（08-17）补了 5 个英文版有真释义、
+        #    原始解析漏收的词（natel/cretacico/allovino/limosino/calendario dell'avvento）。
+        #    ⚠️ 差额超过 5 就要查 —— 那是没人认领的新增。
+        ("🔴 英文版侧的义项一条没动（基线 +5，见注释）",
+         q("SELECT count(*) FROM sense_src WHERE src='en-edition'"), 205933),
     ]
     ok = True
     for name, got, want in checks:

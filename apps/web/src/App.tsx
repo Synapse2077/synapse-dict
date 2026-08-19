@@ -4,6 +4,7 @@ import {
   REL_LABELS, EXCHANGE_LABELS, TRANS_LABELS,
   ES_REGION_LABELS, ES_ARTICLE, ES_CONJ_LABELS,
   IT_REGION_LABELS, IT_ARTICLE, IT_AUX_LABELS, IT_CONJ_LABELS, IT_NUMBER_NOTE_LABELS,
+  itAudioRegion,
   FR_AUX_LABELS, FR_VGROUP_LABELS, FR_ADJPOS_LABELS, FR_REGION_LABELS, FR_ARTICLE,
   PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE,
   DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS,
@@ -142,13 +143,24 @@ type SpanishUnifiedSense = {
 };
 
 // Italian entry (意语专属 schema：本质字段 aux/conj/gender/plural 为一等公民)
+type ItExample = { text: string; zh: string | null; en: string | null; ref: string | null };
 type ItSense = {
   en: string | null;
   zh: string | null;
+  it: string | null;       // 意语版原文释义（`sense_gloss.lang='it'`，89,531 条）
   pos: string | null;
   gender: string | null;   // 逐义项性别 m/f（双性名词 il radio 半径 vs la radio 收音机）
   regions: string[];
   registers: string[];
+  examples: ItExample[];   // 挂在这条义项上的例句（阶段 8 接上）
+};
+type ItReading = { ipa: string; notation: string; src: string; isPrimary: boolean };
+type ItAudio = {
+  file: string; url: string; ogg: string | null;
+  speaker: string | null; region: string | null;   // region 是法语原值，展示前过 itAudioRegion
+};
+type ItRelationGroup = {
+  kind: string; total: number; targets: { word: string; linkable: boolean }[];
 };
 type ItCollocation = { text: string; zh: string | null };
 type ItBase = {
@@ -179,8 +191,12 @@ type ItEntry = {
   collocations: ItCollocation[];
   baseForms: string[];
   bases: ItBase[];
+  // —— 阶段 8 接上展示层的四样（数据分别在阶段 4/5/6a 就落库了，界面一条没显示过）——
+  readings: ItReading[];        // 全部读音；`ipa` 是其中 isPrimary 那条
+  audios: ItAudio[];            // 真人录音（方针④第一级）
+  examples: ItExample[];        // 挂不上具体义项的例句
+  relations: ItRelationGroup[]; // 近义/反义/上下位…
   inflNotes: string[];
-  flag: string | null;
 };
 
 // —— 法语（fr）：法语专属 shape，与 es/it 解耦 ——
@@ -410,15 +426,30 @@ function posLabel(raw: string | null): string {
 //    数据一直在 `audio` 表里（11,203 条，仅 5.47 MB），改回 true 即可恢复。
 const SHOW_HUMAN_AUDIO = false;
 
-function HumanAudioRow({ audios, word, fallback }: {
-  audios: SpanishAudio[]; word: string; fallback: () => void;
+// 真人录音行。**语种无关**：只认「能播的一条录音」这个结构，地区文案由调用方给函数。
+// 🔴 2026-08-18 从"只吃 SpanishAudio"改成结构化类型 —— 意语要用同一个组件，
+//    而两边只差一个地区映射（es 是 `Bolivia` 这类标准码，it 是法语版写的 `Monopoli (Italie)`）。
+//    照抄一份 it 版会让「播放/死链兜底/正在播」三段逻辑各有两个副本
+//    （`refactor-mindset-code-quality`：塞第二份同类东西前先看已有那份能不能复用）。
+type PlayableAudio = {
+  file: string;
+  url: string | null;
+  speaker?: string | null;
+  region?: string | null;
+  regionSrc?: string | null;
+  ipa?: string | null;
+};
+
+function HumanAudioRow({ audios, word, fallback, regionLabel }: {
+  audios: PlayableAudio[]; word: string; fallback: () => void;
+  regionLabel: (raw: string) => string;
 }) {
   const [playing, setPlaying] = useState<string | null>(null);
   const [dead, setDead] = useState<Record<string, true>>({});
   const usable = audios.filter((a) => a.url);
   if (usable.length === 0) return null;
 
-  const play = (a: SpanishAudio) => {
+  const play = (a: PlayableAudio) => {
     if (!a.url || dead[a.file]) return;
     const el = new Audio(a.url);
     setPlaying(a.file);
@@ -436,7 +467,7 @@ function HumanAudioRow({ audios, word, fallback }: {
     <div className="audio-row">
       <span className="audio-row-label">真人发音</span>
       {usable.map((a) => {
-        const region = a.region ? (ES_REGION_LABELS[a.region] || a.region) : '未标注';
+        const region = a.region ? regionLabel(a.region) : '未标注';
         const hint = [
           a.speaker ? `录音人 ${a.speaker}` : null,
           a.regionSrc === 'speaker' ? '地区按录音人推定' :
@@ -1281,6 +1312,7 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
           audios={entry.audios}
           word={entry.word}
           fallback={() => speak(entry.word, speakLocale)}
+          regionLabel={(r) => ES_REGION_LABELS[r] || r}
         />
       )}
 
@@ -1502,7 +1534,50 @@ function groupItSenses(senses: ItSense[]): { pos: string | null; senses: ItSense
   return groups;
 }
 
-function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
+// 🔴 导出供 `contract-check.tsx` 用：那道闸把真实数据喂进这个组件、渲染成 HTML 再断言。
+//    2026-08-16 之前我所有的闸都在数据库里自查，而用户从界面上挑出三个我完全看不见的缺陷
+//    （词性标题显示成英文原始串 / 专名被归到「短语」/ 有义项却整块不渲染）——
+//    那三个的共同点是**只在渲染之后才存在**，查库和查接口都查不到。
+// 一条例句。原文 + 中文 + 出处，三层都可能缺（出处只有 6.7% 有）。
+function ItExampleView({ ex }: { ex: ItExample }) {
+  return (
+    <div className="sense-example">
+      <div className="ex-it" lang="it">{ex.text}</div>
+      {ex.zh && <div className="ex-zh">{ex.zh}</div>}
+      {ex.ref && <div className="ex-ref">{ex.ref}</div>}
+    </div>
+  );
+}
+
+// 语义关系。分类封顶 12 条（`buono` 有 763 条），**截断了要把总数说出来** ——
+// 不说的话用户会以为词典只收了这么多。
+function ItRelationGroups({ groups, onWord }: {
+  groups: ItRelationGroup[]; onWord: (w: string) => void;
+}) {
+  if (groups.length === 0) return null;
+  return (
+    <div className="rel-groups">
+      {groups.map((g) => (
+        <div className="rel-group" key={g.kind}>
+          <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
+          {g.targets.map((t) => (
+            <span className="rel-item" key={t.word}>
+              {t.linkable
+                ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                     onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
+                : <span className="rel-plain">{t.word}</span>}
+            </span>
+          ))}
+          {g.total > g.targets.length && (
+            <span className="rel-more">共 {g.total} 个</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
   entry: ItEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
@@ -1515,14 +1590,36 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
         <h2 className="entry-word">{entry.word}</h2>
       </header>
 
+      {/* 音标行。🔴 2026-08-18 阶段 8：`entry.ipa` 现在来自 `pronunciation` 表
+          （原来是 `dict.ipa` 列）—— 513,775 个词形因此**第一次有音标可显示**。
+          多读音的词（99,048 个）把其余读音并排列出：`ancora` 名词「锚」ˈaŋkora
+          与副词「还」aŋˈkora 是真的两个读音，只显示一个等于告诉用户另一个是错的。
+          ⚠️ 严式转写用方括号，音位式用斜杠 —— 定界符的差别本身是信息（六语种存裸约定）。*/}
       {entry.ipa && (
         <div className="phonetic-row">
           <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
             <span className="phonetic-value">/{entry.ipa}/</span>
             <SpeakerIcon />
           </button>
+          {entry.readings.filter((r) => !r.isPrimary).slice(0, 2).map((r) => (
+            <span className="phonetic-btn phonetic-alt" key={r.ipa}
+                  title={`另一读音 · 来源 ${r.src}`}>
+              <span className="phonetic-value">
+                {r.notation === 'narrow' ? `[${r.ipa}]` : `/${r.ipa}/`}
+              </span>
+            </span>
+          ))}
         </div>
       )}
+
+      {/* 真人录音（阶段 6a 收的 12,188 条 URL）。放在合成音之前 ——
+          方针④的三级兜底是「真人 > 工具生成 > 浏览器 TTS」，顺序就是权威顺序。 */}
+      <HumanAudioRow
+        audios={entry.audios}
+        word={entry.word}
+        fallback={() => speak(entry.word, speakLocale)}
+        regionLabel={itAudioRegion as (r: string) => string}
+      />
 
       {/* 意语本质徽标：动词看助动词/变位类/及物性，名词看性别/复数；CEFR 难度贯穿所有词性 */}
       <div className="entry-meta-row entry-badges">
@@ -1580,7 +1677,26 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
                       {s.zh || <span className="sense-missing">（待补）</span>}
                       <ItSenseChips sense={s} dualGender={entry.gender === 'mf'} />
                     </div>
-                    {s.en && <div className="sense-en">{s.en}</div>}
+                    {/* 🔴 2026-08-16 补上 `s.it`（用户问「怎么没见过 en 和 it 同时出现」时发现的）。
+                        阶段 1.5–3 往库里导了 89,531 条**意语原文释义**，接口也一直在返回，
+                        但这里只渲染了 `s.en` —— 于是那批全部看不见。
+                        实测 52,909 条义项 en+it 都有、36,245 条**只有 it**（英文版没收的义项）。
+                        样式复用 es 那套 `.sense-src`，EN / IT 两个语言标记并排。 */}
+                    {s.en && (
+                      <div className="sense-src" lang="en">
+                        <span className="sense-src-lang">EN</span>{s.en}
+                      </div>
+                    )}
+                    {s.it && (
+                      <div className="sense-src" lang="it">
+                        <span className="sense-src-lang">IT</span>{s.it}
+                      </div>
+                    )}
+                    {/* 挂在这条义项上的例句。中文 100%（阶段 5 全量翻译），
+                        所以这里不做「有没有中文」的分支 —— 有就一定有。 */}
+                    {s.examples.slice(0, 3).map((x, xi) => (
+                      <ItExampleView ex={x} key={xi} />
+                    ))}
                   </li>
                 ))}
               </ol>
@@ -1639,6 +1755,23 @@ function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {/* 挂不上具体义项的例句（39.0% 挂上了，其余在这里成块）。
+          🔴 不硬塞进第一条义项 —— 那等于替源头做了一个它没做的判断，
+          而例句挂错义项正是「用户会看到错的内容」那一类。 */}
+      {entry.examples.length > 0 && (
+        <section className="entry-section">
+          <h3>例句</h3>
+          {entry.examples.map((x, i) => <ItExampleView ex={x} key={i} />)}
+        </section>
+      )}
+
+      {entry.relations.length > 0 && (
+        <section className="entry-section">
+          <h3>相关词</h3>
+          <ItRelationGroups groups={entry.relations} onWord={onWord} />
         </section>
       )}
     </article>

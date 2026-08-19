@@ -607,9 +607,32 @@ entry(
   UNIQUE(src_ref)
 )
 sense.entry_id          -- 义项归哪个 entry；NULL = 无 dump 来源（如只有中文的 22 条）
-pronunciation.entry_id  -- 读音归哪个 entry（阶段 4）
-inflection.entry_id     -- 变形指针拆表后归哪个 entry（阶段 2）
+pronunciation.entry_id  -- ✅ 已加（it 阶段 4，2026-08-17）：读音归哪个 entry。
+                        --    **只在源头里这个读音唯一属于一个 entry 时才写**，
+                        --    NULL = 该词形各词条共用（`gratis` 形容词/副词同读音）。
+                        -- 🔴 查询必须写 `entry_id = ? OR entry_id IS NULL`（wildcard），
+                        --    **不是**「取不到再回落」—— 回落写法会让「有专属次读音的词条」
+                        --    看不到共用的主读音。it 的 A57。
+inflection.entry_id     -- ✅ 语义已定死（it 阶段 8，2026-08-18）：**原形的那个 entry**，
+                        --    即「这个变形形属于原形的哪一个词条」。
+                        --    NULL = 定不了（原形同词性多词源 / 原形悬空），**不猜**。
 ```
+
+🔴 **`inflection.entry_id` 为什么必须定成「原形的 entry」**（it 阶段 8，2026-08-18）：
+
+这一列原来按**来源分裂成两套语义**，各自内部一致、库内不变量全绿、展示层不读它
+⇒ 查库看不出任何异常：
+
+| 来源 | 条数 | entry_id 指向 |
+|---|---|---|
+| en 版 | 509,651 | **变形形自己的** entry（kaikki-en 把 `form_of` 写在变形形的词条里）|
+| en 版 | 122,234 | 原形的 entry（变形形自己没词条时的回落）|
+| fr 版 | 602,336 | 原形的 entry（fr 版把变形表写在原形词条里）|
+
+判据不是偏好，是**哪个读法带信息**：变形形自己的 entry 从 `word_id` 一查就有（冗余），
+而「`porto` 是 `portare`（动词）的变位形、不是 `porto`（名词·港口）的」**推不出来**，
+只有源头知道。⇒ 定成后者，`fixes/repoint_inflection_entry.py` 重指 499,966 条、
+清空 24,514 条（确定性 97.75%，其余留 NULL），断言进回归闸 C8。
 
 🔴 **主键必须是内容派生的稳定复合键，不能是行序**（v4-pro 提的，与 §2.0.1 同源）：
 `src_ref = kk-en:<词形>:<词性>:<词源号>:<seq>`。dump 重下、重排都不会失效。

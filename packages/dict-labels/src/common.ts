@@ -18,6 +18,14 @@ export const POS_LABELS: Record<string, string> = {
   pref: '前缀', suf: '后缀', phr: '短语', contr: '缩合', art: '冠词', prov: '谚语',
   // 2026-08-15 补：对应 build.py POS_MAP 新增的四个 kaikki 取值
   abbr: '缩写', affix: '词缀', onom: '拟声词',
+  // 2026-08-16 补 sym：`POS_MAP` 里 symbol→sym 一直都在，这张表却没有对应项，
+  //   于是 `bo` / `ar` / `AQ` 的分组标题直接显示英文 `sym`。**展示层契约闸第一次跑就逮到的。**
+  sym: '符号',
+  // 2026-08-17 补齐剩下四个：`POS_MAP` 有、这张表没有的取值一次找全（照 sym 那次的教训，
+  //   别只补闸报出来的那一个）。逐条回库看过实际内容再定词：
+  //   char 全是字母表条目（`f` 意大利语字母表第六个字母）⇒「字母」不是泛指的「字符」
+  //   punct 是引号族（`« »` 标示引语）／part 是 `sì` `no` `a'`／interfix 只有 `-isc-`
+  char: '字母', punct: '标点', part: '小品词', interfix: '连接成分',
 };
 
 // 语域标签 → 中文（对应 build.py REGISTERS）。

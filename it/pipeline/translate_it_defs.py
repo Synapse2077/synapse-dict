@@ -116,9 +116,12 @@ async def call(cl, e, items):
     body = {"model": MODEL, "temperature": 0, "stream": False,
             "thinking": {"type": "disabled"},
             "messages": [{"role": "system", "content": SYS},
+                         # 只带**存在的**键：本文件的活儿要 (id, word, it)，
+                         # 而 `fix_geo_parent_zh` 复用这个跑批器做纯音译时**故意不给 `it`**
+                         # （法语原文正是母地名污染音译的来源）。硬取三个键会 KeyError。
                          {"role": "user", "content": json.dumps(
-                             [{k: it[k] for k in ("id", "word", "it")} for it in items],
-                             ensure_ascii=False)}]}
+                             [{k: it[k] for k in ("id", "word", "it") if k in it}
+                              for it in items], ensure_ascii=False)}]}
     r = await cl.post("https://api.deepseek.com/chat/completions",
                       headers={"Authorization": "Bearer " + e["DEEPSEEK_API_KEY"].strip()},
                       json=body, timeout=180)

@@ -38,13 +38,36 @@ norm = lambda s: re.sub(r"\s+", " ", s or "").strip()
 #    · fr 版的义项是**法语释义**，按 A3 明确不收 ⇒ 只看词形缺口
 #    · it 版的义项已灌进 `sense_src(src='it-edition')` ⇒ 要跟那里比，不是跟英文 gloss 比
 #    第一版没分这个口径，报出 fr 缺义项 77,372 / it 缺义项 92,117 —— **全是假的**。
+# 🔴 2026-08-17 加第 6 列 `scope`：这一源的缺口**要不要收**。
+#
+# 起因：脚本原来把每一源的缺口都报成红色 🔴，包括**已决定不收**的那几源
+# ⇒ 这条闸永远红。而「闸必须带已接受基线 + 理由，否则永远红、没人看」是我自己
+#   记过的教训（`fix-regression-and-gate`）。红灯没有信息量，等于没有闸。
+#
+# 收录范围是用户 2026-08-17 定的：看词汇来源排名，**法语版之后断档**（10.3×），
+# 断档线以下的几源边际贡献合计仅 1.87 万，一律只记账不收：
+#
+#     英文版义项级 form_of  436,700 (33.4%)   ┐
+#     法语版变位表          417,647 (32.0%)   │ 收
+#     法语版词条            166,630 (12.7%)   │
+#     英文版词条            151,400 (11.6%)   │
+#     英文版变位表          122,234 ( 9.4%)   ┘
+#     ──────────────────── 断档 ────────────────────
+#     意语版词条             11,889 ( 0.9%)   ← 释义要（阶段 1.5），词形也收
+#     希腊语版/土耳其版/中文版  合计 1.87 万     ← 只记账
+#
+# ⚠️ `scope="ledger"` 的源仍然**每次都扫**：数字要在明处，只是不判红。
+#    哪天决定要收，改一个字段即可，不用重写脚本。
 SOURCES = [
-    ("en", paths.KK, None, "结构基准：词条/义项/英文释义", "en-gloss"),
-    ("it", paths.EDITION, "it", "意语原文释义", "it-evidence"),
-    ("fr", paths.KK_FR, None, "词形并集（释义按 A3 不收）", "words-only"),
-    ("zh-t", paths.KK_ZH_T, None, "词形并集 + 中文盲测真值", "words-only"),
-    ("zh-s", paths.KK_ZH_S, None, "同上", "words-only"),
+    ("en", paths.KK, None, "结构基准：词条/义项/英文释义", "en-gloss", "collect"),
+    ("it", paths.EDITION, "it", "意语原文释义", "it-evidence", "collect"),
+    ("fr", paths.KK_FR, None, "词形并集（释义按 A3 不收）", "words-only", "collect"),
+    ("zh-t", paths.KK_ZH_T, None, "中文版·繁（断档线下）", "words-only", "ledger"),
+    ("zh-s", paths.KK_ZH_S, None, "中文版·简（断档线下）", "words-only", "ledger"),
+    ("el", paths.KK_EL, None, "希腊语版（断档线下）", "words-only", "ledger"),
+    ("tr", paths.KK_TR, None, "土耳其语版（断档线下）", "words-only", "ledger"),
 ]
+SCOPE_NOTE = {"collect": "要收", "ledger": "📋 有意不收（2026-08-17：法语版之后断档）"}
 
 
 def op(p):
@@ -83,13 +106,20 @@ def audit(name, path, lang_code, words, have_glosses, mode, verbose=True):
                     c["② 该版释义按 A3 不收（只取词形）"] += 1
                     continue
                 if g not in have_glosses.get(w, ()):
+                    # 🔴 意语版的「缺定义」占位符按既定规则删除（fixes/strip_it_placeholder.py），
+                    #    它**不是**缺口。不单列出来这条闸就永远红。
+                    if "definizione mancante" in g or "aggiungila tu" in g:
+                        c["📋 占位符（已按规则删除，不算缺口）"] += 1
+                        continue
                     c["🔴 ② 词形在库、这条义项没有"] += 1
                     if len(miss_senses[w0]) < 2:
                         miss_senses[w0].append(g[:56])
     if verbose:
-        print("\n■ %s —— %s" % (name, {x[0]: x[3] for x in SOURCES}[name]))
+        meta = {x[0]: x for x in SOURCES}[name]
+        print("\n■ %s —— %s   [%s]" % (name, meta[3], SCOPE_NOTE[meta[5]]))
+        led = meta[5] == "ledger"
         for k, v in c.most_common():
-            print("   %-34s %9s" % (k, f"{v:,}"))
+            print("   %-34s %9s" % (k.replace("🔴", "📋") if led else k, f"{v:,}"))
         print("   缺口词形 %s 个" % f"{len(miss_words):,}")
         for w in sorted(miss_words)[:4]:
             print("      缺词形 %s" % w)
@@ -101,6 +131,12 @@ def audit(name, path, lang_code, words, have_glosses, mode, verbose=True):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src")
+    # 🔴 缺口清单**由审计脚本本身导出**，不要在别处重新量一遍。
+    #    我 2026-08-17 写临时脚本重算，fr 报 3,483 / it 报 600,781 —— 全是假的，
+    #    因为漏了这里的「③ 变形指针」分类那一层（`measure-landing-not-source`：
+    #    量自己的转换器不量数据）。要清单就从这里拿。
+    ap.add_argument("--dump-gaps", metavar="PATH",
+                    help="把 scope=collect 各源的缺口清单写成 JSON")
     a = ap.parse_args()
 
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
@@ -110,15 +146,26 @@ def main():
             "SELECT d.word, gl.text FROM sense s JOIN dict d ON d.id=s.word_id "
             "JOIN sense_gloss gl ON gl.sense_id=s.id AND gl.lang='en'"):
         have[w.lower()].add(g)
+    # 🔴 2026-08-17：it 版的证据**不能按 `sense_src.word_id` 归组**。
+    #    `fixes/reroute_subentry_defs.py` 有意把子条目改挂到**短语自己的词条**上：
+    #        库里 word='ingegneria informatica'  ← src_ref='kk-it:informatica:noun#0.1'
+    #    按 word_id 归组就会问「informatica 有没有这条 gloss」，答案是没有 ⇒ 报假缺口。
+    #    实测 124 条缺义项里 **84 条是这个假阳性**。
+    #    ⇒ 判据改成按 `src_ref` 里的**源头词形**归组 —— 那一列写的是 dump 坐标，
+    #      重路由不会改它，所以它才是"这条 gloss 收没收"的正确锚点。
+    #      （`measure-landing-not-source` 的变体：**判据没跟上数据结构的变更**。）
     have_it = defaultdict(set)
-    for w, t in con.execute(
-            "SELECT d.word, x.text FROM sense_src x JOIN dict d ON d.id=x.word_id "
-            "WHERE x.src='it-edition'"):
-        have_it[w.lower()].add(t)
+    for ref, t in con.execute(
+            "SELECT x.src_ref, x.text FROM sense_src x WHERE x.src='it-edition'"):
+        # src_ref 形如 kk-it:<源头词形>:<词性>#<etym>.<idx>
+        body = ref[len("kk-it:"):] if ref.startswith("kk-it:") else ref
+        w0 = body.rsplit(":", 1)[0] if ":" in body else body
+        have_it[w0.lower()].add(t)
     print("■ 库：词形 %s / 有英文义项的词形 %s" % (f"{len(words):,}", f"{len(have):,}"))
 
     total = Counter()
-    for name, path, lc, _desc, mode in SOURCES:
+    gaps = {}
+    for name, path, lc, _desc, mode, scope in SOURCES:
         if a.src and a.src != name:
             continue
         if not Path(path).exists():
@@ -126,14 +173,29 @@ def main():
             continue
         c, mw, ms = audit(name, path, lc, words,
                           have_it if mode == "it-evidence" else have, mode)
-        total["缺口词形·并集"] += 0
-        total["%s·缺词形" % name] = len(mw)
-        total["%s·缺义项" % name] = c["🔴 ② 词形在库、这条义项没有"]
+        if a.dump_gaps and scope == "collect":
+            gaps[name] = {"miss_words": sorted(mw),
+                          "miss_senses": {w: gs for w, gs in ms.items()}}
+        tag = "要收" if scope == "collect" else "记账"
+        total[("%s·缺词形" % name, tag)] = len(mw)
+        total[("%s·缺义项" % name, tag)] = c["🔴 ② 词形在库、这条义项没有"]
     print("\n■ 汇总")
-    for k, v in total.items():
-        if v:
-            print("   %-22s %9s" % (k, f"{v:,}"))
-    return 0
+    todo = sum(v for (k, t), v in total.items() if t == "要收" and v)
+    for tag in ("要收", "记账"):
+        rows = [(k, v) for (k, t), v in total.items() if t == tag and v]
+        if not rows:
+            continue
+        print("   —— %s ——" % ("🔴 要收" if tag == "要收" and todo else "✅ 要收" if tag == "要收"
+                              else "📋 有意不收（2026-08-17：法语版之后断档）"))
+        for k, v in rows:
+            print("      %-20s %9s" % (k, f"{v:,}"))
+    print("\n   %s 在收录范围内的缺口合计 %s（期望 0）"
+          % ("✅" if todo == 0 else "🔴", f"{todo:,}"))
+    if a.dump_gaps:
+        Path(a.dump_gaps).write_text(json.dumps(gaps, ensure_ascii=False, indent=1),
+                                     encoding="utf-8")
+        print("   缺口清单 → %s" % a.dump_gaps)
+    return 0 if todo == 0 else 1
 
 
 if __name__ == "__main__":

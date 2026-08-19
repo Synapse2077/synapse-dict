@@ -76,7 +76,8 @@ ZH_SRC = "deepseek-v4-flash:from-it"
 CHUNK = 6      # 每条 payload 比 ③ 大得多（多条意语 × 多条义项），批要小
 
 SYS = """你是意大利语—中文词典编纂员。每条给你一个意大利语词、词性、
-`its`＝**意大利语维基词典**写的若干条意语释义（带编号 n），
+`its`＝**意大利语维基词典**写的若干条意语释义（每条带编号 `n`，
+🔴 `n` 是这条释义的**标识号，不是序号**，可能不连续、不从 1 开始 —— **原样回传**），
 `senses`＝我们词典里该词该词性**已有的义项**（带编号 i、英文 en、中文 zh）。
 
 对 `its` 里的**每一条**，判断它对应已有义项的哪一条：
@@ -85,6 +86,9 @@ SYS = """你是意大利语—中文词典编纂员。每条给你一个意大�
 
 🔴 `senses` 里每条最多被用一次。若两条意语释义你都想指向同一条，说明我们那条
    义项太粗：把**更贴近**的那条指过去，另一条填 0（它是我们缺的义项）。
+🔴 带 `"taken": 1` 的义项**已经接过意语释义了，不能再指向它**。你若认为手上这条
+   意语释义讲的就是它，那正说明我们那条太粗 —— 填 0，并在 `zh` 里写出**这一条
+   跟它的区分点**（它的中文就在 `zh` 字段里，照着区分）。
 🔴 宁可填 0 也不要硬指。近义、上下位、同一领域但不是同一件事的，一律 0。
 🔴 以你自己对**意大利语**的理解判断，`en`/`zh` 只是我们已有义项的说明。
 
@@ -124,6 +128,8 @@ def load(con):
             "SELECT sense_id, lang, text FROM sense_gloss WHERE lang IN ('en','zh') AND seq=0"):
         gl[sid][lang] = t
     word = dict(con.execute("SELECT id, word FROM dict"))
+    taken_ids = {s for (s,) in con.execute(
+        "SELECT sense_id FROM sense_gloss WHERE lang='it' AND kind='definition'")}
     alt_t = defaultdict(list)
     for wid, tgt in con.execute("SELECT word_id, target FROM sense_relation WHERE kind='alt_of'"):
         alt_t[wid].append(tgt)
@@ -150,17 +156,24 @@ def load(con):
             #    实测截掉 1,322 条意语释义（2.82%），`azzurro` 被切在 `rep|ubblicani` 中间，
             #    而完整送入只多花 **3.6%** 字符。用户 2026-08-15：
             #    「不要随意用这种模棱两可的词，要按照义项本身的含义出发」。
-            ours = [(s, gl[s].get("en") or "", gl[s].get("zh") or "")
+            ours = [(s, gl[s].get("en") or "", gl[s].get("zh") or "", s in taken_ids)
                     for s in vis.get((wid, pos), [])]
             units[(wid, pos)] = dict(word=word[wid], pos=pos, its=its, ours=ours)
     return units
 
 
 def payload(u):
+    # 🔴 2026-08-16：`n` 从**位置下标**改成 `sense_src.id`。
+    #    位置下标是易变契约：跑模型时列表有 5 条，`--apply` 因目标义项已有意语定义
+    #    挡下 2 条，下一轮重新读库只剩 2 条 —— 同一份答案里的 n=2 就从
+    #    「riscontrare ed evidenziare」漂到了「trasportare elementi」上，**静默错配**。
+    #    （`registrare` 实测；`one-problem-at-a-time` 里"下标当 id"这是第三次。）
+    #    xid 是主键，永不重排，答案文件可以隔任意久重放。
     return {"w": u["word"], "pos": u["pos"],
-            "its": [{"n": n, "t": clean(t)} for n, (_x, t) in enumerate(u["its"], 1)],
-            "senses": [{"i": i, "en": en, "zh": zh}
-                       for i, (_s, en, zh) in enumerate(u["ours"], 1)]}
+            "its": [{"n": xid, "t": clean(t)} for xid, t in u["its"]],
+            "senses": [dict({"i": i, "en": en, "zh": zh},
+                              **({"taken": 1} if tk else {}))
+                       for i, (_s, en, zh, tk) in enumerate(u["ours"], 1)]}
 
 
 def resolve(u, r):
@@ -174,8 +187,8 @@ def resolve(u, r):
     for e in (r.get("r") or []):
         if isinstance(e, dict) and isinstance(e.get("n"), int):
             ans[e["n"]] = e
-    for n, (xid, text) in enumerate(u["its"], 1):
-        e = ans.get(n)
+    for xid, text in u["its"]:
+        e = ans.get(xid)          # 🔴 按 sense_src.id 取，不按位置（见 payload 注释）
         if e is None:
             st["模型没给这一条（留证据层）"] += 1
             continue
@@ -184,6 +197,10 @@ def resolve(u, r):
             if i in used:
                 st["🔴 撞车：同一条义项被指两次 ⇒ 降级为新建"] += 1
                 i = 0
+            elif u["ours"][i - 1][3]:
+                # 🔴 确定性执行，不靠模型看懂 `taken`：指向已占用的义项 ⇒ 不挂。
+                st["🔴 指向已接过意语定义的义项（留证据层）"] += 1
+                continue
             else:
                 used.add(i)
                 hook.append((u["ours"][i - 1][0], xid, text))
@@ -271,15 +288,49 @@ def run_control(units, con, mode="online", conc=8):
     return clean_d / max(ans, 1) >= 0.90 and hit / max(ans, 1) >= 0.80
 
 
+# 意语版把**所有多词条目**一律标 `phrase`（`corrente alternata`、`fare lezione`、
+# `a bizzeffe` 全是 phrase），而我们按**功能**分类（n / v / adv）——`fixes/fix_phrase_pos.py`
+# 当初修的就是这件事。⇒ 意语版侧的 phrase 族**不携带词性信息**，拿它比是拿口径差当错配。
+# 🔴 实测 1,570 条不一致里，非 phrase 族 **0 条**（全量核，非抽样）。
+#    我修了数据却没同步改闸，让这条最该盯的「防错配」闸假红了一整天。
+PHRASEY = {"phrase", "adv_phrase", "prep_phrase", "adj_phrase", "noun_phrase", "verb_phrase"}
+
+
+def pos_ok(src_pos, our_pos):
+    """意语版词性 vs 我们的词性：phrase 族是通配，其余两侧都过 POS_MAP 再比。"""
+    if src_pos in PHRASEY:
+        return True
+    return POS_MAP.get(src_pos, src_pos) == POS_MAP.get(our_pos, our_pos)
+
+
 def gate(con):
     print("\n═══ 闸 ═══")
     q = lambda s, *a: con.execute(s, a).fetchone()[0]
-    ev = {sid: t for sid, t in con.execute(
-        "SELECT sense_id, text FROM sense_src WHERE src=? AND sense_id IS NOT NULL", (SRC,))}
-    pub = {sid: t for sid, t in con.execute(
-        "SELECT sense_id, text FROM sense_gloss WHERE lang='it' AND kind='definition'")}
-    bad = sum(1 for sid, t in ev.items() if pub.get(sid) not in (t, clean(t)))
-    bad += sum(1 for sid in pub if sid not in ev)
+    # 🔴 2026-08-16：一条 sense 现在可以挂多条意语定义（seq=0 主 + seq≥1 备），
+    #    所以这里必须按**集合**双向比。第一版把它写成 `{sid: t}` 的 dict ——
+    #    同一 sense 的多条证据只剩最后一条，拿它跟 seq=0 比，2,745 条假红。
+    #    （同一个坑我今天在 `attach_second_it_def` 的闸里也犯了一次，那次是 JOIN 出笛卡尔积。）
+    # 🔴 出版层存的是 `clean(strip_self_prefix(证据, 词头))` —— 闸必须用**同一个函数链**
+    #    才叫双向逐字节。2026-08-16 我在写入端加了 `strip_self_prefix`（把
+    #    `ingegneria informatica: …` 里重复的词头剥掉）却忘了改闸，55 条假红。
+    from finish_it_defs import strip_self_prefix   # noqa: E402  局部导入避免循环
+    ev, pub = defaultdict(set), defaultdict(set)
+    for sid, t, w in con.execute(
+            "SELECT x.sense_id, x.text, d.word FROM sense_src x "
+            "JOIN sense s ON s.id=x.sense_id JOIN dict d ON d.id=s.word_id "
+            "WHERE x.src=? AND x.sense_id IS NOT NULL", (SRC,)):
+        ev[sid].add(clean(strip_self_prefix(t, w)))
+    for sid, t in con.execute(
+            "SELECT sense_id, text FROM sense_gloss WHERE lang='it' AND kind='definition'"):
+        pub[sid].add(t)
+    bad = sum(1 for sid, ts in ev.items() if ts != pub.get(sid, set()))
+    # 🔴 2026-08-16：原来这里还加了 `sum(1 for sid in pub if sid not in ev)`，
+    #    也就是「已发布的意语定义必须有一条 it-edition 证据」。实测 377 条对不上，
+    #    逐条查过：它们的意语原文**是真的**，只是证据行挂在 en-edition 上或根本没有
+    #    （`discapito` / `SUV`），来自更早的另一条流水线。
+    #    ⇒ 那是**溯源记账缺口**，不是内容错，单列一条闸带基线，别混在双向逐字节里
+    #      （混着的后果是这条最重要的闸永远红，红久了就没人看了）。
+    orphan = sum(1 for sid in pub if sid not in ev)
 
     # 🔴 新建义项**不许**与同词形已有中文逐字相同 —— 模型偏保守（该挂却答 0）的
     #    唯一后果就是造重复，这条闸是它的确定性兜底。
@@ -302,9 +353,15 @@ def gate(con):
 
     checks = [
         ("🔴 出版层 ↔ 证据层双向逐字节（含清洗口径）", bad, 0),
-        ("🔴 一条 sense 最多一条意语定义",
+        # 🔴 已接受基线 377 + 理由：更早的流水线发布过意语原文但没建 it-edition 证据行。
+        #    内容已逐条确认为真，缺的是溯源。**基线只减不增**：涨了就是新流水线又漏记。
+        ("已发布意语定义却没有 it-edition 证据（溯源缺口，基线 377）", orphan, 377),
+        # 🔴 2026-08-16：约束收到 **seq=0**。意语版对同一条义项写第二种说法的，
+        #    现在记在 seq≥1（`fixes/attach_second_it_def.py`，3,002 条）——
+        #    页面只读 seq=0，所以展示层的「一条义项一条意语原文」照旧成立。
+        ("🔴 一条 sense 最多一条 seq=0 意语定义",
          q("SELECT count(*) FROM (SELECT sense_id FROM sense_gloss WHERE lang='it' "
-           "AND kind='definition' GROUP BY 1 HAVING count(*)>1)"), 0),
+           "AND kind='definition' AND seq=0 GROUP BY 1 HAVING count(*)>1)"), 0),
         # ⚠️ 2026-08-15：`sense.pos` 已归一成短码（`fixes/normalize_sense_pos.py`），
         #    而 `src_ref` 和 `entry.pos` 是 kaikki 长写法 ⇒ **两侧都过 `POS_MAP`** 再比，
         #    否则这条闸从此永远假红（长短写法对不上，不是数据错）。
@@ -313,8 +370,7 @@ def gate(con):
              "SELECT x.src_ref, COALESCE(e.pos, s.pos) FROM sense_src x "
              "JOIN sense s ON s.id=x.sense_id LEFT JOIN entry e ON e.id=s.entry_id "
              "WHERE x.src=? AND x.sense_id IS NOT NULL", (SRC,))
-             if opos is not None
-             and POS_MAP.get(pos_of_ref(ipos), pos_of_ref(ipos)) != POS_MAP.get(opos, opos)), 0),
+             if opos is not None and not pos_ok(pos_of_ref(ipos), opos)), 0),
         ("🔴 本步新建义项的中文与同词形其它义项逐字相同", dup, 0),
         ("🔴 第一手中文的 src 必须记在明处",
          q("SELECT count(*) FROM sense_gloss WHERE src=? AND lang<>'zh'", ZH_SRC), 0),
@@ -325,9 +381,12 @@ def gate(con):
         ("每个词形的 rank 连续无空洞",
          q("SELECT count(*) FROM (SELECT word_id FROM sense GROUP BY word_id "
            "HAVING max(rank)<>count(*) OR min(rank)<>1)"), 0),
-        ("被裁决的证据行数 == 出版层意语释义数",
+        # 上一条已经把那 377 条无证据的意语定义单独立账了，这里要**扣掉**再比，
+        # 否则同一个缺口被两条闸各红一次，而且这条的差值随基线漂。
+        ("被裁决的证据行数 == 出版层意语释义数（扣除溯源缺口）",
          q("SELECT count(*) FROM sense_src WHERE src=? AND sense_id IS NOT NULL", SRC)
-         - q("SELECT count(*) FROM sense_gloss WHERE lang='it' AND kind='definition'"), 0),
+         - q("SELECT count(*) FROM sense_gloss WHERE lang='it' AND kind='definition'")
+         + orphan, 0),   # 计数含 seq≥1：证据也是一条挂一条，两边同口径
     ]
     ok = True
     for name, got, want in checks:

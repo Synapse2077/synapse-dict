@@ -128,8 +128,15 @@ def gate1b(con, rows, seq_of, verbose=True):
         w0, pos, etym = r["key0"]
         ref = "kk-en:%s:%s:%s:%d" % (w0, pos, etym, seq_of.get((r["key0"], r["ipas"]), 0))
         want["%s#%d.%d" % (ref, r["occ"], r["idx"])] = (r["base"], r["label"])
+    # 🔴 2026-08-18 改口径（A28）：本闸的 `want` 是**只从英文版 dump** 复刻出来的，
+    #    而 `inflection` 表后来进了 fr 版 18 万条、it 版若干（阶段 3 收词）——
+    #    拿"英文版应有多少"去对"全表有多少"，报 728,706 条假不符。
+    #    ⇒ 库侧同样限定英文版来源。⚠️ 前缀是 **`kk-en:`**（510,110 行）——
+    #      `kkform-en:` 是另一族（122,234 行，阶段 2a 从 forms 数组补的），别搞混：
+    #      我第一版按 `kkform-en:` 限定，库侧只剩 12 万，反而把不符从 72 万变成 63 万。
     have = {ref: (b, l) for ref, b, l in
-            con.execute("SELECT src_ref, base, label_zh FROM inflection")}
+            con.execute("SELECT src_ref, base, label_zh FROM inflection "
+                        "WHERE src_ref LIKE 'kk-en:%'")}
     bad = [k for k in set(want) | set(have) if want.get(k) != have.get(k)]
     print("   dump 侧 %s 行 / 库侧 %s 行 / 不符 %s"
           % (f"{len(want):,}", f"{len(have):,}", f"{len(bad):,}"))

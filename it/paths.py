@@ -25,6 +25,14 @@ BACKUPS = DATA / "backups"                          # 写库前的自动备份
 DUMPS   = DATA / "dumps"
 ENV     = ROOT / ".env"
 
+# ═══ 合成发音（阶段 6b）═══
+# TTS_VOICES 是 Piper 模型目录，**六语种共用**（各语种取自己的那几个文件）。
+# TTS_OUT 下按 sha1(词|音色) 前两位分 256 个子目录 —— 单目录放十几万文件时
+# macOS 的 `ls` 与 Finder 都会卡。音频字节**不进 SQLite**：`dbtool` 每次写库前
+# 要全文件复制备份，塞进音频后每改一行译文都要多复制几 GB。
+TTS_VOICES = DATA / "tts" / "voices"
+TTS_OUT    = DATA / "tts" / "it"
+
 # ═══ 跨版切片（2026-08-12 阶段 -1 取数）═══
 # 取数依据是实测，不是印象：`probe_editions.py --lang it` 的完整输出存档在
 # `data/work/it/probe/`，各版本贡献的字段见 `docs/lang/it-CONVENTIONS.md` 的取数表。

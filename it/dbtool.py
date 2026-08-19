@@ -53,7 +53,7 @@ TABLE = "dict"
 #    身份列不进（它们 NOT NULL，非空计数恒等于总行数，计了也是常数）。
 #    2026-08-12 阶段 0 之后：`definition`/`translation`/`translation_src`/`meta`/
 #    `collocation`/`example`/`flag` 七列已迁出并删除，内容改由下面的 TRACK_TABLES 守。
-TRACK = ['ipa', 'ipa_src', 'pos',
+TRACK = ['ipa', 'ipa_src', 'pos', 'freq_zipf',
          'aux', 'conj', 'transitivity', 'pronominal',
          'gender', 'gender_src', 'plural', 'plural_gender', 'number_note',
          'infl', 'exchange', 'level']
@@ -292,10 +292,18 @@ def session(tag, expect=None, dry=False, verbose=True):
         print("■ 写入 {:,} 条".format(s.written))
         print("■ 写库后不变量：" + _line(after, d))
     if bad:
-        print("\n🔴 不变量核对未通过：", file=sys.stderr)
-        for b in bad:
-            print("   " + b, file=sys.stderr)
-        print("   回滚：cp '%s' '%s'" % (bak, DB), file=sys.stderr)
+        # 🔴 2026-08-17：核对失败的红字原来只走 stderr，我两次用 grep 过滤输出
+        #    就把它滤掉了，只看到「已收 N 条」就往下走 —— 数据已经 commit 了却不知道。
+        #    ⇒ 同时打到 stdout，并在**最后一行**再重复一次结论，让它难被漏读。
+        #    （不改成自动回滚：快照必须读已提交状态才准，这是设计取舍；
+        #      但"报了而没人看见"是纯粹的可用性问题，能改。）
+        for out in (sys.stderr, sys.stdout):
+            print("\n🔴 不变量核对未通过：", file=out)
+            for b in bad:
+                print("   " + b, file=out)
+            print("   回滚：cp '%s' '%s'" % (bak, DB), file=out)
+            print("🔴🔴🔴 本次写库未通过，**数据已在库中**，要么按上面的命令回滚，"
+                  "要么确认这些变化是预期的并补进 expect。", file=out)
         raise SystemExit(1)
     if verbose:
         print("■ 不变量核对通过 ✓")

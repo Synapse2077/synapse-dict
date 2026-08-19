@@ -218,35 +218,69 @@ def gate1(con, per_word, verbose=True):
             bad += 1
             if len(samples) < 6:
                 samples.append((w, a[:3], b[:3], len(a), len(b)))
+    # 🔴 **已接受基线：5 个词形，且必须正好是这 5 个**（不是"允许 5 个对不上"）。
+    #    `fixes/fill_from_en_edition.py`（08-17）补了英文版有真释义、而当初那版解析漏收的
+    #    5 个词。本闸是拿**当初那版解析**现场重刻，所以它刻不出这 5 条 ——
+    #    差额来自修复，不是回归。⚠️ 名单写死：换了别的词就说明是新问题。
+    BASELINE = {"natel", "cretacico", "allovino", "limosino", "calendario dell'avvento"}
+    diff = {w for w, a, b, na, nb in
+            [(w, have.get(w, []), [x[0] for x in per_case.get(w, [])], 0, 0) for w in words]
+            if a != b} if False else {w for w in words
+                                      if have.get(w, []) != [x[0] for x in per_case.get(w, [])]}
     print("   库里有英文义项的词形 %s；复刻出的词形 %s" % (f"{len(have):,}", f"{len(per_word):,}"))
-    print("   %s 对不上的词形 %s" % ("✓" if bad == 0 else "🔴", f"{bad:,}"))
+    unexpected = diff - BASELINE
+    missing = BASELINE - diff
+    print("   %s 对不上的词形 %s（其中已接受基线 %s）"
+          % ("✓" if not unexpected else "🔴", f"{bad:,}", f"{len(diff & BASELINE):,}"))
     for w, a, b, na, nb in samples:
-        print("   🔴 %s  库 %d 条 %s\n        复刻 %d 条 %s" % (w, na, a, nb, b))
-    return bad == 0
+        mark = "（基线内）" if w in BASELINE else "🔴 新的"
+        print("   %s %s  库 %d 条 %s\n        复刻 %d 条 %s" % (mark, w, na, a, nb, b))
+    if unexpected:
+        print("   🔴 基线之外的：%s" % sorted(unexpected)[:5])
+    if missing:
+        print("   ⚠️ 基线里的这几个现在对上了，说明修复被撤销或口径变了：%s" % sorted(missing))
+    return not unexpected
 
 
 def gate2(con, expect):
     print("\n═══ 闸② 不变量断言 ═══")
     q = lambda s: con.execute(s).fetchone()[0]
     checks = [
-        ("entry 条数 == 期望", q("SELECT count(*) FROM entry"), expect["entry"]),
+        # 🔴 2026-08-18 改口径（A28）。本闸的期望值是**从英文版 dump 现场重推**出来的，
+        #    而 `entry` 表后来还进了 fr 版 169,822 条、it 版 16,234 条（阶段 3 收词）。
+        #    拿"英文版应有多少"去对"全表有多少"，红的是断言不是数据 ⇒ 两侧都限定 en-edition。
+        ("entry 条数（en-edition 侧）== 期望",
+         q("SELECT count(*) FROM entry WHERE src='en-edition'"), expect["entry"]),
         # 🔴 2026-08-13：`sense_src` 现在是**多来源**的证据层（阶段 1.5 灌进了意语版）。
         #    这几条断言原来写死了"库里只有英文版"，多一个来源就误报 —— 红的是断言口径不是数据。
         #    ⇒ 一律按 `src='en-edition'` 限定；意语版的完整性由 `ingest_it_edition.py` 自己的闸守。
-        ("sense_src(en-edition) 条数 == 期望",
-         q("SELECT count(*) FROM sense_src WHERE src='en-edition'"), expect["src"]),
+        # 🔴 **已接受基线 +5，附理由**：`fixes/fill_from_en_edition.py`（08-17）补了
+        #    5 个英文版**有真释义、原始解析漏收**的词（`natel` / `cretacico` / `allovino` /
+        #    `limosino` / `calendario dell'avvento`）。本闸的期望值是用**当初那版解析**
+        #    现场重推的，所以它推不出这 5 条 —— 差额是修复带来的，不是回归。
+        #    ⚠️ 差额**超过 5** 就要查：那说明来了新的、没人认领的证据行。
+        ("sense_src(en-edition) 条数 == 期望 + 5（见注释）",
+         q("SELECT count(*) FROM sense_src WHERE src='en-edition'"), expect["src"] + 5),
         # ⚠️ 断言要分两种：有 dump 来源的必须恰好一条；**只有中文的那 23 条本来就没有来源**
         #    （22 个词条：ganga/Jehova/autoritativo…，见 SCHEMA §10 与 it-CONVENTIONS 记账）。
         #    第一版写成"每条 sense 都恰好一条"，红的是断言不是数据。
-        ("有 entry 的 sense 都恰好一条 sense_src",
-         q("SELECT count(*) FROM (SELECT s.id FROM sense s LEFT JOIN sense_src x "
-           "ON x.sense_id=s.id AND x.src='en-edition' WHERE s.entry_id IS NOT NULL "
-           "GROUP BY s.id HAVING count(x.id)<>1)"), 0),
+        # 🔴 同上：阶段 1.5 之后，一条义项可以**同时**有英文版与意语版两条证据
+        #    （`sense_src` 是证据层，多源是常态）⇒ 断言限定在 en-edition 证据上。
+        # 🔴 口径要按**义项自己的来源**，不能按 entry 的来源：entry 层是共用的 ——
+        #    阶段 1.5/2 之后有 18,506 条**意语版来的义项**也挂在英文版的 entry 上（这是对的）。
+        #    仍然成立的不变量：**有英文版证据的义项，恰好只有一条英文版证据**。
+        ("有 en-edition 证据的 sense，恰好只有一条",
+         q("SELECT count(*) FROM (SELECT x.sense_id FROM sense_src x "
+           "WHERE x.src='en-edition' AND x.sense_id IS NOT NULL "
+           "GROUP BY x.sense_id HAVING count(*)<>1)"), 0),
         ("无 entry 的 sense 都没有 sense_src",
          q("SELECT count(*) FROM sense s JOIN sense_src x ON x.sense_id=s.id "
            "WHERE s.entry_id IS NULL AND x.src='en-edition'"), 0),
-        ("挂上 entry 的 sense == 期望",
-         q("SELECT count(*) FROM sense WHERE entry_id IS NOT NULL"), expect["sense_with_entry"]),
+        # 同上：按义项自己的来源算，才是这道闸当初想守的东西
+        # 同一批 5 条（见上面 `sense_src` 那条的理由）
+        ("由 en-edition 证据裁决出的 sense == 期望 + 5",
+         q("SELECT count(DISTINCT sense_id) FROM sense_src "
+           "WHERE src='en-edition' AND sense_id IS NOT NULL"), expect["sense_with_entry"] + 5),
         ("孤儿 entry（word_id 不在 dict）",
          q("SELECT count(*) FROM entry e LEFT JOIN dict d ON d.id=e.word_id "
            "WHERE d.id IS NULL"), 0),

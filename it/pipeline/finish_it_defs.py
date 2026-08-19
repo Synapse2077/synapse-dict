@@ -21,6 +21,18 @@
 其余全部复用：同 prompt、同 payload 形状、同 `resolve` 的确定性指派、
 同「新建中文与已有逐字相同就不落库」的兜底、同一套闸。
 
+═══ 2026-08-16 收盘 ═══
+    新建义项 179 + 34 = **213 条**；挂到已有义项 8 条。
+    被三道去重闸拦下的：逐字相同 57 / 括号外对应词已全有 202 / 元话语 13。
+    另有 3,002 条「模型认定属于我们某条义项、但那条已接过意语定义」的，
+    走 `fixes/attach_second_it_def.py` 记到 seq≥1（页面不读 seq>0，不产生重复）。
+    ⇒ 待上架从 3,376 → **153**（剩的全是去重闸判定为无新信息的）。
+
+    三个当天逮到的缺陷，全写在下面对应的注释里：
+      · 词组子条目被当成词头义项（392 条，`subentry()`）
+      · 答案文件按位置下标存 ⇒ 重放静默错配（改成 `sense_src.id`，见 payload 注释）
+      · `sense.pos` 写成了 kaikki 长写法（146 条，**展示层契约闸**逮到的）
+
 🔴 模型只用 DeepSeek flash（豆包已在 `ark_batch` 硬拦截，2026-08-15 用户明令）。
 🔴 先跑 1% 切片、我自己读完再放全量（`control-must-cover-every-output-field` 的教训：
    上一次是跑完 418 万 tokens 才第一次读产出）。
@@ -51,6 +63,7 @@ import ds_batch    # noqa: E402
 import paths       # noqa: E402
 from align_it_defs import batched   # noqa: E402
 from align_it_multi import SYS, ZH_SRC, gate, payload, resolve   # noqa: E402  一把尺
+from build import POS_MAP   # noqa: E402  词性映射唯一的家
 from demote_alt_pointer_defs import is_pointer   # noqa: E402
 from promote_it_gloss import PTR, SRC, pos_of_ref   # noqa: E402
 from strip_it_placeholder import clean, not_a_definition   # noqa: E402
@@ -61,6 +74,77 @@ CHUNK = 8
 # 上架前的最后三道确定性筛（实测各 5 / 16 / 0 条；学名那族照送模型）
 LINK = re.compile(r"\(\s*(approfondimento|citazioni|vedi\s+approfondimento)\s*\)", re.I)
 TAGS = re.compile(r"^\s*[mfnc]?\s*(sing|plur|inv)?\s*[mfnc]?\s*(sing|plur|inv)?\s*$", re.I)
+
+
+# 🔴 2026-08-16 切片自检逮到的一族：意语版把**词组子条目**写成 `词组: 定义`，
+#    而那个词组包含词头但不等于词头 ⇒ 这条定义定义的是**词组**，不是词头。
+#    把它当词头的义项送模型，产出的中文与源文本完全无关（模型只好去猜词头还缺什么义）：
+#        quantità  源「quantità fonetica: 音素发音时长」→ 新「大量，众多」
+#        olio      源「sott'olio e sott'aceto: 油浸食品」→ 新「润滑油」
+#        tempo     源「tempo di reazione: 反应时间」    → 新「（足球等比赛的）半场」
+#    `tempo` 那条正是用户从界面上挑出来问我的。⇒ 这批该进 `collocation`，不进义项层。
+SUBENTRY = re.compile(r"^([^:：]{2,60}?)\s*[:：]\s*(.+)$", re.S)
+
+# ═══ 新建义项的两道去重闸（旧的「逐字相同」拦不住的）═══
+# 判据按含义：一条新义项的价值在于它**给了读者一个新的对应词**。
+# 括号里放的是区分信息（prompt 第 2 条要求的），括号外才是对应词本身。
+# ⇒ 括号外那些词若已经全在该词已有义项里，这条新义项没带来新意思。
+#   实测拦下 122 条（占新建 37.3%）：`corrente continua`「直流电（方向恒定的电流）」
+#   已有「直流电」、`nome proprio`「专有名词（人名、地名、神名等）」已有「专有名词」。
+PAREN = re.compile(r"[（(][^）)]*[）)]")
+
+
+def heads(zh):
+    """→ 括号外的对应词集合。「证实（通过证据或证明）」→ {证实}"""
+    return {x.strip() for x in PAREN.sub("", zh or "").replace("，", ",").split(",") if x.strip()}
+
+
+# 模型偶尔把**自己的推理过程**写进释义：
+#   farfalla → 「蝴蝶（同前，重复义项，但按规则需填0，因senses中1已用」
+# 判据：中文在谈论「这部词典/这道题」，而不是在说这个词指什么。
+META = re.compile(r"义项|senses|填\s*0|按规则|同前|重复(?:义项)?|与上(?:文|条)|见上")
+
+
+def is_meta(zh):
+    return bool(META.search(zh or ""))
+
+
+def subentry(text, head):
+    """→ (词组, 定义) 若这是词组子条目；否则 None。
+
+    ⚠️ 判据收窄过两次，两次都是假阳性逼出来的：
+      ① 裸子串 ⇒ `ora` 被 `temp**ora**le` 命中。改成词边界。
+      ② `verde oliva, colore RAL – codice RAL: RAL 6003` ——
+         冒号前是**词头本身 + 同位语**，不是另一个词项。判据：
+         逗号前那截若等于词头，就不是子条目。
+    """
+    m = SUBENTRY.match((text or "").strip())
+    if not m:
+        return None
+    phrase, body = m.group(1).strip(), m.group(2).strip()
+    h = head.lower().strip()
+    if phrase.split(",")[0].strip().lower() == h:      # 词头 + 同位语
+        return None
+    # ⚠️ 撇号在意语里**是**词边界（省音：`sott'olio` = sotto olio、`all'avanguardia`），
+    #    第一版把 `'` 当词内字符排除，`sott'olio` 就漏了。用标准 \b。
+    if not re.search(r"\b%s\b" % re.escape(h), phrase.lower()):
+        return None
+    return (phrase, body)
+
+
+def strip_self_prefix(text, head):
+    """`ingegneria informatica: ramo dell'ingegneria…` 在词头就是 `ingegneria informatica`
+    时，冒号前那截**就是词头自己**，留着是重复。
+
+    这批是 `fixes/reroute_subentry_defs.py` 把子条目归还给词组自己的词条之后出现的：
+    归还前冒号前是"另一个词项"（该拦），归还后是"词头自己"（该剥）。同一段文字，
+    位置变了含义就变了。
+    """
+    t = (text or "").strip()
+    h = (head or "").strip()
+    if h and t.lower().startswith(h.lower() + ":"):
+        return t[len(h) + 1:].strip() or t
+    return t
 
 
 def is_residue(text, head):
@@ -83,6 +167,10 @@ def load(con):
             "SELECT sense_id, lang, text FROM sense_gloss WHERE lang IN ('en','zh') AND seq=0"):
         gl[sid][lang] = t
     word = dict(con.execute("SELECT id, word FROM dict"))
+    # 已经接过意语定义的义项：不能再挂第二条（UNIQUE(sense_id,lang,kind,seq)），
+    # 必须**在 payload 里就告诉模型**，否则它每轮都指向它们、每轮都被挡回证据层。
+    taken_ids = {s for (s,) in con.execute(
+        "SELECT sense_id FROM sense_gloss WHERE lang='it' AND kind='definition'")}
     alt_t = defaultdict(list)
     for wid, tgt in con.execute("SELECT word_id, target FROM sense_relation WHERE kind='alt_of'"):
         alt_t[wid].append(tgt)
@@ -98,14 +186,17 @@ def load(con):
         if is_residue(text, word[wid]):
             stat["🔴 残渣，不上架（链接/性数标签）"] += 1
             continue
+        if subentry(text, word[wid]):
+            stat["🔴 词组子条目，不进义项层（该进 collocation）"] += 1
+            continue
         stat["✅ 待上架"] += 1
-        per[(wid, pos_of_ref(ref))].append((xid, text))
+        per[(wid, pos_of_ref(ref))].append((xid, strip_self_prefix(text, word[wid])))
 
     units = {}
     for (wid, pos), its in per.items():
         units[(wid, pos)] = dict(
             word=word[wid], pos=pos, its=its,
-            ours=[(s, gl[s].get("en") or "", gl[s].get("zh") or "")
+            ours=[(s, gl[s].get("en") or "", gl[s].get("zh") or "", s in taken_ids)
                   for s in vis.get((wid, pos), [])])
     return units, stat
 
@@ -201,19 +292,30 @@ def main():
             st += s2
         for kk, v in st.most_common():
             print("   %-42s %7s" % (kk, f"{v:,}"))
-        zh_of = defaultdict(set)
+        zh_of, head_of = defaultdict(set), defaultdict(set)
         for wid, t in ro.execute(
                 "SELECT s.word_id, g.text FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
                 "WHERE g.lang='zh' AND g.seq=0 AND COALESCE(s.hidden,0)=0"):
             zh_of[wid].add(t)
-        keep, dropped = [], 0
+            head_of[wid] |= heads(t)
+        keep, dropped, near, meta = [], 0, 0, 0
         for wid, pos, xid, text, zh in fresh:
             if zh in zh_of[wid]:
                 dropped += 1
                 continue
+            if is_meta(zh):
+                meta += 1
+                continue
+            hs = heads(zh)
+            if hs and hs <= head_of[wid]:
+                near += 1
+                continue
             zh_of[wid].add(zh)
+            head_of[wid] |= hs
             keep.append((wid, pos, xid, text, zh))
-        print("\n   🔴 新建中文与已有逐字相同、拦下  %s" % f"{dropped:,}")
+        print("\n   🔴 新建中文与已有逐字相同、拦下      %s" % f"{dropped:,}")
+        print("   🔴 括号外对应词已全部存在、拦下      %s" % f"{near:,}")
+        print("   🔴 中文里在谈论词典本身、拦下        %s" % f"{meta:,}")
         print("■ 挂到已有义项 %s 条 / 新建义项 %s 条" % (f"{len(hooks):,}", f"{len(keep):,}"))
         if not (hooks or keep):
             return 0
@@ -227,7 +329,12 @@ def main():
         for wid, pos, xid, text, zh in keep:
             sid += 1
             mx[wid] = mx.get(wid, 0) + 1
-            s_rows.append((sid, wid, mx[wid], pos))
+            # 🔴 `sense.pos` 存**短码**（`fixes/normalize_sense_pos.py` 归一过），
+            #    而 `pos_of_ref()` 给的是 kaikki 长写法。第一版直接写进去，
+            #    146 条落成了 `noun`/`verb`/`abbrev` —— 展示层的 POS_LABELS 查不到，
+            #    分组标题直接把原始串吐给用户（`sta` 显示成 `abbrev`）。
+            #    是**展示层契约闸**逮到的，库里所有闸都不查这个。
+            s_rows.append((sid, wid, mx[wid], POS_MAP.get(pos, pos)))
             g_rows.append((sid, "zh", "equivalent", 0, zh, ZH_SRC))
             g_rows.append((sid, "it", "definition", 0, clean(text), SRC))
             link.append((sid, xid))

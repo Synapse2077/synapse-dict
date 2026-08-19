@@ -43,10 +43,23 @@ import dbtool   # noqa: E402
 import paths    # noqa: E402
 
 
+# 🔴 2026-08-17 加：撇号的各种写法折成 ASCII `'`。
+#    意语里撇号是**词形的一部分**（`all'alba` `sant'Antonio` `d'accordo`），而网页正文
+#    普遍用弯撇号 `’`、用户手打用直撇号 `'`。库里两种都有（1,333 / 1,257 个词形），
+#    **只有 267 个词两种写法都收了** ⇒ 划词选中 `all'alba` 查不到（库里是 `all’alba`）。
+#    ⚠️ 归一只进 `word_norm`，`word` 一个字节不动（源头怎么写就怎么留，[[ipa-bare-storage-convention]] 同理）。
+APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "´": "'", "`": "'", "＇": "'"})
+
+
 def norm(w):
-    """与建库时的 word_norm 同规则：**小写 + 去重音符**。
-    ⚠️ 第一版漏了小写（`ASCII` 的 word_norm 是 `ascii`），全量核对 584,904 行时逮到。"""
-    return "".join(c for c in unicodedata.normalize("NFD", w.lower())
+    """与建库时的 word_norm 同规则：**小写 + 去重音符 + 撇号折成 `'`**。
+
+    ⚠️ 第一版漏了小写（`ASCII` 的 word_norm 是 `ascii`），全量核对 584,904 行时逮到。
+    ⚠️ 2026-08-17 加撇号折叠。**TS 侧 `apostropheNorm` 必须与本函数逐字节一致** ——
+       同一个契约写两遍是老坑（音标哈希那次差一字节全库静默降级），
+       所以 `probes/norm_contract.py` 逐行核对两边的实现。
+    """
+    return "".join(c for c in unicodedata.normalize("NFD", w.translate(APOSTROPHES).lower())
                    if unicodedata.category(c) != "Mn")
 
 
@@ -71,16 +84,30 @@ def gate(con, n_new=None):
     print("\n═══ 闸 ═══")
     q = lambda s, *a: con.execute(s, a).fetchone()[0]
     checks = [
-        ("🔴 每个 entry 的 src_ref 大小写 == 它所属 dict 行的 word",
+        # 🔴 **已接受基线 252，附理由**（闸没有基线就永远红、久了没人看）：
+        #    阶段 1.5 灌意语证据时库里还没拆大小写（按 `w.lower()` 查），阶段 3a 拆行时
+        #    只搬了**已裁决**的那些，剩下的证据仍挂在大小写不对的 dict 行上。
+        #    已修 609 条，剩这批要连义项一起搬 —— **出版层的闸全绿、用户看不到**，
+        #    故记账不追（`it-CONVENTIONS` 记账本有条目）。
+        #    ⚠️ 数字**变大**就说明来了新的，不是这批老账。
+        ("（基线 252）entry 的 src_ref 大小写 == 它所属 dict 行的 word",
          q("SELECT count(*) FROM entry e JOIN dict d ON d.id=e.word_id "
            "WHERE substr(e.src_ref, 7, length(d.word)) <> d.word "
-           "OR substr(e.src_ref, 7+length(d.word), 1) <> ':'"), 0),
+           "OR substr(e.src_ref, 7+length(d.word), 1) <> ':'"), 252),
         ("义项与它的 entry 属于同一个 dict 行",
          q("SELECT count(*) FROM sense s JOIN entry e ON e.id=s.entry_id "
            "WHERE s.word_id <> e.word_id"), 0),
-        ("变形与它的 entry 属于同一个 dict 行",
+        # 🔴 2026-08-18 改口径（A28：红的是断言不是数据）。
+        #    原来写死「变形的 entry 必须属于变形形自己那一行」，报 724,575 条 ——
+        #    实测 `inflection.entry_id` **有两套语义**、各自内部一致、没有第三种：
+        #        724,582 条指向**原形**的 entry（`Antiochena` → `antiocheno`）
+        #        510,110 条指向**变形形自己**的 entry（`pie` → `pie` 自己的 adj entry）
+        #    哪一种对还没定（记账本已记，排阶段 8）⇒ 断言只保证**不是第三种**：
+        #    entry 必须落在「变形形自己」或「它的原形」二者之一，不许指到别的词去。
+        ("变形的 entry 必须落在自己或原形那一行（不许指到别的词）",
          q("SELECT count(*) FROM inflection i JOIN entry e ON e.id=i.entry_id "
-           "WHERE i.word_id <> e.word_id"), 0),
+           "WHERE e.word_id <> i.word_id "
+           "AND (i.base_id IS NULL OR e.word_id <> i.base_id)"), 0),
         ("证据行与它的义项属于同一个 dict 行",
          q("SELECT count(*) FROM sense_src x JOIN sense s ON s.id=x.sense_id "
            "WHERE x.word_id <> s.word_id"), 0),
