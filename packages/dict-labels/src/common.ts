@@ -26,6 +26,20 @@ export const POS_LABELS: Record<string, string> = {
   //   char 全是字母表条目（`f` 意大利语字母表第六个字母）⇒「字母」不是泛指的「字符」
   //   punct 是引号族（`« »` 标示引语）／part 是 `sì` `no` `a'`／interfix 只有 `-isc-`
   char: '字母', punct: '标点', part: '小品词', interfix: '连接成分',
+  // 2026-08-20 补 **西语的原始取值**（西语展示层契约闸第一次跑就逮到 97 处）：
+  //   🔴 上面那批（`sym`/`char`/`abbr`）是**意语**的短码 —— `it/build.py` 的 `POS_MAP`
+  //      把 kaikki 的 `symbol`/`character`/`abbreviation` 映射成了短码；
+  //      而 **es 的 `POS_MAP` 没有这几项**，原始串直接透传进 `sense.pos`。
+  //      ⇒ 同一张表要同时认两套取值。这不是重复，是两个语种的真实数据。
+  //   逐条回库看过实际内容再定词（照 `sym` 那次的教训，一次找全，别只补闸报出来的那个）：
+  //     abbrev 是词典学缩写（`Mús.` 音乐 / `UM` 货币符号 / `CORDE` 语料库名）
+  //     character 全是字母表条目（`A` 西班牙语字母表第一个字母）⇒「字母」不是「字符」
+  //     prep_phrase 是介词短语（`sin duda` 毫无疑问 / `de cabeza` 不假思索）
+  //     symbol 是计量与排版符号（`GB` 吉字节 / `@` 阿罗巴）
+  //     particle 是 `sí` 那族肯定词 ／ infix 只有 `-x-` `-it-`
+  //     syllable 只有 `pa`（仅用于 `de pe a pa`）／unknown 只有 `erre` 一条，源头没给词性
+  abbrev: '缩写', character: '字母', prep_phrase: '介词短语', symbol: '符号',
+  particle: '小品词', infix: '中缀', syllable: '音节', unknown: '未标注',
 };
 
 // 语域标签 → 中文（对应 build.py REGISTERS）。
@@ -41,6 +55,29 @@ export const REGISTER_LABELS: Record<string, string> = {
   sarcastic: '讽刺', endearing: '亲昵', emphatic: '强调', rhetoric: '修辞',
   bureaucratese: '官腔', Leet: 'Leet黑话', figuratively: '比喻',
 };
+
+// 关系条目上的标签 → 中文。2026-08-21。
+// 🔴 外审逮到的：es 的「派生」区把原始英文标签直接印了出来
+//    （`casilla diminutive`、`casucha pejorative`、`a casa adverb`、`近义 diñar slang`）——
+//    `RelationRow` 里写的是 `r.tags.join('·')`，**没查任何映射表**。
+// ⚠️ 值域与 REGISTER_LABELS 有重叠但不相同：这里还会出现构词标签（指小/指大）、
+//    性数标签、以及**关系类型自身**（`synonym`/`synonym-of`）——后者作为标签是冗余的
+//    （它就挂在「近义」那一组下面），映射成空串表示不显示。
+export const REL_TAG_LABELS: Record<string, string> = {
+  ...REGISTER_LABELS,
+  diminutive: '指小', augmentative: '指大', pejorative: '贬义',
+  masculine: '阳性', feminine: '阴性', 'masculine-feminine': '阴阳',
+  singular: '单数', plural: '复数', alternative: '异体', obsolete: '废弃',
+  verb: '动词', noun: '名词', adjective: '形容词', adverb: '副词',
+  // 关系类型自身作为标签是冗余的 ⇒ 空串＝不渲染
+  synonym: '', 'synonym-of': '', antonym: '', also: '', related: '',
+};
+
+/** 关系标签渲染成中文；查不到就原样显示（别把没见过的标签吞掉）。 */
+export function relTagLabel(tag: string): string {
+  const v = REL_TAG_LABELS[tag];
+  return v === undefined ? tag : v;
+}
 
 // 数属性 → 中文（对应 build.py NUMBER）。
 export const NUMBER_LABELS: Record<string, string> = {

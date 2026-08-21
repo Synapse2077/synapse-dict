@@ -42,6 +42,11 @@ import sqlite3
 import tempfile
 
 import paths
+# 🔴 判据 import it 那一份：同一个缺陷在两个语种上用两套判据，迟早对不上。
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent.parent / "it" / "fixes"))
+from fix_unclosed_paren import classify as paren_class   # noqa: E402
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent / "fixes"))
+from hide_english_relation_notes import is_english_note   # noqa: E402
 
 # ══════════════════════════════════════════════════════════════════════════
 #  落点：同一个「缺陷」要在哪两个地方查
@@ -65,6 +70,18 @@ IPA_APP = ("SELECT d.word AS word, p.ipa AS ipa FROM dict d JOIN pronunciation p
 #  ⚠️ 调高任何一个数字都必须同时写清为什么 —— 否则这就变成了掩盖回归的开关。
 # ══════════════════════════════════════════════════════════════════════════
 ACCEPT = {
+    # 🔴 D3 修在**展示层**（App.tsx 的 esNounBadge/esVerbBadge），SQL 查不到 ⇒
+    #    这个数字不会因修复而变。留基线只为「涨了说明数据层来了新的」，
+    #    真正守它的是契约闸（先渲染再断言）。
+    # ⚠️ 这个数被打回**三次**，每次都是收紧（不是放宽）：
+    #    ① 64,393 —— 拿 it 的 NOMINAL={"noun","name","adj"}（**长写法**）去比 es 的
+    #       pos（**短写法** n/name/adj），`{n} ⊆ {noun,…}` 恒为假，几乎所有词都命中。
+    #       ⇒ 跨语种复用判据，**值域必须先对齐**。
+    #    ② 823 —— 判据是「义项词性全是名词性」。**外审逮到误伤**：`banco` 有 6 条名词
+    #       义项 + 1 条感叹词义项（`¡banco!`），明确的 `el · 阳` 被藏掉了。
+    #    ③ 36 —— 只有**另一种也带性的词类**（art/pron/det/contr）与名词性并存时
+    #       才真的说不清归属（`la` ＝ 冠词阴 + 名词阳）。
+    "D3": 36,
     # x 数与 ɡs 数对不齐，`fix_x_gs.convert` 判据**故意拒绝猜**：
     # cóccix ˈkoɡsiɡs（cc 也读 ks）、exotoxina、exaccionista、saxitoxina。
     # 宁可留 4 个错，不要用机械替换去猜 —— 猜错的代价见 fix_x_gs 里 blogs/gangs 那段。
@@ -77,6 +94,18 @@ ACCEPT = {
     # `Imperio bizantino` / `Imperio romano` —— 多词专名的另一种拼法，源头就没给义项。
     # `exactQuery` 已把这类无义项无指针的行排到最后（spanish.ts:417），不会挡住正常检索。
     "B5": 2,
+    # C5 —— 🔴 **2026-08-20 修完之后这条断言的含义变了，基线 934 → 111。**
+    # 原本它量的是「大小写折叠残留」；`fix_case_fold_residue` 把 904 条义项搬回
+    # 各自的拼写行之后，剩下的 111 条**是预期行为**，不是残留：
+    # `sense_owner` 的人工裁决把「复活节岛」判给了大写行 `Isla de Pascua`，
+    # 而 dump 记的原拼写（`entry.spelling`）是小写 `isla de Pascua` ——
+    # 两者本来就该不同。⇒ C5 现在只是「义项行 ≠ entry 行」的计数，
+    # **真正管事的是 C10**（是否在权威说的那一行）。
+    # ⚠️ 留着 C5 是因为它涨了说明有人新造了折叠；但别再拿它当「残留」读。
+    "C5": 111,
+    # C7 = `merer` 14 + `ethnographique` 1 —— `build.py:277` 的 JUNK_BASES，
+    # 有意不给它们建词头。**实测值**，不是猜的（猜高一条会让「少补词头」这类回归隐形）。
+    "C7": 15,
 }
 
 # (编号, 修复脚本, 日期, 缺陷名, 条件SQL[对 ipa/word 两列], 例外说明)
@@ -153,6 +182,214 @@ SENSE_CHECKS = [
 ]
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  C 组 · 词条层 / 变形层（2026-08-20 建）
+#
+#  这两张表是**从旧列迁出来的**，所以回归的形状与 A/B 组不同：不是「修复被抹掉」，
+#  而是「迁移出来的这份与它的来源对不上了」。⇒ 判据一律是**与旧列逐字节比**。
+#  🔴 旧列 `dict.infl` / `dict.exchange` **有意不删**，冻结成迁移锚点 ——
+#     删了这道闸就永远失去了参照物（同 it 对 `dict.ipa` 的处置）。
+#
+#  ⚠️ C2 不写成 SQL。第一版用字符串算术在 SQL 里抠「最后一行」，
+#     报出 103,095 条假红 —— 是我的 SQL 写错了，不是数据错（A33 先查尺子）。
+#     完整的逐字节比对本来就该在 Python 里做，别为了塞进框架去凑 SQL。
+# ══════════════════════════════════════════════════════════════════════════
+def run_infl(con):
+    out = []
+
+    # C1 条数：inflection 行数 vs 旧列拆行后的条数
+    n_tab = con.execute("SELECT COUNT(*) FROM inflection").fetchone()[0]
+    n_col = con.execute(
+        "SELECT COALESCE(SUM(LENGTH(infl)-LENGTH(REPLACE(infl,char(10),''))+1),0) "
+        "FROM dict WHERE COALESCE(infl,'')<>''").fetchone()[0]
+    out.append(("C1", "build_inflection_layer.py", "08-20",
+                "变形层条数与旧 infl 列对不上", abs(n_tab - n_col)))
+
+    # C2 逐字节：从表反向重建每个词形的 infl 字符串，与旧列比。100%，非抽样。
+    from collections import defaultdict
+    rb = defaultdict(list)
+    for wid, seq, base, lab in con.execute(
+            "SELECT word_id, seq, base, label_zh FROM inflection"):
+        rb[wid].append((seq, ("%s 的 %s" % (base, lab)) if base else lab))
+    bad = 0
+    for wid, infl in con.execute(
+            "SELECT id, infl FROM dict WHERE COALESCE(infl,'')<>''"):
+        if "\n".join(t for _, t in sorted(rb.get(wid, []))) != infl:
+            bad += 1
+    out.append(("C2", "build_inflection_layer.py", "08-20",
+                "反向重建 infl 与旧列逐字节不符", bad))
+
+    # C3 挂锚规模：义项挂到 entry 的条数不许缩水（缩水＝有脚本重建了 sense 却没重挂）
+    n = con.execute("SELECT COUNT(*) FROM sense WHERE entry_id IS NOT NULL").fetchone()[0]
+    out.append(("C3", "build_entry_layer.py", "08-20",
+                "义项挂锚数缩水（基线 147,042）", max(0, 147042 - n)))
+
+    # C4 词性轴：sense.pos 与它所属 entry.pos 必须一致。这条是 0 容忍。
+    n = con.execute("SELECT COUNT(*) FROM sense s JOIN entry e ON e.id=s.entry_id "
+                    "WHERE s.pos IS NOT NULL AND s.pos<>e.pos").fetchone()[0]
+    out.append(("C4", "build_entry_layer.py", "08-20", "义项词性与所属词条词性不符", n))
+
+    # C5 大小写折叠残留：见 build_entry_layer 里的基线说明，934 是已接受存量，只拦涨。
+    n = con.execute("SELECT COUNT(*) FROM sense s JOIN entry e ON e.id=s.entry_id "
+                    "WHERE e.word_id<>s.word_id").fetchone()[0]
+    out.append(("C5", "build_entry_layer.py", "08-20",
+                "义项行≠entry行（裁决判给另一拼写，预期 111）", n))
+
+    # C6 读取路径：展示层拼 inflNotes 的规则与 C2 的重建规则必须是同一条。
+    #    🔴 这是「同一判据在写入列和读取列各查一次」里的**读取那一次**。
+    #    TS 侧的实测核对见 `probes/infl_read_path.ts`（4,000 个高频词形 4,000/4,000，
+    #    三种变异全部报红）。这里查的是它依赖的排序键还在不在 —— seq 一旦有洞或重复，
+    #    `ORDER BY i.seq` 拼出来的顺序就不再等于旧列的行序。
+    n = con.execute("SELECT COUNT(*) FROM (SELECT word_id FROM inflection "
+                    "GROUP BY word_id, seq HAVING COUNT(*)>1)").fetchone()[0]
+    out.append(("C6", "spanish.ts:inflectionQuery", "08-20",
+                "变形层 (word_id,seq) 有重复（读取路径靠它排序）", n))
+
+    # C7 悬空原形：2026-08-20 从 11,406 降到 15（`merer` 14 + `ethnographique` 1，
+    #    都是 build.py:277 有意不收的非标准词）。基线是**实测**的，不是猜的 ——
+    #    我第一版猜 16，结果「少补一个词头」这类回归恰好被吞掉、变异该红没红。
+    # ⚠️ 判据是「**指不到活着的 dict 行**」，不只是「base_id 为空」。
+    #    变异验证当场暴露了这个洞：删掉一个补收词头之后 `base_id` 仍非空、
+    #    只是指向了不存在的行，C7 一声不吭（那次是 C8 替它报的红）。
+    #    「悬空」的本质是指不到东西，不是某一列恰好为 NULL。
+    n = con.execute("""SELECT COUNT(*) FROM inflection i
+        LEFT JOIN dict d ON d.id = i.base_id
+        WHERE i.base<>'' AND COALESCE(i.hidden,0)=0 AND d.id IS NULL""").fetchone()[0]
+    out.append(("C7", "ingest_missing_bases.py", "08-20",
+                "变形指不到活着的原形行（基线 15）", n))
+
+    # C8 补收的词头还在不在。判据 = is_lemma + 规则音标 + 无释义无译文 + 有变形指着它。
+    #    **基线 8,063 是实测的**，与「本次新增 8,075」对不上，两处已知代价说清楚：
+    #      · 少 15：G2P 算不出音标的那批 `phonetic_src` 为空，判据够不到；
+    #      · 多 3：`Navidad` / `Nochevieja` / `Pentecostés` 三个**旧行**恰好也满足判据。
+    #    🔴 8,063 → 8,062（2026-08-20 晚）：删掉了 `empelotadose` —— 那是 wiktextract
+    #       粘出来的伪词，我给它建了词头。**基线降低必须写清为什么**，
+    #       否则下次有人会把它当成「又丢了一个词头」。
+    #    没有 `src` 标记列可以精确圈出「本次新增」，所以判据只能是近似的 ——
+    #    但它拦得住真正要拦的那件事（见下）。
+    #    🔴 `build.py` 是 DROP 重建 `dict` 的，这批词头**不在它的输出里** ——
+    #    重跑一次建库就全没了。这正是本闸存在的理由（「被抹掉」那一类）。
+    n = con.execute("""SELECT COUNT(*) FROM dict d
+        WHERE d.is_lemma=1 AND d.phonetic_src='rule' AND d.definition IS NULL
+          AND d.translation IS NULL
+          AND EXISTS(SELECT 1 FROM inflection i WHERE i.base_id=d.id)""").fetchone()[0]
+    out.append(("C8", "ingest_missing_bases.py", "08-20",
+                "补收词头缩水（基线 8,062）", max(0, 8062 - n)))
+
+    # C9 被修掉的伪原形不许在**读取路径**上复活。
+    #    判据抄 `spanish.ts:inflectionQuery`：COALESCE(base_fixed, base) + hidden 过滤。
+    n = con.execute("""SELECT COUNT(*) FROM inflection
+        WHERE COALESCE(hidden,0)=0 AND COALESCE(base_fixed, base) IN
+              ('desemejadose','tú and vos','él and usted','ellos and ellas',
+               'peuco an American hawk','soldado little soldier')""").fetchone()[0]
+    out.append(("C9", "fix_glued_reflexive_base.py", "08-20",
+                "wiktextract 粘出的伪原形在读取路径上复活", n))
+
+    # C10 大小写折叠残留：2026-08-20 从 934 降到 8。
+    #     判据 = 「义项待在 `word` 等于 `entry.spelling` 的那一行」。
+    #     🔴 判据必须用 **Python 建的精确映射**：`idx_word` 是 `word COLLATE NOCASE`，
+    #        SQL 里写 `d.word = e.spelling` 用不上索引 ⇒ 全表扫（当天踩了两次）。
+    #     基线 8 = `OCA`/`ANDA`/`UNA`/`REA`/`ARCA` 这类全大写缩写库里没有独立行，
+    #     义项待在 title-case 行上，是合理落点。**实测，不是猜的。**
+    # 🔴 判据**直接 import 修复脚本自己的 `target_of`**，不抄一份。
+    #    我第一版在这里另写了「义项必须在 entry.spelling 那一行」，
+    #    而修复脚本改成「`sense_owner` 裁决优先」之后，两者会互相报红。
+    _sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent / "fixes"))
+    from fix_case_fold_residue import load_authority, target_of   # noqa
+    exact, owner = load_authority(con)
+    off = 0
+    for sid, swid, ewid, spell in con.execute(
+            "SELECT s.id, s.word_id, e.word_id, e.spelling FROM sense s "
+            "JOIN entry e ON e.id=s.entry_id"):
+        t, why = target_of(sid, spell, ewid, exact, owner)
+        if t is None:
+            continue
+        if why == "spelling" and t != ewid:
+            t = ewid
+        if t != swid:
+            off += 1
+    out.append(("C10", "fix_case_fold_residue.py", "08-20",
+                "义项不在权威（sense_owner 裁决 > entry.spelling）说的那一行", off))
+
+    # C11 「参见 vs 变位形式」标题所依赖的信号。`App.tsx` 用
+    #     `inflNotes.length > 0 ? '变位形式' : '参见'` 分标题，而 `inflNotes` 来自
+    #     `inflection` 表。这 3,881 个词形（`aqui`/`sólo`/`tambien`，全是高频拼写变体）
+    #     必须保持「有 exchange、无变形行」，否则标题会静默变回「变位形式」。
+    #     ⚠️ **es 没有契约闸**（`contract-check.tsx` 只覆盖意语），
+    #        所以渲染层的规则只能在这里从数据侧盯着。这是已知缺口，记在 es-README。
+    n = con.execute("""SELECT COUNT(*) FROM dict d
+        WHERE COALESCE(d.exchange,'')<>'' AND COALESCE(d.infl,'')=''
+          AND EXISTS(SELECT 1 FROM inflection i
+                     WHERE i.word_id=d.id AND COALESCE(i.hidden,0)=0)""").fetchone()[0]
+    out.append(("C11", "App.tsx:变位形式/参见", "08-20",
+                "拼写变体词形冒出了变形行（标题会变回「变位形式」）", n))
+
+    # C12 搜索预计算表的**陈旧性**。这是派生数据，头号风险不是算错，
+    #     是「算对了然后 dict 变了没人重算」—— 那时页面上的搜索结果会是旧的，
+    #     而查 `search_prefix` 表本身一切正常（[[fix-regression-and-gate]] 的第二种机制）。
+    #     ⚠️ 这里只查**指纹**（两个 COUNT，毫秒级）。逐前缀 12,427 条的全量比对
+    #        在 `build_search_prefix.py` 自己的闸里，那个要跑十几秒，不适合挂在每次写库后。
+    try:
+        fp = con.execute("SELECT v FROM search_prefix_meta "
+                         "WHERE k='dict_fingerprint'").fetchone()
+        now = "%d:%d" % con.execute("SELECT COUNT(*), COALESCE(MAX(id),0) FROM dict").fetchone()
+        stale = 0 if (fp and fp[0] == now) else 1
+    except sqlite3.Error:
+        stale = 1        # 表不存在 = 没建或被删，同样要报
+    out.append(("C12", "build_search_prefix.py", "08-20",
+                "搜索预计算表已陈旧（dict 变了没重算）", stale))
+
+    # ── D 组：2026-08-21 拿 it 点测评审的判据来量 es ────────────────────────
+    # 🔴 判据 **import it 那一份**，不另写：同一个缺陷在两个语种上用两套判据，
+    #    迟早对不上。it 上 808 条，es 只有 11 条 —— es 打磨得更久，但不是 0。
+    n = sum(1 for (t,) in con.execute(
+        "SELECT target FROM sense_relation WHERE COALESCE(hidden,0)=0") if paren_class(t))
+    out.append(("D1", "hide_relation_colloc_residue.py", "08-21",
+                "关系目标里的括号残渣（读取路径）", n))
+
+    n = con.execute("""SELECT COALESCE(SUM(k-1),0) FROM (
+        SELECT COUNT(*) k FROM collocation WHERE COALESCE(hidden,0)=0
+         GROUP BY word_id, text HAVING k>1)""").fetchone()[0]
+    out.append(("D2", "hide_relation_colloc_residue.py", "08-21",
+                "同一个词的搭配重复出现（读取路径）", n))
+
+    # D3 词头徽标归属不明。**修在展示层**（App.tsx 的 esNounBadge/esVerbBadge），
+    #    SQL 查不到 ⇒ 这个数字不会因修复而变，进 ACCEPT 只为「涨了说明数据层来了新的」。
+    #    ⚠️ 真正守它的是契约闸（先渲染再断言）。判据与 App.tsx 逐字对应：
+    #    名词/专名/形容词共享性数系统，混进没有性数的词类才叫归属不明。
+    # ⚠️ 判据第一版是「义项词性全是名词性」，**外审逮到误伤** —— `banco` 有 6 条名词
+    #    义项 + 1 条感叹词义项（`¡banco!`），明确的 `el · 阳` 被藏掉了。
+    #    会打架的只有**另一种也带性的词类**（冠词/代词/限定词/缩合），
+    #    感叹词/介词/动词没有性，不影响名词那一支。与 App.tsx 逐字对应。
+    NOMINAL = {"n", "name", "adj"}
+    GENDERED = {"art", "pron", "det", "contr"}
+    scope = {}
+    for wid, pos in con.execute(
+            "SELECT word_id, pos FROM sense WHERE pos IS NOT NULL AND pos<>''"):
+        scope.setdefault(wid, set()).add(pos)
+    n = 0
+    for wid, g, pl in con.execute("SELECT id, gender, plural FROM dict"):
+        sc = scope.get(wid)
+        if sc and (g or pl) and (sc & NOMINAL) and (sc & GENDERED):
+            n += 1
+    out.append(("D3", "App.tsx 词头徽标守卫", "08-21",
+                "词头徽标属性归属不明（展示层已挡，见 ACCEPT）", n))
+
+    # D4 关系区里的英语说明文字。**外审逮到的**（豆包读 `la` 的渲染成品时指出
+    #    「相关词模块末尾混入无关的泛语法说明」），我所有确定性判据都没覆盖过这一族。
+    # 🔴 判据修了三轮：「全 ASCII」误伤 109 条西语谚语（西语字母本来就是 ASCII）→
+    #    双向语言判据（含英语功能词且不含西语功能词）→ 加 8 种精确名单
+    #    （`If le` 只有 5 个字符，长度判据够不到；`se3`/`ello5` 是 `se³`/`ello⁵`
+    #     的上标被压成了数字）。合计藏 635 条。
+    #    ⚠️ 残差记账：`kind='related'` 且目标在 dict 里查不到的仍有约 970 条，
+    #       其中含真西语短语（`¿necesitáis ayuda?`），判据够不到 ⇒ 只作上界。
+    n = sum(1 for (t,) in con.execute(
+        "SELECT target FROM sense_relation WHERE COALESCE(hidden,0)=0") if is_english_note(t))
+    out.append(("D4", "hide_english_relation_notes.py", "08-21",
+                "关系区里混进英语说明文字（读取路径）", n))
+    return out
+
+
 def run_ipa(con, mutate_note=""):
     out = []
     for cid, script, date, name, cond in IPA_CHECKS:
@@ -215,6 +452,21 @@ def report(con):
         print(f"  {cid:<4} {script:<28} {date:<6} {name:<40} {v:>10}  {verdict}")
 
     print()
+    print("═" * 108)
+    print("C 组 · 词条层/变形层 —— 判据是「迁出来的这份与旧列还对不对得上」")
+    print("═" * 108)
+    print(f"  {'ID':<4} {'来源':<32} {'日期':<6} {'缺陷':<40} {'残留':>10}  判定")
+    print("─" * 108)
+    for cid, script, date, name, n in run_infl(con):
+        acc = ACCEPT.get(cid, 0)
+        if n <= acc:
+            verdict = "✅ 仍在" if n == 0 else f"✅ 在基线内({acc})"
+        else:
+            verdict = "❌ 已回归"
+            bad_wrote += 1
+        print(f"  {cid:<4} {script:<32} {date:<6} {name:<40} {n:>10,}  {verdict}")
+
+    print()
     print("─" * 108)
     print(f"  ❌ 修复已失效：{bad_wrote} 条    ⚠️ 修复被绕过：{bad_reads} 条")
     return bad_wrote + bad_reads
@@ -231,6 +483,30 @@ def report(con):
 #       （原列脏但用户看不到，不该半夜叫醒任何人）。
 #     教训与「量源头不量落点」是同一条，只是这次犯在变异上。
 MUTATIONS = [
+    # ── D 组（2026-08-21）。⚠️ 变异要挑**目前不在缺陷集里**的行，
+    #    否则数字不动 ⇒ 报「漏掉」，而闸其实是好的（it 那轮在 D1 上栽过一次）。
+    ("D4 关系区塞一句英语说明",
+     "UPDATE sense_relation SET target='Only used in certain circumstances and rarely' "
+     "WHERE id=(SELECT id FROM sense_relation WHERE COALESCE(hidden,0)=0"
+     "          AND target NOT LIKE '% %' LIMIT 1)"),
+    ("D1 关系目标塞一个断括号",
+     "UPDATE sense_relation SET target='cuarto (1' WHERE id=("
+     "  SELECT id FROM sense_relation WHERE COALESCE(hidden,0)=0"
+     "   AND target NOT LIKE '%(%' AND target NOT LIKE '%)%' LIMIT 1)"),
+    ("D2 复制一条搭配（rank 另给）",
+     "INSERT INTO collocation (word_id,sense_id,text,rank) "
+     "SELECT word_id,sense_id,text,9999 FROM collocation c "
+     " WHERE NOT EXISTS(SELECT 1 FROM collocation c2 WHERE c2.word_id=c.word_id"
+     "                  AND c2.rank=9999) LIMIT 1"),
+    # D3 判据读的是 `sense.pos` 集合 ⇒ 变异要打在那儿：挑一个义项**全是名词性**
+    # 且词头带 gender 的词，把其中一条义项改成介词，性/复数立刻归属不明。
+    ("D3 让一个纯名词词的义项变成介词（性/复数归属立刻不明）",
+     "UPDATE sense SET pos='prep' WHERE id=("
+     "  SELECT s.id FROM sense s JOIN dict d ON d.id=s.word_id"
+     "   WHERE d.gender IS NOT NULL AND d.gender<>'' AND s.pos IS NOT NULL"
+     "     AND NOT EXISTS(SELECT 1 FROM sense s2 WHERE s2.word_id=d.id"
+     "                    AND s2.pos IS NOT NULL AND s2.pos NOT IN ('n','name','adj'))"
+     "   LIMIT 1)"),
     ("A1 往展示层注入 ɡs",
      "UPDATE pronunciation SET ipa='eɡsˈtɾemo' WHERE id=("
      "  SELECT p.id FROM pronunciation p JOIN dict d ON d.id=p.word_id"
@@ -249,6 +525,44 @@ MUTATIONS = [
      "DELETE FROM sense_relation WHERE kind='derived' AND rowid % 10 <> 0"),
     ("B9 删掉一条义项的全部中文",
      "DELETE FROM sense_gloss WHERE sense_id=(SELECT MIN(sense_id) FROM sense_gloss) AND lang='zh'"),
+    # ── C 组：迁出来的这份与旧列对不上 ──────────────────────────────
+    # ⚠️ 变异要打在**闸真正比的那一侧**。C 组比的是「新表 vs 旧列」，
+    #    所以改新表和改旧列都该报红 —— 下面两个方向各来一个。
+    ("C1 删掉一条变形行",
+     "DELETE FROM inflection WHERE id=(SELECT MIN(id) FROM inflection)"),
+    ("C2 改掉一条变形的中文说明",
+     "UPDATE inflection SET label_zh='__篡改__' WHERE id=("
+     "  SELECT MIN(i.id) FROM inflection i JOIN dict d ON d.id=i.word_id"
+     "   WHERE COALESCE(d.infl,'')<>'')"),
+    ("C2b 反过来：改旧列，新表不动",
+     "UPDATE dict SET infl=infl||char(10)||'__多出来的一行__' WHERE id=("
+     "  SELECT MIN(id) FROM dict WHERE COALESCE(infl,'')<>'')"),
+    ("C3 清掉一批义项的挂锚",
+     "UPDATE sense SET entry_id=NULL WHERE entry_id IS NOT NULL AND rowid % 7 = 0"),
+    ("C4 把一个词条的词性改掉",
+     "UPDATE entry SET pos='__x__' WHERE id=("
+     "  SELECT MIN(e.id) FROM entry e JOIN sense s ON s.entry_id=e.id WHERE s.pos IS NOT NULL)"),
+    ("C5 新造一条大小写折叠残留",
+     "UPDATE sense SET entry_id=(SELECT MIN(id) FROM entry WHERE word_id<>1) WHERE id=("
+     "  SELECT MIN(id) FROM sense WHERE word_id=1)"),
+    ("C7 把一个补收的词头删掉（变形重新悬空）",
+     "DELETE FROM dict WHERE id=(SELECT i.base_id FROM inflection i JOIN dict d ON d.id=i.base_id"
+     "  WHERE d.phonetic_src='rule' AND d.translation IS NULL AND d.definition IS NULL LIMIT 1)"),
+    ("C8 把补收词头的音标来源改掉（模拟被 build.py 重建覆盖）",
+     "UPDATE dict SET phonetic_src='kaikki-en' WHERE id IN ("
+     "  SELECT d.id FROM dict d WHERE d.phonetic_src='rule' AND d.translation IS NULL"
+     "   AND d.definition IS NULL AND d.is_lemma=1 LIMIT 200)"),
+    ("C12 往 dict 插一行（预计算表随即陈旧）",
+     "INSERT INTO dict(word, word_norm, is_lemma) VALUES ('__mut__','__mut__',1)"),
+    ("C10 把一条义项搬回小写行（专名混进常用词）",
+     "UPDATE sense SET word_id=(SELECT id FROM dict WHERE word='gracias'), rank=99 "
+     "WHERE id=(SELECT s.id FROM sense s JOIN dict d ON d.id=s.word_id"
+     "          WHERE d.word='Gracias' LIMIT 1)"),
+    ("C9 让一个伪原形在读取路径上复活",
+     "UPDATE inflection SET hidden=NULL, base_fixed=NULL WHERE base='tú and vos'"),
+    ("C6 造一条重复的 (word_id,seq)",
+     "INSERT INTO inflection(word_id,seq,base,base_id,label_zh,src,src_ref)"
+     " SELECT word_id,seq,base,base_id,label_zh,src,src_ref||'-mut' FROM inflection LIMIT 1"),
 ]
 
 
@@ -265,6 +579,9 @@ def reds_of(con):
             red.append(cid)
     for cid, *_x, n in run_sense(con):
         if isinstance(n, str) or n > ACCEPT.get(cid, 0):
+            red.append(cid)
+    for cid, *_x, n in run_infl(con):
+        if n > ACCEPT.get(cid, 0):
             red.append(cid)
     return red
 
@@ -315,6 +632,10 @@ def check_brief():
             if isinstance(n, str):
                 red.append((cid, name, n))
             elif n > acc:
+                red.append((cid, name, f"残留 {n:,}，基线 {acc}（{script}）"))
+        for cid, script, _d, name, n in run_infl(con):
+            acc = ACCEPT.get(cid, 0)
+            if n > acc:
                 red.append((cid, name, f"残留 {n:,}，基线 {acc}（{script}）"))
         return red
     finally:

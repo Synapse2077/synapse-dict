@@ -3,22 +3,22 @@
 > 由 `scripts/gen_manifest.py` 生成。事实自动扫，**来历与用途**在该脚本的 `NOTES` 里手工维护。
 > 数据有增减时重跑：`python3 scripts/gen_manifest.py > data/MANIFEST.md`
 
-生成时间：2026-08-12 22:03
+生成时间：2026-08-21 20:26
 
 
-## 成品库 `data/db/` —— 9 个文件，2.1 GB
+## 成品库 `data/db/` —— 9 个文件，3.3 GB
 
 | 文件 | 大小 | 修改日 | 是什么 | 来历 |
 |---|---|---|---|---|
-| `db/synapse-dict-es.sqlite` | 697.0 MB | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `db/synapse-dict-it.sqlite` | 1.1 GB | 2026-08-21 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `db/synapse-dict-es.sqlite` | 1009.2 MB | 2026-08-21 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/synapse-dict-en.sqlite` | 640.0 MB | 2026-08-01 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/ecdict.sqlite` | 322.4 MB | 2026-05-16 | ECDICT 原始库 | en 的基座（译文/词频/考试标签），第三方数据集 |
-| `db/synapse-dict-it.sqlite` | 148.2 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/synapse-dict-de.sqlite` | 111.1 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/synapse-dict-pt.sqlite` | 109.2 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/synapse-dict-fr.sqlite` | 95.9 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
-| `db/synapse-dict-en.sqlite-shm` | 32 KB | 2026-08-12 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
-| `db/synapse-dict-en.sqlite-wal` | 0 B | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `db/synapse-dict-en.sqlite-shm` | 32 KB | 2026-08-21 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `db/synapse-dict-en.sqlite-wal` | 0 B | 2026-08-21 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 
 ## 原始 dump `data/dumps/` —— 18 个文件，7.0 GB
 
@@ -41,36 +41,42 @@
 | `dumps/kaikki.org-elwiktionary-Italian.jsonl.gz` | 2.7 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-trwiktionary-Italian.jsonl.gz` | 2.4 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-zhwiktionary-Italian-simp.jsonl.gz` | 233 KB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
-| `dumps/README.md` | 2 KB | 2026-08-01 | — | — |
+| `dumps/README.md` | 3 KB | 2026-08-20 | — | — |
 
-## 写库备份 `data/backups/` —— 13 个文件，3.7 GB
+## 写库备份 `data/backups/` —— 19 个文件，6.7 GB
 
 | 文件 | 大小 | 修改日 | 是什么 | 来历 |
 |---|---|---|---|---|
-| `backups/synapse-dict-es.pre-build-sense-layer-20260811-130424.bak` | 697.0 MB | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-it.pre-fix-cross-edition-sense-20260821-135819.bak` | 1.1 GB | 2026-08-21 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-es.pre-hide-english-relation-notes-20260821-194830.bak` | 1009.2 MB | 2026-08-21 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-es.pre-keep-v3-entry-20260820-140712.bak` | 697.0 MB | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-es.pre-keep-ingest-sense-gap-20260810-154410.bak` | 671.3 MB | 2026-08-07 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-en.pre-ipanorm-20260801-193715.bak` | 637.1 MB | 2026-08-01 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-es.pre-keep-v2-schema-20260807-105628.bak` | 553.0 MB | 2026-08-06 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-es.pre-keep-ingest-es-senses-20260805-221648.bak` | 366.4 MB | 2026-08-04 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-it.pre-keep-v3-inflection-20260813-140018.bak` | 336.2 MB | 2026-08-13 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-es.pre-keep-edition-intake-20260803-141856.bak` | 220.3 MB | 2026-08-02 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-it.pre-keep-v3-entry-20260813-103112.bak` | 202.3 MB | 2026-08-13 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-it.pre-keep-v3-entry-20260813-102957.bak` | 202.3 MB | 2026-08-12 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-it.pre-keep-v2-dropcols-20260812-222701.bak` | 201.9 MB | 2026-08-12 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-es.pre-keep-ipanorm-20260801-160542.bak` | 200.4 MB | 2026-08-01 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
-| `backups/synapse-dict-it.pre-debare-20260727-1421.bak` | 137.1 MB | 2026-07-27 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-it.pre-keep-v2-schema-20260812-222550.bak` | 148.2 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-de.pre-debare-20260727-1421.bak` | 104.2 MB | 2026-07-27 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-pt.pre-debare-20260727-1421.bak` | 101.7 MB | 2026-07-27 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-fr.pre-debare-20260727-1421.bak` | 88.8 MB | 2026-07-27 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-en.pre-ipanorm-20260801-193715.bak-shm` | 32 KB | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-en.pre-ipanorm-20260801-193715.bak-wal` | 0 B | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 
-## 过程产物 `data/work/` —— 3277 个文件，794.4 MB
+## 过程产物 `data/work/` —— 3539 个文件，921.9 MB
 
 | 语种 | 文件数 | 大小 |
 |---|---|---|
 | _shared | 7 | 1017 KB |
 | de | 5 | 36.8 MB |
 | en | 125 | 343.0 MB |
-| es | 67 | 315.8 MB |
+| es | 70 | 315.8 MB |
 | fr | 6 | 22.8 MB |
-| it | 3061 | 46.0 MB |
+| it | 3320 | 173.6 MB |
 | pt | 6 | 29.0 MB |
 
 过程产物按语种分放；具体文件类型的来历见下表。
@@ -89,4 +95,4 @@
 
 ---
 
-**合计 13.5 GB**。全部 gitignore，不进版本库：源数据靠下载、产物靠脚本重生成、备份靠本地保管。
+**合计 17.9 GB**。全部 gitignore，不进版本库：源数据靠下载、产物靠脚本重生成、备份靠本地保管。

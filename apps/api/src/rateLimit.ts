@@ -68,8 +68,16 @@ export function createRateLimiter(opts: RateLimitOptions) {
     const g = hit(global, opts.maxGlobal, now);
     global = g.bucket;
     if (g.limited) {
-      res.setHeader('Retry-After', String(Math.ceil((global.resetAt - now) / 1000)));
-      res.status(503).json({ error: 'Service busy, please retry shortly' });
+      const retry = Math.ceil((global.resetAt - now) / 1000);
+      res.setHeader('Retry-After', String(retry));
+      // 🔴 格式必须与 `errors.ts` 的统一出口一致：`{error: <机器可读码>, message, detail}`。
+      //    原来这里回的是 `{error: 'Service busy, please retry shortly'}` —— `error`
+      //    位上放的是**人话**，客户端按错误码分支就会漏掉限流这一支。
+      //    2026-08-19 阶段 9 实测发现（打 130 次那轮）：其余错误都是 `limit_invalid`
+      //    这种码，唯独限流两条不是，**统一错误出口在这里是断的**。
+      res.status(503).json({
+        error: 'service_busy', message: '服务繁忙，请稍后重试', detail: { retryAfterSec: retry },
+      });
       return;
     }
 
@@ -83,8 +91,12 @@ export function createRateLimiter(opts: RateLimitOptions) {
     res.setHeader('X-RateLimit-Reset', String(Math.ceil(p.bucket.resetAt / 1000)));
 
     if (p.limited) {
-      res.setHeader('Retry-After', String(Math.ceil((p.bucket.resetAt - now) / 1000)));
-      res.status(429).json({ error: 'Too many requests' });
+      const retry = Math.ceil((p.bucket.resetAt - now) / 1000);
+      res.setHeader('Retry-After', String(retry));
+      res.status(429).json({
+        error: 'rate_limited', message: '请求过于频繁，请稍后重试',
+        detail: { limit: opts.maxPerIp, retryAfterSec: retry },
+      });
       return;
     }
 

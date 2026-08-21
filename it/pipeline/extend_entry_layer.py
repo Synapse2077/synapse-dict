@@ -50,15 +50,17 @@ import argparse
 import re
 import sqlite3
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fixes"))
 
 import dbtool   # noqa: E402
 import paths    # noqa: E402
 from build import POS_MAP   # noqa: E402  只用来做闸④的反向断言
+from split_case_forms import APOSTROPHES   # noqa: E402  与撇号搬家脚本共用同一份
 
 # `kk-<版>:<词形>:<词性>` + 可选的 `:词源:序号` + 可选的 `#位置`
 REF = re.compile(r"^kk-(?P<ed>[a-z]+):(?P<word>.*):(?P<pos>[a-z_]+)(?::\d+:\d+)?(?:#.*)?$")
@@ -74,6 +76,24 @@ def src_ref_of(ed, word, pos):
     return "kk-%s:%s:%s:0:0" % (ed, word, pos)
 
 
+def word_evidence(con):
+    """→ {word_id: {(版本, kaikki 词性)}}，来自该词形**所有**证据行。
+
+    🔴 2026-08-19 补：包括 `sense_id` 为空的**词级**证据行。
+       盲推那批义项（`fill_blind_gloss`，3,391 条）自己没有证据行 ——
+       它们建立在"各版都没有释义"这个前提上。但同词形上往往还留着意语版那条
+       `definizione mancante` 占位符，它的 `src_ref` 里带着 kaikki 原生词性
+       （`kk-it:accappare:verb#0.0`）。那就是能证明词性的东西，只是挂在词上不挂在义项上。
+    """
+    ev = defaultdict(set)
+    for wid, ref in con.execute(
+            "SELECT word_id, src_ref FROM sense_src WHERE src_ref IS NOT NULL"):
+        ed, pos = parse_ref(ref)
+        if pos:
+            ev[wid].add((ed, pos))
+    return ev
+
+
 def plan(con):
     """→ (新建 [(word_id, word, pos, ed)], 挂已有 [(sense_id, entry_id)], 统计)"""
     ent = {}
@@ -82,6 +102,19 @@ def plan(con):
     word = dict(con.execute("SELECT id, word FROM dict"))
     fresh, link, st = {}, [], Counter()
     seen_sense = set()
+
+    def place(sid, wid, ed, pos, tag):
+        eid = ent.get((wid, pos))
+        if eid is not None:
+            link.append((sid, eid))
+            st[tag + "：挂到已有 entry"] += 1
+        else:
+            # 同一 (词形,词性) 来自两版时合并成一行，src 记先到的
+            fresh.setdefault((wid, pos), (word[wid], ed))
+            link.append((sid, (wid, pos)))     # 占位，写库时换成真 id
+            st[tag + "：新建 entry 并挂上"] += 1
+
+    # ═══ 第一遍：义项自己带证据行 —— 词性直接从它的 src_ref 取 ═══
     for sid, wid, ref in con.execute(
             "SELECT s.id, s.word_id, x.src_ref FROM sense s "
             "JOIN sense_src x ON x.sense_id=s.id "
@@ -93,18 +126,30 @@ def plan(con):
             st["🔴 src_ref 解析不出词性（跳过）"] += 1
             continue
         seen_sense.add(sid)
-        eid = ent.get((wid, pos))
-        if eid is not None:
-            link.append((sid, eid))
-            st["挂到已有 entry（英文版建的）"] += 1
-        else:
-            # 同一 (词形,词性) 来自两版时合并成一行，src 记先到的
-            fresh.setdefault((wid, pos), (word[wid], ed))
-            link.append((sid, (wid, pos)))     # 占位，写库时换成真 id
-            st["新建 entry 并挂上"] += 1
-    st["🔴 没有任何证据的义项（无从建 entry）"] = con.execute(
-        "SELECT count(*) FROM sense s WHERE s.entry_id IS NULL AND COALESCE(s.hidden,0)=0 "
-        "AND NOT EXISTS(SELECT 1 FROM sense_src x WHERE x.sense_id=s.id)").fetchone()[0]
+        place(sid, wid, ed, pos, "自带证据")
+
+    # ═══ 第二遍：义项没有自己的证据行，退到**词级**证据 ═══
+    # 🔴 词级证据可能给出多个词性（`elitista` 既是形容词又是名词）。那时唯一还能
+    #    用的东西是 `sense.pos`（展示层短码）——**只在它能把候选缩到 1 个时才用**。
+    #    缩不到 1 个就不建：宁可留 entry_id 空白，也不把义项挂到可能错的词条上
+    #    （闸②「反错配」防的就是这件事，别自己先犯）。
+    ev = word_evidence(con)
+    for sid, wid, spos in con.execute(
+            "SELECT s.id, s.word_id, s.pos FROM sense s "
+            "WHERE s.entry_id IS NULL AND COALESCE(s.hidden,0)=0 "
+            "AND NOT EXISTS(SELECT 1 FROM sense_src x WHERE x.sense_id=s.id) ORDER BY s.id"):
+        cand = ev.get(wid) or set()
+        if not cand:
+            st["🔴 词级证据也没有（无从建 entry）"] += 1
+            continue
+        if len({p for _e, p in cand}) > 1:
+            cand = {(e, p) for e, p in cand if POS_MAP.get(p) == spos}
+        if len({p for _e, p in cand}) != 1:
+            st["🔴 词级证据给出多个词性，缩不到一个（不建）"] += 1
+            continue
+        ed, pos = sorted(cand)[0]
+        place(sid, wid, ed, pos, "退到词级证据")
+
     rows = [(wid, w, pos, ed) for (wid, pos), (w, ed) in fresh.items()]
     return rows, link, st
 
@@ -114,11 +159,19 @@ def gate(con):
     q = lambda s, *a: con.execute(s, a).fetchone()[0]
     rows, link, st = plan(con)
     # ① 本步建的 entry，src_ref 必须能按同一规则逐字节重算出来
+    #
+    # 🔴 2026-08-19：这条闸红了 252 条，是**尺子错，不是数据错**。
+    #    `merge_apostrophe_variants` 把 `all’aperto`（印刷撇号）并进了 `all'aperto`
+    #    （ASCII 撇号），而 `src_ref` 记的是**源头怎么叫它**，那一列合并时刻意不动
+    #    （那个脚本第 25 行就写着这件事）。这条闸却假设 `dict.word` 永不变。
+    #    ⇒ 判据改成「归一到同一撇号之后逐字节相等」，用的是搬家脚本**同一份**
+    #      `APOSTROPHES`（不另写一份，否则两边约定漂了没人发现）。
+    #      归一之外的任何一个字节不同，照样报红 —— 变异验证第三条盯着这一点。
     bad_ref = sum(1 for eid, wid, pos, sr, src in con.execute(
         "SELECT e.id, e.word_id, e.pos, e.src_ref, e.src FROM entry e "
         "WHERE e.src IN ('fr-edition','it-edition')")
         for w in [con.execute("SELECT word FROM dict WHERE id=?", (wid,)).fetchone()[0]]
-        if sr != src_ref_of(src.split("-")[0], w, pos))
+        if sr.translate(APOSTROPHES) != src_ref_of(src.split("-")[0], w, pos).translate(APOSTROPHES))
     # ② 反错配：义项挂的 entry 必须同词形、且词性等于证据里的词性
     cross = q("SELECT count(*) FROM sense s JOIN entry e ON e.id=s.entry_id "
               "WHERE e.word_id <> s.word_id")
@@ -134,15 +187,24 @@ def gate(con):
         ("🔴 本步建的 entry.src_ref 逐字节可复算", bad_ref, 0),
         ("🔴 义项挂的 entry 必须是同一个词形（反错配）", cross, 0),
         ("🔴 entry.pos 必须等于该义项证据里的词性（反错配）", posbad, 0),
-        ("🔴 本步建的 entry 不许有孤儿（没有义项挂着）",
+        # 🔴 已接受基线 102 + 理由：法语版给了这 102 个动词的**变位表**（5,628 行
+        #    `inflection` 指向它们），但三个版本都没给释义，盲推那一批也没覆盖到。
+        #    entry 行留着是有用的 —— 变位表要靠它归属；删了等于把变位表也扔了。
+        #    这批词形在页面上是「有词头有变位表、没有释义」＝**不完整，不是错**。
+        ("法语版变位表带来的无义项 entry（基线 102）",
          q("SELECT count(*) FROM entry e WHERE e.src IN ('fr-edition','it-edition') "
-           "AND NOT EXISTS(SELECT 1 FROM sense s WHERE s.entry_id=e.id)"), 0),
+           "AND NOT EXISTS(SELECT 1 FROM sense s WHERE s.entry_id=e.id)"), 102),
         ("🔴 entry.pos 仍全是 kaikki 原值，没混进展示层短码",
          sum(1 for (p,) in con.execute("SELECT DISTINCT pos FROM entry")
              if p not in POS_MAP), 0),
-        # 🔴 已接受基线 27 + 理由：这 27 条义项**一条证据都没有**，
-        #    无从判断它属于哪个词条。不编，记账。
-        ("没有任何证据的义项（基线 27）", st["🔴 没有任何证据的义项（无从建 entry）"], 27),
+        # 🔴 已接受基线 21 + 理由：这 21 条义项在**词和义项两级**都没有任何证据行
+        #    （盲推那批里"连占位符都没有"的一族），无从判断它属于哪个词条。不编。
+        ("词级证据也没有的义项（基线 21）", st["🔴 词级证据也没有（无从建 entry）"], 21),
+        # 🔴 已接受基线 15 + 理由：`elitista` 这类词，词级证据同时给出 adj 和 noun，
+        #    `sense.pos` 又缩不到一个（多数正是上面 `fix_blind_sense_pos` 清空的那批）。
+        #    把义项挂到猜的那个词条上，正是闸②要防的错配 ⇒ 宁可留空。
+        ("词级证据缩不到一个词性的义项（基线 15）",
+         st["🔴 词级证据给出多个词性，缩不到一个（不建）"], 15),
     ]
     ok = True
     for name, got, want in checks:

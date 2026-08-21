@@ -185,7 +185,12 @@ export type SpanishEntry = {
   tts: SpanishTts[];           // 工具合成音（有哪个口音就给哪个，缺的由前端落到浏览器 TTS）
   baseForms: string[];         // 变位形式 → 原形词（来自 exchange "0:原形"）
   bases: SpanishBase[];        // 原形词连同其词义（服务端解析，供内联展示）
-  inflNotes: string[];         // 该词形的语法说明（来自 infl 列，可多行）
+  inflNotes: string[];         // 该词形的语法说明（来自 inflection 表，可多行）
+  // 反查：以本词为原形的变形形。2026-08-20 加，`inflection.base_id` 建成之后才可能。
+  // 主要给 8,075 个**补收的词头**用 —— 源头只有变形页、没有词头页，
+  // 我们按证据补了词头但**没有释义**（模型盲推这批生僻词错误率 24–25%，宁可留空白）。
+  // 有了这一块，页面至少能回答「这个词长什么样、怎么读、有哪些变形」。
+  forms: { word: string; label: string }[];
   homographs: SpanishHomograph[];  // 拼写只差大小写的其他词条（同页并列显示）
   flag: string | null;
 };
@@ -363,9 +368,16 @@ function mapEntry(row: EsRow): SpanishEntry {
     unifiedSenses: [],                // 另表，由 getEntry 填
     tts: [],                          // 文件系统，由 getEntry 填
 
+    // 🔴 `baseForms` **继续读 `exchange`，不读 `inflection.base`**（2026-08-20）。
+    //    这两列不是同一份东西：`build.py:305-330` 对 `exchange` 里的原形做过**人工裁决**
+    //    （`fertil`→`fértil` 重指、`azud m`→`azud` 剥英文泄漏、`tú and vos` 当垃圾删掉），
+    //    `infl` 行里留的是**未裁决的原字符串**。实测换过去 15,499 个词形会变：
+    //    `absconder` 丢掉指向 `esconder` 的链接、`te` 冒出一个点不开的 `tú and vos`。
+    //    ⇒ 裁决过的那份才是真值。变形层给的是**结构**（tags / 原文 / base_id），不是原形裁决。
     baseForms: parseBaseForms(row.exchange),
     bases: [],
-    inflNotes: splitLines(row.infl),
+    inflNotes: [],                    // 另表 `inflection`，由 getEntry 填
+    forms: [],                        // 另表 `inflection` 反查，由 getEntry 填
     homographs: [],                   // 另表，由 getEntry 填
     flag: row.flag,
   };
@@ -387,6 +399,9 @@ export class SpanishDictService {
   private readonly exampleQuery;
   private readonly relationQuery;
   private readonly homographQuery;
+  private readonly inflectionQuery;
+  private readonly formsQuery;
+  private readonly prefixCacheQuery;
 
   constructor(databasePath: string, ttsDir?: string) {
     this.databasePath = databasePath;
@@ -532,11 +547,15 @@ export class SpanishDictService {
       WHERE word_id = ? AND notation = 'phonemic' AND is_primary = 1
     `);
 
+    // 🔴 2026-08-21 加 hidden 过滤，与 sense_relation 同批：
+    //    `hide_relation_colloc_residue` 藏了 6 组重复搭配（en el aire 出现 3 次）
+    //    与 11 条关系残渣（barril 的度量衡换算表被切成 cuarto (1 + 1008 barriles)）。
+    //    加列不改这里 = 白做 —— it 那轮就是这么栽的，而且脚本的 --verify 还报了绿。
     this.collocationQuery = this.db.prepare(`
       SELECT c.id, c.text, g.text AS zh
       FROM collocation c
       LEFT JOIN collocation_gloss g ON g.collocation_id = c.id AND g.lang = 'zh'
-      WHERE c.word_id = ?
+      WHERE c.word_id = ? AND COALESCE(c.hidden, 0) = 0
       ORDER BY c.rank
     `);
 
@@ -566,7 +585,7 @@ export class SpanishDictService {
              EXISTS(SELECT 1 FROM dict d2
                     WHERE d2.word = r.target COLLATE NOCASE) AS linkable
       FROM sense_relation r
-      WHERE r.word_id = ?
+      WHERE r.word_id = ? AND COALESCE(r.hidden, 0) = 0
       ORDER BY r.kind, r.id
     `);
 
@@ -582,6 +601,53 @@ export class SpanishDictService {
       SELECT t.sense_id, t.kind, t.value
       FROM sense_tag t JOIN sense s ON s.id = t.sense_id
       WHERE s.word_id = ?
+    `);
+
+    // 变形层（2026-08-20 建，取代 `dict.infl` 那个多行字符串）。
+    // `seq` 就是旧列的行序 —— 排序键换成别的，页面上变形的先后就会变。
+    // `base_fixed` 优先于 `base`，`hidden=1` 不渲染 —— 见 fixes/fix_glued_reflexive_base.py。
+    // 🔴 修的是**用户看得见的错**：`lo`(zipf 6.89) 的变位形式曾显示
+    //    「él and usted 的 宾格」—— wiktextract 把英文粘进了原形，
+    //    而这几个词是全词典频次最高的。`base` 列本身不改（它是闸①的参照物）。
+    this.inflectionQuery = this.db.prepare(`
+      SELECT i.seq, COALESCE(i.base_fixed, i.base) AS base, i.base_id,
+             i.label_zh, i.kind, d.word AS base_word
+      FROM inflection i LEFT JOIN dict d ON d.id = i.base_id
+      WHERE i.word_id = ? AND COALESCE(i.hidden, 0) = 0
+      ORDER BY i.seq
+    `);
+
+    // 短前缀预计算（2026-08-20，`pipeline/build_search_prefix.py`）。
+    // 🔴 `search()` 是**每敲一个字符跑一次**的路径，而 1 字符前缀实测最慢 354ms ——
+    //    瓶颈是为了取 20 条把 2–3 万条候选整个排一遍（`LENGTH(word)` 与
+    //    `lower(word)=lower(?)` 都不可索引，`OR` 又强制走 MULTI-INDEX OR）。
+    //    1–3 字符前缀全库约 1.1 万种（含大小写变体），答案完全由前缀决定 ⇒ 预算好。
+    //    做到 2 不够：1–2 降到 1ms 之后最慢的变成 3 字符的 `des`（114ms）。
+    // ⚠️ **查不到就回退实时查询**，结果一样只是慢一点 —— 缓存未命中不是错误。
+    //    这条性质是有意的：SQLite 的 `lower()` 不认非 ASCII，与其猜大小写归一规则，
+    //    不如让键严格等于原串。
+    this.prefixCacheQuery = this.db.prepare(`
+      SELECT d.id, d.word, d.is_lemma, d.pos, d.translation, d.definition,
+             (SELECT g.text FROM sense_gloss g
+              WHERE g.sense_id = (SELECT s.id FROM sense s
+                                  WHERE s.word_id = d.id ORDER BY s.rank LIMIT 1)
+                AND g.lang = 'zh'
+              ORDER BY LENGTH(g.text) LIMIT 1) AS sense_zh
+      FROM search_prefix p JOIN dict d ON d.id = p.word_id
+      WHERE p.prefix = ?
+      ORDER BY p.rank
+      LIMIT ?
+    `);
+
+    // 反查：以本词为原形的变形形。走 `idx_infl_base`（base_id）。
+    // 🔴 上限 60：`hablar` 这类动词有几百个变位形，全塞给前端会把页面撑爆
+    //    （超长内容撑版面是 es 展示层已知的三条线索之一）。
+    this.formsQuery = this.db.prepare(`
+      SELECT d.word AS word, i.label_zh AS label
+      FROM inflection i JOIN dict d ON d.id = i.word_id
+      WHERE i.base_id = ? AND COALESCE(i.hidden, 0) = 0
+      ORDER BY d.word, i.seq
+      LIMIT 60
     `);
   }
 
@@ -633,7 +699,14 @@ export class SpanishDictService {
     const keyword = query.trim();
     if (!keyword) return [];
     const like = `${keyword}%`;
-    const rows = this.prefixQuery.all(like, like, keyword, limit) as Array<{
+    // 短前缀走预计算表；未命中（或长前缀）落回实时查询，结果一致。
+    let rows = (keyword.length <= 3
+      ? this.prefixCacheQuery.all(keyword, limit)
+      : []) as Array<{
+      id: number; word: string; pos: string | null;
+      translation: string | null; definition: string | null; sense_zh: string | null;
+    }>;
+    if (rows.length === 0) rows = this.prefixQuery.all(like, like, keyword, limit) as Array<{
       id: number; word: string; pos: string | null;
       translation: string | null; definition: string | null; sense_zh: string | null;
     }>;
@@ -722,6 +795,22 @@ export class SpanishDictService {
     const row = this.exactQuery.get(keyword, keyword) as EsRow | undefined;
     if (!row) return null;
     const entry = mapEntry(row);
+
+    // 变形层：语法说明改从 `inflection` 表读（2026-08-20），不再劈 `dict.infl` 字符串。
+    // 🔴 迁移时逐词形核过：这里拼出来的 `inflNotes` 与旧列 `splitLines(row.infl)`
+    //    在**全部 1,139,997 个词形上逐字节相同**（差异只出在 baseForms，见 mapEntry 处的注释）。
+    //    契约闸另有一条断言盯着这件事，别改了排序或拼法就以为没人看得见。
+    const infl = this.inflectionQuery.all(row.id) as Array<{
+      seq: number; base: string; base_id: number | null;
+      label_zh: string; kind: string | null; base_word: string | null;
+    }>;
+    entry.inflNotes = infl.map((r) => (r.base ? `${r.base} 的 ${r.label_zh}` : r.label_zh));
+
+    // 反查变形形。**只在本词没有义项时查** —— 有释义的词条页信息已经够多，
+    // 再挂一串变位形只会挤掉真正要看的东西；而补收的词头正好没有义项。
+    if (row.definition === null && row.translation === null) {
+      entry.forms = this.formsQuery.all(row.id) as { word: string; label: string }[];
+    }
 
     // 解析每个原形的词义（单层，供变位页内联展示各原形分别是什么意思）。
     for (const bw of entry.baseForms) {

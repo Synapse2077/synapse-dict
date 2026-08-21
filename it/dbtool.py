@@ -121,40 +121,103 @@ def diff(before, after):
 #  🔴 里程碑用文件名豁免，不靠"记得手动留"：
 #     tag 里带 `keep` 的（`dbtool.session("keep-v2-schema")`）永不淘汰。
 #     结构大改之前请用这个前缀 —— 那种备份删了就真回不去了。
+#
+#  🔴 2026-08-20 补第三条规则：**按总量封顶**。
+#     前两条规则挡不住这个形状 —— 一轮收尾跑十几个**不同 tag** 的脚本，
+#     「同 tag 同天留最新」一个都淘汰不掉；而 it 的库已经涨到 1.1 GB/次，
+#     `MAX_BACKUPS=12` 换算过来就是 **13 GB**。8-19/8-20 两天实测正是 13.1 GB。
+#     ⇒ 条数上限对"库变大"是失效的，必须再加一条以字节计的闸。
 KEEP_TAG = "keep"
-MAX_BACKUPS = 12          # 同一语种保留的非豁免备份数上限
+#  🔴 2026-08-21 收紧：`keep` 从「三条全豁免」改成「**只豁免 ①③，计入 ②**」。
+#     起因＝当天清盘时发现自动淘汰一个都没删，而 backups 已经 9.8 GB：
+#     it 7 个备份里 5 个带 keep 全豁免，剩下的字节数又没到上限 ⇒
+#     **堆积的不是普通备份，是豁免名单本身**。里程碑只增不减，
+#     一门语言做完就永久压着 2-3 GB。
+#  ⚠️ 代价说明白：条数上限是**共享**的，所以一天跑够 MAX_BACKUPS 个普通备份，
+#     最老的里程碑会被挤掉。这是本函数唯一一处会删 keep 的地方，
+#     因此淘汰 keep 时**必须打印警告**（见下面的 `⚠️ 淘汰里程碑`），不许静默。
+MAX_BACKUPS = 12            # 同一语种保留的备份数上限（**含 keep**，2026-08-21 起）
+#     3 GB ≈ 当前 it 库的两个快照。**用字节不用条数**，所以库长大时它自动收紧条数 ——
+#     条数上限恰恰是对「库变大」失效的那一条。里程碑（keep）不计入，永远删不掉。
+MAX_BACKUP_BYTES = 3 * 1024 ** 3   # 非 keep 备份的总量上限（带 keep 的不计入）
+
+
+def _backup_time(p, day, hms):
+    """备份时间取**文件名里的时间戳**，不取 mtime。
+
+    🔴 2026-08-21：`backup()` 用 `shutil.copy2` 复制，**它连源库的 mtime 一起搬过来**
+       ⇒ `.bak` 的 mtime 是「这个库最后一次被写」的时刻，**不是「备份是什么时候打的」**。
+       两者能差很远：实测 7 个备份对不上，最狠的
+       `synapse-dict-es.pre-keep-v3-entry-20260820-140712.bak` mtime 是 **8-11，差 9 天**
+       （es 8-11 封版后库一直没动，8-20 才打的这个备份）。
+       规则①②都按时间排队，用错时钟会把**刚打的里程碑排成最老的**先删掉。
+    ⚠️ 文件名时分秒有 4 位（`-1421`）和 6 位（`-140712`）两种写法，补零到 6 位再解析。
+       解析不了就退回 mtime —— 宁可排序差一点，也不能因为一个怪名字就抛异常。
+    """
+    try:
+        return time.mktime(time.strptime(day + hms.ljust(6, "0"), "%Y%m%d%H%M%S"))
+    except ValueError:
+        return p.stat().st_mtime
 
 
 def prune_backups(verbose=True, dry=False):
-    """同一 tag 同一天只留最新的一个；再按时间保留最近 MAX_BACKUPS 个。带 keep 的豁免。
+    """三条规则依次收紧。`keep` 豁免 ①③、**计入 ②**（2026-08-21 改，见上）：
+    ① 同一 tag 同一天只留最新的一个        —— keep 豁免
+    ② 全部按时间取最近 MAX_BACKUPS 个      —— keep **也算**
+    ③ 再按**总字节**从新到旧累加，超过 MAX_BACKUP_BYTES 的淘汰 —— keep 不计入也不淘汰
+
+    🔴 ③ 至少留 1 个：真出事时手里得有一个能回滚的点。
 
     `dry=True` 只列不删 —— **改这个函数之后先 dry 跑一遍**。
     它是本仓库里唯一一个会自动删数据的地方，写错了没有第二次机会。
     """
     pat = re.compile(r"^%s\.pre-(.+)-(\d{8})-(\d{4,6})\.bak$" % re.escape(DB.stem))
-    rows = []
+    rows, when = [], {}
     for p in paths.BACKUPS.glob("%s.pre-*.bak" % DB.stem):
         m = pat.match(p.name)
         if m:
             rows.append((p, m.group(1), m.group(2)))
-    keep, drop = set(), []
-    # ① 同 (tag, 日期) 只留最新
+            when[p] = _backup_time(p, m.group(2), m.group(3))
+    exempt, drop = set(), []
+    # ① 同 (tag, 日期) 只留最新。keep 豁免这一条 —— 同一天同一个 tag 的两个里程碑
+    #    （8-13 那对相隔 75 秒的 `keep-v3-entry`）不当重复删。
     newest = {}
     for p, tag, day in rows:
         if KEEP_TAG in tag:
-            keep.add(p)
+            exempt.add(p)
             continue
         k = (tag, day)
-        if k not in newest or p.stat().st_mtime > newest[k].stat().st_mtime:
+        if k not in newest or when[p] > when[newest[k]]:
             if k in newest:
                 drop.append(newest[k])
             newest[k] = p
         else:
             drop.append(p)
-    # ② 剩下的按时间取最近 MAX_BACKUPS 个
-    rest = sorted(newest.values(), key=lambda p: -p.stat().st_mtime)
-    keep |= set(rest[:MAX_BACKUPS])
-    drop += rest[MAX_BACKUPS:]
+    # ② 按时间取最近 MAX_BACKUPS 个。🔴 keep 也在这个池子里（2026-08-21 改）——
+    #    否则里程碑只增不减，一门语言做完就永久压着 2-3 GB。
+    pool = sorted(list(newest.values()) + list(exempt), key=lambda p: -when[p])
+    drop += pool[MAX_BACKUPS:]
+    pool = pool[:MAX_BACKUPS]
+
+    # ③ 总量封顶：从新到旧累加，超了的淘汰。**至少留 1 个**。
+    #    keep 不计入总量、也不被这条淘汰。
+    total, survive, seen_plain = 0, [], False
+    for p in pool:
+        if p in exempt:
+            survive.append(p)
+            continue
+        total += p.stat().st_size
+        if not seen_plain or total <= MAX_BACKUP_BYTES:
+            survive.append(p)
+        else:
+            drop.append(p)
+        seen_plain = True
+    keep = set(survive)
+
+    # ⚠️ 淘汰里程碑：本函数唯一会删 keep 的路径（规则②的共享条数上限），永不静默。
+    for p in drop:
+        if KEEP_TAG in p.name:
+            print("   ⚠️ 淘汰里程碑（条数超 %d）：%s" % (MAX_BACKUPS, p.name))
 
     freed = sum(p.stat().st_size for p in drop)
     if dry:

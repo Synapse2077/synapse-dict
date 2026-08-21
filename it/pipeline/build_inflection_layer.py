@@ -31,6 +31,7 @@
 """
 import argparse
 import json
+import re
 import sqlite3
 import sys
 from collections import Counter, defaultdict
@@ -60,6 +61,31 @@ DDL = """CREATE TABLE inflection (
 IDX = ["CREATE INDEX idx_infl_word ON inflection(word_id)",
        "CREATE INDEX idx_infl_base ON inflection(base_id)",
        "CREATE INDEX idx_infl_entry ON inflection(entry_id)"]
+
+
+# 源头会把性别/数标记缀在原形词后：`form_of: [{"word": "uovo m"}]`。
+# 🔴 原样存会让 `base_id` 解析不出来（`uovo m` 不是词形），于是**任何按 base_id 走索引的
+#    查询都看不见这一行** —— 双复数展示就是这么被挡住的（`uovo` 一条复数都查不到）。
+#    2026-08-19 修在**入口**：只删库不改这里，下次重收又会灌回来
+#    （`replay-scripts-undo-fixes`）。判据与 `fixes/clean_inflection_base.py` 共用这一份。
+_BASE_SUFFIX = re.compile(r"^(.*\S)\s+(?:m|f|mf|pl|m pl|f pl)$")
+
+
+def clean_base(base):
+    """剥掉原形词尾巴上的性别/数标记。**剥不出就原样返回**，不硬猜。
+
+    🔴 **必须幂等**（`clean_base(clean_base(x)) == clean_base(x)`）：
+       源头有 `… quanti m pl` 这种两个标记连着的，剥一次得 `… quanti m`，
+       它自己又以 ` m` 结尾。剥一次的话，**入口剥一次、闸再剥一次就永远差一步**，
+       外锚闸每次都报一条不符。⇒ 循环剥到稳定为止。
+       （与阶段 4 的 `norm(norm(x))==norm(x)` 是同一条要求，那道闸就在 build 的闸④里。）
+    """
+    cur = base or ""
+    while True:
+        m = _BASE_SUFFIX.match(cur)
+        if not m:
+            return cur
+        cur = m.group(1)
 
 
 def replay(words):
@@ -94,17 +120,26 @@ def replay(words):
                 fo = s.get("form_of") or s.get("alt_of")
                 if not (fo and not is_affix):
                     continue
-                base = (fo[0].get("word") or "").strip() if fo else ""
+                # 🔴 **两个 base，别合并**：`raw` 复刻七月的行为（闸①a 要逐字重建旧列
+                #    `dict.infl`/`exchange`，那道闸的职责就是"原样复刻"，带着毛病也得一样）；
+                #    `base` 是归一后的、进新表用（`clean_base` 剥掉 `uovo m` 的性别尾巴）。
+                #    2026-08-19 第一版我在这里只留了归一后的一个，闸①a 当场报 18 条不符 ——
+                #    **归一属于新结构，不属于对旧结构的复刻**。
+                raw = (fo[0].get("word") or "").strip() if fo else ""
+                base = clean_base(raw)
                 if not base:
                     stat["form_of 但没有目标词（跳过，同七月）"] += 1
                     continue
-                label = compose(tags) or "变位形式"   # ⚠️ 是"变位"不是"变形"，闸①逮到过一次
-                note = "%s 的 %s" % (base, label)
+                # 🔴 两个 label，理由同上面的 raw/base（A83）：
+                #    `legacy` 给闸①a 复刻七月的旧列，`label` 进新表（含「自反形式」）。
+                legacy_label = compose(tags) or "变位形式"   # ⚠️ 是"变位"不是"变形"，闸①逮到过一次
+                label = compose(tags, legacy=False) or "变位形式"
+                note = "%s 的 %s" % (raw, legacy_label)
                 if note not in r["seen"]:           # 复刻七月的去重
                     r["seen"].add(note)
                     r["infl"].append(note)
-                if base not in r["bases"]:
-                    r["bases"].append(base)
+                if raw not in r["bases"]:
+                    r["bases"].append(raw)
                 if s.get("form_of"):                # 只有真变形进新表
                     stat["✅ 变形关系"] += 1
                     rows.append({"w": w, "key0": key0, "ipas": ipas, "occ": occ, "idx": i,

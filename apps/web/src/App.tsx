@@ -7,8 +7,7 @@ import {
   itAudioRegion,
   FR_AUX_LABELS, FR_VGROUP_LABELS, FR_ADJPOS_LABELS, FR_REGION_LABELS, FR_ARTICLE,
   PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE,
-  DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS,
-} from '@synapse-dict/dict-labels';
+  DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
 
@@ -102,6 +101,9 @@ type SpanishEntry = {
   baseForms: string[];
   bases: SpanishBase[];
   inflNotes: string[];
+  // 反查：以本词为原形的变形形（2026-08-20）。只在**补收的无释义词头**上有值 ——
+  // 见 SpanishEntryView 里那段注释。服务端已按 60 条封顶。
+  forms: { word: string; label: string }[];
   homographs: SpanishHomograph[];
   flag: string | null;
 };
@@ -153,12 +155,17 @@ type ItSense = {
   regions: string[];
   registers: string[];
   examples: ItExample[];   // 挂在这条义项上的例句（阶段 8 接上）
+  entryId: number | null;  // 这条义项属于哪个词条（同词形多词条时用来分组）
 };
-type ItReading = { ipa: string; notation: string; src: string; isPrimary: boolean };
+type ItReading = {
+  ipa: string; notation: string; src: string; isPrimary: boolean;
+  entryIds: number[];       // 属于哪几个词条；空 = 各词条共用（见 dict-core 的注释）
+};
 type ItAudio = {
   file: string; url: string; ogg: string | null;
   speaker: string | null; region: string | null;   // region 是法语原值，展示前过 itAudioRegion
 };
+type ItPlural = { form: string; gender: string | null };
 type ItRelationGroup = {
   kind: string; total: number; targets: { word: string; linkable: boolean }[];
 };
@@ -185,6 +192,7 @@ type ItEntry = {
   gender: string | null;
   plural: string | null;
   pluralGender: string | null;
+  plurals: ItPlural[];          // 全部复数形（双复数 braccia/bracci）
   numberNote: string | null;
   level: string | null;
   senses: ItSense[];
@@ -515,7 +523,14 @@ function RelationRow({ rels, onWord }: {
                 ? <a className="rel-link" href={`#${encodeURIComponent(r.target)}`}
                      onClick={(ev) => { ev.preventDefault(); onWord(r.target); }}>{r.target}</a>
                 : <span className="rel-plain">{r.target}</span>}
-              {r.tags.length > 0 && <span className="rel-tag">{r.tags.join('·')}</span>}
+              {/* 🔴 2026-08-21：原来是 `r.tags.join('·')` —— 把原始英文标签直接印出来
+                  （`casilla diminutive`、`近义 diñar slang`）。映射表的家在
+                  `@synapse-dict/dict-labels`，不在这里新增。空串＝有意不显示
+                  （`synonym` 这类关系类型自身作标签是冗余的）。 */}
+              {(() => {
+                const zh = r.tags.map(relTagLabel).filter(Boolean);
+                return zh.length > 0 && <span className="rel-tag">{zh.join('·')}</span>;
+              })()}
             </span>
           ))}
         </div>
@@ -629,16 +644,6 @@ function getInitialTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-function getInitialLang(): string {
-  try {
-    const saved = localStorage.getItem('dict-lang');
-    if (saved) return saved;
-  } catch {
-    // ignore
-  }
-  return 'en';
-}
-
 // 用上次缓存的语言列表初始化，让语言栏首帧就在位、不再加载后弹入（避免布局跳动）。
 function getInitialLanguages(): LanguageMeta[] {
   try {
@@ -648,6 +653,28 @@ function getInitialLanguages(): LanguageMeta[] {
     // ignore
   }
   return [];
+}
+
+// 存下来的语种码在这里就核一次，别等 /api/langs 回来。
+//
+// 🔴 `/api/langs` 回来之后确实会核对（见下面那个 effect 里的 setLang），但那是
+//    **一个网络往返之后**的事。在那之前，首帧和首批 /api/search 用的都是这个值 ——
+//    存了个已下线/拼错的码（改过 localStorage、或某个语种下线了），就会先打出一批
+//    落到后端回退分支的请求。后端那条回退是对的（响应里如实标 lang），
+//    但那意味着**用户看到的是另一门语言的结果，而语言栏高亮的是他选的那个**。
+//
+// 判据用的就是上一次缓存下来的语言表 —— 同步可读、零成本、不多发一个请求。
+// 缓存为空（首次访问/清过缓存）时不拦：那时没有可信的判据，拦了等于永远回退到 en。
+export function getInitialLang(): string {
+  try {
+    const saved = localStorage.getItem('dict-lang');
+    if (!saved) return 'en';
+    const known = getInitialLanguages();
+    if (known.length === 0 || known.some((l) => l.code === saved)) return saved;
+  } catch {
+    // ignore
+  }
+  return 'en';
 }
 
 const SpeakerIcon = () => (
@@ -1175,7 +1202,13 @@ function SenseChips({ sense }: { sense: SpanishSense | SpanishUnifiedSense }) {
   );
 }
 
-function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
+// 导出供 `contract-check-es.tsx` 渲染 —— 契约闸必须用**组件本身**，
+// 不能自己复刻一份渲染逻辑（那样验的是复刻件，不是用户看到的东西）。
+// 义项折叠阈值。**导出**供契约闸使用 —— 闸要断言「首屏那一段必须渲染」，
+// 自己复制一个 8 就等于两处各写一份，改一处另一处静默失效。
+export const SENSE_FOLD_AT_ES = 8;
+
+export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   entry: SpanishEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
@@ -1188,7 +1221,7 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   //    但对用户是**不可预测**的 —— 这个词展开 3 条、那个展开 12 条，说不出理由。
   //    固定条数至少是可解释的。
   const [showAllSenses, setShowAllSenses] = useState(false);
-  const SENSE_FOLD_AT = 8;
+  const SENSE_FOLD_AT = SENSE_FOLD_AT_ES;
   useEffect(() => { setShowAllSenses(false); }, [entry.id]);   // 换词回到折叠态
 
   // 方针④三级兜底在音标行上的落法：有成品合成音就播文件，没有才降到浏览器 TTS。
@@ -1238,6 +1271,26 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   const isAdj = senseHasPos
     ? entry.unifiedSenses.some((s) => s.pos === 'adj' || s.pos === 'adv')
     : posParts.some((p) => p === 'adj' || p === 'adv');
+
+  // 🔴 2026-08-21 词头徽标的**归属守卫**（与 it 的 A97 同一条判据，见 it-CONVENTIONS）。
+  //    `isNoun` 只问「有没有一条名词义项」——`la` 有名词义（音名「拉」）就为真，
+  //    于是词头给阴性定冠词标上了 `el · 阳`。全库 **64,393 个词形**这样。
+  //    ⇒ 性/复数/阴性形只在**有义项的词性全是名词性**（n/name/adj，它们共享性数系统）
+  //      时才显示；变位类/词干变化/过去分词/及物性只可能属于动词，有动词义项就显示。
+  //    ⚠️ 变量名特意与意语段不同：App.tsx 五个语种共用一个文件，同名的话
+  //      批量替换串到别的语种会**静默生效**（2026-08-21 已经这样搞崩过 es 一次）。
+  //    ⚠️ 判据第一版写成「义项词性全是名词性才显示」，被外审逮到误伤：`banco` 有
+  //       6 条名词义项 + 1 条**感叹词**义项（`¡banco!` 表强烈赞同），于是明确的
+  //       `el · 阳` 被藏掉了。真正会冲突的不是「任何非名词词性」，而是**另一种也带性的
+  //       词类** —— 冠词/代词/限定词有性且可能与名词的性相反（`la` ＝ art 阴 + n 阳）；
+  //       感叹词/介词/动词/副词根本没有性，不影响名词那一支。
+  const ES_NOMINAL = new Set(['n', 'name', 'adj']);
+  const ES_GENDERED = new Set(['art', 'pron', 'det', 'contr']);   // 这些也带性 ⇒ 会打架
+  const esPosScope = [...new Set(entry.unifiedSenses.map((s) => s.pos).filter(Boolean))];
+  const esNounBadge = esPosScope.length === 0
+    ? isNoun
+    : esPosScope.some((p) => ES_NOMINAL.has(p!)) && !esPosScope.some((p) => ES_GENDERED.has(p!));
+  const esVerbBadge = esPosScope.length === 0 ? isVerb : esPosScope.includes('v');
 
   // 词头性别 = **粗分**：这个词会不会碰到两种性别。细分（每条义项到底是哪个性别）
   // 由义项自己的小圆片承担，词头不重复也不替它回答。
@@ -1320,23 +1373,23 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
       {/* 西语本质徽标：CEFR 贯穿；名词性别 el/la/复数/阴性，动词变位类/词干变化/过去分词/及物性 */}
       <div className="entry-meta-row entry-badges">
         {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
-        {isNoun && headGender && (
+        {esNounBadge && headGender && (
           <span className={`badge g g-${g0}`}>
             {ES_ARTICLE[headGender] || ''} · {GENDER_LABELS[headGender] || headGender}
           </span>
         )}
-        {isNoun && entry.plural && <span className="badge plural">复数 {entry.plural}</span>}
-        {(isNoun || isAdj) && entry.feminine && <span className="badge fem">阴性形 {entry.feminine}</span>}
+        {esNounBadge && entry.plural && <span className="badge plural">复数 {entry.plural}</span>}
+        {esNounBadge && entry.feminine && <span className="badge fem">阴性形 {entry.feminine}</span>}
         {(isAdj || isVerb) && entry.comparative && <span className="badge cmp">比较级 {entry.comparative}</span>}
-        {isVerb && entry.conjugation && (
+        {esVerbBadge && entry.conjugation && (
           <span className="badge conj">{ES_CONJ_LABELS[entry.conjugation] || entry.conjugation}</span>
         )}
-        {isVerb && entry.stemChange && <span className="badge sep">词干 {entry.stemChange}</span>}
-        {isVerb && entry.pp && <span className="badge pp">过去分词 {entry.pp}</span>}
-        {isVerb && entry.transitivity && (
+        {esVerbBadge && entry.stemChange && <span className="badge sep">词干 {entry.stemChange}</span>}
+        {esVerbBadge && entry.pp && <span className="badge pp">过去分词 {entry.pp}</span>}
+        {esVerbBadge && entry.transitivity && (
           <span className="badge tag">{TRANS_LABELS[entry.transitivity] || entry.transitivity}</span>
         )}
-        {entry.reflexive && <span className="badge tag">代动词 prnl.</span>}
+        {entry.reflexive && <span className="badge tag">代动词</span>}
         {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
       </div>
 
@@ -1448,10 +1501,50 @@ function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      {/* 变位形式：指回原形 + 各原形的词义 + 语法说明 */}
-      {entry.baseForms.length > 0 && (
+      {/* 补收的词头（2026-08-20，8,075 个）：源头只有变形页、没有词头页，
+          我们按证据补了词形/词性/规则音标，但**没有释义** ——
+          模型盲推这批生僻词的错误率实测卡在 24–25%，宁可留诚实空白。
+          这一块让页面至少能回答「它有哪些变形形」，而不是一片空白。
+          🔴 条件带 `unifiedSenses.length === 0`：有释义的词条页不显示这块。
+             `acoparse` 有 58 个变位形，挂在正常词条页上只会挤掉真正要看的东西 ——
+             「超长内容撑版面」是 es 展示层已知的三条线索之一。 */}
+      {entry.forms.length > 0 && entry.unifiedSenses.length === 0 && (
         <section className="entry-section">
-          <h3>变位形式</h3>
+          <h3>变形形</h3>
+          <p className="it-note">源头未收录本词的词条页，暂无释义；以下是库中指向它的变形形。</p>
+          <ul className="infl-notes">
+            {entry.forms.slice(0, 24).map((f, i) => (
+              <li key={i}>
+                <a href={`#${encodeURIComponent(f.word)}`}
+                  onClick={(e) => { e.preventDefault(); onWord(f.word); }}>{f.word}</a>
+                {' — '}{f.label}
+              </li>
+            ))}
+            {entry.forms.length > 24 && (
+              <li className="base-more">… 共 {entry.forms.length} 个变形形</li>
+            )}
+          </ul>
+        </section>
+      )}
+
+      {/* 变位形式：指回原形 + 各原形的词义 + 语法说明
+          🔴 标题按**数据**分，不写死（2026-08-20）：3,881 个词形有 `baseForms`
+             但没有任何 `inflNotes` —— 它们是**拼写变体**不是变位形式
+             （`aqui`→`aquí` 常见误拼、`sólo`→`solo` 旧拼写、`EEUU`→`EE. UU.` 缩写形，
+             `sólo` zipf 5.79 / `asi` 5.21 / `tambien` 4.98，全是高频词）。
+             这些词的释义已经写着「aquí 的常见误拼」，下面却顶着「变位形式」的标题。
+             判据是确定性的：有语法说明才是变位，没有就只是指向另一个拼写。
+
+          🔴 条件是 `baseForms || inflNotes`，**不是只看 baseForms**
+             （2026-08-20 契约闸第一次跑就逮到）：`baseForms` 来自 `dict.exchange`，
+             而 `exchange` 为空、变位说明非空的词形有 **10,894 个** ——
+             头两个是 `lo`(zipf 6.89) 和 `te`(6.52)，全库最常用的词。
+             原条件把整块（含语法说明）一起跳过：数据里明明写着「él 的 宾格」，
+             页面上一个字都没有。当天我刚把 `él and usted` 重指成 `él`，
+             数据侧的闸全绿、**用户看到的页面没有任何变化** —— 典型的「被绕过」。 */}
+      {(entry.baseForms.length > 0 || entry.inflNotes.length > 0) && (
+        <section className="entry-section">
+          <h3>{entry.inflNotes.length > 0 ? '变位形式' : '参见'}</h3>
           {entry.inflNotes.length > 0 && (
             <ul className="infl-notes">
               {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}
@@ -1524,12 +1617,45 @@ function ItSenseChips({ sense, dualGender }: { sense: ItSense; dualGender?: bool
   );
 }
 
-function groupItSenses(senses: ItSense[]): { pos: string | null; senses: ItSense[] }[] {
-  const groups: { pos: string | null; senses: ItSense[] }[] = [];
+/**
+ * 义项分组。**相邻聚合**（不是按 pos 归类）—— 义项顺序本身有意义（`sense.rank`），重排会打乱它。
+ *
+ * 🔴 2026-08-19：分组键从「词性」改成「**词条 + 词性**」。同一个词形常常是好几个词条：
+ *    `ancora` = 副词「还」/ 名词「锚」/ 动词，`subito` = 副词「立刻」/ 动词「遭受了」。
+ *    只按词性分，两个**同词性不同词源**的词条会被并成一组（`pesca` 的两个名词：
+ *    桃子 etym1 / 捕鱼 etym2），而它们的读音是不同的 —— 分不开就没法把读音挂对地方。
+ */
+/**
+ * 这条读音该不该标在这一组义项的组头上。
+ *
+ * 🔴 判据是「**专属**」不是「属于」：一条读音若挂在这个词形的**每一个**词条上，
+ *    它就是共用读音 —— 词头那行已经显示过，再往每个组头铺一遍只是把同一个东西印 N 遍。
+ *    回答的是「这一组有没有自己的读音」，不是「这一组该读什么」。
+ *
+ * 🔴 导出是为了**一处实现**：组件渲染和 `contract-check` 都调它。
+ *    `it-display-layer-stage8` 的教训：第一版我在闸里自己按义项的 entryId 算了一遍，
+ *    报了 67 条假红 —— 判据分两份写，迟早漂。
+ *
+ * ⚠️ 它住在 App.tsx 而不是 dict-core：dict-core 依赖 `node:sqlite`，浏览器端引不了
+ *    （`dict-labels` 存在的理由就是这个）。而这条判据不是"映射表"，也不该塞进 dict-labels。
+ */
+export function readingBelongsTo(
+  r: ItReading, entryId: number | null, allEntryIds: (number | null)[],
+): boolean {
+  if (entryId === null || r.entryIds.length === 0) return false;
+  if (!r.entryIds.includes(entryId)) return false;
+  const known = allEntryIds.filter((x): x is number => x !== null);
+  return !(known.length > 1 && known.every((x) => r.entryIds.includes(x)));
+}
+
+export function groupItSenses(senses: ItSense[]): {
+  pos: string | null; entryId: number | null; senses: ItSense[];
+}[] {
+  const groups: { pos: string | null; entryId: number | null; senses: ItSense[] }[] = [];
   for (const s of senses) {
     const last = groups[groups.length - 1];
-    if (last && last.pos === s.pos) last.senses.push(s);
-    else groups.push({ pos: s.pos, senses: [s] });
+    if (last && last.pos === s.pos && last.entryId === s.entryId) last.senses.push(s);
+    else groups.push({ pos: s.pos, entryId: s.entryId, senses: [s] });
   }
   return groups;
 }
@@ -1584,6 +1710,31 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
   const isVerb = !!entry.pos && entry.pos.split('/').includes('v');
   const isNoun = !!entry.pos && entry.pos.split('/').some((p) => p === 'n' || p === 'name');
   const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
+  // 🔴 2026-08-21 词头徽标的**归属守卫**。
+  //    `isNoun`/`isVerb` 读的是 `dict.pos`（`contr/n/v` 这样的**词形级**斜杠串），
+  //    只要这个拼写有一种名词用法就为真；而 `entry.gender`/`plural`/`aux` 同样是
+  //    词形级汇总 —— 两个词形级的东西凑在一起，就把只对某一个词条成立的属性
+  //    顶到了整词头上：`la` 显示「阳性」（那是名词「音名拉」的性，冠词/代词是阴性）、
+  //    `di` 显示「阴性 单复同形」、`anche`（也）显示「阴性」、`fare` 显示「复数 fari」
+  //    （`fari` 是 `faro` 灯塔的复数）。全库 7,527 个词形，**几乎全是最高频词**。
+  //    ⇒ 归属不明就不显示。错比缺更伤权威。
+  //    ⚠️ 判据用 `posWithSenses`（**有可见义项**的词条词性），不是 `dict.pos`：
+  //       `acqua` 的 `pos='n/v'` 里那个 v 是 `acquare` 的变位形、一条义项都没有，
+  //       它的「阴性 复数 acque」完全正确，不能跟着一起藏。
+  //    ⏳ 这是止血。把徽标下沉到各个词性分组是正解，要先给 entry 层补性/复数，已记账。
+  //    ⚠️ 判据第一版写成「≥2 种词性就算归属不明」，被契约闸逮到造成 92 处回归：
+  //       `cecchino`(noun+name 姓氏)、`sagro`(adj+noun)、`100enne`(adj) 的复数形全没了。
+  //       意语里**名词/专名/形容词共享性数系统**（`sagri` 对形容词和名词都适用），
+  //       它们之间根本不冲突 —— 冲突只发生在**混进了没有性数的词类**时（冠词/代词/介词/动词）。
+  //    ⚠️ 助动词/变位类/及物性更简单：它们**只可能属于动词**，不存在归属歧义 ⇒
+  //       有动词义项就显示（`fare` 的 aux=avere 是对的；`acqua` 没有动词义项，
+  //       它那个 aux 来自同形的 `acquare`，所以不显示）。
+  const NOMINAL = new Set(['noun', 'name', 'adj']);
+  const posScope = entry.posWithSenses ?? [];
+  // posScope 为空 = 该词形没有自己的义项（纯变形形如 `piante`）⇒ 没有证据说明有冲突，
+  // 保持原行为，别把「不知道」当成「有歧义」。
+  const nounBadge = posScope.length === 0 ? isNoun : posScope.every((p) => NOMINAL.has(p));
+  const verbBadge = posScope.length === 0 ? isVerb : posScope.includes('verb');
   return (
     <article className="entry-detail">
       <header className="entry-header">
@@ -1624,38 +1775,50 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
       {/* 意语本质徽标：动词看助动词/变位类/及物性，名词看性别/复数；CEFR 难度贯穿所有词性 */}
       <div className="entry-meta-row entry-badges">
         {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
-        {isNoun && entry.gender && (
+        {nounBadge && entry.gender && (
           <span className={`badge g g-${entry.gender}`}>{GENDER_LABELS[entry.gender] || entry.gender}性</span>
         )}
-        {isNoun && entry.plural && (
-          <span className="badge plural">
-            复数 {entry.plural}
-            {entry.pluralGender && <span className="plural-shift">〈{GENDER_LABELS[entry.pluralGender]}〉</span>}
+        {/* 🔴 2026-08-19：意语的双复数装不进单列 —— `braccio` 有 braccia（阴，人的手臂）
+            与 bracci（阳，器物的臂）两个，全库 1,833 个词这样。现在铺全部。 */}
+        {nounBadge && entry.plurals.map((p) => (
+          <span className="badge plural" key={p.form}>
+            复数 {p.form}
+            {p.gender && <span className="plural-shift">〈{GENDER_LABELS[p.gender]}〉</span>}
           </span>
-        )}
-        {isNoun && entry.numberNote && (
+        ))}
+        {nounBadge && entry.numberNote && (
           <span className="badge num">{IT_NUMBER_NOTE_LABELS[entry.numberNote] || entry.numberNote}</span>
         )}
-        {isVerb && entry.aux && (
+        {verbBadge && entry.aux && (
           <span className={`badge aux aux-${entry.aux}`}>{IT_AUX_LABELS[entry.aux]}</span>
         )}
-        {isVerb && entry.conj && (
+        {verbBadge && entry.conj && (
           <span className="badge conj">{IT_CONJ_LABELS[entry.conj] || entry.conj}</span>
         )}
-        {isVerb && entry.transitivity && (
+        {verbBadge && entry.transitivity && (
           <span className="badge tag">{TRANS_LABELS[entry.transitivity] || entry.transitivity}</span>
         )}
-        {entry.pronominal && <span className="badge tag">代动词 prnl.</span>}
+        {entry.pronominal && <span className="badge tag">代动词</span>}
         {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
       </div>
 
-      {/* 异性复数（metaplasmic）提示：意语招牌，braccio(阳)→braccia(阴) */}
-      {isNoun && entry.pluralGender && entry.plural && (
-        <div className="it-note">
-          异性复数：单数 <b>{entry.word}</b>（{GENDER_LABELS[entry.gender || 'm']}）→ 复数{' '}
-          <b>{entry.plural}</b>（{GENDER_LABELS[entry.pluralGender]}）
-        </div>
-      )}
+      {/* 异性复数（metaplasmic）提示：意语招牌，braccio(阳)→braccia(阴)。
+          🔴 同时给出另一个「规则复数」——这类词的两个复数**意思不同**
+          （braccia 是人的手臂、bracci 是器物的臂），只显示一个等于告诉用户另一个不存在。 */}
+      {nounBadge && entry.plurals.some((p) => p.gender) && (() => {
+        const shifted = entry.plurals.find((p) => p.gender)!;
+        const others = entry.plurals.filter((p) => p !== shifted);
+        return (
+          <div className="it-note">
+            异性复数：单数 <b>{entry.word}</b>（{GENDER_LABELS[entry.gender || 'm']}）→ 复数{' '}
+            <b>{shifted.form}</b>（{GENDER_LABELS[shifted.gender!]}）
+            {others.length > 0 && (
+              <>；另有 <b>{others.map((p) => p.form).join('、')}</b>
+              （{GENDER_LABELS[entry.gender || 'm']}）</>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 🔴 2026-08-16 去掉 `entry.isLemma &&`（用户查 `TVTB` 时发现的）。
           `is_lemma` 是七月压平结构时打的标，那会儿还没有 entry/sense 分层，
@@ -1667,9 +1830,31 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          {groupItSenses(entry.senses).map((grp, gi) => (
+          {groupItSenses(entry.senses).map((grp, gi, all) => (
             <div className="pos-group" key={gi}>
-              {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
+              {grp.pos && (
+                <div className="pos-group-label">
+                  {posLabel(grp.pos)}
+                  {/* 🔴 2026-08-19：把**这一组专属的读音**标在组头上。
+                      `ancora` 名词「锚」是 ˈankora、副词「还」是 anˈkora —— 以前两条读音
+                      并排堆在词头，用户没法知道哪条配哪组义项（1,944 个同形异读词形）。
+                      ⚠️ 判据是「这条读音**专属**于本词条」——共用读音已经在词头那行
+                      显示过，再铺一遍只是重复。这里回答的是「这一组有没有自己的读音」，
+                      与「这一组该读什么」是两个问题。
+                      🔴 2026-08-19：判据搬进 `readingBelongsTo`（dict-core），
+                      组件与契约闸**共用同一份实现** —— 判据分两份写就会像上次那样
+                      在闸里报 67 条假红。 */}
+                  {/* ⚠️ 只在**分了多组**时标：单组页面上，词头那行已经把读音显示过了，
+                      再在组头重复一遍是噪声（`braccio` 只有一个名词组）。 */}
+                  {(all.length > 1 ? entry.readings.filter(
+                    (r) => readingBelongsTo(r, grp.entryId, all.map((g) => g.entryId))) : [])
+                    .slice(0, 1).map((r) => (
+                      <span className="pos-group-ipa" key={r.ipa}>
+                        {r.notation === 'narrow' ? `[${r.ipa}]` : `/${r.ipa}/`}
+                      </span>
+                    ))}
+                </div>
+              )}
               <ol className="sense-list">
                 {grp.senses.map((s, i) => (
                   <li className="sense-item" key={i}>
@@ -1709,6 +1894,33 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.baseForms.length > 0 && (
         <section className="entry-section">
           <h3>变位形式</h3>
+          {/* 🔴 2026-08-19：`braccio` 既是名词「手臂」，又是动词 `bracciare` 的变位形
+              （源头就是两个词源）。这一块直接摆在名词释义下面，看起来像是名词的变位 ——
+              有人看这一页时正是这么误读的，还建议把整块删掉。**删掉会丢真信息**：
+              用户在文章里划到 `io braccio` 需要知道它是动词形。⇒ 不删，说清楚它是另一个词。 */}
+          {/* 🔴 2026-08-21：这句开场白原来是无条件的，对 `sentirsi` 说反了 ——
+              `sentirsi` **就是** `sentire` 的自反形式（`inflection.tags` 里明写着
+              form-of/reflexive），不是「碰巧同形的另一个词」。全库 1,418 行这样。
+              ⇒ 全部原形都是自反关系时换一句话说；混合时按同形处理（更保守）。 */}
+          {entry.senses.length > 0 && (() => {
+            const refl = entry.reflexiveOf ?? [];
+            const allRefl = refl.length > 0 && entry.baseForms.every((b) => refl.includes(b));
+            return (
+              <div className="it-note it-homograph">
+                {allRefl ? (
+                  <>下面是 <b>{entry.word}</b> 作为{' '}
+                    {entry.baseForms.map((b, i) => (
+                      <span key={b}>{i > 0 && '、'}<b>{b}</b></span>
+                    ))}{' '}自反形式的变位。</>
+                ) : (
+                  <>下面这些与上面的释义不是同一个词 —— <b>{entry.word}</b> 这个拼写同时还是{' '}
+                    {entry.baseForms.map((b, i) => (
+                      <span key={b}>{i > 0 && '、'}<b>{b}</b></span>
+                    ))}{' '}的变位形式。</>
+                )}
+              </div>
+            );
+          })()}
           {entry.inflNotes.length > 0 && (
             <ul className="infl-notes">
               {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}

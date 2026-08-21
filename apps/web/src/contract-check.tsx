@@ -33,7 +33,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService, type ItalianEntry } from '@synapse-dict/dict-core';
 import { POS_LABELS, REL_LABELS, itAudioRegion } from '@synapse-dict/dict-labels';
-import { ItalianEntryView } from './App';
+import { ItalianEntryView, groupItSenses, getInitialLang, readingBelongsTo } from './App';
 
 // 🔴 走 `getService('it')` —— 与 API **同一条代码路径、同一个数据目录推算逻辑**。
 //    第一版直接 `new ItalianDictService()` 少传路径，报 ERR_INVALID_ARG_TYPE。
@@ -158,19 +158,159 @@ const CHECKS: Check[] = [
     },
   },
   {
+    // 2026-08-19：`dict.plural` 单列装不下双复数（`braccio` 的 braccia/bracci），
+    // 接口改成给 `plurals[]` 之后，组件必须**全部铺出来**——少铺一个就等于告诉用户它不存在
+    name: '🔴 该显示的复数形都必须全部渲染出来',
+    hit: (e, html) => {
+      const t = visibleText(html);
+      const isNoun = !!e.pos && e.pos.split('/').some((p) => p === 'n' || p === 'name');
+      if (!isNoun) return null;
+      // 🔴 2026-08-21：必须带上 A97 的归属守卫，否则这条闸**比实现更严 = 假红**。
+      //    全量取样时报了 119 处，`ZTL`(缩写)、`buon senso`(词组) 这些词的
+      //    `scope` 里混着非 NOMINAL 词类，组件**有意**不渲染性/复数徽标
+      //    （`buon senso` 库里那个复数 `buon sensi` 本身就是错的，正确是 `buoni sensi`）。
+      //    ⚠️ 这不是放宽闸：它防的仍然是「组件只铺了第一个复数形」，
+      //       变异照样能逮到 —— 那些词的 scope 全是 NOMINAL。
+      const NOMINAL = new Set(['noun', 'name', 'adj']);
+      const scope = e.posWithSenses ?? [];
+      if (scope.length > 0 && !scope.every((p) => NOMINAL.has(p))) return null;
+      const miss = e.plurals.filter((p) => !t.includes(p.form));
+      return miss.length ? `${miss.length} 个复数形没渲染：${miss.map((p) => p.form).join('、')}` : null;
+    },
+  },
+  {
+    // 🔴 `plural_gender` 的语义是**异性复数**；与词头性别相同却渲染出性别徽标 = 假信息
+    name: '🔴 不许渲染出与词头同性别的「异性复数」',
+    hit: (e) => {
+      const bad = e.plurals.filter((p) => p.gender && p.gender === e.gender);
+      return bad.length ? `${bad.map((p) => p.form).join('、')} 标了与词头相同的性别` : null;
+    },
+  },
+  {
+    // 2026-08-19：同形异读词（`subito` 副词 ˈsubito / 动词 suˈbito）把读音标在**对应那组义项**
+    // 的组头上。接口给了 `readings[].entryId`，组件漏渲染就等于用户仍然分不清哪个读音配哪组。
+    // ⚠️ 只断言「**专属**于某个词条、且那个词条确实有义项组」的读音 ——
+    //    共用读音（entryId=null）本来就只在词头显示，不该出现在组头。
+    name: '🔴 专属于某组义项的读音必须标在那一组上',
+    // 🔴 判据必须与组件**用同一个 `groupItSenses`**（所以它是 export 的）。
+    //    第一版我按「义项的 entryId 集合」自己算了一遍，报了 67 条假红 ——
+    //    那些义项 `pos` 是空的（全库 1.9%），组头根本不渲染、没地方挂读音，
+    //    而读音在词头那行已经显示过了。**尺子错，不是组件错**（A33）。
+    hit: (e, html) => {
+      const grps = groupItSenses(e.senses as never);
+      if (grps.length < 2) return null;              // 单组：词头那行已经显示过
+      const all = grps.map((g) => g.entryId);
+      const want = grps.filter((g) => g.pos).flatMap((g) =>
+        e.readings.filter((r) => readingBelongsTo(r as never, g.entryId, all)).slice(0, 1));
+      if (want.length === 0) return null;
+      const shown = [...html.matchAll(/class="pos-group-ipa">([^<]*)</g)].map((m) => m[1]);
+      const miss = want.filter((r) => !shown.some((x) => x.includes(r.ipa)));
+      return miss.length ? `${miss.length} 条专属读音没标到组头：${miss[0].ipa}` : null;
+    },
+  },
+  {
     name: '页面上不许出现 undefined / [object Object]',
     // ⚠️ 判据里**不能有 `null`**：意语 `null'` 是 `nulla` 的省音形式，**词形本身**就长这样。
     //    第一版拿裸串判报了它；第二版试图"先剔除词头和释义再判"，页面上仍有别处出现，还是误报。
-    //    ⇒ 直接把 `null` 从判据里去掉 —— `undefined`/`[object Object]`/`NaN` 不可能是合法意语内容，
-    //       而 `null` 会。为一条假阳性继续加复杂度不划算（`PITFALLS` A4：判据改三轮就停手）。
+    //    ⇒ 把 `null` 从判据里去掉。
+    // ⚠️ 2026-08-19 又中一次，同一个形状：`indefinito` / `imprecisato` 的**英文释义原文**
+    //    就是 "undefined, unresolved" —— 取样面从 2 万涨到 3.9 万才撞上。
+    //    ⇒ 扫描前先剔掉 `.sense-src`（EN/IT 原文）那几块：**那是源头的字，不是我们渲染的值**，
+    //       我们只该为自己生成的东西负责。剔完 `undefined` 仍然是硬判据。
     hit: (_e, html) => {
-      const t = visibleText(html);
+      const ours = html.replace(/<div class="sense-src"[\s\S]*?<\/div>/g, '');
+      const t = visibleText(ours);
       const bad = ['undefined', '[object Object]', 'NaN'].filter((x) => t.includes(x));
       return bad.length ? `渲染出 ${bad.join('、')}` : null;
     },
 
   },
+  {
+    // 2026-08-19：`example.hidden` 是新加的列（87 条古法语/拉丁/法语释义被当成了意语例句）。
+    // 🔴 加了列还得**读取路径也认它**，否则就是「数据改了、页面照旧」——
+    //    `fix-regression-and-gate` 记的第二种机制：查写入列永远绿，用户看到的是错的。
+    //    ⇒ 这一条直接问页面：藏起来的例句原文**不许出现在渲染结果里**。
+    name: '🔴 藏起来的例句不许渲染出来',
+    hit: (e, html) => {
+      const hid = hiddenExamples(e.word);
+      if (hid.length === 0) return null;
+      const t = visibleText(html);
+      const leak = hid.filter((x) => t.includes(x.slice(0, 40)));
+      return leak.length ? `${leak.length} 条已藏例句漏进页面：${leak[0].slice(0, 40)}` : null;
+    },
+  },
+
+  // ══ 2026-08-21 点测评审：修在**展示层**的四条 ═══════════════════════════
+  // 🔴 这四条**只能在这里守**。回归闸查的是数据库，而修复做在 `italian.ts`/`App.tsx`
+  //    里 —— 谁把守卫删掉，回归闸照样全绿（那正是「被绕过」）。
+  //    ⇒ 数据层的数字进了回归闸的 ACCEPT 基线，用户看得见的部分由这四条负责。
+  {
+    name: '🔴 变形提示不许重复成多行',
+    hit: (e, html) => {
+      const items = [...html.matchAll(/<li[^>]*>([^<]*)<\/li>/g)].map((m) => m[1]);
+      const dup = items.filter((x, i) => items.indexOf(x) !== i);
+      return dup.length ? `重复 ${dup.length} 行，例：${dup[0]}` : null;
+    },
+  },
+  {
+    name: '🔴 同一个搭配不许出现两次',
+    hit: (e) => {
+      const t = e.collocations.map((c) => c.text);
+      const dup = t.filter((x, i) => t.indexOf(x) !== i);
+      return dup.length ? `重复 ${dup.length} 条，例：${dup[0]}` : null;
+    },
+  },
+  {
+    // `la` 的「阳性」是名词「音名拉」的性，冠词/代词是阴性 —— 顶在词头就是错的。
+    // ⚠️ 判据要和 `App.tsx` 的守卫**同一个定义**：`posWithSenses.length >= 2`。
+    name: '🔴 词头徽标归属不明时不许显示性/复数/助动词',
+    hit: (e, html) => {
+      // 判据与 App.tsx 的守卫**同一个定义**：名词/专名/形容词共享性数系统，
+      // 混进没有性数的词类（冠词/代词/介词/动词）才叫归属不明。
+      const NOMINAL = new Set(['noun', 'name', 'adj']);
+      const scope = e.posWithSenses ?? [];
+      if (scope.length === 0) return null;
+      const badges = html.match(/<div class="entry-meta-row entry-badges">[\s\S]*?<\/div>\s*(?=<)/);
+      if (!badges) return null;
+      const shown = [...badges[0].matchAll(/class="badge (g|plural|num|aux|conj) /g)].map((m) => m[1]);
+      const bad: string[] = [];
+      if (!scope.every((p) => NOMINAL.has(p))) {
+        bad.push(...shown.filter((x) => x === 'g' || x === 'plural' || x === 'num'));
+      }
+      if (!scope.includes('verb')) {
+        bad.push(...shown.filter((x) => x === 'aux' || x === 'conj'));
+      }
+      return bad.length ? `归属不明却渲染了徽标：${[...new Set(bad)].join('、')}` : null;
+    },
+  },
+  {
+    // `sentirsi` **就是** `sentire` 的自反形式，说它「与上面的释义不是同一个词」是错的。
+    name: '🔴 自反形式不许被说成「不是同一个词」',
+    hit: (e, html) => {
+      const refl = e.reflexiveOf ?? [];
+      if (refl.length === 0 || e.baseForms.length === 0) return null;
+      if (!e.baseForms.every((b) => refl.includes(b))) return null;
+      return visibleText(html).includes('不是同一个词')
+        ? `${e.word} 是 ${refl.join('、')} 的自反形式，却被说成不是同一个词` : null;
+    },
+  },
+  {
+    // `fix_unclosed_paren` 藏起来的 602 条说明片段，不许从关系区漏出来。
+    name: '🔴 关系区不许出现括号残渣',
+    hit: (e, html) => {
+      const items = [...html.matchAll(/class="rel-(?:link|plain)"[^>]*>([^<]*)</g)].map((m) => m[1]);
+      const bad = items.filter((x) => (x.includes('(') !== x.includes(')')));
+      return bad.length ? `${bad.length} 条括号残渣，例：${bad[0]}` : null;
+    },
+  },
 ];
+
+/** 某个词形被藏起来的例句原文。判据要问**库里真藏了什么**，不复制一份名单。 */
+const hiddenExQuery = db.prepare(
+  'SELECT text FROM example WHERE word = ? AND COALESCE(hidden,0) = 1');
+function hiddenExamples(word: string): string[] {
+  return (hiddenExQuery.all(word) as Array<{ text: string }>).map((r) => r.text);
+}
 
 /** 高风险面：三个已知缺陷各自的全集 + 一批常用词。 */
 function targets(limit: number): string[] {
@@ -188,12 +328,23 @@ function targets(limit: number): string[] {
      WHERE COALESCE(s.hidden,0)=0 LIMIT 4000`)) set.add(w);
   // 阶段 8 新接的四样，各取一批（**有数据的那批**才验得出"接口给了页面没显示"）
   for (const w of q(`SELECT DISTINCT word FROM example LIMIT 3000`)) set.add(w);
+  // 🔴 藏起来的例句那 87 条 —— **全量**进取样面。
+  //    不进来的话「藏起来的例句不许渲染」那条检查在多数取样下命中 0 条，
+  //    等于一条永远通过的检查（`verification-gates-not-sampling`）。
+  for (const w of q(`SELECT DISTINCT word FROM example WHERE COALESCE(hidden,0)=1`)) set.add(w);
   for (const w of q(`SELECT DISTINCT word FROM audio LIMIT 2000`)) set.add(w);
   for (const w of q(`SELECT d.word FROM dict d JOIN sense_relation r ON r.word_id=d.id
      GROUP BY d.id HAVING count(*) > 12 LIMIT 1500`)) set.add(w);   // 一定会触发截断
   for (const w of q(`SELECT d.word FROM dict d JOIN pronunciation p ON p.word_id=d.id
      GROUP BY d.id HAVING count(*) > 1 LIMIT 2000`)) set.add(w);    // 多读音
-  const all = [...set];
+  // 双复数（braccia/bracci 那族，1,833 个）—— 全部铺进取样面
+  for (const w of q(`SELECT b.word FROM inflection i JOIN dict b ON b.id=i.base_id
+     WHERE i.label_zh='复数' GROUP BY b.id HAVING count(DISTINCT i.word_id) > 1`)) set.add(w);
+  // 🔴 `--limit` 是从头切的 —— 排在后面的取样面会被整段切掉。
+  //    「藏起来的例句」那族只有 87 条，切没了检查就永远命中 0 ⇒ **必覆盖面排最前**。
+  const must = q(`SELECT DISTINCT word FROM example WHERE COALESCE(hidden,0)=1`);
+  for (const w of must) set.delete(w);
+  const all = [...must, ...set];
   return limit > 0 ? all.slice(0, limit) : all;
 }
 
@@ -263,6 +414,11 @@ function mutate(words: string[]): void {
      (e) => e.relations.length > 0],
     ['把中文换成 undefined 字样',
      (e) => { if (e.senses[0]) e.senses[0].zh = 'undefined'; }],
+    // 2026-08-21：搭配去重做在 `italian.ts` 的 colsQuery 侧，这条检查读的是
+    // `e.collocations` 这个**数据结果**，所以变异也打在数据上（不是 html）。
+    ['把一条搭配复制成两条',
+     (e) => { if (e.collocations[0]) e.collocations.push({ ...e.collocations[0] }); },
+     (e) => e.collocations.length > 0],
   ];
 
   // 「组件少渲染了一块」——用正则把渲染结果里的那一块抠掉，检查必须报出来。
@@ -277,12 +433,45 @@ function mutate(words: string[]): void {
      (e) => !!e.ipa],
     ['组件漏渲染录音行', (h) => h.replace(/audio-chip/g, 'x-chip'),
      (e) => e.audios.length > 0],
+    ['组件漏把专属读音标到组头', (h) => h.replace(/<span class="pos-group-ipa">[\s\S]*?<\/span>/g, ''),
+     (e) => {
+       const grps = groupItSenses(e.senses as never);
+       return grps.length > 1 && grps.filter((g) => g.pos).some((g) =>
+         e.readings.some((r) => readingBelongsTo(r as never, g.entryId,
+           groupItSenses(e.senses as never).map((x) => x.entryId))));
+     }],
+    ['组件只铺了第一个复数形', (h) => {
+      const parts = [...h.matchAll(/<span class="badge plural"[\s\S]*?<\/span>/g)];
+      return parts.length > 1 ? h.replace(parts[parts.length - 1][0], '') : h;
+    }, (e) => e.plurals.length > 1],
     ['组件漏说关系被截断了', (h) => h.replace(/<span class="rel-more">[^<]*<\/span>/g, ''),
      (e) => e.relations.some((g) => g.total > g.targets.length)],
     ['组件把录音地区的法语原文直接印出来',
      (h) => h.replace(/<span class="audio-region">[^<]*<\/span>/,
                       '<span class="audio-region">Monopoli (Italie)</span>'),
      (e) => e.audios.some((a) => a.region === 'Monopoli (Italie)')],
+    // ── 2026-08-21 点测评审那四条展示层修复的变异 ──────────────────────
+    ['组件把变形提示重复渲染了',
+     (h) => h.replace(/(<ul class="infl-notes">)(<li[^>]*>[^<]*<\/li>)/, '$1$2$2'),
+     (e) => e.inflNotes.length > 0],
+    ['组件在归属不明时仍渲染性别徽标',
+     (h) => h.replace(/(<div class="entry-meta-row entry-badges">)/,
+                      '$1<span class="badge g g-m">阳性</span>'),
+     // 只在**确实归属不明**的词上打，否则造出来的不是缺陷
+     (e) => {
+       const N = new Set(['noun', 'name', 'adj']);
+       const s = e.posWithSenses ?? [];
+       return s.length > 0 && !s.every((p) => N.has(p));
+     }],
+    ['组件把自反形式说成不是同一个词',
+     (h) => h.replace(/下面是 /, '下面这些与上面的释义不是同一个词 —— '),
+     (e) => {
+       const r = e.reflexiveOf ?? [];
+       return r.length > 0 && e.baseForms.length > 0 && e.baseForms.every((b) => r.includes(b));
+     }],
+    ['组件把括号残渣渲染进关系区',
+     (h) => h.replace(/(class="rel-plain">)([^<]*)(<)/, '$1kiwi australe ($3'),
+     (e) => e.relations.some((g) => g.targets.some((t) => !t.linkable))],
   ];
 
   console.log('\n═══ 变异验证 ═══');
@@ -323,13 +512,55 @@ function mutate(words: string[]): void {
   if (caught !== total) process.exit(1);
 }
 
+/**
+ * 语种码守卫：存在 localStorage 里的 `dict-lang` 必须先跟缓存的语言表核一次。
+ *
+ * 这一条不按词条循环 —— 它问的不是"某个词渲染对不对"，而是**首帧用哪个语种去查**。
+ * `/api/langs` 回来之后确实会核对，但那是一个网络往返之后的事；在那之前发出去的
+ * 请求会落到后端的"未知语种回退默认语种"分支 —— 后端行为是对的，
+ * 可用户看到的是另一门语言的结果，而语言栏高亮的是他选的那个。
+ *
+ * 三种输入各断言一次：**合法码放行 / 非法码回退 / 表为空时不拦**。
+ * 🔴 第三条最容易被"顺手写严"破坏：首次访问时缓存表是空的，
+ *    那时没有可信判据，拦了等于永远回退到 en。
+ */
+function langGuard(): number {
+  const cases: [string, string | null, string | null, string][] = [
+    ['合法码原样放行', 'it', '[{"code":"it"},{"code":"en"}]', 'it'],
+    ['已下线/拼错的码回退', 'zz', '[{"code":"it"},{"code":"en"}]', 'en'],
+    ['缓存表为空时不拦（首次访问）', 'it', null, 'it'],
+    ['没存过时用默认', null, '[{"code":"it"}]', 'en'],
+  ];
+  let bad = 0;
+  for (const [name, saved, langs, want] of cases) {
+    const store: Record<string, string> = {};
+    if (saved !== null) store['dict-lang'] = saved;
+    if (langs !== null) store['dict-langs'] = langs;
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => (k in store ? store[k] : null),
+      setItem: () => {},
+    };
+    const got = getInitialLang();
+    const ok = got === want;
+    if (!ok) bad++;
+    console.log(`   ${ok ? '✅' : '🔴'} ${name.padEnd(28)} → ${got}（应 ${want}）`);
+  }
+  delete (globalThis as { localStorage?: unknown }).localStorage;
+  return bad;
+}
+
 const argv = process.argv.slice(2);
 const limit = argv.includes('--limit') ? Number(argv[argv.indexOf('--limit') + 1]) : 0;
 const words = targets(limit);
-if (argv.includes('--mutate')) {
+if (argv.includes('--lang')) {
+  console.log('\n═══ 语种码守卫 ═══');
+  process.exit(langGuard() === 0 ? 0 : 1);
+} else if (argv.includes('--mutate')) {
   mutate(words);
 } else {
-  const bad = run(words);
+  console.log('\n═══ 语种码守卫 ═══');
+  const langBad = langGuard();
+  const bad = run(words) + langBad;
   console.log(`\n   ${bad === 0 ? '✅ 全部通过' : `🔴 共 ${bad} 处不符`}`);
   process.exit(bad === 0 ? 0 : 1);
 }

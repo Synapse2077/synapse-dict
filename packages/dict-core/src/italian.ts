@@ -43,9 +43,21 @@ export type ItalianSense = {
   // 挂在这条义项上的例句（`example.sense_id`，14,895 条挂上了）。
   // 挂不上义项的那 23,249 条走 `ItalianEntry.examples`，摆在词条末尾，不硬塞进某条义项。
   examples: ItalianExample[];
+  // 这条义项属于哪个词条（`sense.entry_id`）。**同一个词形可以有好几个词条**：
+  // `ancora` = 副词「还」+ 名词「锚」+ 动词；`braccio` = 名词「手臂」+ 动词 bracciare 的变位。
+  // 展示层按它分组，才能把「这个读音属于哪一组义项」说清楚。NULL = 无 dump 来源。
+  entryId: number | null;
+  // 所属词条的词性（`entry.pos`，长写法 noun/verb/…）。
+  // 🔴 与 `pos`（`sense.pos`，短写法且可能为空）不同源，别混用：`dei` 的两条
+  //    alt_of 义项 `sense.pos` 是 NULL，只有这一列能说明它们属于动词/名词词条。
+  entryPos: string | null;
 };
 
 export type ItalianCollocation = { text: string; zh: string | null };
+
+// 一个复数形。`gender` 只在**与词头性别不同**时有值（异性复数 metaplasmic）——
+// 相同就不是异性复数，写上去等于渲染一个并不存在的性别变化。
+export type ItalianPlural = { form: string; gender: string | null };
 
 // 一条读音。**来自 `pronunciation` 表，不再是 `dict.ipa` 那一列**（阶段 8 切换）。
 // 一个词形可以有多条：`ancora` 名词「锚」ˈaŋkora / 副词「还」aŋˈkora 是真的两个读音，
@@ -55,6 +67,14 @@ export type ItalianReading = {
   notation: string;         // phonemic | narrow（严式只有 826 行，展示成 […]）
   src: string;              // 谁背书了这个读音（en/it/fr 版 · 规则派生 · unknown）
   isPrimary: boolean;       // 默认展示的那条（trust_rank 选出来的）
+  // 这个读音属于**哪几个**词条。空数组 = 该词形各词条共用（或源头没说）。
+  // `subito` 的两个读音各挂一个词条：ˈsubito 副词「立刻」/ suˈbito 动词「遭受了」。
+  //
+  // 🔴 2026-08-19 从单个 `entryId` 改成数组，读的是 `pronunciation_entry` 关联表。
+  //    单个可空外键表达不了「一个读音属于哪几个词条」：`pesca` 的 /ˈpɛska/ 在源头里
+  //    同时挂在 noun:1 和 adj:1 下，按「唯一才写」的老规矩只能落 NULL ⇒ **区分力全丢**。
+  //    换成关联表之后收回了 21,666 个词形的归属（其中 18,121 条读音是多归属的）。
+  entryIds: number[];
 };
 
 // 真人录音（Wikimedia Commons）。方针④三级兜底的**第一级**，9,404 个词形有。
@@ -132,8 +152,14 @@ export type ItalianEntry = {
   transitivity: string | null;  // t / i / ti
   pronominal: boolean;          // 反身/代词式/procomplementare
   gender: string | null;        // m / f / mf
-  plural: string | null;        // 不规则复数形
+  plural: string | null;        // 不规则复数形（单值，兼容字段）
   pluralGender: string | null;  // 异性复数（braccio→braccia 记 f）
+  // 🔴 **全部复数形**，2026-08-19 加。`plural` 是单列，装不下意语的双复数：
+  //    `braccio` → `braccia`（阴，人的手臂）/ `bracci`（阳，器物的臂），
+  //    源头（it 版拆两条名词、en 版两条 plural of braccio 各带性别）说得很清楚，
+  //    全库 **1,833 个词**是这样。多值落行不落列（A20），行早就在 `inflection` 里
+  //    （1,730 个词的全部复数形都齐），这里只是把它读出来。
+  plurals: ItalianPlural[];
   numberNote: string | null;    // invariable / plural-only / uncountable
   level: string | null;         // CEFR 难度等级 A1-C2（豆包填）
   // —— 释义与关联 ——
@@ -146,6 +172,18 @@ export type ItalianEntry = {
   relations: ItalianRelationGroup[];   // 近义/反义/上下位…
   tts: ItalianTts[];            // 工具合成音（没有就空数组，前端落到浏览器 TTS）
   inflNotes: string[];          // 该词形语法说明（infl 列）
+  // 🔴 2026-08-21：**有可见义项**的词条覆盖了哪几种词性（`entry.pos` 去重）。
+  //    词头徽标（性/复数/助动词）取自 `dict` 行，那是**词形级**的汇总；这一列
+  //    只有一个值时归属才明确，≥2 时属性只对其中一个词条成立、顶在词头就是错的
+  //    （`la` 显示「阳性」是名词「音名拉」的性，`di` 显示「阴性」，`anche` 显示「阴性」）。
+  //    ⚠️ 判据只数**有可见义项**的词条：`acqua` 的 verb 词条（`acquare` 的变位形）
+  //    一条义项都没有，它的「阴性 复数 acque」是对的，不能因此被藏。
+  posWithSenses: string[];
+  // 🔴 2026-08-21：这些原形与本词形是**自反关系**（`inflection.tags` 含 reflexive），
+  //    不是「碰巧同形的另一个词」。变位区块的开场白要据此分叉 ——
+  //    `sentirsi` **就是** `sentire` 的自反形式，说它「与上面的释义不是同一个词」是错的；
+  //    而 `braccio`（名词「手臂」+ 动词 `bracciare` 的变位）那句话是对的。全库 1,418 行。
+  reflexiveOf: string[];
 };
 
 // 2026-08-12 v2 结构迁移（docs/SCHEMA.md）：`definition` / `translation` / `meta` /
@@ -231,9 +269,9 @@ const EX_CAP = 8;
 type SenseRow = { id: number; pos: string | null; gender: string | null;
                   en: string | null; zh: string | null; it: string | null;
                   sense_aux: string | null; entry_aux: string | null;
-                  entry_pos: string | null };
+                  entry_pos: string | null; entry_id: number | null };
 type TagRow = { sense_id: number; kind: string; value: string };
-type InflRow = { base: string; label_zh: string };
+type InflRow = { base: string; label_zh: string; tags: string | null };
 type AltRow = { sense_id: number; target: string };
 type ColRow = { text: string; zh: string | null };
 type AudioRow = { file: string; url_mp3: string | null; url_ogg: string | null;
@@ -268,6 +306,7 @@ export class ItalianDictService {
   private readonly normQuery;
   private readonly hasContentQuery;
   private readonly prefixQuery;
+  private readonly prefixCacheQuery;
   private readonly sensesQuery;
   private readonly entryAuxQuery;
   private readonly inflQuery;
@@ -281,6 +320,7 @@ export class ItalianDictService {
   private readonly exampleQuery;
   private readonly relationQuery;
   private readonly existsQuery;
+  private readonly pluralQuery;
   private readonly ttsDir: string;
 
   constructor(databasePath: string, ttsDir?: string) {
@@ -351,7 +391,7 @@ export class ItalianDictService {
 
     // 一个词的义项：出版层 sense 定顺序，各语言说法从 sense_gloss 取。
     this.sensesQuery = this.db.prepare(`
-      SELECT s.id, s.pos, s.gender,
+      SELECT s.id, s.pos, s.gender, s.entry_id,
              s.aux AS sense_aux, e.aux AS entry_aux, e.pos AS entry_pos,
              (SELECT text FROM sense_gloss
                WHERE sense_id = s.id AND lang = 'en' AND kind = 'equivalent' AND seq = 0) AS en,
@@ -380,7 +420,7 @@ export class ItalianDictService {
     // 🔴 不再读那两列 —— 它们把一个词形的多条关系拼在一个字符串里，且**含 alt_of**
     //    （`a` 的 "alfiere 的 变位形式" 其实是缩写，不是变位形式，阶段 2a 已移回词条层）。
     this.inflQuery = this.db.prepare(`
-      SELECT base, label_zh FROM inflection WHERE word_id = ? ORDER BY id
+      SELECT base, label_zh, tags FROM inflection WHERE word_id = ? ORDER BY id
     `);
 
     // alt_of 指针：把目标词的中文释义**跟随读取**出来（不复制数据）。
@@ -402,7 +442,8 @@ export class ItalianDictService {
     `);
 
     this.altQuery = this.db.prepare(`
-      SELECT sense_id, target FROM sense_relation WHERE word_id = ? AND kind = 'alt_of'
+      SELECT sense_id, target FROM sense_relation
+      WHERE word_id = ? AND kind = 'alt_of' AND COALESCE(hidden, 0) = 0
     `);
 
     this.tagsQuery = this.db.prepare(`
@@ -435,11 +476,23 @@ export class ItalianDictService {
     // 🔴 排序里 `is_primary DESC` 是第一键 —— 默认展示的那条必须稳定排第一，
     //    它是 `trust_rank` 选出来的，展示层不许自己再挑一次（那就是第二把尺子）。
     //    其余按「音位式优先、短的优先、字符串定序」，保证同一个词两次打开顺序一致。
+    // 🔴 2026-08-21 加 `hidden` 过滤。`hide_junk_pronunciation` 藏了 8 条：3 个词的
+    //    **主音标是 `*`**（用户直接看到 `/*/`）、`Vantaa` 只有一个长音符 `ː`、
+    //    fr 版把 `acquietano` 的音标切剩 `ˈa.no`。
+    //    ⚠️ 加列不改这里 = 白做 —— 同一天已经在 `sense_relation` 上栽过一次，
+    //       那次的 `--verify` 还报了绿（它查的是 `WHERE hidden=0`，那只是**假设**
+    //       展示层会过滤），是渲染出来看见 `gatto della giungla Felis chaus` 才发现的。
+    // `entry_ids` 走 `pronunciation_entry` 关联表（可能一条读音挂多个词条）。
+    // 🔴 旧列 `pronunciation.entry_id` 仍在、内容是关联表的**子集**（建表时并了进去），
+    //    但读取路径一律走关联表 —— 旧列只作为迁移锚点留着，别再从它读。
     this.pronQuery = this.db.prepare(`
-      SELECT ipa, notation, src, is_primary FROM pronunciation
-      WHERE word_id = ?
-      ORDER BY is_primary DESC, CASE WHEN notation='phonemic' THEN 0 ELSE 1 END,
-               LENGTH(ipa) ASC, ipa ASC
+      SELECT p.ipa, p.notation, p.src, p.is_primary,
+             (SELECT group_concat(l.entry_id) FROM pronunciation_entry l
+               WHERE l.pronunciation_id = p.id) AS entry_ids
+      FROM pronunciation p
+      WHERE p.word_id = ? AND COALESCE(p.hidden, 0) = 0
+      ORDER BY p.is_primary DESC, CASE WHEN p.notation='phonemic' THEN 0 ELSE 1 END,
+               LENGTH(p.ipa) ASC, p.ipa ASC
     `);
 
     // 真人录音。⚠️ 这里**不能写 COLLATE NOCASE** —— `idx_audio_word` 是 BINARY 索引，
@@ -456,13 +509,19 @@ export class ItalianDictService {
       SELECT e.sense_id, e.text, e.ref,
              (SELECT text FROM example_gloss WHERE example_id = e.id AND lang = 'zh') AS zh,
              (SELECT text FROM example_gloss WHERE example_id = e.id AND lang = 'en') AS en
-      FROM example e WHERE e.word = ? ORDER BY e.id
+      FROM example e WHERE e.word = ? AND COALESCE(e.hidden, 0) = 0 ORDER BY e.id
     `);
 
     // 语义关系。`alt_of` 由 altQuery 单独处理（它是「指向另一个词」，不是「语义相邻」）。
+    // 🔴 2026-08-21 加 `hidden` 过滤。`fix_unclosed_paren` 藏了 602 条切碎的说明片段，
+    //    但只加列、不改这里 = 白做：`gatto` 的下位词照样渲染成
+    //    `gatto della giungla Felis chaus`（前半剥了括号、后半那条根本没被过滤掉）。
+    //    ⚠️ 而且那个脚本的 `--verify` 当时**报了绿** —— 它查的是
+    //    `WHERE COALESCE(hidden,0)=0`，那只是**假设**展示层会过滤。
+    //    「闸在数据层自查、展示层却绕过去」正是回归闸文件头写的第二种机制。
     this.relationQuery = this.db.prepare(`
       SELECT kind, target FROM sense_relation
-      WHERE word_id = ? AND kind <> 'alt_of' ORDER BY id
+      WHERE word_id = ? AND kind <> 'alt_of' AND COALESCE(hidden, 0) = 0 ORDER BY id
     `);
 
     // 关系目标点不点得动。🔴 判据必须与 `getEntry` 的解析路径一致：那边落空会走
@@ -473,7 +532,39 @@ export class ItalianDictService {
       SELECT 1 AS n FROM dict WHERE word = ? OR word_norm = ? LIMIT 1
     `);
 
+    // 一个名词的**全部复数形**。走 `base_id`（有 idx_infl_base 索引），不走 `base` 字符串
+    //    —— `base` 列上没有索引，按它查就是扫 124 万行。
+    // 🔴 `label_zh` 必须**精确等于「复数」**，不能用 LIKE '%复数%'：
+    //    动词的「陈述式现在时第一人称复数」也含这两个字，全库 274,668 行，
+    //    一旦漏进来，`parlare` 的复数栏就会冒出 `parliamo`。
+    // 🔴 只认 `entry_id` 指向**名词词条**的那些。形容词的性数一致形（`bello` 的
+    //    bei/begli/belle/belli、`rosso` 的 rosse/rossi）在 `inflection` 里同样标着「复数」，
+    //    不过滤就会被当成名词复数铺出来 —— 实测 `bello` 会显示「另有 bei、begli、belli」，
+    //    是彻头彻尾的假信息。判据用的正是 A72 刚定死的语义：`entry_id` = 原形的那个词条。
+    //    ⚠️ `entry_id` 为空的行（如 `uova`）走不到这里，由 `dict.plural` 列兜底 ——
+    //       那一列是 `build.extract_plural` 只在名词条目上算的，天然就是名词复数。
+    this.pluralQuery = this.db.prepare(`
+      SELECT d.word AS form, i.tags FROM inflection i
+        JOIN dict d ON d.id = i.word_id
+        JOIN entry e ON e.id = i.entry_id AND e.pos = 'noun'
+      WHERE i.base_id = ? AND i.label_zh = '复数'
+      ORDER BY i.id
+    `);
+
     // 前缀检索：命中 word 或 word_norm（去重音，便于无重音输入）；lemma 优先、短词优先。
+    // 短前缀预计算（2026-08-20，`it/pipeline/build_search_prefix.py`）。
+    // `search()` 每敲一个字符跑一次，实测 1 字符前缀最慢 490ms —— 为了取 20 条
+    // 把上万条候选整个排一遍（`LENGTH(word)` 与两级精确匹配都不可索引，
+    // `OR` 又强制 MULTI-INDEX OR）。1–3 字符前缀答案完全由前缀决定 ⇒ 预算好。
+    // ⚠️ **查不到就回退实时查询**，结果一样只是慢一点 —— 未命中不是错误。
+    this.prefixCacheQuery = this.db.prepare(`
+      SELECT d.id, d.word, d.is_lemma, d.pos, d.infl
+      FROM search_prefix p JOIN dict d ON d.id = p.word_id
+      WHERE p.prefix = ?
+      ORDER BY p.rank
+      LIMIT ?
+    `);
+
     this.prefixQuery = this.db.prepare(`
       SELECT id, word, is_lemma, pos, infl
       FROM dict
@@ -510,11 +601,40 @@ export class ItalianDictService {
     return ipa.normalize('NFC').replace(/ː/g, '').replace(/ŋ(?=[ˈˌ]?[kɡ])/g, 'n');
   }
 
+  /**
+   * 一个名词的全部复数形。`inflection` 为主（多值、带性别），`dict.plural` 兜底。
+   *
+   * 🔴 **并集，不是二选一**：`inflection` 覆盖了 94% 的列值，剩下 6% 只有列里有；
+   *    只读表会让那 6% 的复数徽标凭空消失（"改读取路径把东西弄丢"是这个项目的老病）。
+   * ⚠️ 性别只在**与词头不同**时才给 —— 相同就不是异性复数，渲染出来是个假徽标。
+   */
+  private buildPlurals(row: ItRow): ItalianPlural[] {
+    const out: ItalianPlural[] = [];
+    const seen = new Set<string>();
+    const push = (form: string | null, gender: string | null) => {
+      if (!form || seen.has(form)) return;
+      seen.add(form);
+      out.push({ form, gender: gender && gender !== row.gender ? gender : null });
+    };
+    for (const r of this.pluralQuery.all(row.id) as unknown as
+        { form: string; tags: string | null }[]) {
+      let g: string | null = null;
+      try {
+        const tags = r.tags ? (JSON.parse(r.tags) as string[]) : [];
+        g = tags.includes('feminine') ? 'f' : tags.includes('masculine') ? 'm' : null;
+      } catch { /* tags 不是合法 JSON 就当没有性别，不猜 */ }
+      push(r.form, g);
+    }
+    push(row.plural, row.plural_gender);      // 列值兜底：表里没有的那 6%
+    return out;
+  }
+
   private buildReadings(wordId: number): ItalianReading[] {
     const rows = this.pronQuery.all(wordId) as unknown as
-      { ipa: string; notation: string; src: string; is_primary: number }[];
+      { ipa: string; notation: string; src: string; is_primary: number;
+        entry_ids: string | null }[];
     const out: ItalianReading[] = [];
-    const seen = new Set<string>();
+    const seen = new Map<string, ItalianReading>();
     for (const r of rows) {
       const ipa = normalizeItalianIpa(r.ipa);
       if (!ipa) continue;
@@ -524,9 +644,22 @@ export class ItalianDictService {
       //    排序已把音位式排在严式前面，所以留下的是音位式那条。
       //    ⚠️ 严式**只在文字确实不同时**才留（真正的窄式转写会带更多细节）。
       const key = ItalianDictService.readingKey(ipa);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ ipa, notation: r.notation, src: r.src, isPrimary: r.is_primary === 1 });
+      const ids = (r.entry_ids ?? '').split(',').filter(Boolean).map(Number);
+      const dup = seen.get(key);
+      if (dup) {
+        // 🔴 被去重掉的那一行**归属要并进来**，不能直接丢。
+        //    `pesca` 的严式行（fr 版）与音位式行（en 版）文字相同 ⇒ 只留音位式那条，
+        //    但两行各自挂着不同的词条 —— 直接 `continue` 会把其中一半归属扔掉，
+        //    页面上就变成「有的组标了读音、有的组没标」，看着像数据缺失。
+        for (const id of ids) if (!dup.entryIds.includes(id)) dup.entryIds.push(id);
+        continue;
+      }
+      const rec: ItalianReading = {
+        ipa, notation: r.notation, src: r.src, isPrimary: r.is_primary === 1,
+        entryIds: ids,
+      };
+      seen.set(key, rec);
+      out.push(rec);
     }
     return out;
   }
@@ -599,10 +732,15 @@ export class ItalianDictService {
       registers: byId.get(r.id)?.registers ?? [],
       // 见 ItalianSense.grammar 的说明：非动词词条不渲染及物性
       grammar: r.entry_pos === 'verb' ? (byId.get(r.id)?.grammar ?? []) : [],
+      // 🔴 2026-08-21 透出词条级词性，供词头徽标判断属性归属（见 posWithSenses）。
+      //    用 entry.pos 而不是 sense.pos：后者是短写法且**可能为空**
+      //    （`dei` 的两条 alt_of 义项就没有 pos），值域也和 entry 层对不上。
+      entryPos: r.entry_pos ?? null,
       // 逐义项的值优先；没有就用词条级的值（**不是**在库里复制一份，见 SCHEMA §10.4）
       aux: r.sense_aux ?? r.entry_aux ?? null,
       altOf: alts.get(r.id) ?? [],
       examples: ex?.get(r.id) ?? [],
+      entryId: r.entry_id ?? null,
     }));
   }
 
@@ -625,6 +763,9 @@ export class ItalianDictService {
     const infl = this.inflQuery.all(row.id) as unknown as InflRow[];
     const readings = this.buildReadings(row.id);
     const ex = full ? this.examplesOf(row.word) : undefined;
+    // 🔴 只算一次。`posWithSenses` 也要用它 —— 在对象字面量里再调一次 `buildSenses`
+    //    等于每开一个词条页把全部义项查询跑两遍（`fare` 有 50 条义项）。
+    const senses = this.buildSenses(row.id, ex);
     return {
       lang: 'it',
       id: row.id,
@@ -643,11 +784,27 @@ export class ItalianDictService {
       gender: row.gender,
       plural: row.plural,
       pluralGender: row.plural_gender,
+      plurals: this.buildPlurals(row),
       numberNote: row.number_note,
       level: row.level,
-      senses: this.buildSenses(row.id, ex),
-      collocations: (this.colsQuery.all(row.id) as unknown as ColRow[])
-        .map((c) => ({ text: c.text, zh: c.zh ?? null })),
+      senses,
+      // 🔴 2026-08-21 按 `text` 去重：`treno` 的搭配区 14 条里 7 条是重复的
+      //    （`treno del cannone` 出现两遍）。全库 317 组、326 行多余。
+      //    ⚠️ 其中 294 组**两条的中文不一样**（`abito blu` ＝「正式礼服（…尤指深色西装）」
+      //    vs「蓝色正装」），是同一批搭配被翻译了两次。哪个译法更好**没有定论**
+      //    —— 用长短去选就是拿形式代理当判据（`Saint-Léger` 那次坏掉 1,528 条）。
+      //    ⇒ 这里只负责**不重复显示**，取 `rank` 最小的那条（colsQuery 已按 rank 排序）；
+      //      「两个译法选哪个」是另一件事，已记账，一条数据都不删。
+      collocations: (() => {
+        const seen = new Set<string>();
+        const out: { text: string; zh: string | null }[] = [];
+        for (const c of this.colsQuery.all(row.id) as unknown as ColRow[]) {
+          if (seen.has(c.text)) continue;
+          seen.add(c.text);
+          out.push({ text: c.text, zh: c.zh ?? null });
+        }
+        return out;
+      })(),
       baseForms: [...new Set(infl.map((x) => x.base))],
       bases: [],
       audios: full ? (this.audioQuery.all(row.word) as unknown as AudioRow[]).map((a) => ({
@@ -664,7 +821,19 @@ export class ItalianDictService {
       examples: full ? (ex!.get(null) ?? []).slice(0, EX_CAP) : [],
       relations: full ? this.relationsOf(row.id) : [],
       tts: [],                          // 文件系统，由 getEntry 填
-      inflNotes: infl.map((x) => `${x.base} 的 ${x.label_zh}`),
+      // 🔴 2026-08-21 补上去重。上面 `baseForms` 一直是 `new Set(...)`，这一行却不是 ——
+      //    于是 `una` 的变位区块显示**三行一模一样**的「uno 的 单数」。
+      //    读取路径上 2,428 行多余，而按全列判重只有 431 行：`inflQuery` 只投影
+      //    `base, label_zh` 两列，别的列不同、这两列相同的行落到页面上就是同一句话。
+      //    ⇒ 去重必须按**投影后的那句话**判，不是按数据行判。
+      inflNotes: [...new Set(infl.map((x) => `${x.base} 的 ${x.label_zh}`))],
+      // `buildSenses` 返回的已经是可见义项（sensesQuery 过滤了 hidden），直接去重。
+      posWithSenses: [...new Set(
+        senses.map((s) => s.entryPos).filter((p): p is string => !!p),
+      )],
+      reflexiveOf: [...new Set(
+        infl.filter((x) => (x.tags ?? '').includes('"reflexive"')).map((x) => x.base),
+      )],
       // ⚠️ 2026-08-18 阶段 8 删掉了 `flag` 字段：`dict.flag` 列在 v2 迁移时就删了
       //    （全库 0 行），这里一直返回 null 只是为了不动展示层。现在一起清掉 ——
       //    永远为 null 的字段和永远为真的健康检查是同一类东西。
@@ -679,9 +848,16 @@ export class ItalianDictService {
     const keyword = query.trim();
     if (!keyword) return [];
     const like = `${keyword}%`;
-    const rows = this.prefixQuery.all(like, like, keyword, keyword, limit) as Array<{
+    let rows = (keyword.length <= 3
+      ? this.prefixCacheQuery.all(keyword, limit)
+      : []) as Array<{
       id: number; word: string; pos: string | null; infl: string | null;
     }>;
+    if (rows.length === 0) {
+      rows = this.prefixQuery.all(like, like, keyword, keyword, limit) as Array<{
+        id: number; word: string; pos: string | null; infl: string | null;
+      }>;
+    }
     return rows.map((r) => {
       const g = this.briefQuery.get(r.id) as { text: string } | undefined;
       return {

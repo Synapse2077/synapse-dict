@@ -28,8 +28,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 
 import paths   # noqa: E402
+# 🔴 与收词器**共用同一份**「法语版缺定义占位符」判据。抄一份就是两边漂开的起点。
+from intake_fr_words import PLACE as FR_PLACE   # noqa: E402
 
 AFFIX_POS = {"prefix", "suffix", "infix", "interfix", "circumfix", "combining_form"}
 norm = lambda s: re.sub(r"\s+", " ", s or "").strip()
@@ -94,9 +97,30 @@ def audit(name, path, lang_code, words, have_glosses, mode, verbose=True):
                 if not g:
                     c["空 gloss"] += 1
                     continue
+                # 🔴 2026-08-19：判据必须与**那一版自己的收词器**逐字一致，
+                #    否则闸永远红而数据没问题。这道闸原来只看 `form_of`、且只认意语版的
+                #    占位符，于是把法语版 30 个词形报成「要收」——回源逐条看，
+                #    全是 `intake_fr_words.py:77-82` 按两条成文规则有意不收的：
+                #      · `alt_of` 指针（`kilohenry` = kH 的拼写变体）→ 归变形层
+                #      · 法语版自己的占位符 `Définition manquante ou à compléter. (Ajouter)`
+                #        （`laserfoto` / `black noise` / `diventabile`）→ 没东西可翻
+                #
+                # ⚠️ 🔴 这两条**只对法语版成立，不能一刀切到所有源**。
+                #    我第一版就是一刀切的，英文版的「变形指针」当场从 43.7 万涨到 51.8 万 ——
+                #    那 8 万条是 `alt_of`，而英文版的 alt_of **是要收的**
+                #    （`build.py:147` 当年正是"把 alt_of 当 form_of"才造出 3,890 条编造标签）。
+                #    一刀切等于把英文版的一整族真缺口从闸的视野里抹掉。
+                #    ⇒ 豁免按源声明，判据跟着那一版自己的收词器走。
                 if s.get("form_of") and not affix:
                     c["③ 变形指针（记账，不算缺口）"] += 1
                     continue
+                if name == "fr":
+                    if s.get("alt_of") and not affix:
+                        c["③ alt_of 指针（fr 收词器不收，记账）"] += 1
+                        continue
+                    if FR_PLACE.search(g):
+                        c["📋 法语版自己的「缺定义」占位符（没东西可翻，不算缺口）"] += 1
+                        continue
                 c["源头真义项"] += 1
                 if w not in words:
                     c["🔴 ① 词形不在库里"] += 1

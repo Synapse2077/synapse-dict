@@ -1345,6 +1345,22 @@ body {
 
 .rel-plain { color: var(--text-secondary); }
 
+/* 分组专属读音：同形异读词（`ancora` 名词 ˈankora / 副词 anˈkora）把读音标在
+   对应的那组义项上，而不是全堆在词头。字号比词头小一号，避免抢焦点。 */
+.pos-group-label .pos-group-ipa {
+  margin-left: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Charis SIL',
+    'Doulos SIL', 'Gentium Plus', 'Lucida Grande', 'Arial Unicode MS', sans-serif;
+}
+
+/* 同形异义提示：变位形式那一块与上面的释义不是同一个词 */
+.it-note.it-homograph {
+  margin-bottom: 8px;
+}
+
 /* 截断提示：`buono` 有 763 个近义词，只铺前 12 个 —— 但必须告诉用户还有多少，
    否则「只收了 12 个」是个假印象。 */
 .rel-more {

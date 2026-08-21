@@ -52,6 +52,9 @@ from split_case_forms import APOSTROPHES, norm            # noqa: E402
 from strip_it_placeholder import PLACEHOLDER              # noqa: E402
 from fix_geo_parent_zh import DESC_PARENT, LAT           # noqa: E402
 from strip_pos_label_in_gloss import LAB, TAIL           # noqa: E402
+from fix_unclosed_paren import classify as paren_class   # noqa: E402
+from hide_junk_pronunciation import is_junk_ipa            # noqa: E402
+from fix_cross_edition_sense import REWRITE as XED_REWRITE  # noqa: E402
 
 f = lambda n: format(n, ",")
 
@@ -87,6 +90,26 @@ ACCEPT = {
     #   sequestrotomia —— 死骨本就是取出，通行译名如此
     # ⚠️ 这三个是**判过的**，不是没看的。数字变大就说明来了新的、没判过的。
     "B5:write": 3, "B5:read": 3,
+    # ── D 组（2026-08-21 点测评审）的已接受基线 ──────────────────────────
+    # 🔴 D1 写入侧 602 = `fix_unclosed_paren` **藏起来**的切碎说明片段。行留在表里是
+    #    有意的（可逆，且收录脚本重放时 INSERT OR IGNORE 不会覆盖 hidden）。
+    #    读取侧必须是 0 —— 那才是用户看得见的地方。
+    "D1:write": 602,
+    # 🔴 D3–D6 的修复**做在展示层**，SQL 查不到，所以这里的数字不会因修复而变。
+    #    ⚠️ 这意味着**这四条在回归闸里守不住** —— 谁把 `italian.ts`/`App.tsx` 的守卫
+    #       删掉，这里照样是绿的，正是文件头说的第二种机制「被绕过」。
+    #    ⇒ 真正守它们的是 `apps/web/src/contract-check.tsx`（**先渲染再断言**）。
+    #       这里留基线只是为了记住数据层长什么样：数字**涨了**说明数据层来了新的。
+    "D3:write": 431, "D3:read": 2428,     # 变形提示：投影后重复，inflNotes 去重挡住
+    # 读取侧 > 写入侧是这条判据**天生的形状**（全列判重 vs 投影两列判重），不是被绕过。
+    "D3:bypass": "ok",
+    "D4:write": 326, "D4:read": 326,      # 搭配重复：colsQuery 按 text 去重挡住
+    # 3,844 = 判据两次收窄后的真值（16,599 → 7,527 → 3,844，见 special() 里的说明）。
+    "D5:write": 3844, "D5:read": 3844,    # 词头徽标：posWithSenses 守卫挡住
+    "D6:write": 1418, "D6:read": 1418,    # 自反措辞：reflexiveOf 分叉挡住
+    # 🔴 D7 写入侧 4 = `hide_junk_pronunciation` 藏起来的 `*`×3 与 `ː`×1。
+    #    读取侧必须是 0。（另 4 条 fr 版词尾残片是**合法音标只是错**，不归 D7 判据。）
+    "D7:write": 4,
     # C7：交叉引用义项里，**藏了这个词就一片空白**的三条（`fieri` / `drin` / `parteddietro`）。
     # `unhide_orphan_senses` 立的规矩：宁可显示一条弱内容，也不要显示空白。
     # 这三条在 `hide_see_also_residue.scan` 的 keep 侧，闸只盯 hide 侧，所以这里是 0；
@@ -142,12 +165,42 @@ def checks():
          "SELECT text FROM example",
          "SELECT text FROM example",     # App 直接读 example，写=读
          lambda t: is_not_an_example(t, None)),
+
+        # ── D 组：2026-08-21 点测评审（12 词渲染成品送两家外审）逮到的 ──────
+        # 🔴 这一组的来历值得记：**两家模型都判 `gatto`「无问题」**，而 `gatto` 的
+        #    下位词里躺着 6 条 `( Felis chaus` 这样的断括号。模型看语言学，
+        #    形式特征明确的残渣反而是确定性判据的活儿 —— 两者互补，不能互相替代。
+        # D1 见 special()：读取侧要按 `hidden` 列过滤，而那一列是修复脚本建的 ——
+        # checks() 拿不到连接、判断不了 schema 在不在，写死 SQL 会在建列前直接抛错。
+        ("D2", "clean_inflection_base.py", "08-21", "变形原形里混着英文 and",
+         "SELECT base FROM inflection",
+         # 读取侧＝`inflQuery`（italian.ts:406）—— App 把它渲染成「avere and 的 …」
+         "SELECT base FROM inflection",
+         lambda t: " and " in t or t.endswith(" and")),
     ]
 
 
 def special(con, trace=False):
     """判据需要「文本 + 别的列」才成立的，单独查；同样跑写入侧与读取侧两遍。"""
     out = []
+
+    # F1 搜索预计算表的**陈旧性**（2026-08-20）。`search_prefix` 是派生数据，
+    #    头号风险不是算错，是「算对了然后 dict 变了没人重算」—— 那时页面上的
+    #    搜索下拉给的是旧结果，而查表本身一切正常，正是「被绕过」的形状。
+    #    ⚠️ 这里只比**指纹**（两个 COUNT，毫秒级）。逐前缀 13,442 条的全量比对
+    #       在 `pipeline/build_search_prefix.py` 自己的闸里，那个要跑二十几秒。
+    #    写入侧＝表在不在，读取侧＝指纹对不对（`italian.ts` 就是靠它给结果的）。
+    try:
+        fp = con.execute("SELECT v FROM search_prefix_meta "
+                         "WHERE k='dict_fingerprint'").fetchone()
+        now = "%d:%d" % con.execute(
+            "SELECT COUNT(*), COALESCE(MAX(id),0) FROM dict").fetchone()
+        miss = 0 if fp else 1
+        stale = 0 if (fp and fp[0] == now) else 1
+    except sqlite3.Error:
+        miss = stale = 1
+    out.append(("F1", "build_search_prefix.py", "08-20",
+                "搜索预计算表缺失/陈旧（dict 变了没重算）", miss, stale))
 
     # A5：音节切分残渣冒充音标 —— 判据**照抄 `drop_hyphenation_fragments.is_fragment`**，
     #     它要同时看词形与音标（「这串音标是词形拼写的一个片段」）。
@@ -275,6 +328,144 @@ def special(con, trace=False):
     out.append(("C8", "repoint_inflection_entry.py", "08-18", "变形层 entry_id 不指向原形词条",
                 wrong(""),
                 wrong("AND (SELECT count(*) FROM entry e2 WHERE e2.word_id=i.base_id) > 1")))
+
+    # ══ D 组：2026-08-21 点测评审 ═════════════════════════════════════════
+    # D1 关系目标里的括号残渣。判据 **import `fix_unclosed_paren.classify`**，不另写。
+    # 🔴 读取侧要按 `hidden` 过滤，而那列是修复脚本 ALTER 出来的 ⇒ 先探 schema 再取数，
+    #    否则建列之前这道闸自己会抛 OperationalError（闸挂了比闸红了更糟）。
+    if trace:
+        print("      · D1 括号残渣…", flush=True)
+    rel_cols = {r[1] for r in con.execute("PRAGMA table_info(sense_relation)")}
+    read_sql = ("SELECT target FROM sense_relation WHERE COALESCE(hidden,0)=0"
+                if "hidden" in rel_cols else "SELECT target FROM sense_relation")
+    out.append(("D1", "fix_unclosed_paren.py", "08-21", "关系目标里的括号残渣（切分切碎的）",
+                sum(1 for t in texts(con, "SELECT target FROM sense_relation") if paren_class(t)),
+                sum(1 for t in texts(con, read_sql) if paren_class(t))))
+
+    # D3 变形提示重复。🔴 **写入侧与读取侧必然不同，这正是要点**：
+    #    `inflQuery`（italian.ts:406）只投影 `base, label_zh` 两列 —— 别的列不一样、
+    #    这两列一样的行，落到页面上就是**一模一样的三行**（`una` 的「uno 的 单数」×3）。
+    #    ⇒ 读取侧只按投影后的两列判重，写入侧按全列。读取侧必然 ≥ 写入侧。
+    if trace:
+        print("      · D3 变形提示重复…", flush=True)
+    dup_write = con.execute("""
+        SELECT COALESCE(SUM(k-1),0) FROM (
+          SELECT COUNT(*) k FROM inflection
+           GROUP BY word_id, base, base_id, label_zh, desc_en, tags, src
+          HAVING k>1)""").fetchone()[0]
+    dup_read = con.execute("""
+        SELECT COALESCE(SUM(k-1),0) FROM (
+          SELECT COUNT(*) k FROM inflection
+           GROUP BY word_id, base, label_zh HAVING k>1)""").fetchone()[0]
+    out.append(("D3", "dedupe_inflection.py", "08-21", "变形提示在页面上重复成多行",
+                dup_write, dup_read))
+
+    # D4 搭配重复（`colsQuery` italian.ts:438 按 word_id 取 text）
+    if trace:
+        print("      · D4 搭配重复…", flush=True)
+    col_dup = con.execute("""
+        SELECT COALESCE(SUM(k-1),0) FROM (
+          SELECT COUNT(*) k FROM collocation GROUP BY word_id, text HAVING k>1)""").fetchone()[0]
+    out.append(("D4", "dedupe_collocation.py", "08-21", "同一个词的搭配重复出现",
+                col_dup, col_dup))
+
+    # D5 词头徽标属性归属不明却照显示。
+    # 🔴 这条是**纯展示层**缺陷：数据本身没错，`la` 作名词（音名「拉」）确实是阳性。
+    #    错在 `dict.pos` 是**词形级**的斜杠串（`contr/n/v`），`App.tsx:1685` 的
+    #    `isNoun = entry.pos.split('/').some(p => p==='n')` 只要有一个名词用法就为真，
+    #    于是把只对某一个词条成立的性/复数顶到了整词的头上。
+    #    ⇒ **修法在读取侧**（多词性就不显示），所以写入侧会一直非零、必须进 ACCEPT；
+    #      读取侧修完应当归零。这正是「写入列 vs 读取路径」两侧分开量的价值。
+    if trace:
+        print("      · D5 词头徽标归属…", flush=True)
+    # 判据经过**两次收窄**，两次都是被更严的证据打回来的：
+    #   ① 「`dict.pos` 斜杠串有 ≥2 个成分」→ 16,599。太宽：`acqua` 的 `n/v` 里那个 v
+    #      来自 `acquare` 的变位形、一条可见义项都没有，它的「阴性 复数 acque」是对的。
+    #   ② 「**有可见义项**的词条覆盖 ≥2 种词性」→ 7,527。**还是太宽**：契约闸逮到 92 处
+    #      回归 —— `cecchino`(noun+name)、`sagro`(adj+noun) 的复数形全没了。意语里
+    #      **名词/专名/形容词共享性数系统**，它们之间不冲突。
+    # ⇒ 现在的定义（与 `App.tsx` 的守卫逐字对应）：
+    #      性/复数/单复同形：`scope` 非空且**混进了非 NOMINAL 词类**才算归属不明
+    #      助动词/变位类：只可能属于动词 ⇒ `scope` 非空且**不含 verb** 才算
+    NOMINAL = {"noun", "name", "adj"}
+    scope = {}
+    for wid, pos in con.execute("""
+            SELECT e.word_id, e.pos FROM entry e
+             WHERE EXISTS(SELECT 1 FROM sense s
+                           WHERE s.entry_id=e.id AND COALESCE(s.hidden,0)=0)"""):
+        scope.setdefault(wid, set()).add(pos)
+    n5 = 0
+    for wid, gender, plural, note, aux, conj in con.execute(
+            "SELECT id, gender, plural, number_note, aux, conj FROM dict"):
+        sc = scope.get(wid)
+        if not sc:
+            continue                       # 没有自己的义项（纯变形形）⇒ 无冲突证据
+        if (gender or plural or note) and not sc <= NOMINAL:
+            n5 += 1
+        elif (aux or conj) and "verb" not in sc:
+            n5 += 1
+    out.append(("D5", "App.tsx 词头徽标守卫", "08-21", "词头徽标属性归属不明却照显示",
+                n5, n5))
+
+    # D6 自反形式被说成「不是同一个词」。
+    #    `sentirsi` 就**是** `sentire` 的自反形式（tags 里明写 form-of/reflexive），
+    #    而变位区块的开场白是「下面这些与上面的释义**不是同一个词**」—— 措辞与数据矛盾。
+    #    判据取 tags 而不是 desc_en：tags 是结构化的，desc_en 是自由文本。
+    if trace:
+        print("      · D6 自反形式措辞…", flush=True)
+    refl = con.execute("""
+        SELECT COUNT(*) FROM inflection
+         WHERE tags LIKE '%"reflexive"%' AND tags LIKE '%"form-of"%'""").fetchone()[0]
+    out.append(("D6", "App.tsx 变位区块措辞", "08-21", "自反形式被写成「不是同一个词」",
+                refl, refl))
+
+    # D7 音标位上根本不是音标的值（`*` / 只剩一个 `ː`）。
+    # 🔴 其中 3 条是**主音标**，用户直接看到 `/*/`。判据 import 修复脚本那一份 ——
+    #    它是**反着定义**的（列标记符号，不列音段白名单）：第一版用白名单
+    #    漏掉了 ɾ/ʔ/ə/ɜ，把 `r`→`ɾ`、`ah`→`ʔ` 这些真音标判成垃圾，17 条里误伤 9 条。
+    if trace:
+        print("      · D7 音标位上的垃圾…", flush=True)
+    pron_cols = {r[1] for r in con.execute("PRAGMA table_info(pronunciation)")}
+    pr_read = ("SELECT ipa FROM pronunciation WHERE COALESCE(hidden,0)=0"
+               if "hidden" in pron_cols else "SELECT ipa FROM pronunciation")
+    out.append(("D7", "hide_junk_pronunciation.py", "08-21", "音标位上不是音标的值",
+                sum(1 for t in texts(con, "SELECT ipa FROM pronunciation") if is_junk_ipa(t)),
+                sum(1 for t in texts(con, pr_read) if is_junk_ipa(t))))
+
+    # D8 有可见读音、却没有（或有多条）默认读音 —— 藏掉主音标后忘了重选就会这样，
+    #    展示层 `readings.find(isPrimary)` 落空，整个词的音标行消失。
+    if trace:
+        print("      · D8 默认读音唯一性…", flush=True)
+    if "hidden" in pron_cols:
+        n8 = con.execute("""
+            SELECT COUNT(*) FROM (
+              SELECT word_id, SUM(CASE WHEN is_primary=1 THEN 1 ELSE 0 END) k
+                FROM pronunciation WHERE COALESCE(hidden,0)=0 GROUP BY word_id HAVING k<>1)
+            """).fetchone()[0]
+    else:
+        n8 = 0
+    out.append(("D8", "hide_junk_pronunciation.py", "08-21", "有可见读音却没有唯一的默认读音",
+                n8, n8))
+
+    # D9 人工裁决过的中文被盖回去了。
+    # 🔴 这四条是**逐条回源证实**的跨版错配修正（`treno` 首义漏「火车」、`libro` 的
+    #    「叶片」、`fare` 的「赠送」方向反了）。它们写在 `sense_gloss` 上，
+    #    而重译脚本会整批覆盖那一列 —— `replay-scripts-undo-fixes` 记的正是这个形状：
+    #    `UNIQUE` 保证不重复，**不保证不倒退**。
+    # 判据 import 修复脚本的名单，不另抄一份。
+    if trace:
+        print("      · D9 人工裁决的中文…", flush=True)
+    def xed(where):
+        n = 0
+        for sid, (w, _old, new_zh, _why) in XED_REWRITE.items():
+            row = con.execute(
+                "SELECT g.text FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
+                "WHERE g.sense_id=? AND g.lang='zh' AND g.seq=0 " + where, (sid,)).fetchone()
+            if not row or row[0] != new_zh:
+                n += 1
+        return n
+    out.append(("D9", "fix_cross_edition_sense.py", "08-21", "人工裁决过的中文被盖回去了",
+                xed(""), xed("AND COALESCE(s.hidden,0)=0 AND g.kind='equivalent'")))
     return out
 
 
@@ -316,7 +507,11 @@ def report(con, verbose=True, trace=False):
         bad_w = base_w is not None and nw > base_w
         bad_r = base_r is not None and nr > base_r
         # 🔴 「被绕过」的形状：写入侧干净、读取侧有货
-        bypass = nr > nw
+        # ⚠️ 少数断言的读取侧**天然**比写入侧大，那不是被绕过，是判据本身的形状：
+        #    D3 的写入侧按全列判重（431），读取侧按 `inflQuery` 投影后的两列判重（2,428）——
+        #    「别的列不同、页面上却是同一句话」正是它要查的东西。这类要**显式豁免**，
+        #    不能靠把两侧的判据改成一样来消红（那会把真正的信息抹掉）。
+        bypass = nr > nw and ACCEPT.get(cid + ":bypass") != "ok"
         mark = "🔴" if (bad_w or bad_r or bypass) else "✅"
         if verbose:
             print("   %s %-5s %-34s %10s %10s%s"
@@ -340,71 +535,153 @@ def check_brief():
         con.close()
 
 
-def mutate():
+def mutate(only=()):
     """⭐ 变异验证：在**备份副本**上把每一族缺陷各造一条，闸必须逐条报出来。
 
+    `only`：只跑这几条（如 `("D4","D5")`）。每条变异都要复制 1.1 GB 的库再跑全部判据，
+    全量一轮二十多分钟 —— 修好一条变异就为它重跑全部，是不必要的等待。
+    ⚠️ 但**合入前必须完整跑一遍**：`only` 是调试用的，不是验收口径。
+
     一条永远通过的检查等于没检查 —— 这里就是证明它会失败的地方。
+
+    🔴 2026-08-21 重写判据。原来是 `got = bool(report(...))` ——「跑完还有红的就算逮住」。
+       那在**全部断言基线都是 0** 时成立；D 组进来之后有 6 条常红（缺陷还没修），
+       于是无论造什么变异、哪怕造在完全无关的表上，`bool(red)` 都为真 ⇒ **13/13 全过，
+       而且是假的**。这与「闸写完必须变异验证」是同一个道理：变异验证自己也会变成摆设。
+    ⇒ 改成**逐条比对**：每个变异声明它该触发哪条断言，只看**那一条**的数字有没有变大。
+       顺带还能抓出「变异触发了别的断言」——那说明判据之间有串扰。
     """
     import shutil
     import tempfile
     tmp = Path(tempfile.mkdtemp()) / "m.sqlite"
     muts = [
-        ("A1 音标里塞回定界符",
+        ("A1", "A1 音标里塞回定界符",
          "UPDATE dict SET ipa='/ˈka.sa/' WHERE word='casa'"),
-        ("A3 音标里塞拉丁 g",
+        ("A3", "A3 音标里塞拉丁 g",
          "UPDATE dict SET ipa='ˈgat.to' WHERE word='gatto'"),
-        ("A4 撇号冒充重音符（读取侧）",
+        ("A4", "A4 撇号冒充重音符（读取侧）",
          "UPDATE pronunciation SET ipa='''kaza' WHERE id=(SELECT id FROM pronunciation "
          "WHERE is_primary=1 LIMIT 1)"),
-        ("A5 音节切分残渣（读取侧）",
+        ("A5", "A5 音节切分残渣（读取侧）",
          "UPDATE pronunciation SET ipa='su' WHERE id=(SELECT p.id FROM pronunciation p "
          "JOIN dict d ON d.id=p.word_id WHERE d.word='sudanese' LIMIT 1)"),
-        ("B1 中文写成拉丁字母",
+        ("B1", "B1 中文写成拉丁字母",
          "UPDATE sense_gloss SET text='house' WHERE rowid=(SELECT g.rowid FROM sense_gloss g "
          "JOIN sense s ON s.id=g.sense_id WHERE g.lang='zh' AND g.kind='equivalent' "
          "AND g.seq=0 AND COALESCE(s.hidden,0)=0 LIMIT 1)"),
         # ⚠️ 这条变异必须挑**词性确实是 adj** 的义项 —— 判据是「标签＝本义项词性」，
         #    随便挑一条加「（形容词）」造不出缺陷，第一版就是这么把变异做废的（9/10）。
-        ("B2 释义带回词性标签（挑 adj 义项）",
+        ("B2", "B2 释义带回词性标签（挑 adj 义项）",
          "UPDATE sense_gloss SET text=text||'（形容词）' WHERE rowid=(SELECT g.rowid "
          "FROM sense_gloss g JOIN sense s ON s.id=g.sense_id WHERE g.lang='zh' "
          "AND g.kind='equivalent' AND g.seq=0 AND COALESCE(s.hidden,0)=0 "
          "AND s.pos='adj' LIMIT 1)"),
-        ("B3 占位符回到出版层",
+        ("B3", "B3 占位符回到出版层",
          "UPDATE sense_gloss SET text='definizione mancante; se vuoi, aggiungila tu' "
          "WHERE rowid=(SELECT g.rowid FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
          "WHERE g.lang='it' AND g.kind='definition' AND COALESCE(s.hidden,0)=0 LIMIT 1)"),
-        ("C1 sense.pos 写回长写法",
+        ("C1", "C1 sense.pos 写回长写法",
          "UPDATE sense SET pos='adjective' WHERE id=(SELECT id FROM sense WHERE pos IS NOT NULL LIMIT 1)"),
-        ("C3 塞一条构词公式当例句",
+        ("C3", "C3 塞一条构词公式当例句",
          "INSERT INTO example (word,text,src) VALUES ((SELECT word FROM example LIMIT 1),"
          "'ragazzo (“boy”) + -one → ragazzone (“big boy”)','en-edition')"),
-        ("C5 word_norm 改坏一行",
+        ("C5", "C5 word_norm 改坏一行",
          "UPDATE dict SET word_norm='ZZZ' WHERE word='casa'"),
-        ("C8 变形层 entry_id 指回变形形自己",
+        ("C8", "C8 变形层 entry_id 指回变形形自己",
          "UPDATE inflection SET entry_id=(SELECT e.id FROM entry e WHERE e.word_id="
          "inflection.word_id LIMIT 1) WHERE id=(SELECT i.id FROM inflection i "
          "WHERE i.base_id IS NOT NULL AND EXISTS(SELECT 1 FROM entry e WHERE "
          "e.word_id=i.word_id) LIMIT 1)"),
-        ("C7 wiktextract 残渣放回出版层",
+        ("C7", "C7 wiktextract 残渣放回出版层",
          "UPDATE sense SET hidden=0 WHERE id=(SELECT s.id FROM sense s JOIN sense_gloss g "
          "ON g.sense_id=s.id WHERE g.lang='en' AND g.text LIKE 'see %' AND s.hidden=1 LIMIT 1)"),
-        ("🔴 被绕过：写入列干净、读取路径有货",
+        ("A1", "🔴 被绕过：写入列干净、读取路径有货",
          "UPDATE pronunciation SET ipa='/ˈka.sa/' WHERE is_primary=1 AND word_id="
          "(SELECT id FROM dict WHERE word='casa')"),
+        # ── D 组（2026-08-21）──────────────────────────────────────────
+        # ⚠️ 变异必须挑**目前不在缺陷集里**的行。第一版 `LIMIT 1` 取到的那行本来
+        #    就带断括号，改成另一个断括号后数字纹丝不动 ⇒ 报「没逮住」，而闸是好的。
+        #    这是「变异没造出新缺陷」，不是「闸是摆设」—— 两者报出来一模一样，
+        #    所以变异没触发时**先查变异对不对**。
+        ("D1", "D1 关系目标塞一个断括号",
+         "UPDATE sense_relation SET target='kiwi australe (' WHERE id="
+         "(SELECT id FROM sense_relation WHERE kind<>'alt_of' "
+         " AND target NOT LIKE '%(%' AND target NOT LIKE '%)%' LIMIT 1)"),
+        ("D2", "D2 变形原形塞回英文 and",
+         "UPDATE inflection SET base='avere and' WHERE id="
+         "(SELECT id FROM inflection WHERE base NOT LIKE '% and%' LIMIT 1)"),
+        # ⚠️ D3 的变异必须**照抄投影后的两列**再插一行：只改 desc_en/src 之类
+        #    不参与 `inflQuery` 投影的列，页面上根本看不出重复，也就造不出这个缺陷。
+        # 🔴 `src_ref` 有 UNIQUE 约束，照抄会 IntegrityError ⇒ 给它一个新值。
+        #    这反而更贴近真实：**写入侧（全列判重）不会涨、只有读取侧涨** ——
+        #    正是「其他列不同、投影后一样」那 1,997 行的形状。
+        ("D3", "D3 复制一行变形提示（word_id/base/label_zh 全同，src_ref 另给）",
+         "INSERT INTO inflection (word_id,entry_id,base,base_id,label_zh,desc_en,tags,src,src_ref) "
+         "SELECT word_id,entry_id,base,base_id,label_zh,desc_en,tags,src,src_ref||':mut' "
+         "FROM inflection WHERE label_zh IS NOT NULL AND label_zh<>'' LIMIT 1"),
+        # 🔴 `collocation` 有 UNIQUE(word_id, rank)，照抄 rank 会 IntegrityError ⇒ 另给一个。
+        ("D4", "D4 复制一条搭配（rank 另给）",
+         "INSERT INTO collocation (word_id,sense_id,text,rank) "
+         "SELECT word_id,sense_id,text,9999 FROM collocation "
+         "WHERE NOT EXISTS(SELECT 1 FROM collocation c2 WHERE c2.word_id=collocation.word_id "
+         "AND c2.rank=9999) LIMIT 1"),
+        # ⚠️ 变异必须打在**判据真正读的东西**上。第一版改的是 `dict.pos`，
+        #    而收窄后的判据看的是「有可见义项的 entry.pos 集合」，压根不读 dict.pos
+        #    ⇒ 改了也不动数字。判据一变，它的变异就得跟着变，否则闸又变成摆设。
+        #    这里挑一个**目前 scope 全是名词**、且带 gender 的词，把它的 entry
+        #    改成动词 ⇒ scope 混进非 NOMINAL，性/复数徽标立刻归属不明。
+        ("D5", "D5 让一个纯名词词的词条变成动词（性/复数归属立刻不明）",
+         "UPDATE entry SET pos='verb' WHERE id=(SELECT e.id FROM entry e "
+         "JOIN dict d ON d.id=e.word_id "
+         "WHERE d.gender IS NOT NULL AND d.gender<>'' "
+         "AND EXISTS(SELECT 1 FROM sense s WHERE s.entry_id=e.id AND COALESCE(s.hidden,0)=0) "
+         "AND (SELECT COUNT(DISTINCT e2.pos) FROM entry e2 WHERE e2.word_id=d.id "
+         "     AND e2.pos IN ('noun','name','adj') "
+         "     AND EXISTS(SELECT 1 FROM sense s2 WHERE s2.entry_id=e2.id "
+         "                AND COALESCE(s2.hidden,0)=0))=1 "
+         "AND NOT EXISTS(SELECT 1 FROM entry e3 WHERE e3.word_id=d.id "
+         "               AND e3.pos NOT IN ('noun','name','adj') "
+         "               AND EXISTS(SELECT 1 FROM sense s3 WHERE s3.entry_id=e3.id "
+         "                          AND COALESCE(s3.hidden,0)=0)) LIMIT 1)"),
+        ("D7", "D7 把一条主音标改成 *",
+         "UPDATE pronunciation SET ipa='*' WHERE id=(SELECT id FROM pronunciation "
+         "WHERE is_primary=1 AND COALESCE(hidden,0)=0 LIMIT 1)"),
+        # ⚠️ 造「没有默认读音」要挑**还有别的可见读音**的词，否则藏完那个词一条都不剩、
+        #    分母是 0，`HAVING k<>1` 也就不会命中。
+        ("D8", "D8 把一个词的默认读音降级（该词还有别的读音）",
+         "UPDATE pronunciation SET is_primary=0 WHERE id=(SELECT p.id FROM pronunciation p "
+         "WHERE p.is_primary=1 AND COALESCE(p.hidden,0)=0 AND (SELECT COUNT(*) FROM pronunciation q "
+         "WHERE q.word_id=p.word_id AND COALESCE(q.hidden,0)=0)>1 LIMIT 1)"),
+        ("D9", "D9 把人工裁决过的中文盖回旧值",
+         "UPDATE sense_gloss SET text='（人或物的）系列，行列' "
+         "WHERE sense_id=12064 AND lang='zh' AND seq=0"),
+        ("D6", "D6 给一行变形打上 reflexive 标签",
+         "UPDATE inflection SET tags='[\"form-of\", \"reflexive\"]' WHERE id="
+         "(SELECT id FROM inflection WHERE tags NOT LIKE '%reflexive%' LIMIT 1)"),
     ]
+    if only:
+        muts = [m for m in muts if m[0] in only]
+        print("⚠️ 只跑 %s —— 这是调试口径，合入前要完整跑一遍" % ",".join(only))
     print("═══ 变异验证：每族各造一条，闸必须报出来 ═══")
+    con0 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    base = {cid: (nw, nr) for cid, _s, _d, _n, nw, nr in run(con0)}
+    con0.close()
     caught = 0
-    for name, sql in muts:
+    for cid, name, sql in muts:
         shutil.copy(paths.DB, tmp)
         c2 = sqlite3.connect(tmp)
         c2.execute(sql)
         c2.commit()
-        red = report(c2, verbose=False)
+        after = {c: (w, r) for c, _s, _d, _n, w, r in run(c2)}
         c2.close()
-        got = bool(red)
+        # 🔴 只看**声明的那一条**有没有变大：基线非零时 `bool(red)` 恒真、等于没测。
+        got = after.get(cid, (0, 0)) > base.get(cid, (0, 0))
         caught += got
-        print("   %s %s" % ("✅ 逮住" if got else "🔴 没逮住", name))
+        others = [c for c in after if c != cid and after[c] > base.get(c, (0, 0))]
+        print("   %s %-52s %s→%s%s"
+              % ("✅ 逮住" if got else "🔴 没逮住", name,
+                 base.get(cid), after.get(cid),
+                 ("  ⚠️ 同时触发 " + ",".join(others)) if others else ""))
     print("\n   变异验证 %s（%d/%d）"
           % ("通过" if caught == len(muts) else "🔴 有闸是摆设", caught, len(muts)))
     return caught == len(muts)
@@ -413,9 +690,11 @@ def mutate():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mutate", action="store_true")
+    ap.add_argument("--only", default="", help="只跑这几条变异，逗号分隔（调试用）")
     a = ap.parse_args()
     if a.mutate:
-        return 0 if mutate() else 1
+        only = tuple(x.strip() for x in a.only.split(",") if x.strip())
+        return 0 if mutate(only) else 1
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     red = report(con, trace=True)
     con.close()

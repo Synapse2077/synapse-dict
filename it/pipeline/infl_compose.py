@@ -53,10 +53,22 @@ def _pick(t, pairs):
     return [zh for k, zh in pairs if k in t]
 
 
-def compose(tags):
-    """kaikki tags → 中文语法说明；无法组合时返回 ''（调用方回退'变位形式'）。"""
+def compose(tags, legacy=True):
+    """kaikki tags → 中文语法说明；无法组合时返回 ''（调用方回退'变位形式'）。
+
+    🔴 `legacy=True`（默认）**冻结成七月的行为**，供 `build_inflection_layer.replay()`
+       逐字节重建旧列 `dict.infl` / `exchange` 用 —— 那道闸（闸①a）的职责就是
+       "原样复刻"，带着毛病也得一样（A83）。**新表一律传 `legacy=False`。**
+    """
     t = set(x for x in tags if x not in DROP)
     seg = []
+
+    # —— 自反式：源头写 `reflexive of lavare`，而我们一直落成「变位形式」——
+    #    `lavarsi` 显示成「lavare 的 变位形式」是**错的**，它是自反形式，
+    #    与「第三人称单数」这类变位不是一回事。全库 1,418 条。2026-08-19 补。
+    #    ⚠️ 只在新表生效（见上）：改了 legacy 分支，闸①a 当场对不上七月的旧列。
+    if not legacy and "reflexive" in t:
+        return "自反形式"
 
     # —— 非限定形式（互斥优先）——
     if "infinitive" in t:
