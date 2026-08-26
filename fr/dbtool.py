@@ -133,14 +133,48 @@ KEEP_TAG = "keep"
 #  🔴 2026-08-21：`keep` **只豁免 ①③，计入 ②**。
 #     当天清盘发现自动淘汰一个都没删而 backups 已 9.8 GB：es 9 个备份里 6 个带 keep
 #     全豁免，剩 3 个非豁免的字节数又刚好没到上限 ⇒ **堆积的不是普通备份，是豁免名单本身**。
-#  ⚠️ 代价说明白：条数上限是**共享**的，所以一天跑够 MAX_BACKUPS 个普通备份，
-#     最老的里程碑会被挤掉。这是本函数唯一一处会删 keep 的地方，
-#     因此淘汰 keep 时**必须打印警告**（见下面的 `⚠️ 淘汰里程碑`），不许静默。
-MAX_BACKUPS = 12            # 同一语种保留的备份数上限（**含 keep**）
-#  🔴 条数上限对「库变大」是失效的：一轮收尾跑十几个**不同 tag** 的脚本，
-#     「同 tag 同天留最新」一个都淘汰不掉，而库涨到 1 GB/次时 12 条就是 12 GB。
-#     必须再加一条以**字节**计的闸。里程碑（keep）不计入。
-MAX_BACKUP_BYTES = 3 * 1024 ** 3   # 非 keep 备份的总量上限（带 keep 的不计入）
+#     （当时的修法是"把 keep 计入条数"—— 治标，2026-08-25 已被下面那条取代。）
+#  🔴 2026-08-25 第四次咬人之后**换方向，不再调参数**：条数上限整个删掉。
+#     它刚刚挤掉了 `keep-v3-infl@20260822`（不可再生的迁移锚点），而当天我打了
+#     7 个彼此只差一次小改动的 1.8 GB 里程碑 —— **该删的是那 7 个里的中间几个，
+#     不是最老的那个**。条数上限没有"哪个更值钱"的概念，只会按时间从老到新砍，
+#     于是永远砍在最不该砍的地方。
+#     ⇒ 新规则见 `prune_backups`：**按字节封顶（含 keep）+ 按稀疏度淘汰**。
+KEEP_PLAIN = 2              # 普通（非 keep）备份只留最近这么多个 —— 例行 pre-state，
+#                             下一个备份一出现，上一个的价值立刻衰减
+# 同一语种**全部**备份的总量上限，**keep 也计入**。
+# 🔴 keep 从前不计入字节 ⇒ 唯一约束它的是条数，而 fr 一个备份 1.8 GB、上限 24 个
+#    ＝ 43 GB 的隐性预算，实测已经涨到 37 GB。豁免名单本身就是问题
+#    （2026-08-21 在 es 上已经诊断过一次，当时的修法是"把 keep 计入条数"——治标）。
+# ⇒ keep 计入字节，超了按**稀疏度**淘汰（见 `_thin`），首尾永不删。
+MAX_BACKUP_BYTES = 8 * 1024 ** 3
+
+
+def _thin(items, when, budget, floor=2):
+    """总字节超预算时，反复删掉**时间上最"挤"**的那个。→ (留下的, 删掉的)
+
+    "挤" = 它与前后邻居的时间跨度最小 ⇒ 删了它，时间轴上留下的空洞最小。
+    效果是**密集簇被抽稀、稀疏的老锚点自然存活** —— 正好是按时间从老到新砍的反面。
+
+    🔴 `floor` = 最少留几个，首尾优先保住：最新的是「回滚上一步」，
+       最老的是「回到起点」，这两个的价值不随邻居多少衰减 ⇒ 里程碑用 floor=2。
+    ⚠️ **普通备份不能用这个下限**：它们不是锚点，只是例行 pre-state，
+       预算被里程碑占满时该让干净（floor=0）。第一版把 floor 写死成 2，
+       测试当场逮到「普通的该砍光却留了 2 个」。
+    """
+    live = sorted(items, key=lambda p: when[p])
+    total = sum(p.stat().st_size for p in live)
+    out = []
+    while total > budget and len(live) > max(floor, 0):
+        if len(live) <= 2:                       # 只剩首尾，按从老到新让
+            i = 0
+        else:
+            i = min(range(1, len(live) - 1),
+                    key=lambda j: when[live[j + 1]] - when[live[j - 1]])
+        p = live.pop(i)
+        total -= p.stat().st_size
+        out.append(p)
+    return live, out
 
 
 def _backup_time(p, day, hms):
@@ -161,12 +195,15 @@ def _backup_time(p, day, hms):
 
 
 def prune_backups(verbose=True, dry=False):
-    """三条规则依次收紧。`keep` 豁免 ①③、**计入 ②**：
-    ① 同一 tag 同一天只留最新的一个        —— keep 豁免
-    ② 全部按时间取最近 MAX_BACKUPS 个      —— keep **也算**
-    ③ 再按**总字节**从新到旧累加，超过 MAX_BACKUP_BYTES 的淘汰 —— keep 不计入也不淘汰
+    """三条规则依次收紧：
+    ① 同一 tag 同一天只留一个   —— 普通留**最新**，keep 留**最早**（真正的 pre-state）
+    ② 普通备份只留最近 KEEP_PLAIN 个
+    ③ 总字节封顶 MAX_BACKUP_BYTES（**keep 也计入**）：先砍普通的，
+       还超就按**稀疏度**抽稀 keep（`_thin`）—— 密集簇的中间点先走，首尾永不删
 
-    🔴 ③ 至少留 1 个：真出事时手里得有一个能回滚的点。
+    🔴 2026-08-25 用 ③ 的稀疏度淘汰**换掉了**原来的条数上限。
+       条数上限只会按时间从老到新砍，而"该砍的"恰恰是同一天连打的那几个近乎重复的
+       快照 —— 它砍在了最不该砍的地方，实测挤掉 `keep-v3-infl@20260822`。
 
     `dry=True` 只列不删 —— **改这个函数之后先 dry 跑一遍**。
     它是本仓库里唯一一个会自动删数据的地方，写错了没有第二次机会。
@@ -179,12 +216,31 @@ def prune_backups(verbose=True, dry=False):
             rows.append((p, m.group(1), m.group(2)))
             when[p] = _backup_time(p, m.group(2), m.group(3))
     exempt, drop = set(), []
-    # ① 同 (tag, 日期) 只留最新。keep 豁免这一条 —— 同一天同一个 tag 的两个里程碑
-    #    （it 有一对相隔 75 秒的 `keep-v3-entry`）不当重复删。
-    newest = {}
+    # ① 同 (tag, 日期) 只留一个。
+    #
+    #    普通备份留**最新**：它是离现在最近的可恢复状态。
+    #
+    #    🔴 2026-08-23：keep 原来完全豁免这一条，**代价当天就付了** ——
+    #    我把 `strip-footnote` 判据改窄了两次、重试三次，留下 3 个同标签同日的
+    #    1.8 GB 快照（`apos` 更狠，4 个），条数配额被占满，规则② 挤掉了
+    #    `pre-keep-v3-altof` 这个**阶段 2 的真里程碑**。
+    #    ⇒ keep 也进这一条，但方向**相反：留最早的那个**。
+    #      理由：里程碑的意义是「操作 X **之前**的状态」。同一天同一个 tag 跑了三次，
+    #      第一个才是真正的 pre-state，后两个是我改到一半的中间态 ——
+    #      作为回滚锚点严格地更差。
+    #    ⚠️ 代价说明白：如果同一天把同一个 tag 复用给了两个**不同**的操作，
+    #      留最早 = 回滚会多退一步。仍然可恢复，只是退得更远。
+    #      （这比「里程碑被重试快照挤掉」——直接不可恢复——好。）
+    newest, oldest = {}, {}
     for p, tag, day in rows:
         if KEEP_TAG in tag:
-            exempt.add(p)
+            k = (tag, day)
+            if k not in oldest or when[p] < when[oldest[k]]:
+                if k in oldest:
+                    drop.append(oldest[k])
+                oldest[k] = p
+            else:
+                drop.append(p)
             continue
         k = (tag, day)
         if k not in newest or when[p] > when[newest[k]]:
@@ -193,31 +249,53 @@ def prune_backups(verbose=True, dry=False):
             newest[k] = p
         else:
             drop.append(p)
-    # ② 按时间取最近 MAX_BACKUPS 个。🔴 keep 也在这个池子里 ——
-    #    否则里程碑只增不减，一门语言做完就永久压着 2-3 GB。
-    pool = sorted(list(newest.values()) + list(exempt), key=lambda p: -when[p])
-    drop += pool[MAX_BACKUPS:]
-    pool = pool[:MAX_BACKUPS]
+    exempt = set(oldest.values())              # 过了 ① 的 keep
+    # ② 普通备份只留最近 KEEP_PLAIN 个。
+    #    它们是例行的 pre-state，下一个备份一出现，上一个基本就没人会回去了；
+    #    而里程碑不一样，它标的是「某次结构变更之前」，隔多久都可能要回去。
+    plain = sorted(newest.values(), key=lambda p: -when[p])
+    drop += plain[KEEP_PLAIN:]
+    plain = plain[:KEEP_PLAIN]
 
-    # ③ 总量封顶：从新到旧累加，超了的淘汰。**至少留 1 个**。
-    #    keep 不计入总量、也不被这条淘汰。
-    total, survive, seen_plain = 0, [], False
-    for p in pool:
-        if p in exempt:
-            survive.append(p)
-            continue
-        total += p.stat().st_size
-        if not seen_plain or total <= MAX_BACKUP_BYTES:
-            survive.append(p)
-        else:
-            drop.append(p)
-        seen_plain = True
-    keep = set(survive)
+    # ③ 总字节封顶（**keep 也计入**），超了按稀疏度抽稀。
+    #    先砍普通的（更不值钱），还超再抽稀 keep。
+    budget = MAX_BACKUP_BYTES
+    used = sum(p.stat().st_size for p in exempt)
+    plain, cut = _thin(plain, when, max(budget - used, 0), floor=0) if plain else ([], [])
+    drop += cut
+    used += sum(p.stat().st_size for p in plain)
+    if used > budget:
+        survive_keep, cut_keep = _thin(list(exempt), when, budget - sum(
+            p.stat().st_size for p in plain))
+        drop += cut_keep
+        exempt = set(survive_keep)
+    keep = set(plain) | exempt
 
-    # ⚠️ 淘汰里程碑：本函数唯一会删 keep 的路径（规则②的共享条数上限），永不静默。
+    # 🔴 删 keep 有**两条**路径，仍然分开打（合并打印 = 信息淹没在噪声里）：
+    #    ①' 同标签同日的重试快照 —— 该组仍留着最早那个，没丢回滚能力
+    #    ③  预算超了被抽稀 —— 该标签整个消失
+    # ⚠️ 2026-08-25：③ 从前是「条数上限从最老开始砍」＝**意外**，所以用 🔴 报警；
+    #    换成稀疏度淘汰之后它是**预期行为**（密集簇本来就该抽稀），
+    #    再打 🔴 就是狼来了。降级成陈述句，但仍逐条列出来，不许静默。
+    by_group = {}
+    for p, tag, day in rows:
+        if KEEP_TAG in tag:
+            by_group.setdefault((tag, day), []).append(p)
+    survivors = {k for k, ps in by_group.items() if any(p in keep for p in ps)}
     for p in drop:
-        if KEEP_TAG in p.name:
-            print("   ⚠️ 淘汰里程碑（条数超 %d）：%s" % (MAX_BACKUPS, p.name))
+        if KEEP_TAG not in p.name:
+            continue
+        m = pat.match(p.name)
+        grp = (m.group(1), m.group(2)) if m else None
+        if grp in survivors:
+            print("   · 清理同标签同日的重试快照：%s（该里程碑仍保留最早的一个）" % p.name)
+        else:
+            print("   ⚠️ 淘汰里程碑（总量超 %.0f GB，抽稀掉这个时间点）：%s"
+                  % (MAX_BACKUP_BYTES / 1024 ** 3, p.name))
+
+    gone = sorted("%s@%s" % k for k in by_group if k not in survivors)
+    if gone:
+        print("   （被抽稀掉的里程碑标签：%s）" % ", ".join(gone))
 
     freed = sum(p.stat().st_size for p in drop)
     if dry:
@@ -326,7 +404,18 @@ def session(tag, expect=None, dry=False, verbose=True):
     except BaseException:
         conn.rollback()
         conn.close()
-        print("\n🔴 写库异常，已 rollback。备份仍在：" + bak.name, file=sys.stderr)
+        # 🔴 2026-08-22：**rollback 成功 ⇒ 这份备份是冗余的，当场删掉。**
+        #    事务回滚后库就是备份拍下的那个状态，留着它只是噪声 —— 而噪声会挤掉里程碑：
+        #    当天 `keep-v3-apos` 那个 7 行的小改动失败重试三次，留下 4 份内容几乎相同的备份，
+        #    把 `keep-v3-schema` 和 `keep-v3-entry` 两个**不可再生的迁移锚点**挤出了条数上限。
+        #    ⚠️ 只删「异常回滚」这一路。**闸核对未通过那一路不能删** ——
+        #       那时数据已经在库里，备份是唯一的回滚点。
+        try:
+            bak.unlink()
+            print("\n🔴 写库异常，已 rollback；本次备份是冗余的，已删除（%s）"
+                  % bak.name, file=sys.stderr)
+        except OSError:
+            print("\n🔴 写库异常，已 rollback。备份仍在：" + bak.name, file=sys.stderr)
         raise
     after = snapshot(conn)
     conn.close()
@@ -387,8 +476,11 @@ def _regression_check(verbose=True):
        而且不是每次红都该回滚 —— 有些是这次写库有意为之。报出来 + 备份路径就够决策了。
     不想跑：`SKIP_REGRESSION_CHECK=1`。
 
-    fr 的回归闸文件在阶段 7 才建（现在还没有任何"过去的修复"要守）。
+    ✅ fr 的回归闸已于 2026-08-26（阶段 7）建好，从此每次写库都会跑。
     **文件不存在 = 静默跳过；文件在但跑不起来 = 必须喊** —— 后者是闸自己坏了。
+
+    ⚠️ 闸里的 **L 组是故意红的**（App 还在读老扁平列，v3 那套表一张没接）。
+       阶段 8 切完读取路径才该变绿 —— **别为了让写库输出好看去调它的基线。**
     """
     if os.environ.get("SKIP_REGRESSION_CHECK") == "1":
         return
