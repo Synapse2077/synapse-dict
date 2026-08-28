@@ -38,6 +38,7 @@
    调高任何一个基线都要写清为什么 —— 否则这就成了掩盖回归的开关。
 """
 import argparse
+import re
 import shutil
 import sqlite3
 import sys
@@ -56,6 +57,9 @@ import strip_editorial_residue as _res                    # noqa: E402
 import strip_footnote_refs as _foot                       # noqa: E402
 import tidy_gloss_punctuation as _tidy                    # noqa: E402
 import build_pronunciation_layer as _pron                 # noqa: E402
+import clean_reading_intruders as _intr                   # noqa: E402
+import strip_zh_gloss_period as _per                      # noqa: E402
+import build_search_prefix as _pref                       # noqa: E402
 from intake_fr_words import norm_apos                     # noqa: E402
 
 f = lambda n: format(n, ",")
@@ -124,7 +128,13 @@ ACCEPT = {
     # ── E 组：例句 ────────────────────────────────────────────────────
     # 📋 E2 收窄后 281 条：`e^π≈23,14069263`、`demain → 2main`（短信体）、
     #    `g 1 prob, viens stp!`（火星文）—— 本来就没有可翻的东西。2026-08-26 判定不修。
-    "E2:all": 281, "E2:vis": 281,
+    #    2026-08-27 由 (281, 281) 调到 (284, 218)：
+    #    `pipeline/fix_example_sense_mismatch.py` 换掉 7,598 条取错义项的译文。
+    #    · 写入侧 +3：`brier - brioche.` / `péter - pétoche.` / `statuo- + -claste → …`
+    #      —— **词源推导式，本来就没有可翻的东西**，与基线里那 281 条同一族。
+    #    · 读取侧 **281 → 218**：修好了 63 条原来"没翻"的可见例句。
+    #    ⚠️ 读取侧**降**了才是这次修复该有的方向；写入侧那 3 条是同族新增，不是回归。
+    "E2:all": 284, "E2:vis": 218,
 
     # ── F 组：stage-2a 遗留（`docs/FR_PLAN.md` 已记账）────────────────
     # 📋 F2 1,037 条证据行指向隐藏义项：隐藏是**可逆**的（写 hidden 不删行），
@@ -132,7 +142,15 @@ ACCEPT = {
     #    2026-08-26 由 1,037 调到 1,052：`fixes/fix_gate_reds.py` 隐掉了 15 条
     #    「释义只剩 … 且无中文」的义项，它们的证据行随之指向隐藏义项。
     #    ⚠️ 这是**我自己那次修复的已知后果**，不是回归 —— 调基线必须像这样写清来源。
-    "F2:all": 1052,
+    #    2026-08-27 由 1,052 调到 1,057：`fixes/reclean_published_fr_defs.py` 把 889 条
+    #    「洗完只剩占位符/词条头」的义项置 hidden=1（其中 884 条本来就是隐藏的，
+    #    新增可见→隐藏的只有 5 条），它们的证据行随之指向隐藏义项。同一种已知后果。
+    "F2:all": 1057,
+    # 📋 F5 9,295 条读音没有词性归属：全是 `legacy`（七月老流水线，`src_ref` 写的是
+    #    `dict.ipa:<id>.<n>`，**源头就没有词性坐标**），留 NULL 是设计不是漏填。
+    #    ⚠️ 这个数**涨了**就说明有新的读音没带坐标进来，或者 `pos` 列被重建冲掉了 ——
+    #    后者别的闸一条都看不见（行数不变、不变量不变、可逆性不变）。
+    "F5:all": 9295, "F5:vis": 9295,
     # 📋 F3 622 条可见义项 pos 为空：stage-2a 建表时的遗留，已记账。
     #    ⚠️ 这条**没修**是因为规模小且不影响展示（pos 空就不显示词性徽标）。
     "F3:all": 622, "F3:vis": 622,
@@ -213,6 +231,11 @@ def checks():
         #    真正会漏进来的是语言标签 `（法语）`（`[[context-you-give-leaks-into-output]]`）。
         ("C3", "slot_translate", "08-23", "中文里残留「（法语）」这个我给的上下文标签",
          ZH_ALL, ZH_PUB, lambda t: "（法语）" in t),
+        # 🔴 C4：中文释义**句末不带句号**是全库体例（既有 30,000 条抽样里 0.0%）。
+        #    A5 重写那批破了例（36%）—— 判据 import 修复侧那一份，不另抄。
+        #    ⚠️ 只认中文句号 `。`：`Anthericum ramosum L.` 的拉丁点是词的一部分。
+        ("C4", "strip_zh_gloss_period", "08-28", "中文释义句末带句号（全库体例是不带）",
+         ZH_ALL, ZH_PUB, lambda t: _per.trailing_period(t) is not None),
 
         # ── D 组：撇号归一（全库约定）──────────────────────────────────
         ("D1", "normalize_apostrophes", "08-22", "词形里有未归一的弯撇号",
@@ -307,15 +330,74 @@ def special(con, trace=False):
           "GROUP BY word_id HAVING COUNT(*)>1)")
     one("F4", "build_pronunciation_layer", "08-25", "🔴 一个词形多条主读音", n, n)
 
-    # ── L 组：阶段 8 债务 —— App 还在读老扁平列 ─────────────────────────
-    # 🔴 这不是数据缺陷，是**读取路径没切**。故意红着，见文件头。
-    n = q("SELECT COUNT(*) FROM dict d WHERE COALESCE(d.ipa,'')='' "
-          "AND EXISTS(SELECT 1 FROM pronunciation p WHERE p.word_id=d.id)")
-    one("L1", "阶段 8 待切", "08-26",
-        "🔴 老列无音标、音标层有（App 读老列 ⇒ 用户看不到）", n, n)
-    n = q("SELECT COUNT(*) FROM example")
-    one("L2", "阶段 8 待切", "08-26",
-        "🔴 例句一条都没接进展示层（french.ts 无 example 查询）", n, n)
+    # F5：读音归属（族 D，2026-08-27）。`pronunciation.pos` 是展示层把读音分到
+    #     词性组的唯一依据 —— 这一列要是被后续重建悄悄丢掉，`en` 的 A1 介词旁边
+    #     又会摆回名词义的 /ɑ̃.ky.le/，而**别的闸一条都看不见**（行数不变、
+    #     不变量不变、可逆性不变）。
+    #     ⚠️ 期望值不是 0：`legacy` 那 9,295 行没有词性坐标，留 NULL 是设计。
+    n = q("SELECT COUNT(*) FROM pronunciation WHERE pos IS NULL")
+    one("F5", "backfill_pronunciation_pos", "08-27", "读音缺词性归属（应=legacy 行数）", n, n)
+
+    # F6：`context='liaison'` ⇒ 音标里**必须**有连诵符 ‿。
+    # 🔴 这条不变量是 `mark_liaison_readings` 自己破坏的：它对前导连诵符那一条
+    #    同时做了「剥掉 ‿」和「标 liaison」两件互相矛盾的事，剥完标签就成了假的。
+    #    `Haut-Pyrénéens` 只有这一条读音、还是主读音 ⇒ 页头印着「/…/ 连诵」。
+    #    规模只有 1 条，但**没有任何别的闸看得见**（行数不变、不变量不变、
+    #    可逆性不变），只有渲染出来才看得见 —— 所以要有这一条。
+    n = sum(1 for (t,) in con.execute(
+        "SELECT ipa FROM pronunciation WHERE context='liaison'") if "‿" not in (t or ""))
+    one("F6", "clean_reading_intruders", "08-28", "🔴 标了连诵却没有连诵符", n, n)
+
+    # F7：读音行里混进限定词（`gaz` 的 `[dy ɡaz]` = 录音里说的「du gaz」）。
+    #     ⭐ 判据 import 修复侧那一份，**不另抄**（`[[fix-regression-and-gate]]`：
+    #        闸与它守的逻辑用两个判据 ＝ 闸在报自己的 bug）。
+    n = sum(1 for w, ipa, pri in con.execute(
+        "SELECT d.word, p.ipa, p.is_primary FROM pronunciation p "
+        "JOIN dict d ON d.id=p.word_id WHERE instr(p.ipa,' ')>0")
+        if _intr.intruder(w, ipa, pri))
+    one("F7", "clean_reading_intruders", "08-28", "🔴 读音行开头混进限定词", n, n)
+
+    # F8：搜索前缀预计算表的**陈旧性**。
+    # 🔴 预计算表的头号风险不是算错，是**算对了然后 `dict` 变了没人重算** ——
+    #    那时下拉给的是旧词表，而所有别的闸都看不见（表在、行数对、查询不报错）。
+    #    判据 = `dict` 的行数与 max(id) 指纹，与建表时记下的那个比。
+    #    ⚠️ 判据 import 生成侧那一份，不另抄（`[[fix-regression-and-gate]]`）。
+    n = 0
+    if con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                   "AND name='search_prefix_meta'").fetchone()[0]:
+        fp = con.execute("SELECT v FROM search_prefix_meta "
+                         "WHERE k='dict_fingerprint'").fetchone()
+        n = 0 if fp and fp[0] == _pref.fingerprint(con) else 1
+    else:
+        n = 1                       # 表都没有 ＝ 阶段 9 没做
+    one("F8", "build_search_prefix", "08-28", "🔴 搜索前缀预计算表陈旧（dict 变了没重算）", n, n)
+
+    # ── L 组：读取路径 ────────────────────────────────────────────────
+    # 🔴 2026-08-26 阶段 8 完成后**重写**。
+    #    第一版查的是数据库（「老列没音标而音标层有」「例句共 740,366 条」），
+    #    想守的却是「App 有没有接上 v3」—— 而那件事在 TypeScript 里，
+    #    `french.ts` 改没改，SQL 一个字都看不见。切完之后它们**照样红**，
+    #    这种「永远红且改不动」的闸最后一定被无视（PITFALLS E 组）。
+    # ⇒ 改成直接查**读取路径的源码**：它到底 FROM 了哪些表。
+    #    这是数据闸能诚实回答的问题；「渲染出来对不对」由
+    #    `apps/web/src/contract-check-fr.tsx`（渲染后断言 + 变异验证）守。
+    ts = HERE.parent.parent / "packages" / "dict-core" / "src" / "french.ts"
+    raw = ts.read_text(encoding="utf-8") if ts.exists() else ""
+    # 🔴 **必须先剥注释**。第一版直接在全文里找 `dict.translation`，
+    #    而文件头的说明里就写着「原来读的是 dict.translation」—— 闸匹配到了自己的注释，
+    #    报了 2 条假红。判据查的是「代码读没读」，注释不是代码。
+    src = re.sub(r"//[^\n]*|/\*.*?\*/", "", raw, flags=re.S)
+    miss = [t for t in ("FROM pronunciation", "FROM example", "FROM sense",
+                        "FROM sense_gloss", "FROM inflection", "FROM collocation")
+            if t not in src]
+    one("L1", "french.ts", "08-26",
+        "🔴 展示层没接 v3 表（缺 %s）" % ("/".join(x.split()[-1] for x in miss) or "无"),
+        len(miss), len(miss))
+    # L2：老扁平列**不许再被读**（它们是七月压平的旧值，与 v3 打架）
+    stale = [c for c in ("dict.translation", "dict.definition", "d.translation", "d.definition")
+             if c in src]
+    one("L2", "french.ts", "08-26",
+        "🔴 展示层还在读老扁平列（%s）" % ("、".join(stale) or "无"), len(stale), len(stale))
     return out
 
 
@@ -422,10 +504,26 @@ MUTATIONS = [
            " AND COALESCE(s.hidden,0)=0 LIMIT 1)"),
     ("F3", "UPDATE sense SET pos='' WHERE id="
            "(SELECT id FROM sense WHERE COALESCE(hidden,0)=0 AND COALESCE(pos,'')<>'' LIMIT 1)"),
+    ("F5", "UPDATE pronunciation SET pos=NULL WHERE id IN "
+           "(SELECT id FROM pronunciation WHERE pos IS NOT NULL LIMIT 5)"),
     ("F4", "UPDATE pronunciation SET is_primary=1 WHERE id=("
            "SELECT p2.id FROM pronunciation p2 WHERE p2.is_primary=0 AND EXISTS("
            "  SELECT 1 FROM pronunciation p1 WHERE p1.word_id=p2.word_id AND p1.is_primary=1)"
            " LIMIT 1)"),
+    # F6：给一条**没有**连诵符的读音贴上 liaison 标签 —— 正是 Haut-Pyrénéens 那个形状
+    ("F6", "UPDATE pronunciation SET context='liaison' WHERE id="
+           "(SELECT id FROM pronunciation WHERE instr(ipa,'‿')=0 AND context IS NULL LIMIT 1)"),
+    ("C4", "UPDATE sense_gloss SET text=text||'。' WHERE rowid=("
+           "SELECT g.rowid FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
+           " WHERE g.lang='zh' AND COALESCE(s.hidden,0)=0 AND g.text NOT LIKE '%。' LIMIT 1)"),
+    # F8：让指纹对不上 —— 往 dict 插一行就等于「数据变了没重算」
+    ("F8", "INSERT INTO dict (word, word_norm, is_lemma, pos) "
+           "VALUES ('__pfx__','__pfx__',1,'n')"),
+    # F7：造一条「限定词 + 词自身读音」。⚠️ 必须挑**普通词**且**非主读音**，
+    #     否则判据的负控会把它挡掉，变异就永远打不响（同一个坑今天已经踩过三次）。
+    ("F7", "UPDATE pronunciation SET ipa='yn '||ipa WHERE id="
+           "(SELECT p.id FROM pronunciation p JOIN dict d ON d.id=p.word_id "
+           " WHERE p.is_primary=0 AND instr(p.ipa,' ')=0 AND d.word='photographie' LIMIT 1)"),
 ]
 
 

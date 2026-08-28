@@ -20,7 +20,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { ItalianEntryView, SpanishEntryView } from './App';
+import { ItalianEntryView, SpanishEntryView, FrenchEntryView } from './App';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
@@ -38,8 +38,11 @@ const words = fileArg
   ? readFileSync(fileArg, 'utf8').split('\n').map((s) => s.trim()).filter((s) => s && !s.startsWith('#'))
   : argv.filter((a, i) => !a.startsWith('--') && !VALUED.has(argv[i - 1] ?? ''));
 
-const View = lang === 'es' ? SpanishEntryView : ItalianEntryView;
-const locale = lang === 'es' ? 'es-MX' : 'it-IT';
+// 🔴 2026-08-26 加 fr（阶段 8）。导出器只支持 it/es 时，fr 的展示层缺陷
+//    就只能靠我读服务端 JSON 猜 —— 而缺陷**只在渲染之后才存在**。
+const View = lang === 'es' ? SpanishEntryView
+  : lang === 'fr' ? FrenchEntryView : ItalianEntryView;
+const locale = lang === 'es' ? 'es-MX' : lang === 'fr' ? 'fr-FR' : 'it-IT';
 const svc = getService(lang) as unknown as { getEntry(w: string): unknown };
 
 /**

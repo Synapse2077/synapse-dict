@@ -26,6 +26,15 @@ export const POS_LABELS: Record<string, string> = {
   //   char 全是字母表条目（`f` 意大利语字母表第六个字母）⇒「字母」不是泛指的「字符」
   //   punct 是引号族（`« »` 标示引语）／part 是 `sì` `no` `a'`／interfix 只有 `-isc-`
   char: '字母', punct: '标点', part: '小品词', interfix: '连接成分',
+  // 2026-08-26 补 **法语的两个取值**（法语展示层契约闸全量跑逮到 15 处）。
+  //   照 `sym` 那次的教训**一次找全**：把 fr 的 `sense.pos` 全部 27 种与本表对了一遍，
+  //   缺的就这两个（`adj/n` 由 `posLabel` 按 `/` 拆开后自然命中，不算缺）。
+  //   逐条回库看过实际内容再定词：
+  //     var 是**排印变体**（1,383 条）—— `coeur` / `oeil` / `noeud` 这些无连字拼写，
+  //         法文版释义写的是 `Variante typographique de cœur.`。
+  //         🔴 译成「变体」太泛：它专指**因排印限制而写成的形式**，不是一般的异体。
+  //     postp 是后置词（4 条，`durant` 一类跟在名词后的用法）
+  var: '排印变体', postp: '后置词',
   // 2026-08-20 补 **西语的原始取值**（西语展示层契约闸第一次跑就逮到 97 处）：
   //   🔴 上面那批（`sym`/`char`/`abbr`）是**意语**的短码 —— `it/build.py` 的 `POS_MAP`
   //      把 kaikki 的 `symbol`/`character`/`abbreviation` 映射成了短码；
@@ -54,6 +63,30 @@ export const REGISTER_LABELS: Record<string, string> = {
   regional: '地区性', jargon: '行话', slur: '蔑称', ironic: '反讽',
   sarcastic: '讽刺', endearing: '亲昵', emphatic: '强调', rhetoric: '修辞',
   bureaucratese: '官腔', Leet: 'Leet黑话', figuratively: '比喻',
+  // 🔴 2026-08-26（fr 阶段 8）补：fr 的 register 全量 40 种里**这 7 种查不到中文**，
+  //    会把生标签（`World-War-I`）直接印在义项旁边。
+  //    是渲染后契约闸逮到的 —— 数据层闸看不见「标签映射不全」这类缺陷。
+  //    ⚠️ 这是共享表，补条目只会让别的语种也不再漏生标签，不改变已有行为。
+  Ancient: '古代', Middle: '中古', 'Middle-Ages': '中世纪', 'World-War-I': '一战',
+  excessive: '过度', mildly: '轻度', vernacular: '本土说法',
+  // 🔴 2026-08-27（fr 族 C 第二段）：法文版 `tags` 分桶后映射到的规范键。
+  //    法语维基词典的语域体系比英语版细 —— 「极罕见 / 很罕见 / 较罕见 / 少用」
+  //    是四个不同的标注，合并成一个「罕见」就把源头的信息抹平了。
+  anglicism: '英语借词', 'false-anglicism': '假英语词',
+  'extremely-rare': '极罕见', 'very-rare': '很罕见', rarer: '较罕见',
+  'seldom-used': '少用', 'more-common': '较常用', 'less-common': '较少用', common: '常用',
+  proverbial: '谚语', hapax: '孤例', meliorative: '褒义', 'very-familiar': '很随便',
+  broadly: '广义', especially: '尤指', specifically: '特指', literally: '字面义',
+  metonymically: '转喻', 'by-analogy': '类比', hyperbole: '夸张', idiomatic: '习语',
+  collectively: '集合用法', generically: '泛指', physical: '具体义',
+  'spelling-1990': '1990新正字法', 'spelling-pre1835': '1835前旧拼写',
+  // 2026-08-27 第二轮（fr 族 C）
+  derisive: '嘲讽', 'criticized-usage': '受非议用法', blasphemous: '亵渎',
+  insult: '侮辱', nickname: '绰号', 'sometimes-pejorative': '有时贬义',
+  sometimes: '有时', nowadays: '今义', honorific: '敬称', verlan: '倒音俚语',
+  latinism: '拉丁借词', germanism: '德语借词', hispanism: '西语借词',
+  italianism: '意语借词', litotes: '曲言', 'traditional-spelling': '传统拼写',
+  acronym: '首字母缩略', rural: '乡村用语',
 };
 
 // 关系条目上的标签 → 中文。2026-08-21。
@@ -207,6 +240,36 @@ export const TOPIC_LABELS: Record<string, string> = {
   'speech-pathology': '言语病理学', state: '州省', stone: '石材', temperature: '温度',
   'translation-studies': '翻译学', travel: '旅行', 'units-of-measure': '计量单位',
   volcanology: '火山学', weaving: '织造', weekdays: '星期', woodworking: '木工',
+  // 🔴 2026-08-27 fr 收领域标签时补的 12 个（族 C）。法文版给 260,660 条可见义项
+  //    标了 topics，现有表已覆盖 95.3%，这 12 个把覆盖率抬到 **99%**。
+  //    ⚠️ `linguistic` 与已有的 `linguistics` 是**两个键**（法文版用无 s 的写法），
+  //       两个都要留 —— 少一个就有 3,897 条义项的标签渲染成英文原始串。
+  linguistic: '语言学', cuisine: '烹饪', automobile: '汽车', mammalogy: '哺乳动物学',
+  biogeography: '生物地理学', beverages: '饮料', police: '警务', malacology: '软体动物学',
+  pedology: '土壤学', petrography: '岩相学', ethnology: '民族学', colorimetry: '色度学',
+  // 🔴 2026-08-27（fr 族 C 第二段）：法文版 `tags` 里的领域名映射到的规范键。
+  //    法语维基词典的领域体系有一批英语版没有的细分（犬学/猫科学/鲸类学/翼手目学），
+  //    合并成「动物学」会把它给的信息抹掉。
+  didactics: '教学法', viticulture: '葡萄种植', nosology: '疾病分类学', occupations: '职业', industry: '工业',
+  'animal-husbandry': '畜牧', pharmacy: '药学', administration: '行政',
+  'veterinary-medicine': '兽医', labor: '劳动', gardening: '园艺', 'role-playing-games': '角色扮演游戏',
+  cynology: '犬学', felinology: '猫科学', hippology: '马学', unionism: '工会', activism: '社会运动',
+  petroleum: '石油', 'computer-networking': '计算机网络', 'computer-security': '信息安全',
+  'artificial-intelligence': '人工智能', wikis: '维基', 'nuclear-physics': '核', liturgy: '礼拜仪式',
+  Judaism: '犹太教', Hinduism: '印度教', 'ancient-greece': '古希腊', 'ancient-rome': '古罗马',
+  urbanism: '城市规划', 'public-works': '公共工程', logistics: '物流', painting: '绘画', sculpture: '雕塑',
+  'remote-sensing': '遥感', acoustics: '声学', 'physical-chemistry': '物理化学',
+  stereochemistry: '立体化学', confectionery: '糖果', butchery: '肉铺', cheeses: '奶酪', leather: '皮革',
+  'natural-sciences': '博物学', prehistory: '史前', calendar: '历法',
+  'international-relations': '国际关系', lepidopterology: '鳞翅目学', herpetology: '爬虫学',
+  primatology: '灵长类学', cetology: '鲸类学', ethnobiology: '民族生物学', phytosociology: '植物社会学',
+  arboriculture: '树艺', agronomy: '农学', environment: '环境', 'library-science': '图书馆学',
+  papermaking: '造纸', bookbinding: '装订', locksmithing: '锁具', cooperage: '制桶',
+  'electrical-engineering': '电工', gynecology: '妇科', childcare: '育儿', nutrition: '营养学',
+  'public-health': '公共卫生', cosmetology: '美容', disability: '残障', reproduction: '生殖',
+  society: '社会', family: '家庭', funerals: '丧葬', prison: '监狱',
+  advertising: '广告', trademarks: '商标', postal: '邮政', safety: '安全', 'board-sports': '板类运动',
+  islands: '岛屿', rivers: '河流', toponymy: '地名学', ethnonymy: '族名学', anthroponymy: '人名学',
 };
 
 // 词汇关系的中文名。`derived` 是「派生词/习语」（`pie` → `a contrapié`），

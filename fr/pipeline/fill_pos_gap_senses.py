@@ -72,9 +72,10 @@ def plan(con):
         sen[wid].append((sid, rank, pos or ""))
 
     grp = defaultdict(list)
+    w_of = dict(con.execute("SELECT id, word FROM dict"))   # clean 的词条头判据要词形
     for sid, wid, t, ref in con.execute(
             "SELECT id, word_id, text, src_ref FROM sense_src WHERE src='fr-edition'"):
-        c = gloss_clean.clean(t)
+        c = gloss_clean.clean(t, w_of.get(wid))
         if not c:
             continue
         if (wid, c) in pub:
@@ -178,11 +179,12 @@ def verify():
     chk("③ 新义项的词性与法文版证据不一致", bad, 0)
     # ④ 可逆性：每一行都能由「证据 + clean」重建
     bad = 0
-    for txt, src_txt in con.execute(
-            "SELECT g.text, x.text FROM sense_gloss g "
+    for txt, src_txt, w in con.execute(
+            "SELECT g.text, x.text, d.word FROM sense_gloss g "
             "JOIN sense_src x ON x.sense_id=g.sense_id AND x.src='fr-edition' "
+            "JOIN sense s ON s.id=g.sense_id JOIN dict d ON d.id=s.word_id "
             "WHERE g.src=?", (SRC,)):
-        if gloss_clean.clean(src_txt) != txt:
+        if gloss_clean.clean(src_txt, w) != txt:
             bad += 1
     chk("④ 新行无法由「证据 + clean」重建", bad, 0)
     chk("⑤ 新义项已经有中文了（本步不该生成中文）",

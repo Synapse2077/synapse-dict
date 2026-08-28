@@ -496,11 +496,44 @@ def _regression_check(verbose=True):
     if not red:
         if verbose:
             print("■ 回归闸通过 ✓（过去的修复都还在）")
+    else:
+        print("\n🔴 回归闸报警：有 %d 条过去的修复现在失效了" % len(red), file=sys.stderr)
+        for cid, name, why in red:
+            print("   %-5s %-38s %s" % (cid, name, why), file=sys.stderr)
+        print("   明细：python3 tests/test_no_regression.py", file=sys.stderr)
+    _ledger_gate(verbose)
+
+
+def _ledger_gate(verbose=True):
+    """**账的闸** —— 计划表和收尾单说的话，与库里的事实对不对得上。
+
+    🔴 起因：用户 2026-08-27「你自己定的规矩，自己的经验教训，你自己为什么不执行呢」。
+       查会话自己的记录，形状很干净：**做成机制的全守住了，写成文字的一条没守住**
+       （`think=False` 硬默认 / `DOUBAO_DISABLED` / 本文件的 `expect` 闸 都守住了；
+       `[[ship-dont-measure-in-circles]]` 这类 prose 一条没守住）。
+       ⇒ 不再往记忆里写"要记得 X"，写会自己响的东西。
+
+    它逮的是**账**不是数据：阶段表标着 ✅ 而交付物是 0（阶段 5 的关系层/频次层
+    就是这么漏了七天的）、收尾单不存在或记账又散开。
+    与回归闸同样**只报不拦**。
+    """
+    p = HERE / "tests" / "test_plan_ledger.py"
+    if not p.exists():
         return
-    print("\n🔴 回归闸报警：有 %d 条过去的修复现在失效了" % len(red), file=sys.stderr)
-    for cid, name, why in red:
-        print("   %-5s %-38s %s" % (cid, name, why), file=sys.stderr)
-    print("   明细：python3 tests/test_no_regression.py", file=sys.stderr)
+    try:
+        from tests.test_plan_ledger import check_brief as _lb
+        red = _lb()
+    except Exception as e:
+        print("\n⚠️ 账的闸没跑起来（%s）—— 这本身要查" % e, file=sys.stderr)
+        return
+    if not red:
+        if verbose:
+            print("■ 账的闸通过 ✓（计划表与收尾单和库对得上）")
+        return
+    print("\n🔴 账的闸报警：%d 条" % len(red), file=sys.stderr)
+    for cid, why in red:
+        print("   %-4s %s" % (cid, why), file=sys.stderr)
+    print("   明细：python3 tests/test_plan_ledger.py", file=sys.stderr)
 
 
 def sample_check(rows, n=10, cols=("词", "改前", "改后")):

@@ -5,7 +5,8 @@ import {
   ES_REGION_LABELS, ES_ARTICLE, ES_CONJ_LABELS,
   IT_REGION_LABELS, IT_ARTICLE, IT_AUX_LABELS, IT_CONJ_LABELS, IT_NUMBER_NOTE_LABELS,
   itAudioRegion,
-  FR_AUX_LABELS, FR_VGROUP_LABELS, FR_ADJPOS_LABELS, FR_REGION_LABELS, FR_ARTICLE,
+  FR_AUX_LABELS, FR_VGROUP_LABELS, FR_ADJPOS_LABELS, FR_REGION_LABELS,
+  FR_REGION_CODE_LABELS, FR_PRON_CONTEXT_LABELS, FR_ARTICLE,
   PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE,
   DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel } from '@synapse-dict/dict-labels';
 
@@ -205,6 +206,13 @@ type ItEntry = {
   examples: ItExample[];        // 挂不上具体义项的例句
   relations: ItRelationGroup[]; // 近义/反义/上下位…
   inflNotes: string[];
+  // 🔴 2026-08-28 阶段 9 补：这两个字段 `italian.ts` 早就在返回、组件也早就在用
+  //    （1778 行的词头徽标归属、1951 行的反身指针），**只有这份类型声明漏了**
+  //    ⇒ `npm run typecheck` 一直红三条，而 `npm run build` 依赖 typecheck ⇒ 打不出包。
+  //    这正是本文件 226 行那条记账说的「契约的第二份抄写，编译器不会提醒跨包漂移」。
+  //    ⚠️ 这是 **it 侧**的遗留，不是 fr 的。只补类型声明，行为一个字节没改。
+  posWithSenses: string[];      // 有可见义项的词性（词头徽标据此判归属）
+  reflexiveOf: string[];        // 反身式指回的原形
 };
 
 // —— 法语（fr）：法语专属 shape，与 es/it 解耦 ——
@@ -215,8 +223,31 @@ type FrSense = {
   gender: string | null;
   regions: string[];
   registers: string[];
+  id: number;               // 阶段 8：例句按 senseId 归到义项下要用
+  fr: string | null;        // 法语原文定义（阶段 1.5 裁决收回来的，96.0% 覆盖）
+
+  topics: string[];        // 领域标签（族 C，2026-08-27）
 };
 type FrCollocation = { text: string; zh: string | null };
+// 🔴 阶段 8 新增。⚠️ 这几个类型是 `packages/dict-core/src/french.ts` 契约的**第二份抄写**
+//    （六个语种都这样）—— 改服务端类型必须同步改这里，编译器不会提醒跨包漂移。
+//    📋 记账：契约该只有一份，六份类型声明合并是独立一件事，不在阶段 8 做。
+type FrReading = {
+  ipa: string; notation: string | null; region: string | null;
+  src: string | null; isPrimary: boolean;
+  pos: string | null;            // 这条读音属于哪个词性的词条；null = 无词性坐标
+  context: string | null;        // 语境变体，目前只有 'liaison'（连诵形）
+};
+type FrExample = {
+  senseId: number | null; text: string; zh: string | null;
+  en: string | null; ref: string | null; bold: Array<[number, number]>;
+};
+type FrRelationGroup = {
+  kind: string; total: number;
+  targets: Array<{ word: string; clickable: boolean }>;
+};
+type FrAltOf = { target: string; zh: string | null; clickable: boolean };
+type FrForm = { form: string; label: string | null };
 type FrBase = {
   word: string;
   pos: string | null;
@@ -246,7 +277,12 @@ type FrEntry = {
   comparative: string | null;
   level: string | null;
   senses: FrSense[];
+  readings: FrReading[];
+  examples: FrExample[];
   collocations: FrCollocation[];
+  forms: FrForm[];
+  altOf: FrAltOf[];
+  relations: FrRelationGroup[];   // 近义/反义/上下位…（阶段 5 补做 2026-08-27）
   baseForms: string[];
   bases: FrBase[];
   inflNotes: string[];
@@ -1423,7 +1459,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
                     {entry.examples.filter((x) => x.senseId === s.id).slice(0, 3).map((x) => (
                       <div className="sense-example" key={x.id}>
                         <div className="ex-es" lang="es">{x.text}</div>
-                        {x.zh && <div className="ex-zh">{x.zh}</div>}
+                        {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
                       </div>
                     ))}
                     {/* 源语言锚点：英文对应词与西语单语定义。归并之后**同一条义项
@@ -1495,7 +1531,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
           {entry.examples.filter((x) => !x.senseId).slice(0, 6).map((x) => (
             <div className="sense-example" key={x.id}>
               <div className="ex-es" lang="es">{x.text}</div>
-              {x.zh && <div className="ex-zh">{x.zh}</div>}
+              {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
             </div>
           ))}
         </section>
@@ -1677,8 +1713,18 @@ function ItExampleView({ ex }: { ex: ItExample }) {
 
 // 语义关系。分类封顶 12 条（`buono` 有 763 条），**截断了要把总数说出来** ——
 // 不说的话用户会以为词典只收了这么多。
-function ItRelationGroups({ groups, onWord }: {
-  groups: ItRelationGroup[]; onWord: (w: string) => void;
+// 关系分组的**纯展示**组件。语言无关：只认 {kind,total,targets:[{word,可点}]}。
+// 🔴 2026-08-27 从 `ItRelationGroups` 抽出来，因为 fr 阶段 5 补做关系层之后要渲染
+//    同一个形状。抄第二份就是 `[[refactor-mindset-code-quality]]` 里用户点名的那件事
+//    （同一文件内 REGION_LABELS 与 REGION_ZH 两张西语地区表已经重复过一次）。
+// ⚠️ 两个语种的服务端字段名不同（it 叫 `linkable`、fr 叫 `clickable`），
+//    这里**两个都认** —— 与其改动已经跑绿的服务端契约，不如在展示层容纳差异。
+function RelationGroups({ groups, onWord }: {
+  groups: Array<{
+    kind: string; total: number;
+    targets: Array<{ word: string; linkable?: boolean; clickable?: boolean }>;
+  }>;
+  onWord: (w: string) => void;
 }) {
   if (groups.length === 0) return null;
   return (
@@ -1688,7 +1734,7 @@ function ItRelationGroups({ groups, onWord }: {
           <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
           {g.targets.map((t) => (
             <span className="rel-item" key={t.word}>
-              {t.linkable
+              {(t.linkable ?? t.clickable)
                 ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
                      onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
                 : <span className="rel-plain">{t.word}</span>}
@@ -1701,6 +1747,12 @@ function ItRelationGroups({ groups, onWord }: {
       ))}
     </div>
   );
+}
+
+function ItRelationGroups({ groups, onWord }: {
+  groups: ItRelationGroup[]; onWord: (w: string) => void;
+}) {
+  return <RelationGroups groups={groups} onWord={onWord} />;
 }
 
 export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
@@ -2001,17 +2053,92 @@ function FrSenseChips({ sense, dualGender }: { sense: FrSense; dualGender?: bool
   // 仅双性名词逐义项标性别（le 书 / la 斤），单性词与词头徽标重复故略
   if (dualGender && sense.gender)
     chips.push({ cls: `g g-${sense.gender}`, text: `${FR_ARTICLE[sense.gender] || ''} ${GENDER_LABELS[sense.gender] || ''}` });
+  // 🔴 族 C（2026-08-27）：领域标签排在地区/语域**前面** —— 「植物学」这类
+  //    回答的是「这条义项在说哪一行的事」，比「在哪儿说」「多正式」更先要知道。
+  //    ⚠️ class 用 `top` 不是 `topic` —— `styles.css` 里已经有 `.sense-chip.top`
+  //    （2026-08-12 专门改成描边绿，因为它原来的蓝和阳性 chip 只差 4% 浓度，
+  //     用户实测「阳」和「化学」分不出来）。新造一个类名 = 那次调色白做。
+  for (const t of sense.topics) chips.push({ cls: 'top', text: TOPIC_LABELS[t] || t });
   for (const r of sense.regions) chips.push({ cls: 'reg', text: FR_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
-  if (chips.length === 0) return null;
+  // 🔴 2026-08-27（族 C 第二段）：按**渲染出来的中文**判重，不按键判重。
+  //    收了法文版标签之后，同一条义项会同时带上英语版的 `derogatory` 和
+  //    法文版的 `pejorative` —— 两个不同的键、**同一个中文「贬义」**，
+  //    `cervelle` 于是印出「…贬义 转喻 贬义」。
+  //    ⚠️ 判重必须发生在**投影之后**（读者看到的那一串），
+  //       这与读音行按音标串判重是同一个形状（`french.ts` 里那段注释）。
+  const seenText = new Set<string>();
+  const uniq = chips.filter((c) => {
+    if (seenText.has(c.text)) return false;
+    seenText.add(c.text);
+    return true;
+  });
+  if (uniq.length === 0) return null;
   return (
     <span className="sense-chips">
-      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+      {uniq.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
     </span>
   );
 }
 
-function groupFrSenses(senses: FrSense[]): { pos: string | null; senses: FrSense[] }[] {
+/**
+ * 这条读音该显示在哪儿：**返回 null = 词头那行**；返回词性 = 该词性的组头。
+ *
+ * 🔴 族 D「读音归属」（2026-08-27）。法文版每个词条各写各的音标，我们以前
+ *    全堆在词头 —— `taper` 页头是 `/ta.pe/ /te.pœʁ/`，后者是**名词**（光纤锥，
+ *    念英式）；`en` 的 A1 介词旁边摆着名词义的 /ɑ̃.ky.le/；`bon` 旁边是
+ *    /ba.ta.jɔ̃/（bataillon 的缩写）。3,674 个词形跨词性读音不同。
+ *
+ * 🔴 **一个函数决定全部去向，每条读音恰好落一处。** 写成两个（"词头显示哪些"
+ *    和"组头显示哪些"）就会出现漏显示或重复显示，而两边都自认为正确 ——
+ *    `readingBelongsTo` 那条注释里记的 67 条假红就是判据分两份写出来的。
+ *    契约闸 `contract-check-fr.tsx` 直接调本函数断言「恰好一处」。
+ *
+ * 判据（顺序即优先级）：
+ *   ① 页面上只有一个词性组 ⇒ 词头那行已经把读音显示全了，组头再铺一遍是噪声
+ *   ② 读音没有词性坐标（`legacy` 那 9,295 行）⇒ 判不了，放词头
+ *   ③ 该词性我们一条义项都没有（`au` 的 symbol 之类）⇒ 没有组可挂，放词头
+ *   ④ 该词性就是**主词性**（第一组，即 rank 1 那条义项的词性）⇒ 词头
+ *   ⑤ 其余 ⇒ 归它自己的组头
+ */
+// 词头该印哪个性别徽标（收尾单 A2，2026-08-27）。**判据只许一份**：组件与契约闸共用。
+//
+// 🔴 起因：`mari` 词头印「阴阳性」。查下来 `dict.gender='mf'` **不是错值** ——
+//    它是把两条义项的性**压平到词形上**的产物（r1 丈夫 m ／ r2 大麻 f），
+//    与族 B 的徽标串味、`[[case-folding-contaminates-columns]]` 完全同源。
+//    ⚠️ `entry` 层声明了 `gender` 列但**从没填过**（0/2,543,172），只能靠义项层。
+//
+// 🔴 我的记账把规模写成 7,460（＝全部 `mf` 词头）。实测分四个桶：
+//      A 真通性  3,274  义项自己就说 mf（`dilettante`/`boss`，法语里真的通性）⇒ **印**
+//      B 压平      265  义项分别是 m 和 f（`mari`/`livre`/`geste`）        ⇒ **不印**
+//      C 单一性别  116  义项只说 m 或只说 f，而词头说 mf                    ⇒ **印义项那个**
+//      D 无信息  3,805  义项层没有性别，词头是唯一来源                      ⇒ **印**（删了就什么都没有）
+//    真缺陷 ＝ B + C ＝ **381**，不是 7,460。
+//
+// ⚠️ B 桶不印**不丢信息**：`FrSenseChips` 已经逐义项印性别（`dualGender` 那条线），
+//    读者在义项行上看到「丈夫 阳」「大麻 阴」—— 比在词头印一个两边都不准的「阴阳性」好。
+export function frHeadGender(
+  wordGender: string | null, senseGenders: Array<string | null>,
+): string | null {
+  const gs = [...new Set(senseGenders.filter((g): g is string => !!g))];
+  if (gs.length === 0) return wordGender;                  // D：义项没信息 ⇒ 词形级兜底
+  if (gs.length === 1) return gs[0];                       // A（['mf']）与 C（['m']）
+  if (gs.includes('m') && gs.includes('f')) return null;    // B：压平的 ⇒ 不印
+  return wordGender;
+}
+
+export function frReadingSlot(
+  r: { pos: string | null }, groupPoses: (string | null)[],
+): string | null {
+  const distinct = Array.from(new Set(groupPoses.filter((x): x is string => !!x)));
+  if (distinct.length < 2) return null;            // ①
+  if (!r.pos) return null;                         // ②
+  if (!distinct.includes(r.pos)) return null;      // ③
+  if (r.pos === distinct[0]) return null;          // ④
+  return r.pos;                                    // ⑤
+}
+
+export function groupFrSenses(senses: FrSense[]): { pos: string | null; senses: FrSense[] }[] {
   const groups: { pos: string | null; senses: FrSense[] }[] = [];
   for (const s of senses) {
     const last = groups[groups.length - 1];
@@ -2021,35 +2148,148 @@ function groupFrSenses(senses: FrSense[]): { pos: string | null; senses: FrSense
   return groups;
 }
 
-function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
+// kaikki 用 `^([X])` 表示**上标**（编者注 / 脚注号）。例句原文按设计**逐字不改**
+// （`bold` 偏移量钉着它，收词闸就是靠偏移量证明没改过），所以解释这个记法是**展示层的事**
+// —— 这不是「用展示层补丁代替修数据」，是 markup 该在哪一层解释的问题。
+// 全库 example.text 1,802 行、example_gloss 274 行带这个记法。
+// 内容有实义的居多：`^([sic])`（原文如此）、`^([note: Le cabernet franc])`（编者注）。
+// ⚠️ 将来若要渲染 `bold` 高亮，**偏移量是针对原始串的**，必须在拆分之前算好。
+// 🔴 两种形式都要认（全量扫出来的，不是猜的）：
+//    `^([sic])` `^([note: …])`  编者注   1,802 条
+//    `^(ème)`  `^(ère)`         序数上标   238 条（`1ʳᵉ classe`、`107ᵉ anniversaire`）
+//    第一版只写了带方括号那种，序数那批原样露成 `^(ème)` 给用户看。
+// 🔴 **方括号是源头自带的，不能由渲染补**：`^([sic])` 的括号本来就在，
+//    而 `^(ème)` 没有 —— 第一版无条件补，把 `1ʳᵉ classe` 渲染成了 `1 [ère] classe`。
+const SUP = /\^\((\[[^\])]*\]|[^\])]*)\)/g;
+// 源头的维基链接 `[[w:URL|显示文字]]`：只留显示文字。
+const WLINK = /\[\[w:[^|\]]*\|([^\]]*)\]\]/g;
+// 整行就是一条「维基百科条目」参见（16 条）—— 那不是例句，不渲染。
+const WIKI_ONLY = /^\s*\[\[w:[^\]]*\]\]\s*sur l[’']encyclopédie/i;
+function FrText({ text: raw }: { text: string }) {
+  const text = raw.replace(WLINK, '$1');
+  const parts: Array<string | { sup: string }> = [];
+  let last = 0;
+  for (const m of text.matchAll(SUP)) {
+    if (m.index! > last) parts.push(text.slice(last, m.index));
+    parts.push({ sup: m[1] });
+    last = m.index! + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  if (parts.length <= 1) return <>{text}</>;
+  return (
+    <>
+      {parts.map((p, i) => (typeof p === 'string'
+        ? <span key={i}>{p}</span>
+        : <sup className="ex-sup" key={i} title={p.sup}>{p.sup}</sup>))}
+    </>
+  );
+}
+
+export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
   entry: FrEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
   const posParts = entry.pos ? entry.pos.split('/') : [];
-  const isVerb = posParts.includes('v');
-  const isNoun = posParts.some((p) => p === 'n' || p === 'name');
-  const isAdj = posParts.includes('adj');
+  // 🔴 族 D：读音归属要知道**这一页有哪些词性组**。算一次，词头行与组头共用同一份 ——
+  //    两处各算一次就会在「组的边界」上悄悄分叉。
+  const frGroups = groupFrSenses(entry.senses);
+  const frGroupPoses = frGroups.map((g) => g.pos);
+  // 🔴 族 B「词形级字段串味」（2026-08-27，两家外审都挑出来了）。
+  //    `entry.pos` 是**词形级**的合并串（`livre` = `n/v`，因为 `livre` 同时是
+  //    动词 `livrer` 的变位形），拿它算徽标 ⇒ `livre` 的名词页头显示
+  //    「助动词 avoir 第三组（不规则）」——那是 `livrer` 的属性。
+  //    `verront` 显示「voir **副词**/动词」同理（`dict.pos='adv/v'`）。
+  //    全库 `pos` 带 `/` 的 **28,822** 个词形，其中带 aux/vgroup 的 **2,165**。
+  //
+  //    ⇒ 判据换成**义项层的词性**（`sense.pos` 是逐义项的真值），
+  //      词形级只在「一条义项都没有」时兜底 —— 变形形、无义项的词条靠它，
+  //      去掉兜底那些词的徽标会整片消失。
+  //    ⭐ 这与西语视图 2026-08-11 那次（`mano` 的及物性显示在名词义项旁边，
+  //      3,670 个词形）**是同一个形状、同一条判据**，那边叫 `senseHasPos`。
+  const frSensePos = [...new Set(entry.senses.map((s) => s.pos).filter(Boolean))];
+  const frHasSensePos = frSensePos.length > 0;
+  //    ⚠️ 性/复数只在**没有别的带性词类**时显示：法语的冠词/限定词/代词也带性，
+  //      且可能与名词的性相反（`le` = 阳性限定词 + 名词「勒（音名）」）。
+  //      感叹词/动词/副词没有性，不影响名词那一支 —— 这条护栏是西语
+  //      `banco`（6 条名词义 + 1 条感叹词义，性别徽标被误藏）换来的。
+  const FR_NOMINAL = new Set(['n', 'name', 'adj']);
+  const FR_GENDERED = new Set(['art', 'det', 'pron', 'contr']);
+  const isVerb = frHasSensePos ? frSensePos.includes('v') : posParts.includes('v');
+  const isNoun = frHasSensePos
+    ? frSensePos.some((p) => FR_NOMINAL.has(p!)) && !frSensePos.some((p) => FR_GENDERED.has(p!))
+    : posParts.some((p) => p === 'n' || p === 'name');
+  const isAdj = frHasSensePos ? frSensePos.includes('adj') : posParts.includes('adj');
   const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
+  const headGender = frHeadGender(entry.gender, entry.senses.map((s) => s.gender));
   return (
     <article className="entry-detail">
       <header className="entry-header">
         <h2 className="entry-word">{entry.word}</h2>
       </header>
 
+      {/* 音标行。🔴 2026-08-26 阶段 8：`entry.ipa` 现在来自 `pronunciation` 表
+          （原来是 `dict.ipa` 列）—— **1,423,034 个词形因此第一次有音标可显示**。
+          其余读音并排列出：`chat` 有 12 条（含 fr-CA/fr-BE 地区变体，
+          以及借自英语的 /tʃat/「网络聊天」义），只显示一个等于告诉用户别的是错的。
+          ⚠️ 音值式用方括号、音位式用斜杠 —— 定界符的差别本身是信息（六语种存裸约定）。*/}
       {entry.ipa && (
         <div className="phonetic-row">
           <button className="phonetic-btn" onClick={() => speak(entry.word, speakLocale)} title="播放发音" type="button">
             <span className="phonetic-value">/{entry.ipa}/</span>
             <SpeakerIcon />
           </button>
+          {/* 🔴 词头行也要标语境（收尾单 A1）。契约闸第一次跑就逮到我漏了这条路径：
+              `-(s)` 只有连诵形这一条读音、它就是主读音，页头把 /z‿/ 光秃秃摆着。
+              主读音走 `entry.ipa` 这条**单独的**渲染路径，与下面的备用读音、
+              词性组头是三条路 —— 补了两条不等于补完了。 */}
+          {(() => {
+            const pr = entry.readings.find((r) => r.isPrimary && r.context);
+            return pr ? <span className="phonetic-context">{FR_PRON_CONTEXT_LABELS[pr.context!] || pr.context}</span> : null;
+          })()}
+          {/* 🔴 族 D：只显示 `frReadingSlot` 判为**词头**的那些。属于某个词性
+              专有的读音移到那一组的组头 —— 否则 `taper` 页头会摆着名词的
+              /te.pœʁ/、`en` 的 A1 介词旁边摆着 /ɑ̃.ky.le/。 */}
+          {entry.readings
+            .filter((r) => !r.isPrimary && frReadingSlot(r, frGroupPoses) === null)
+            .slice(0, 3).map((r) => (
+            <span className="phonetic-btn phonetic-alt" key={`${r.ipa}-${r.region ?? ''}`}
+                  title={`另一读音 · 来源 ${r.src ?? '?'}`}>
+              <span className="phonetic-value">
+                {r.notation === 'narrow' ? `[${r.ipa}]` : `/${r.ipa}/`}
+              </span>
+              {/* 🔴 连诵形必须标出来（收尾单 A1）：`les` 的 /le.z‿/ 是它在元音前的
+                     读法，不是 `les` 本身。不标就是把语境变体当成另一个读音摆着。 */}
+              {r.context && <span className="phonetic-context">{FR_PRON_CONTEXT_LABELS[r.context] || r.context}</span>}
+              {r.region && <span className="phonetic-region">{FR_REGION_CODE_LABELS[r.region] || r.region}</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* 异体指针：这个拼写是另一个词的异体/旧拼写。把目标词的中文跟着显示出来 ——
+          只给裸指针没用，用户查到 `clef` 时最想要的就是 `clé` 的意思。 */}
+      {entry.altOf.length > 0 && (
+        <div className="alt-of-row">
+          {entry.altOf.map((a) => (
+            <span className="alt-of" key={a.target}>
+              异体 →{' '}
+              {a.clickable
+                ? <a href={`#${encodeURIComponent(a.target)}`}
+                     onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
+                : <span className="alt-of-plain">{a.target}</span>}
+              {a.zh && <span className="alt-of-zh">{a.zh}</span>}
+            </span>
+          ))}
         </div>
       )}
 
       {/* 法语本质徽标：动词看助动词/组/过去分词/及物性，名词看性别/复数，形容词看阴性形；CEFR 贯穿 */}
       <div className="entry-meta-row entry-badges">
         {entry.level && <span className={`badge cefr cefr-${entry.level[0]}`}>{entry.level}</span>}
-        {isNoun && entry.gender && (
-          <span className={`badge g g-${entry.gender}`}>{GENDER_LABELS[entry.gender] || entry.gender}性</span>
+        {/* 🔴 性别徽标读 `frHeadGender` 不读 `entry.gender`（收尾单 A2）——
+            后者是**词形级**的压平值，`mari` 的「阴阳性」就是两条义项的性合并出来的。 */}
+        {isNoun && headGender && (
+          <span className={`badge g g-${headGender}`}>{GENDER_LABELS[headGender] || headGender}性</span>
         )}
         {isNoun && entry.plural && (
           <span className="badge plural">复数 {entry.plural}</span>
@@ -2083,20 +2323,53 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
         {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
       </div>
 
-      {entry.isLemma && entry.senses.length > 0 && (
+      {/* 🔴 2026-08-26 去掉 `entry.isLemma &&`。**这一条挡住 21,833 个词形（4.0%）**
+          —— 它们有可见义项，整块释义却不渲染。
+          与 it 那次 `TVTB` 一模一样的形状（那次 8,552 个）：接口返回完全正确，
+          缺陷只在组件这一行，查库查接口都看不见，是**渲染后断言**逮到的
+          （`contract-check-fr.tsx` 第一条）。
+          `is_lemma` 是「是不是词元」，不是「有没有内容」—— 拿它当渲染开关，
+          就把「`'tain` 是 putain 的口语异体」这种**有释义的非词元**整页清空了。
+          📋 记账：pt / de 两个视图**同一行同一个 bug**，按纪律本轮不动。 */}
+      {entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          {groupFrSenses(entry.senses).map((grp, gi) => (
+          {frGroups.map((grp, gi) => (
             <div className="pos-group" key={gi}>
-              {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
+              {grp.pos && (
+                <div className="pos-group-label">
+                  {posLabel(grp.pos)}
+                  {/* 🔴 族 D：这一组专属的读音标在组头上。判据与词头行**同一个函数**。 */}
+                  {entry.readings
+                    .filter((r) => frReadingSlot(r, frGroupPoses) === grp.pos)
+                    .slice(0, 2).map((r) => (
+                      <span className="pos-group-ipa" key={`${r.ipa}-${r.region ?? ''}`}>
+                        {r.notation === 'narrow' ? `[${r.ipa}]` : `/${r.ipa}/`}
+                        {r.context && <span className="phonetic-context">{FR_PRON_CONTEXT_LABELS[r.context] || r.context}</span>}
+                      </span>
+                    ))}
+                </div>
+              )}
               <ol className="sense-list">
                 {grp.senses.map((s, i) => (
-                  <li className="sense-item" key={i}>
+                  <li className="sense-item" key={s.id ?? i}>
                     <div className="sense-zh">
                       {s.zh || <span className="sense-missing">（待补）</span>}
                       <FrSenseChips sense={s} dualGender={entry.gender === 'mf'} />
                     </div>
-                    {s.en && <div className="sense-en">{s.en}</div>}
+                    {/* 法语原文定义 —— 阶段 1.5 裁决收回来的，96.0% 的可见义项有。
+                        放在中文之下、英文之上：它是**这门语言自己的说法**，权威性高于英文对应词。 */}
+                    {s.fr && <div className="sense-fr" lang="fr"><FrText text={s.fr} /></div>}
+                    {s.en && <div className="sense-en"><FrText text={s.en} /></div>}
+                    {/* 这条义项下的例句（阶段 5，中文 99.9%）。
+                        🔴 限 3 条：`passer` 有 138 条例句，全铺出来会把释义挤没
+                           —— es 展示层已知的三条线索之一就是「超长内容撑版面」。 */}
+                    {entry.examples.filter((x) => x.senseId === s.id && !WIKI_ONLY.test(x.text)).slice(0, 3).map((x, xi) => (
+                      <div className="sense-example" key={xi}>
+                        <div className="ex-fr" lang="fr"><FrText text={x.text} /></div>
+                        {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
+                      </div>
+                    ))}
                   </li>
                 ))}
               </ol>
@@ -2123,9 +2396,26 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
                     onClick={(e) => { e.preventDefault(); onWord(bw); }}>
                     {bw}
                   </a>
-                  {base?.pos && <span className="base-pos">{posLabel(base.pos)}</span>}
+                  {/* 🔴 族 B（2026-08-27，两家外审都挑出）：原形的 `pos` 是**词形级**
+                      合并串。`verront` 的原形行印着「voir 副词 / 动词」—— `voir`
+                      确实另有一个副词读法（`voire` 的变体），但 `verront` 是**动词**
+                      `voir` 的变位形，跟那个副词没关系。
+                      ⚠️ 这里判不出该取哪一支（`inflection` 的标签没接到展示层），
+                      **那就一支都不印**：少一个词性标签，好过印一个错的
+                      （`docs/FRAMEWORK.md`：错比缺更伤权威）。
+                      单一词性照常印 —— 那种情况没有歧义。 */}
+                  {base?.pos && !base.pos.includes('/')
+                    && <span className="base-pos">{posLabel(base.pos)}</span>}
                   {base?.aux && <span className="base-pos">{FR_AUX_LABELS[base.aux]}</span>}
-                  {base?.gender && <span className="base-pos">{GENDER_LABELS[base.gender]}性</span>}
+                  {/* 🔴 内联原形的性别也走 `frHeadGender`（收尾单 A2）。
+                      契约闸报 `marine` 时我第一反应是词头徽标没修好，查下来是**这一处**：
+                      变位形式区块里的原形 `marin` 印着「阴阳性」。
+                      ⇒ 同一个判据有**两条渲染路径**，补一条不算补完（与 A1 连诵标签
+                      漏掉词头行是同一个形状，同一天里第二次）。 */}
+                  {(() => {
+                    const bg = base && frHeadGender(base.gender, base.senses.map((s) => s.gender));
+                    return bg ? <span className="base-pos">{GENDER_LABELS[bg] || bg}性</span> : null;
+                  })()}
                   {base && base.senses.length > 0 && (() => {
                     const zhs = base.senses.map((s) => s.zh).filter(Boolean) as string[];
                     const CAP = 4;
@@ -2155,6 +2445,54 @@ function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {/* 没挂上义项的例句（22.6%，见 docs/FR_PLAN.md 阶段 5 补记）。
+          🔴 仍要显示，只是归不到某条义项下 —— 它们挂不上是**我们挂载失败或义项缺口**，
+             不是句子不好；对无义项的变形页更是这一页唯一的内容。 */}
+      {entry.examples.some((x) => x.senseId === null) && (
+        <section className="entry-section">
+          <h3>例句</h3>
+          {entry.examples.filter((x) => x.senseId === null && !WIKI_ONLY.test(x.text)).slice(0, 6).map((x, i) => (
+            <div className="sense-example" key={i}>
+              <div className="ex-fr" lang="fr"><FrText text={x.text} /></div>
+              {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* 相关词（阶段 5 补做，2026-08-27：+300,611 行）。
+          🔴 数据层建完不接这里 = 白做 —— `[[it-display-layer-stage8]]` 那轮
+             「关系例句录音三张表从没人看」就是这么发生的。
+          ⚠️ 与 it 共用 `RelationGroups`（纯展示、语言无关），不抄第二份。 */}
+      {entry.relations.length > 0 && (
+        <section className="entry-section">
+          <h3>相关词</h3>
+          <RelationGroups groups={entry.relations} onWord={onWord} />
+        </section>
+      )}
+
+      {/* 这个词有哪些形式（反向 base_id 查询）。
+          🔴 只在**没有释义**时显示：`passer` 有 69 种形式，挂在正常词条页上
+             只会挤掉真正要看的东西。对补收的词头（有变形、无释义）这一块
+             让页面至少能回答「它有哪些形式」，而不是一片空白。 */}
+      {entry.forms.length > 0 && entry.senses.length === 0 && (
+        <section className="entry-section">
+          <h3>词形变化</h3>
+          <ul className="form-list">
+            {entry.forms.slice(0, 40).map((f, i) => (
+              <li className="form-item" key={i}>
+                <a href={`#${encodeURIComponent(f.form)}`}
+                   onClick={(e) => { e.preventDefault(); onWord(f.form); }}>{f.form}</a>
+                {f.label && <span className="form-label">{f.label}</span>}
+              </li>
+            ))}
+          </ul>
+          {entry.forms.length > 40 && (
+            <div className="form-more">… 共 {entry.forms.length} 种形式</div>
+          )}
         </section>
       )}
     </article>
@@ -2278,7 +2616,7 @@ function PortugueseEntryView({ entry, onWord, speak }: {
                       {s.zh || <span className="sense-missing">（待补）</span>}
                       <PtSenseChips sense={s} dualGender={entry.gender === 'mf'} />
                     </div>
-                    {s.en && <div className="sense-en">{s.en}</div>}
+                    {s.en && <div className="sense-en"><FrText text={s.en} /></div>}
                   </li>
                 ))}
               </ol>
@@ -2494,7 +2832,7 @@ function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                       {s.zh || <span className="sense-missing">（待补）</span>}
                       <DeSenseChips sense={s} />
                     </div>
-                    {s.en && <div className="sense-en">{s.en}</div>}
+                    {s.en && <div className="sense-en"><FrText text={s.en} /></div>}
                   </li>
                 ))}
               </ol>

@@ -38,8 +38,11 @@ def env():
                 if "=" in l and not l.startswith("#"))
 
 
-def done_keys(out_path):
-    """→ {法语原串: 记录}。坏行（末行截断等）跳过。"""
+def done_keys(out_path, land="fr"):
+    """→ {落盘键: 记录}。坏行（末行截断等）跳过。
+
+    `land` = 落盘按哪个字段存，见 `translate()` 里那一大段。默认 `fr`。
+    """
     p = Path(out_path)
     if not p.exists():
         return {}
@@ -49,7 +52,8 @@ def done_keys(out_path):
             o = json.loads(ln)
         except Exception:
             continue
-        got[o["fr"]] = o
+        if land in o:
+            got[o[land]] = o
     return got
 
 
@@ -190,15 +194,25 @@ async def _run(todo, key, sys_prompt, out_path, fields, keep, key_field="fr",
 
 
 def translate(items, sys_prompt, out_path, fields=("fr", "ctx"), keep=("fr", "kind", "n"),
-              key_field="fr", answer_field="zh"):
+              key_field="fr", answer_field="zh", land="fr"):
     """items = [{fr, …}]。只请求尚未落盘的。→ stat dict。
 
     `fields` = 发给模型的字段；`keep` = 落盘时保留的字段（答案字段自动加）。
 
     `key_field` = **应答按哪个字段认领**。默认 `fr`（短槽值，原串就是天然主键）。
     整句释义要用 `id` —— 法语原文太长，让模型原样回传一整句既费 token 又容易被它
-    "顺手改一个字"导致认领不上。⚠️ 无论按哪个字段认领，**落盘仍按 `fr` 存**
-    （`keep` 里必须有 `fr`），这样同一句法语在全库永远只有一个中文。
+    "顺手改一个字"导致认领不上。
+
+    `land` = **落盘按哪个字段存**，默认 `fr`（`keep` 里必须有它）。
+    默认这条是**翻译族的不变量**：同一句法语在全库永远只有一个中文，所以按原串
+    落盘既能续跑又能天然去重。
+
+    🔴 **判断族不能用这条不变量。** 判官的产物取决于 `(法语, 中文)` 这一**对**，
+       而同一句法语配不同中文是存在的 —— 族 E 探针实测：98,305 条义项里有
+       6,352 条的法语定义与别的义项**逐字相同但中文不同**（6.5%）。按 `fr` 落盘
+       会让其中一条静默领走另一条的判断结果，而**产物正是一个比率**，
+       这种污染不会报错、只会把数悄悄改掉。⇒ 那种任务传 `land="id"`。
+       （`[[model-answer-files-key-by-id]]`：编号一律用数据库主键。）
 
     `answer_field` = 答案挂在应答对象的哪个键上。默认 `zh`（翻译族）。
     **裁决族传 `m`** —— 那一族的产物不是中文，是一张「哪条法语原文挂到哪条义项」的表；
@@ -206,14 +220,19 @@ def translate(items, sys_prompt, out_path, fields=("fr", "ctx"), keep=("fr", "ki
     （`[[refactor-mindset-code-quality]]`）。
     """
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    got = done_keys(out_path)
-    todo = [i for i in items if i["fr"] not in got]
+    got = done_keys(out_path, land)
+    todo = [i for i in items if i[land] not in got]
     print("■ 槽值 %s 个；已翻 %s；待翻 %s"
           % (format(len(items), ","), format(len(got), ","), format(len(todo), ",")))
+    if land not in keep:
+        raise ValueError("keep 里必须有落盘键 %r" % land)
+    if land != "fr":
+        n = len({i[land] for i in items})
+        if n != len(items):
+            raise ValueError("落盘键 %r 在这批里不唯一（%d 个值 / %d 条）"
+                             % (land, n, len(items)))
     if not todo:
         return {"done": 0, "tok": 0, "miss": 0}
-    if "fr" not in keep:
-        raise ValueError("keep 里必须有 'fr' —— 落盘键永远是法语原串")
     stat = asyncio.run(_run(todo, env()["DEEPSEEK_API_KEY"].strip(),
                             sys_prompt, out_path, list(fields), list(keep),
                             key_field=key_field, answer_field=answer_field))

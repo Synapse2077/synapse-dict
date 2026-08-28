@@ -129,6 +129,19 @@ POS_EQ = {"name": "n"}
 # ⚠️ 但这一族最容易似是而非，所以单列一条控制判据，切片里必须我自己读。
 PTR_SRC = {"template:alt_of", "template:fr-alt_of", "template:pointer"}
 
+# 🔴 **我逐条读之后否决的挂载**（`[[record-the-negative-decision]]`：
+#    「我判定不该挂」和「模型判定不该挂」一样是一个结论，要落账，否则下一轮又挂回来）。
+#    这些证据行**照样进 `decided.txt`**（问过了），只是不写库。
+#    目前 2 条，都来自 `passer` 那一批（`--cap 40` 抬高上限后 100% 逐条读出来的）：
+#      168161 `Faire traverser.`  → 挂到「经过，驶过」。法语是**使役及物**（把人渡过去），
+#                                    中文那条是不及物的"自己经过"。相邻，不是同一个意思。
+#      168162 `Tamiser, filtrer.` → 挂到「渗透，渗漏」。法语是**及物**的"过滤、筛"
+#                                    （passer la farine），中文那条是液体自己渗过去。
+#    ⭐ 18 条里 16 条对、2 条错，两条错的形状**完全一样**：及物/使役贴到不及物义项上。
+#       模型在候选 34 条这种长清单上，配价（valency）这一维分辨力明显下降 ——
+#       这正是 `S_CAP=20` 那道门当初要拦的东西，抬高它就必须我自己逐条兜住。
+REJECT = {168161, 168162}
+
 
 def pos_key(p):
     p = (p or "").strip()
@@ -180,12 +193,17 @@ def collect(con):
         "SELECT s.word_id, g.text FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
         "WHERE g.lang='fr'"))
     todo = defaultdict(list)
+    # 🔴 `clean` 的词条头判据要拿**词形**才判得了（`\音标\` 前面那段是不是词头）。
+    #    不传就只剥「整条以音标开头」那半边 ⇒ 证据侧和出版侧用了两个判据，
+    #    35 条会永远判重不命中、被当成"还没出版"反复重挂。
+    #    `[[fix-regression-and-gate]]`：判据只许一份，**用它的地方也得用对**。
+    w_of = dict(con.execute("SELECT id, word FROM dict"))
     for sid, wid, t, ref in con.execute(
             "SELECT id, word_id, text, src_ref FROM sense_src WHERE src='fr-edition'"):
         # 🔴 证据层是**原文**，出版层是**洗过的文本**（`pipeline/gloss_clean.py`）。
         #    拿原文去比出版层，5,668 条洗过的行会被当成"还没出版"再挂一遍 ——
         #    同一句法语在同一条义项上出现两次。⇒ 两边都过 `clean` 再比。
-        t = gloss_clean.clean(t)
+        t = gloss_clean.clean(t, w_of.get(wid))
         if not t:
             st["📋 占位符/编者残渣，洗完为空 ⇒ 不出版（记账）"] += 1
             continue
@@ -537,6 +555,8 @@ def apply_rows(con, groups, got):
         for d_i, ss in by_d.items():
             if len(set(ss)) != 1:
                 continue
+            if d_i in REJECT:          # 我读过之后否决的，见 REJECT 的注释
+                continue
             pairs.append((d_i, ss[0], ok_d[d_i]))
 
     # 🔴 幂等：证据行已经裁决过的（`sense_id` 非空）不再动。重放不该改已有归属。
@@ -593,7 +613,8 @@ def mutate():
     real_clean, real_pos_key = gloss_clean.clean, globals()["pos_key"]
     cases = [
         ("① 把 clean 弄歪（重建必然对不上）",
-         lambda: setattr(gloss_clean, "clean", lambda t: real_clean(t) + "·")),
+         lambda: setattr(gloss_clean, "clean",
+                         lambda t, w=None: real_clean(t, w) + "·")),
         ("③ 把词性归一弄歪（n/name 不再同类）",
          lambda: globals().__setitem__("pos_key", lambda p: (p or "").strip())),
     ]
@@ -639,12 +660,13 @@ def verify():
     #       按 (行, 证据) 配对去数，配不上的那些配对根本不是错。
     rebuilt = defaultdict(bool)
     rows = set()
-    for gid, txt, src_txt in con.execute(
-            "SELECT g.sense_id, g.text, x.text FROM sense_gloss g "
+    for gid, txt, src_txt, w in con.execute(
+            "SELECT g.sense_id, g.text, x.text, d.word FROM sense_gloss g "
             "JOIN sense_src x ON x.sense_id=g.sense_id AND x.src='fr-edition' "
+            "JOIN sense s ON s.id=g.sense_id JOIN dict d ON d.id=s.word_id "
             "WHERE g.src=? AND g.lang='fr'", (SRC,)):
         rows.add((gid, txt))
-        if gloss_clean.clean(src_txt) == txt:
+        if gloss_clean.clean(src_txt, w) == txt:
             rebuilt[(gid, txt)] = True
     chk("① 出版层有行无法由「证据 + clean」重建",
         sum(1 for r in rows if not rebuilt[r]), 0)
@@ -731,13 +753,22 @@ def main():
     ap.add_argument("--truth", type=int, metavar="N", default=0,
                     help="正控+负控各 N 组（真值实验，用前必跑）")
     ap.add_argument("--ledger", metavar="PATH", help="无法裁决的清单写成 JSON")
+    # 🔴 `S_CAP` 是**风险闸门**不是性能参数：候选越多，模型读不完、挂错的概率越高。
+    #    抬高它必须是**一次显式的、写进命令行的决定**，而且抬高之后那一批
+    #    **我要 100% 逐条读**（不是抽样）—— 全库只有 `passer` 一个词撞到这条线
+    #    （34 条义项 / 50 条待裁），它是 A1 核心动词，值得单独走一趟。
+    ap.add_argument("--cap", type=int, metavar="N",
+                    help="临时抬高候选义项上限（默认 20）。抬高的那批必须逐条读。")
     # 冒烟/改契约时用另一个答案文件。🔴 prompt 一改，旧答案就作废
     # （`[[model-answer-files-key-by-id]]`），别让试跑的答案混进正式那份。
     ap.add_argument("--out", metavar="PATH")
+    global OUT, S_CAP
     a = ap.parse_args()
-    global OUT
     if a.out:
         OUT = Path(a.out)
+    if a.cap:
+        print("⚠️ 候选上限 %d → %d（这一批必须 100%% 逐条读）" % (S_CAP, a.cap))
+        S_CAP = a.cap
     if a.undo:
         return undo()
     if a.verify:
