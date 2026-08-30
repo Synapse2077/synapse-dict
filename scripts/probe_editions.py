@@ -51,7 +51,11 @@ NAMES = {
     #    `re.I` 折叠后是 i̇（i + 组合点），所以模式里写 `i̇?talyanca` 两种都认。
     "it": r"^italian$|italien|italiaans|italienisch|italiano|włoski|wloski|итальян|ιταλ|"
           r"i̇?talyanca|italšt|意大利|義大利|이탈리아|イタリア",
+    # ⚠️ 2026-08-30：`tr` 与 `cs` 原来匹配不到 —— 与上面 `it` 那条**同一个坑的第二次**
+    #    （用户问「每门语言所需的 dump 应该都不一样吧，确认过吗」时暴露）。
+    #    土耳其语 `Portekizce`、捷克语 `portugalština` 都不含 "portug…al" 之外的共同词根。
     "pt": r"^portuguese$|portugais|portugees|portugiesisch|portoghese|portugués|português|portugalski|"
+          r"portekizce|portugalšt|"
           r"португал|πορτογαλ|葡萄牙|포르투갈|ポルトガル",
 }
 

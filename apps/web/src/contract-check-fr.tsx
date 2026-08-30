@@ -106,6 +106,26 @@ const CHECKS: Check[] = [
     },
   },
   {
+    // 🔴 2026-08-29 用户点出「fr 好像没有标出 en/it/fr 之类的标志」。
+    //    上一条只问「法语原文有没有渲染出来」—— 答案一直是"有"，所以它**在构造上看不见这个缺陷**：
+    //    法语原文走的是没有 CSS 规则的 `.sense-fr`、英文走无标签的 `.sense-en`，
+    //    中文/法文/英文三行同字号同颜色堆在一起，用户扫一眼分不清哪行是哪种语言。
+    //    （es/it 早就有 `.sense-src` + 分色徽标，fr 是**漏抄**，不是有意从简。）
+    //    ⇒ 这一条问的是不同的问题：**渲染出来的那行，认不认得出是哪种语言**。
+    //    顺带把 `s.en` 也纳进来 —— 在此之前 24 条闸里没有一条守英文对应词，
+    //    组件漏掉那一行的话（it 2026-08-16 意语原文就是这么漏了 89,531 条）全闸皆绿。
+    name: '🔴 源语言行必须带认得出的语种标签（FR/EN）',
+    hit: (e, html) => {
+      const rows = [...html.matchAll(/<div class="sense-src" lang="(\w+)">(?:<span class="sense-src-lang">(\w+)<\/span>)?/g)];
+      const bare = rows.filter((m) => !m[2]);
+      if (bare.length) return `${bare.length} 行源语言没有语种标签（lang=${bare[0][1]}）`;
+      const wrong = rows.filter((m) => m[2] !== m[1].toUpperCase());
+      if (wrong.length) return `语种标签与 lang 不符：lang=${wrong[0][1]} 标签=${wrong[0][2]}`;
+      const want = e.senses.filter((s) => s.fr).length + e.senses.filter((s) => s.en).length;
+      return rows.length !== want ? `应有 ${want} 行源语言，页面只渲染了 ${rows.length} 行` : null;
+    },
+  },
+  {
     // 🔴 阶段 5 补做的关系层（+300,611 行，2026-08-27）。
     //    `french.ts` 里原来有一句「fr 的 sense_relation 只有 alt_of 一种，所以不做
     //    相关词分组」—— 数据补完之后那句话就成了错的。这条闸盯住的正是
@@ -500,6 +520,14 @@ function mutate(words: string[]): void {
     ['把「释义」区块整块抹掉', (h) => h.replace(/释义/g, ''), (e) => e.senses.length > 0],
     ['把第一条义项的中文抹掉', (h) => h, (e) => e.senses.some((s) => !!s.zh)],
     ['把法语原文定义抹掉', (h) => h, (e) => e.senses.some((s) => !!s.fr)],
+    // 模拟修复之前的状态：源语言行只有正文、没有语种徽标（`.sense-fr` / 无标签的 `.sense-en`）
+    ['把源语言行的语种徽标抹掉',
+      (h) => h.replace(/<span class="sense-src-lang">\w+<\/span>/g, ''),
+      (e) => e.senses.some((s) => !!s.fr || !!s.en)],
+    // 模拟组件漏写英文那一行（it 2026-08-16 意语原文漏渲染的同一形状）
+    ['把英文对应词那一行整行抹掉',
+      (h) => h.replace(/<div class="sense-src" lang="en">.*?<\/div>/g, ''),
+      (e) => e.senses.some((s) => !!s.en)],
     ['把音标抹掉', (h) => h, (e) => !!e.ipa],
     ['把「连诵」标签抹掉（模拟组件漏读 context 列）',
       (h) => h.replace(/连诵/g, ''),

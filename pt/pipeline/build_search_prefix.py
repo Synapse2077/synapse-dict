@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""预计算短前缀的搜索结果（葡语）—— 干掉搜索下拉的尖峰。2026-08-30（阶段 9）。
+
+═══ pt 的实测（阶段 9 开工时，进程内非 HTTP）═══
+`search()` 是搜索下拉与划词的路径，**用户每敲一个字符就跑一次**。
+
+    修之前              **2,242 – 7,456 ms**   ← 比 es/it 优化前还差一个数量级
+    ① 中文摘要移到 LIMIT 之后   1,136 – 1,346 ms
+    ② 加 `idx_gloss_sense_lang` + `ANALYZE`   **0.7 – 140 ms**
+    ③ 本步（预计算短前缀）      目标：短前缀也进 1 ms
+
+🔴 ①②不是"顺手优化"，是**两个真缺陷**，都在 `[[query-desc]]` 那一族里：
+   · 中文摘要写成候选行上的相关子查询 ⇒ 规划器**从选择性最差那头入手**
+     （`lang='zh'` 有 34 万行），且对**每个候选**都跑一次 —— 占总耗时 99.5%。
+   · 加了 `(sense_id, lang)` 索引规划器**仍然不用**，因为库里**没有统计信息**；
+     `ANALYZE` 之后计划才翻转（`SEARCH g USING idx_gloss_sense_lang`），
+     同一段 200 次调用 **11,748 ms → 4 ms**。
+
+═══ 瓶颈是排序不是过滤（es/it 2026-08-20 实测，机制相同）═══
+为了取 20 条，把两三万条候选整个排一遍。`ORDER BY` 里的 `LENGTH(word)` 与
+`lower(word)=lower(?)` 都不可索引，而 `word LIKE ? OR word_norm LIKE ?` 的 **OR
+强制走 MULTI-INDEX OR** ⇒ 规划器不会为它采用排序索引，**建索引没用**。
+
+═══ 判据：问题只在短前缀，而短前缀的答案完全由前缀决定 ═══
+`ORDER BY` 的每一项都只依赖词形本身和这个前缀，与查询上下文无关 ⇒ **可确定性预计算**。
+
+🔴🔴 **`LIVE` 与 `packages/dict-core/src/portuguese.ts` 的 `prefix` 逐字相同，
+     一行都不从 fr/it 抄。** pt 的排序是**两级**精确匹配
+     （先 `word = ?` 再 `lower(word) = lower(?)`），fr 只有一级 ——
+     抄过来会**静默改掉排序**，而两边都不会报错。
+     阶段 3a 特意把 `Cefalópodos`（头足纲）和 `cefalópodos`（复数）拆成了两行，
+     第一级精确匹配就是为它们存在的，抄丢了等于把那次拆分作废。
+
+═══ 缓存未命中 = 正确回退，不是错误 ═══
+键就是调用方传进来的原字符串。查不到就走实时查询 —— 结果一样，只是慢一点。
+🔴 SQLite 的 `lower()` **不认非 ASCII**（`lower('É')`='É'），而葡语词头大量带重音符
+   （`ação`/`ótimo`/`está`）。与其去猜大小写归一规则，不如让键严格等于原串、猜不中就回退。
+
+═══ 闸 ═══
+① **可逆性回核**（100%，非抽样）：每一个预计算的前缀重跑实时查询，id 序列逐位比。
+② 陈旧性：记下建表时 `dict` 的行数与 max(id)。`dict` 一变闸就红 ——
+   预计算表的头号风险不是算错，是**算对了然后数据变了没人重算**。
+③ 变异验证（含负控）
+
+用法（在 pt/ 目录下）：
+    python3 -u pipeline/build_search_prefix.py            # 试算 + 闸，不写库
+    python3 -u pipeline/build_search_prefix.py --apply
+    python3 -u pipeline/build_search_prefix.py --mutate
+"""
+import argparse
+import sqlite3
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import dbtool   # noqa: E402
+import paths    # noqa: E402
+
+MAXLEN = 3
+TOPN = 50           # `apps/api` 的 parseLimit 上限是 50（默认 20）
+
+DDL = """CREATE TABLE search_prefix (
+  prefix  TEXT NOT NULL,      -- 调用方传进来的原字符串（不做大小写归一，见文件头）
+  rank    INTEGER NOT NULL,   -- 0 起，与实时查询的输出顺序逐位一致
+  word_id INTEGER NOT NULL,
+  PRIMARY KEY (prefix, rank)
+) WITHOUT ROWID"""
+DDL_META = """CREATE TABLE search_prefix_meta (
+  k TEXT PRIMARY KEY, v TEXT NOT NULL
+)"""
+
+# 🔴 与 `packages/dict-core/src/portuguese.ts` 的 `prefix` **逐字相同**。
+#    ⚠️ 比 fr 多一级：`WHEN d.word = ?` 在前、`WHEN lower(d.word) = lower(?)` 在后。
+LIVE = """
+SELECT id FROM dict
+WHERE word LIKE ? COLLATE NOCASE OR word_norm LIKE ? COLLATE NOCASE
+ORDER BY CASE WHEN word = ? THEN 0
+              WHEN lower(word) = lower(?) THEN 1 ELSE 2 END,
+         is_lemma DESC,
+         LENGTH(word) ASC,
+         word ASC
+LIMIT ?
+"""
+
+def keys(con):
+    """要预计算哪些前缀。取 `dict.word` 真实出现的 1–3 字符前缀，连同 SQLite `lower()` 形式。
+
+    ⚠️ 必须先 `strip()` —— `search()` 是先 trim 再查的，不 trim 会造出永远命中不到的键。
+    """
+    s = set()
+    for (w,) in con.execute("SELECT word FROM dict"):
+        w = w.strip()
+        for L in range(1, MAXLEN + 1):
+            if len(w) >= L:
+                s.add(w[:L])
+    extra = {"".join(c.lower() if "A" <= c <= "Z" else c for c in k) for k in s}
+    return sorted(s | extra)
+
+
+def build(con, ks, verbose=True):
+    rows, c = [], Counter()
+    t0 = time.time()
+    for i, k in enumerate(ks):
+        ids = [r[0] for r in con.execute(LIVE, (k + "%", k + "%", k, k, TOPN))]
+        for r, wid in enumerate(ids):
+            rows.append((k, r, wid))
+        c["前缀"] += 1
+        c["命中 0 条的前缀"] += (not ids)
+        if verbose and i and i % 2000 == 0:
+            print("     … %d/%d  %.0fs" % (i, len(ks), time.time() - t0), flush=True)
+    if verbose:
+        print("■ 预计算 %s 个前缀 / %s 行，用时 %.0fs"
+              % (format(c["前缀"], ","), format(len(rows), ","), time.time() - t0))
+        if c["命中 0 条的前缀"]:
+            print("     （其中 %d 个前缀查不到任何词，存空）" % c["命中 0 条的前缀"])
+    return rows
+
+
+def fingerprint(con):
+    n, mx = con.execute("SELECT COUNT(*), COALESCE(MAX(id),0) FROM dict").fetchone()
+    return "%d:%d" % (n, mx)
+
+
+def apply(con, rows):
+    con.execute("DROP TABLE IF EXISTS search_prefix")
+    con.execute("DROP TABLE IF EXISTS search_prefix_meta")
+    con.execute(DDL)
+    con.execute(DDL_META)
+    con.executemany("INSERT INTO search_prefix (prefix, rank, word_id) VALUES (?,?,?)", rows)
+    con.execute("INSERT INTO search_prefix_meta (k, v) VALUES ('dict_fingerprint', ?)",
+                (fingerprint(con),))
+    con.execute("INSERT INTO search_prefix_meta (k, v) VALUES ('topn', ?)", (str(TOPN),))
+    return len(rows)
+
+
+def gate(con, verbose=True):
+    """闸①：每个前缀重跑实时查询，id 序列逐位比。100%，非抽样。"""
+    bad, mism, stored = [], 0, {}
+    for k, r, wid in con.execute(
+            "SELECT prefix, rank, word_id FROM search_prefix ORDER BY prefix, rank"):
+        stored.setdefault(k, []).append(wid)
+    for k, ids in stored.items():
+        live = [r[0] for r in con.execute(LIVE, (k + "%", k + "%", k, k, TOPN))]
+        if live != ids:
+            mism += 1
+            if len(bad) < 3:
+                bad.append("🔴 前缀 %r 与实时查询不一致（存 %d / 实时 %d）"
+                           % (k, len(ids), len(live)))
+    out = []
+    if mism:
+        out.append("🔴 %s 个前缀的预计算结果与实时查询不一致" % format(mism, ","))
+        out += bad
+    fp = con.execute("SELECT v FROM search_prefix_meta WHERE k='dict_fingerprint'").fetchone()
+    if not fp or fp[0] != fingerprint(con):
+        out.append("🔴 `dict` 已变（指纹 %s → %s），预计算表已陈旧，必须重建"
+                   % (fp[0] if fp else "?", fingerprint(con)))
+    if verbose:
+        print("■ 闸：核对 %s 个前缀，不一致 %s" % (format(len(stored), ","), mism))
+        for b in out:
+            print("     " + b)
+        if not out:
+            print("     ✅ 全部通过")
+    return out
+
+
+def mutate(rows):
+    import shutil
+    import tempfile
+    # 🔴 **变异必须打在一个真有 ≥3 行的前缀上。** it 那轮第一版盲取 `rows[0]`，
+    #    那个前缀只有 1 行 ⇒「少存一行」和「前两条对调」双双成了空操作、
+    #    构造上不可能红。**变异没触发，先查变异对不对，别改闸。**
+    cnt = Counter(k for k, _i, _w in rows)
+    pick = next(k for k, n in cnt.items() if n >= 3)
+    idx = [j for j, (k, _i, _w) in enumerate(rows) if k == pick]
+
+    def drop_one(r):
+        return [x for j, x in enumerate(r) if j != idx[0]]
+
+    def swap_two(r):
+        r = list(r)
+        a, b = idx[0], idx[1]
+        r[a], r[b] = (r[a][0], r[a][1], r[b][2]), (r[b][0], r[b][1], r[a][2])
+        return r
+
+    def bad_id(r):
+        r = list(r)
+        k, i, w = r[idx[0]]
+        r[idx[0]] = (k, i, w + 7)
+        return r
+
+    MUT = [("① 改掉一个前缀里的一个 id", bad_id, True),
+           ("② 少存一行（顺序错位）", drop_one, True),
+           ("③ 把某前缀的前两条对调", swap_two, True),
+           ("④【负控】原样写入", lambda r: r, False)]
+    ok, cases = 0, []
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "t.sqlite"
+        shutil.copy2(paths.DB, p)
+        c = sqlite3.connect(p)
+        for name, mut, want_red in MUT:
+            c.execute("SAVEPOINT m")
+            try:
+                apply(c, mut(list(rows)))
+                bad = gate(c, verbose=False)
+            finally:
+                c.execute("ROLLBACK TO m")
+                c.execute("RELEASE m")
+            good = bool(bad) == want_red
+            ok += good
+            cases.append((name, ("✅ 报红" if bad else "✅ 照常绿") if good
+                          else ("🔴 该红没红" if want_red else "🔴 不该红却红了")))
+        # ⑤ 陈旧性：动了 dict 之后闸必须红
+        c.execute("SAVEPOINT m")
+        apply(c, list(rows))
+        c.execute("INSERT INTO dict (word, word_norm, is_lemma, pos) VALUES ('__x__','__x__',1,'n')")
+        bad = gate(c, verbose=False)
+        c.execute("ROLLBACK TO m")
+        c.execute("RELEASE m")
+        ok += bool(bad)
+        cases.append(("⑤ dict 变了（陈旧性）", "✅ 报红" if bad else "🔴 该红没红"))
+        c.close()
+    print("\n■ 变异验证")
+    for n, s in cases:
+        print("     %-30s %s" % (n, s))
+    print("     %d/%d" % (ok, len(cases)))
+    return 0 if ok == len(cases) else 1
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--mutate", action="store_true")
+    a = ap.parse_args()
+    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    ks = keys(con)
+    print("■ 待预计算前缀 %s 个（1–%d 字符，含大小写变体）" % (format(len(ks), ","), MAXLEN))
+    rows = build(con, ks)
+    con.close()
+    if a.mutate:
+        return mutate(rows)
+    if not a.apply:
+        print("\n(未加 --apply，没有写库)")
+        return 0
+    with dbtool.session("search-prefix", expect={}) as s:
+        apply(s.conn, rows)
+    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    bad = gate(con)
+    con.close()
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -29,6 +29,8 @@
   --es-soft: rgba(180, 83, 9, 0.12);
   --it-accent: #15803d;   /* 源语言标识：IT 绿，与 EN 蓝 / ES 琥珀三向拉开 */
   --it-soft: rgba(21, 128, 61, 0.12);
+  --fr-accent: #7c3aed;   /* 源语言标识：FR 紫，与 EN 蓝 / ES 琥珀 / IT 绿四向拉开 */
+  --fr-soft: rgba(124, 58, 237, 0.12);
   --topic: #0f7a5f;       /* 学科标签 绿 —— 必须避开阳性的 --accent 蓝 */
 }
 
@@ -58,6 +60,8 @@
   --es-soft: rgba(242, 177, 85, 0.18);
   --it-accent: #6ee7a0;   /* 源语言标识：IT 绿（暗色下提亮） */
   --it-soft: rgba(110, 231, 160, 0.18);
+  --fr-accent: #c4b5fd;   /* 源语言标识：FR 紫（暗色下提亮） */
+  --fr-soft: rgba(196, 181, 253, 0.18);
   --topic: #4fc3a1;       /* 学科标签 绿（暗色下提亮） */
 }
 
@@ -754,6 +758,11 @@ body {
 .sense-src[lang='it'] .sense-src-lang {
   background: var(--it-soft);
   color: var(--it-accent);
+}
+
+.sense-src[lang='fr'] .sense-src-lang {
+  background: var(--fr-soft);
+  color: var(--fr-accent);
 }
 
 .sense-missing {

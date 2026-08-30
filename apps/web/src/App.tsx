@@ -7,7 +7,7 @@ import {
   itAudioRegion,
   FR_AUX_LABELS, FR_VGROUP_LABELS, FR_ADJPOS_LABELS, FR_REGION_LABELS,
   FR_REGION_CODE_LABELS, FR_PRON_CONTEXT_LABELS, FR_ARTICLE,
-  PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE,
+  PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE, ptInflHeading,
   DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
@@ -290,13 +290,35 @@ type FrEntry = {
 };
 
 // —— 葡萄牙语（pt）：双读音(巴西 pt-BR + 葡萄牙 pt-PT)，与 es/it/fr 解耦 ——
+// ⚠️ 这一份是 `packages/dict-core/src/portuguese.ts` 那些类型的**前端副本**
+//    （六个语种都是这么写的）。2026-08-30 阶段 8 把服务改成 v3 多表版，
+//    这里必须跟着改 —— 不改的话新字段在编译期就报「不存在」，改漏了则渲染不出来。
 type PtSense = {
+  id: number;
   en: string | null;
   zh: string | null;
+  pt: string | null;          // 葡语原文定义（阶段 1.5a）
   pos: string | null;
   gender: string | null;
   regions: string[];
   registers: string[];
+  topics: string[];
+};
+type PtReading = {
+  ipa: string; notation: string | null; region: string | null;
+  pos: string | null; src: string | null;
+};
+type PtExample = {
+  senseId: number | null; text: string; zh: string | null;
+  en: string | null; ref: string | null; bold: Array<[number, number]>;
+};
+type PtInflection = { base: string; label: string | null; clickable: boolean };
+type PtForm = { form: string; label: string | null };
+type PtAltOf = { target: string; zh: string | null; clickable: boolean };
+type PtRelationTarget = { word: string; clickable: boolean };
+type PtRelationGroup = { kind: string; total: number; targets: PtRelationTarget[] };
+type PtAudio = {
+  url: string; region: string | null; regionSrc: string | null; speaker: string | null;
 };
 type PtCollocation = { text: string; zh: string | null };
 type PtBase = {
@@ -327,11 +349,18 @@ type PtEntry = {
   adjPos: string | null;
   government: string | null;
   level: string | null;
+  freqZipf: number | null;
   senses: PtSense[];
+  readings: PtReading[];
+  examples: PtExample[];
   collocations: PtCollocation[];
+  inflections: PtInflection[];
+  forms: PtForm[];
+  relations: PtRelationGroup[];
+  altOf: PtAltOf[];
+  audio: PtAudio[];
   baseForms: string[];
   bases: PtBase[];
-  inflNotes: string[];
   flag: string | null;
 };
 
@@ -2559,7 +2588,27 @@ function PtPhonetics({ word, ipaBr, ipaPt, speak }: {
   );
 }
 
-function PortugueseEntryView({ entry, onWord, speak }: {
+/**
+ * 例句出处的展示层清洗。**不动数据** —— 坏的是源头的著录字段，不是我们的库。
+ *
+ * 阶段 8 用 `render-dump` 按用户真正看到的样子导出时逮到两族（2026-08-30）：
+ *   · `ref` 是**纯标点**        200 条 → 页面上一个孤零零的「.」
+ *   · `ref` 含**空字段**        812 条 → `, Olgário Paulo Vogt, , EDUNISC, página: 25`
+ *
+ * ⚠️ 判据只做两件事：把连续逗号压成一个、去掉首尾的孤立标点。
+ *    **不猜内容、不重排字段** —— 那是源头的著录格式，我们没有权威改它。
+ */
+function ptCleanRef(raw: string | null): string | null {
+  if (!raw) return null;
+  const s = raw
+    .replace(/\s*,\s*(?=,)/g, '')      // 连续逗号（空字段留下的）
+    .replace(/^[\s,.:;-]+/, '')
+    .replace(/[\s,.:;-]+$/, '')
+    .trim();
+  return s.length >= 2 ? s : null;     // 剩不到两个字符的（`.`、`,`）不展示
+}
+
+export function PortugueseEntryView({ entry, onWord, speak }: {
   entry: PtEntry; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
@@ -2603,7 +2652,13 @@ function PortugueseEntryView({ entry, onWord, speak }: {
         {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
       </div>
 
-      {entry.isLemma && entry.senses.length > 0 && (
+      {/* 🔴🔴 **不许加 `entry.isLemma &&`** —— `it` 的 `TVTB` 就是死在这一行：
+          一个 `entry.isLemma &&` 挡住 8,552 个词形的整块释义，而接口返回完全正确，
+          查库、查接口都看不见。pt 上同一行挡住 **6,520 个词形**
+          （`no`／`thesaurus`／`frei`／`abada` 都有自己的义项却不是词元）。
+          ⇒ 判据只问「**有没有义项**」，不问「是不是词元」。
+          契约闸 `contract-check-pt.tsx` 第一条守着它，改回去会立刻红。 */}
+      {entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
           {groupPtSenses(entry.senses).map((grp, gi) => (
@@ -2616,7 +2671,18 @@ function PortugueseEntryView({ entry, onWord, speak }: {
                       {s.zh || <span className="sense-missing">（待补）</span>}
                       <PtSenseChips sense={s} dualGender={entry.gender === 'mf'} />
                     </div>
-                    {s.en && <div className="sense-en"><FrText text={s.en} /></div>}
+                    {/* 🔴 源语言行必须带认得出的语种标签 —— fr 收尾单 C29 记的就是
+                        「pt/de 的源语言行没有标记」。这里一次做对，判据由契约闸守。 */}
+                    {s.pt && (
+                      <div className="sense-src" lang="pt">
+                        <span className="sense-src-lang">PT</span>{s.pt}
+                      </div>
+                    )}
+                    {s.en && (
+                      <div className="sense-src" lang="en">
+                        <span className="sense-src-lang">EN</span>{s.en}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ol>
@@ -2625,13 +2691,19 @@ function PortugueseEntryView({ entry, onWord, speak }: {
         </section>
       )}
 
-      {/* 变位形式：指回原形（含人称不定式等葡语专属变位）；原形连带性别显示 */}
+      {/* 变形区块：指回原形（含人称不定式等葡语专属变位）；原形连带性别显示。
+          🔴 标题不写死 —— `gamão → gamões`（名词复数）和 `acérrimo → acérrima`（形容词阴性）
+             顶着「变位形式」是错的（外审两家四版都点了）。判据在 `ptInflHeading` **一处**，
+             和标签去重共用同一张语法成分表，不在这里再抄一份词表。 */}
       {entry.baseForms.length > 0 && (
         <section className="entry-section">
-          <h3>变位形式</h3>
-          {entry.inflNotes.length > 0 && (
+          <h3>{ptInflHeading(entry.inflections.map((x) => x.label))}</h3>
+          {/* v3 之后变形说明由 `inflections[].label` 承担，`dict.infl` 那列已废 */}
+          {entry.inflections.length > 0 && (
             <ul className="infl-notes">
-              {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}
+              {entry.inflections.map((x, k) => (
+                <li key={k}>{x.base} 的 {x.label ?? '变位形式'}</li>
+              ))}
             </ul>
           )}
           <div className="base-list">
@@ -2674,6 +2746,66 @@ function PortugueseEntryView({ entry, onWord, speak }: {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {/* 🔴 真人录音。fr 那轮的头号事故就在这里：库里 39 万条 URL，
+          而 `french.ts` 里 `FROM audio` 出现 **0 次** —— 一个用户都看不见。
+          pt 的地区标记是**有出处的**（`region_src` = tag / filename / speaker），
+          说不出出处的一律不标，不猜。 */}
+      {entry.audio.length > 0 && (
+        <section className="entry-section">
+          <h3>真人发音</h3>
+          <div className="audio-row">
+            {entry.audio.map((a, i) => (
+              <audio className="audio-clip" key={i} controls preload="none" src={a.url}
+                data-region={a.region ?? ''}
+                title={a.region
+                  ? `${a.region === 'pt-BR' ? '巴西' : '葡萄牙'}${a.speaker ? ` · ${a.speaker}` : ''}`
+                  : (a.speaker ?? '未标地区')} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {entry.examples.length > 0 && (
+        <section className="entry-section">
+          <h3>例句</h3>
+          <ul className="example-list">
+            {entry.examples.slice(0, 12).map((x, i) => (
+              <li className="example-item" key={i}>
+                <div className="example-text" lang="pt">{x.text}</div>
+                {x.zh && <div className="example-zh">{x.zh}</div>}
+                {!x.zh && x.en && <div className="example-en">{x.en}</div>}
+                {ptCleanRef(x.ref) && (
+                  <div className="example-ref">{ptCleanRef(x.ref)}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {entry.relations.length > 0 && (
+        <section className="entry-section">
+          <h3>语义关系</h3>
+          {entry.relations.map((g) => (
+            <div className="rel-group" key={g.kind}>
+              <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
+              <span className="rel-targets">
+                {g.targets.map((t, i) => (
+                  <span key={i}>
+                    {i > 0 && '、'}
+                    {t.clickable
+                      ? <a href={`#${encodeURIComponent(t.word)}`}
+                          onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
+                      : <span className="rel-plain">{t.word}</span>}
+                  </span>
+                ))}
+                {g.total > g.targets.length && <span className="rel-more">… 共 {g.total}</span>}
+              </span>
+            </div>
+          ))}
         </section>
       )}
     </article>

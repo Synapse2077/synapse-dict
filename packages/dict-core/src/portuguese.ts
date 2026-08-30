@@ -1,13 +1,36 @@
 // ============================================================================
-// 葡萄牙语词典服务 —— 葡语专属，自包含，不引用其它语种（不复用 es/it/fr 服务）。
-// 读 pt/build.py 产出的葡语专属 dict 表：把葡语本质作为一等字段返回——
-//   · 双读音 ipa_br(巴西 pt-BR) + ipa_pt(欧洲 pt-PT)  ← 葡语灵魂
-//   · 动词 vconj(变位类)、transitivity、pronominal、pp(过去分词)；无 aux
-//   · 名词/形容词 gender、plural、feminine、comparative
-// IPA 入库为维基式精确源；读取时规范化为葡语本土词典标准（去连结弧、去音节点，保留鼻化/双方言标记）。
+// 葡萄牙语词典服务 —— 葡语专属，自包含，**不引用其它语种**（不复用 es/it/fr 服务）。
+//
+// 2026-08-30 阶段 8：从**老扁平版重写为 v3 多表版**。
+//
+// 🔴 为什么必须重写：`[[it-display-layer-stage8]]` 与 fr 2026-08-29 的复发 ——
+//    数据层全绿、库里查得到，而 `french.ts` 里 `FROM audio` 出现 **0 次**
+//    ⇒ 39 万条录音一个用户都看不见。**「落库成功」证明不了「到达用户」。**
+//    pt 重写前的状态更彻底：287 行只读 `dict` 的扁平列，
+//    v3 的 sense / sense_gloss / pronunciation / inflection / example /
+//    sense_relation / audio **一张都没接** —— 阶段 0–6 做的东西用户一个字看不到。
+//
+// ══════ 三条 pt 独有、别的语种没有的约束 ══════
+//
+// ① **双读音是葡语的灵魂**：`pronunciation.region` 分 pt-BR / pt-PT / NULL(通用)。
+//    读者看到 `novos ˈnɔ.vus / ˈnɔ.vuʃ` 时必须知道哪个是哪个 ——
+//    元音变换让同一个词的巴葡欧葡差别不只是口音（`novo ˈno.vu → novos ˈnɔ.vus`）。
+//
+// ② 🔴 **查变形必须走 `inflection.word_id`，不能走 `entry`**（收尾单 C11）：
+//    只在 `forms` 里出现过的词形，阶段 3 只给它建了 `dict` 行**没建 `entry` 行**，
+//    实测 **132,660 条** `inflection.entry_id` 为空。走 entry 会把它们全查不出来。
+//
+// ③ **变形标签要去重**（收尾单 C8）：阶段 2b 把同一个变形关系按词性各存了一份
+//    （`tôdas → tôda 复数` 存了 5 条：det/adj/adv/noun/noun），照渲染会把「复数」印五遍。
+//
+// ⚠️ 隐藏行一律不出现在读者面前：`sense.hidden=1`（变位指针 1,746 条）、
+//    `example.hidden=1`。数据没删，只是不展示。
+//
+// IPA 全语种**存裸**，斜杠由展示层统一加（`[[ipa-bare-storage-convention]]`）。
 // ============================================================================
 
 import { DatabaseSync } from 'node:sqlite';
+import { ptPartsOf } from '@synapse-dict/dict-labels';
 
 export type PortugueseSearchItem = {
   id: number;
@@ -17,15 +40,61 @@ export type PortugueseSearchItem = {
 };
 
 export type PortugueseSense = {
-  en: string | null;
-  zh: string | null;
-  pos: string | null;
-  gender: string | null;    // 逐义项性别（双性名词 rádio m 收音机 / f 镭）
-  regions: string[];        // 地区（Brazil / Portugal / dialectal …）
-  registers: string[];
+  id: number;
+  zh: string | null;        // 中文释义
+  pt: string | null;        // 葡语原文定义（阶段 1.5a 收回来的）
+  en: string | null;        // 英文对应词（七月建库层）
+  pos: string | null;       // 逐义项词性（实测 27.9% 的多义词逐义项不同）
+  gender: string | null;    // 逐义项性别（rádio m 收音机 / f 镭）
+  regions: string[];        // 地区 ← sense_tag kind=region（含安哥拉/莫桑比克等非洲变体）
+  registers: string[];      // 语域 ← kind=register
+  topics: string[];         // 领域 ← kind=topic（fr 那轮漏收过一整族，这里一开始就接）
 };
 
 export type PortugueseCollocation = { text: string; zh: string | null };
+
+// 一条读音。**双读音是 pt 的一等公民**，`region` 不是装饰。
+export type PortugueseReading = {
+  ipa: string;
+  notation: string | null;   // phonemic（音位式）/ narrow（音值式）
+  region: string | null;     // pt-BR / pt-PT / null=通用（两支相同）
+  pos: string | null;        // 同形异读靠它分（`pronunciation.pos`，一开始就带的列）
+  src: string | null;
+};
+
+export type PortugueseExample = {
+  senseId: number | null;
+  text: string;
+  zh: string | null;
+  en: string | null;
+  ref: string | null;
+  bold: Array<[number, number]>;
+};
+
+export type PortugueseInflection = {
+  base: string;
+  label: string | null;
+  clickable: boolean;
+};
+
+export type PortugueseAltOf = { target: string; zh: string | null; clickable: boolean };
+export type PortugueseForm = { form: string; label: string | null };
+
+export type PortugueseRelationTarget = { word: string; clickable: boolean };
+export type PortugueseRelationGroup = {
+  kind: string; total: number; targets: PortugueseRelationTarget[];
+};
+const PT_REL_ORDER = ['synonym', 'antonym', 'hypernym', 'hyponym',
+                      'coordinate', 'holonym', 'meronym'];
+const PT_REL_CAP = 12;
+
+// 一条真人录音（Commons URL，不下载字节）。`region` 与读音同一套取值。
+export type PortugueseAudio = {
+  url: string;
+  region: string | null;
+  regionSrc: string | null;   // tag / filename / speaker —— 说得出这个地区哪来的
+  speaker: string | null;
+};
 
 export type PortugueseBase = {
   word: string;
@@ -40,64 +109,40 @@ export type PortugueseEntry = {
   lang: 'pt';
   id: number;
   word: string;
-  ipaBr: string | null;         // 巴西标准音 pt-BR
-  ipaPt: string | null;         // 欧洲标准音 pt-PT
+  ipaBr: string | null;         // 巴西标准音（readings 里 pt-BR 或通用的第一条）
+  ipaPt: string | null;         // 欧洲标准音
   pos: string | null;
   isLemma: boolean;
   // —— 葡语本质（一等字段；无 aux）——
-  vconj: string | null;         // 1 / 2 / 3 / por（变位类）
-  transitivity: string | null;  // t / i / ti
-  pronominal: boolean;          // 代词式/反身 -se
-  pp: string | null;            // 过去分词（规则/长形 ganhado）
-  ppShort: string | null;       // particípio duplo 不规则短形（ganho/pago/gasto）
-  gender: string | null;        // m / f / mf
-  plural: string | null;        // 不规则复数
-  feminine: string | null;      // 阴性形（bonito→bonita；ator→atriz）
-  comparative: string | null;   // 不规则比较级（bom→melhor）
-  adjPos: string | null;        // 形容词位置 pre / post / both（velho amigo / amigo velho）
-  government: string | null;    // 动词/形容词介词支配 regência（gostar de、assistir a）
-  level: string | null;         // CEFR A1-C2
-  senses: PortugueseSense[];
-  collocations: PortugueseCollocation[];
-  baseForms: string[];
-  bases: PortugueseBase[];
-  inflNotes: string[];
-  flag: string | null;
-};
-
-type PtRow = {
-  id: number;
-  word: string;
-  ipa_br: string | null;
-  ipa_pt: string | null;
-  pos: string | null;
-  is_lemma: number;
   vconj: string | null;
   transitivity: string | null;
-  pronominal: number | null;
+  pronominal: boolean;
   pp: string | null;
-  pp_short: string | null;
+  ppShort: string | null;
   gender: string | null;
   plural: string | null;
   feminine: string | null;
   comparative: string | null;
-  adj_pos: string | null;
+  adjPos: string | null;
   government: string | null;
   level: string | null;
-  definition: string | null;
-  translation: string | null;
-  meta: string | null;
-  infl: string | null;
-  exchange: string | null;
-  collocation: string | null;
+  freqZipf: number | null;      // 阶段 5a 建的客观频次（NULL = 量不了，不是"罕见"）
+  // —— v3 各层 ——
+  senses: PortugueseSense[];
+  readings: PortugueseReading[];
+  examples: PortugueseExample[];
+  collocations: PortugueseCollocation[];
+  inflections: PortugueseInflection[];
+  forms: PortugueseForm[];
+  relations: PortugueseRelationGroup[];
+  altOf: PortugueseAltOf[];
+  audio: PortugueseAudio[];
+  baseForms: string[];
+  bases: PortugueseBase[];
   flag: string | null;
 };
 
-// kaikki/维基 IPA → 葡语本土词典标准（显示层规范化，与英语 normalizePronunciation 同定位）。
-// 葡语双方言音位 kaikki 已较规范；读取只做轻量清理：
-//   ① 去连结弧 t͡ʃ→tʃ、d͡ʒ→dʒ  ② 去音节点 .  ③ 保留鼻化 ɐ̃/õ/ɐ̃w̃ 与双方言 (ʁ)/(ɾ) 括注
-//   ④ 只保留 /音位/ 式，丢弃 [窄式]
-// 例：/ˈli.vɾi/→/ˈlivɾi/、/paʁˈt͡ʃi(ʁ)/→/paʁˈtʃi(ʁ)/
+// kaikki/维基 IPA → 展示式。存裸，这里只做轻量清理：去连结弧、去音节点。
 function normalizePtIpa(ipa: string | null): string | null {
   if (!ipa) return ipa;
   let s = ipa.trim();
@@ -105,177 +150,339 @@ function normalizePtIpa(ipa: string | null): string | null {
   if (slash) s = slash[0];
   else s = s.replace(/\s*\[[^\]]*\]\s*/g, '').trim();
   let inner = s.startsWith('/') && s.endsWith('/') ? s.slice(1, -1) : s;
-  inner = inner.replace(/͡/g, '');   // ① 去连结弧
-  inner = inner.replace(/\./g, '');       // ② 去音节点
-  inner = inner.trim();
-  return inner;   // 裸输出——斜杠由展示层(App.tsx)统一加，全语种存裸
+  inner = inner.replace(/͡/g, '').replace(/\./g, '').trim();
+  return inner || null;
 }
 
-function splitLines(s: string | null): string[] {
-  if (!s) return [];
-  return s.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-}
-
-function firstLine(s: string | null): string | null {
-  if (!s) return null;
-  const first = s.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)[0];
-  return first || null;
-}
-
-function parseCollocations(raw: string | null): PortugueseCollocation[] {
-  return splitLines(raw).map((line) => {
-    const m = line.match(/^(.+?)\s+([一-鿿　-〿＀-￯].*)$/);
-    if (m) return { text: m[1].trim(), zh: m[2].trim() };
-    return { text: line, zh: null };
-  });
-}
-
-function parseBaseForms(raw: string | null): string[] {
-  const out: string[] = [];
-  for (const line of splitLines(raw)) {
-    const idx = line.indexOf(':');
-    const w = (idx >= 0 ? line.slice(idx + 1) : line).trim();
-    if (w) out.push(w);
-  }
-  return [...new Set(out)];
-}
-
-function buildSenses(row: PtRow): PortugueseSense[] {
-  const defs = splitLines(row.definition);
-  const zhs = splitLines(row.translation);
-  let metaArr: Array<Record<string, unknown>> = [];
+function parseBold(raw: string | null): Array<[number, number]> {
+  if (!raw) return [];
   try {
-    metaArr = row.meta ? (JSON.parse(row.meta) as Array<Record<string, unknown>>) : [];
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    return v.filter((p) => Array.isArray(p) && p.length === 2) as Array<[number, number]>;
   } catch {
-    metaArr = [];
+    return [];
   }
-  const n = Math.max(defs.length, zhs.length, metaArr.length);
-  const asArr = (v: unknown) => (Array.isArray(v) ? (v as string[]) : []);
-  const senses: PortugueseSense[] = [];
-  for (let i = 0; i < n; i++) {
-    const m = metaArr[i] ?? {};
-    senses.push({
-      en: defs[i] ?? null,
-      zh: zhs[i] ?? null,
-      pos: typeof m.pos === 'string' ? m.pos : null,
-      gender: typeof m.g === 'string' ? m.g : null,
-      regions: asArr(m.reg),
-      registers: asArr(m.lex),
-    });
-  }
-  return senses;
-}
-
-function mapEntry(row: PtRow): PortugueseEntry {
-  return {
-    lang: 'pt',
-    id: row.id,
-    word: row.word,
-    ipaBr: normalizePtIpa(row.ipa_br),
-    ipaPt: normalizePtIpa(row.ipa_pt),
-    pos: row.pos,
-    isLemma: row.is_lemma === 1,
-    vconj: row.vconj,
-    transitivity: row.transitivity,
-    pronominal: row.pronominal === 1,
-    pp: row.pp,
-    ppShort: row.pp_short,
-    gender: row.gender,
-    plural: row.plural,
-    feminine: row.feminine,
-    comparative: row.comparative,
-    adjPos: row.adj_pos,
-    government: row.government,
-    level: row.level,
-    senses: buildSenses(row),
-    collocations: parseCollocations(row.collocation),
-    baseForms: parseBaseForms(row.exchange),
-    bases: [],
-    inflNotes: splitLines(row.infl),
-    flag: row.flag,
-  };
 }
 
 export class PortugueseDictService {
   readonly databasePath: string;
   readonly lang = 'pt';
   private readonly db: DatabaseSync;
-  private readonly statsQuery;
-  private readonly exactQuery;
-  private readonly prefixQuery;
+  private readonly q: Record<string, ReturnType<DatabaseSync['prepare']>>;
 
   constructor(databasePath: string) {
     this.databasePath = databasePath;
     this.db = new DatabaseSync(databasePath);
     this.db.exec('PRAGMA query_only = ON');
 
-    this.statsQuery = this.db.prepare(`
-      SELECT
-        COUNT(*) AS total,
-        SUM(is_lemma) AS lemmas,
-        SUM(CASE WHEN translation IS NOT NULL AND translation != '' THEN 1 ELSE 0 END) AS translated,
-        SUM(CASE WHEN ipa_br IS NOT NULL AND ipa_br != '' THEN 1 ELSE 0 END) AS ipaBr
-      FROM dict
-    `);
+    const HEAD = `id, word, ipa_br, ipa_pt, pos, is_lemma, vconj, transitivity,
+                  pronominal, pp, pp_short, gender, plural, feminine, comparative,
+                  adj_pos, government, level, freq_zipf, collocation, flag`;
 
-    this.exactQuery = this.db.prepare(`
-      SELECT id, word, ipa_br, ipa_pt, pos, is_lemma, vconj, transitivity, pronominal,
-             pp, pp_short, gender, plural, feminine, comparative, adj_pos, government, level,
-             definition, translation, meta, infl, exchange, collocation, flag
-      FROM dict
-      WHERE word = ? COLLATE NOCASE
-      ORDER BY is_lemma DESC
-      LIMIT 1
-    `);
+    this.q = {
+      stats: this.db.prepare(`
+        SELECT (SELECT COUNT(*) FROM dict)                              AS total,
+               (SELECT SUM(is_lemma) FROM dict)                         AS lemmas,
+               (SELECT COUNT(DISTINCT word_id) FROM sense
+                 WHERE COALESCE(hidden,0)=0)                            AS translated,
+               (SELECT COUNT(DISTINCT word_id) FROM pronunciation)      AS ipa,
+               (SELECT COUNT(DISTINCT word) FROM audio)                 AS audio,
+               (SELECT COUNT(*) FROM example WHERE COALESCE(hidden,0)=0) AS examples`),
 
-    this.prefixQuery = this.db.prepare(`
-      SELECT id, word, is_lemma, pos, translation, definition
-      FROM dict
-      WHERE word LIKE ? COLLATE NOCASE OR word_norm LIKE ? COLLATE NOCASE
-      ORDER BY
-        CASE WHEN lower(word) = lower(?) THEN 0 ELSE 1 END,
-        is_lemma DESC,
-        LENGTH(word) ASC,
-        word ASC
-      LIMIT ?
-    `);
+      head: this.db.prepare(
+        `SELECT ${HEAD} FROM dict WHERE word = ? ORDER BY is_lemma DESC LIMIT 1`),
+      // 精确大小写优先（阶段 3a 特意把 `Cefalópodos`/`cefalópodos` 拆成两行，
+      // 用 NOCASE 会把它们混为一谈）；查不到再退回不区分大小写。
+      headCI: this.db.prepare(
+        `SELECT ${HEAD} FROM dict WHERE word = ? COLLATE NOCASE
+          ORDER BY CASE WHEN word = ? THEN 0 ELSE 1 END, is_lemma DESC LIMIT 1`),
+
+      // 🔴🔴 **中文摘要必须查在 LIMIT 之后。**
+      //    第一版把它写成候选行上的相关子查询 —— 实测 **5,891 ms**，
+      //    去掉它只剩 **28 ms**（占 99.5%）。
+      //    根因是 `[[query-perf-collation-traps]]` 记过的那条：
+      //    **相关子查询会从选择性最差那头入手** —— 计划里是
+      //    `SEARCH g USING INDEX idx_glosslang (lang=?)`，而 `lang='zh'` 有 **34 万行**；
+      //    而且它对**每个候选**都跑一次，不是只对留下的 20 条。
+      //    ⇒ 拆成两步：先选出 20 条，再给这 20 条取中文（`briefs`）。
+      prefix: this.db.prepare(`
+        SELECT d.id, d.word, d.pos, d.is_lemma
+          FROM dict d
+         WHERE d.word LIKE ? COLLATE NOCASE OR d.word_norm LIKE ? COLLATE NOCASE
+         ORDER BY CASE WHEN d.word = ? THEN 0
+                       WHEN lower(d.word) = lower(?) THEN 1 ELSE 2 END,
+                  d.is_lemma DESC, LENGTH(d.word) ASC, d.word ASC
+         LIMIT ?`),
+
+      // 🔴 短前缀走**预计算表**（阶段 9）。1–3 字符的候选有两三万条，
+      //    为取 20 条要整个排一遍 —— 而 `ORDER BY` 里的 `LENGTH(word)` 与
+      //    `lower(word)=lower(?)` 都不可索引，`OR` 又强制 MULTI-INDEX OR ⇒ **建索引没用**。
+      //    ⚠️ **未命中 = 正确回退**：键就是调用方传进来的原串（不做大小写归一，
+      //    因为 SQLite 的 `lower()` 不认非 ASCII，而葡语词头大量带重音符）。
+      //    查不到就走实时查询，结果一样、只是慢一点。
+      cached: this.db.prepare(`
+        SELECT d.id, d.word, d.pos, d.is_lemma
+          FROM search_prefix p JOIN dict d ON d.id = p.word_id
+         WHERE p.prefix = ? ORDER BY p.rank LIMIT ?`),
+
+      // 只对已选出的少数几条取中文摘要。`word_id` 上有索引，逐条命中。
+      brief: this.db.prepare(`
+        SELECT g.text FROM sense s
+          JOIN sense_gloss g ON g.sense_id = s.id AND g.lang = 'zh'
+         WHERE s.word_id = ? AND COALESCE(s.hidden,0)=0
+         ORDER BY s.rank LIMIT 1`),
+
+      senses: this.db.prepare(`
+        SELECT s.id, s.pos, s.gender,
+               (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='zh' LIMIT 1) AS zh,
+               (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='pt' LIMIT 1) AS pt,
+               (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='en' LIMIT 1) AS en
+          FROM sense s
+         WHERE s.word_id = ? AND COALESCE(s.hidden,0)=0
+         ORDER BY s.rank`),
+
+      tags: this.db.prepare(
+        `SELECT sense_id, kind, value FROM sense_tag WHERE sense_id IN
+           (SELECT id FROM sense WHERE word_id = ?)`),
+
+      // 🔴 双读音：按 region 取，`NULL` 表示两支相同（通用）。
+      readings: this.db.prepare(`
+        SELECT ipa, notation, region, pos, src FROM pronunciation
+         WHERE word_id = ?
+         ORDER BY CASE notation WHEN 'phonemic' THEN 0 ELSE 1 END,
+                  CASE region WHEN 'pt-BR' THEN 0 WHEN 'pt-PT' THEN 1 ELSE 2 END,
+                  id`),
+
+      examples: this.db.prepare(`
+        SELECT e.sense_id, e.text, e.ref, e.bold,
+               (SELECT text FROM example_gloss WHERE example_id=e.id AND lang='zh') AS zh,
+               (SELECT text FROM example_gloss WHERE example_id=e.id AND lang='en') AS en
+          FROM example e
+         WHERE e.word = ? AND COALESCE(e.hidden,0)=0
+         ORDER BY CASE WHEN e.sense_id IS NULL THEN 1 ELSE 0 END, e.id
+         LIMIT 40`),
+
+      colloc: this.db.prepare(`
+        SELECT c.text,
+               (SELECT text FROM collocation_gloss WHERE collocation_id=c.id AND lang='zh') AS zh
+          FROM collocation c WHERE c.word_id = ? ORDER BY c.rank`),
+
+      // 🔴 C11：走 `inflection.word_id`，**不走 entry**（132,660 条 entry_id 为空）。
+      // 🔴 C8：`DISTINCT base,label` —— 阶段 2b 按词性各存了一份，不去重会印五遍。
+      inflOf: this.db.prepare(`
+        SELECT DISTINCT i.base, i.label_zh,
+               (SELECT 1 FROM dict d WHERE d.word = i.base) AS ok
+          FROM inflection i WHERE i.word_id = ?
+         ORDER BY i.base, i.label_zh`),
+
+      // 词元页反过来看：这个词有哪些形式
+      forms: this.db.prepare(`
+        SELECT DISTINCT d.word AS form, i.label_zh AS label
+          FROM inflection i JOIN dict d ON d.id = i.word_id
+         WHERE i.base_id = ? ORDER BY i.label_zh, d.word LIMIT 200`),
+
+      rel: this.db.prepare(`
+        SELECT kind, target,
+               (SELECT 1 FROM dict d WHERE d.word = sense_relation.target) AS ok
+          FROM sense_relation WHERE word_id = ? AND kind <> 'alt_of'`),
+
+      altOf: this.db.prepare(`
+        SELECT r.target,
+               (SELECT g.text FROM sense s
+                  JOIN sense_gloss g ON g.sense_id=s.id AND g.lang='zh'
+                 WHERE s.word_id = (SELECT id FROM dict WHERE word = r.target)
+                   AND COALESCE(s.hidden,0)=0 ORDER BY s.rank LIMIT 1) AS zh,
+               (SELECT 1 FROM dict d WHERE d.word = r.target) AS ok
+          FROM sense_relation r WHERE r.word_id = ? AND r.kind = 'alt_of'`),
+
+      audio: this.db.prepare(`
+        SELECT COALESCE(url_ogg, url_mp3, url_wav, url_other) AS url,
+               region, region_src, speaker
+          FROM audio WHERE word = ?
+         ORDER BY CASE region WHEN 'pt-BR' THEN 0 WHEN 'pt-PT' THEN 1 ELSE 2 END, id
+         LIMIT 8`),
+    };
   }
 
   getStats() {
-    return this.statsQuery.get() as Record<string, number>;
+    return this.q.stats.get() as Record<string, number>;
   }
 
   search(query: string, limit = 20): PortugueseSearchItem[] {
-    const keyword = query.trim();
-    if (!keyword) return [];
-    const like = `${keyword}%`;
-    const rows = this.prefixQuery.all(like, like, keyword, limit) as Array<{
-      id: number; word: string; pos: string | null;
-      translation: string | null; definition: string | null;
-    }>;
+    const kw = query.trim();
+    if (!kw) return [];
+    const like = `${kw}%`;
+    type Row = { id: number; word: string; pos: string | null };
+    // 先查预计算表；未命中（长前缀、或大小写变体没算过）回退实时查询。
+    let rows = this.q.cached.all(kw, limit) as Row[];
+    if (rows.length === 0) rows = this.q.prefix.all(like, like, kw, kw, limit) as Row[];
     return rows.map((r) => ({
-      id: r.id,
-      word: r.word,
-      pos: r.pos,
-      brief: firstLine(r.translation) || firstLine(r.definition),
+      id: r.id, word: r.word, pos: r.pos,
+      brief: (this.q.brief.get(r.id) as { text: string } | undefined)?.text ?? null,
+    }));
+  }
+
+  private sensesOf(wordId: number): PortugueseSense[] {
+    const rows = this.q.senses.all(wordId) as Array<{
+      id: number; pos: string | null; gender: string | null;
+      zh: string | null; pt: string | null; en: string | null;
+    }>;
+    const tagRows = this.q.tags.all(wordId) as Array<{
+      sense_id: number; kind: string; value: string;
+    }>;
+    const byId = new Map<number, { regions: string[]; registers: string[]; topics: string[] }>();
+    for (const t of tagRows) {
+      const e = byId.get(t.sense_id)
+        ?? { regions: [], registers: [], topics: [] };
+      if (t.kind === 'region') e.regions.push(t.value);
+      else if (t.kind === 'register') e.registers.push(t.value);
+      else if (t.kind === 'topic') e.topics.push(t.value);
+      byId.set(t.sense_id, e);
+    }
+    return rows.map((r) => ({
+      id: r.id, zh: r.zh, pt: r.pt, en: r.en, pos: r.pos, gender: r.gender,
+      ...(byId.get(r.id) ?? { regions: [], registers: [], topics: [] }),
     }));
   }
 
   getEntry(word: string): PortugueseEntry | null {
-    const keyword = word.trim();
-    if (!keyword) return null;
-    const row = this.exactQuery.get(keyword) as PtRow | undefined;
+    const kw = word.trim();
+    if (!kw) return null;
+    const row = (this.q.head.get(kw) ?? this.q.headCI.get(kw, kw)) as
+      Record<string, unknown> | undefined;
     if (!row) return null;
-    const entry = mapEntry(row);
+    const id = row.id as number;
+    const w = row.word as string;
 
-    for (const bw of entry.baseForms) {
+    const readings = (this.q.readings.all(id) as Array<{
+      ipa: string; notation: string | null; region: string | null;
+      pos: string | null; src: string | null;
+    }>).map((r) => ({ ...r, ipa: normalizePtIpa(r.ipa) ?? r.ipa }));
+
+    // 词头单行展示用：巴葡取 pt-BR 或通用的第一条，欧葡同理。
+    const pick = (reg: string) =>
+      readings.find((r) => r.region === reg)?.ipa
+      ?? readings.find((r) => r.region === null)?.ipa
+      ?? null;
+
+    const relRows = this.q.rel.all(id) as Array<{
+      kind: string; target: string; ok: number | null;
+    }>;
+    // 🔴 **按 `(kind, target)` 去重** —— 外审 2026-08-30 逮到 `rotar` 的
+    //    `girar`/`rotacionar` 印三遍、`bem → mal` 印七遍，全库 **14,386 组**。
+    //    根因：数据层的去重键是 `(word_id, sense_id, kind, target)`，而
+    //    **同一个词的不同义项指向同一个近义词**就绕过去了（`bem` 七条义项都说反义是 `mal`）。
+    //    ⚠️ **不在数据层删** —— 「这条关系属于哪个义项」是有用的信息；
+    //      重复只存在于"把所有义项的关系并成一列展示"这一步，就在这一步去掉。
+    const relMap = new Map<string, PortugueseRelationTarget[]>();
+    const relSeen = new Set<string>();
+    for (const r of relRows) {
+      const key = `${r.kind}\u0000${r.target}`;
+      if (relSeen.has(key)) continue;
+      relSeen.add(key);
+      const arr = relMap.get(r.kind) ?? [];
+      arr.push({ word: r.target, clickable: !!r.ok });
+      relMap.set(r.kind, arr);
+    }
+    const relations: PortugueseRelationGroup[] = PT_REL_ORDER
+      .filter((k) => relMap.has(k))
+      .map((k) => ({
+        kind: k, total: relMap.get(k)!.length,
+        targets: relMap.get(k)!.slice(0, PT_REL_CAP),
+      }));
+
+    // 变形标签同样要去重，而且**要吃掉"泛化标签"**：
+    // 外审逮到 `podaste` 同时列「陈述式第二人称单数」和「陈述式简单过去时第二人称单数」，
+    // `musaranhos pigmeus` 同时列「复数」和「阳性复数」—— 后者包含前者。
+    // ⇒ 同一个 base 下，若某标签是另一标签的**子串**，只留更具体的那条。
+    const rawInfl = (this.q.inflOf.all(id) as Array<{
+      base: string; label_zh: string | null; ok: number | null;
+    }>).map((r) => ({ base: r.base, label: r.label_zh, clickable: !!r.ok }));
+    // 🔴 第一版判据是「标签 A 是标签 B 的**连续子串**」—— 渲染出来当场打回：
+    //    `podaste` 的「陈述式第二人称单数」不是「陈述式简单过去时第二人称单数」的连续子串
+    //    （中间插了「简单过去时」）。判据比它要描述的东西**窄**。
+    //    ⇒ 按含义写：把标签切成**语法成分**，若 A 的成分是 B 的子集，A 更泛，丢掉 A。
+    // 🔴 **选择支按长度降序生成** —— `[[regex-alternation-order]]` 记过三次：
+    //    正则选择支是**从左到右 first-match，不是最长匹配**，短的排前面就挡住长的
+    //    （`分词` 排在 `过去分词` 前面时，`过去分词阴性单数` 会被切成 `分词`+…）。
+    //    ⇒ 不手写顺序，由代码排。
+    const inflections = rawInfl.filter((x, _i, all) => !all.some((y) => {
+      if (y === x || y.base !== x.base || !x.label || !y.label) return false;
+      if (y.label === x.label) return false;
+      const px = ptPartsOf(x.label);
+      const py = ptPartsOf(y.label);
+      if (px.size === 0) return false;
+      if (!([...px].every((p) => py.has(p)))) return false;   // x 的成分不全在 y 里 ⇒ 不比
+      if (px.size < py.size) return true;                     // x 真子集 ⇒ x 更泛，丢
+      // 成分集相等（`分词` vs `过去分词` 归一后都是 {分词}）⇒ 留字面更完整的那条。
+      return y.label.length > x.label.length
+        || (y.label.length === x.label.length && y.label > x.label);
+    }));
+
+    const entry: PortugueseEntry = {
+      lang: 'pt', id, word: w,
+      ipaBr: pick('pt-BR') ?? normalizePtIpa(row.ipa_br as string | null),
+      ipaPt: pick('pt-PT') ?? normalizePtIpa(row.ipa_pt as string | null),
+      pos: row.pos as string | null,
+      isLemma: row.is_lemma === 1,
+      vconj: row.vconj as string | null,
+      transitivity: row.transitivity as string | null,
+      pronominal: row.pronominal === 1,
+      pp: row.pp as string | null,
+      ppShort: row.pp_short as string | null,
+      gender: row.gender as string | null,
+      plural: row.plural as string | null,
+      feminine: row.feminine as string | null,
+      comparative: row.comparative as string | null,
+      adjPos: row.adj_pos as string | null,
+      government: row.government as string | null,
+      level: row.level as string | null,
+      freqZipf: (row.freq_zipf as number | null) ?? null,
+      senses: this.sensesOf(id),
+      readings,
+      examples: (this.q.examples.all(w) as Array<{
+        sense_id: number | null; text: string; ref: string | null;
+        bold: string | null; zh: string | null; en: string | null;
+      }>).map((e) => ({
+        senseId: e.sense_id, text: e.text, zh: e.zh, en: e.en, ref: e.ref,
+        bold: parseBold(e.bold),
+      })),
+      collocations: this.q.colloc.all(id) as PortugueseCollocation[],
+      inflections,
+      forms: this.q.forms.all(id) as PortugueseForm[],
+      relations,
+      altOf: (this.q.altOf.all(id) as Array<{
+        target: string; zh: string | null; ok: number | null;
+      }>).map((r) => ({ target: r.target, zh: r.zh, clickable: !!r.ok })),
+      audio: (this.q.audio.all(w) as Array<{
+        url: string; region: string | null; region_src: string | null;
+        speaker: string | null;
+      }>).map((a) => ({
+        url: a.url, region: a.region, regionSrc: a.region_src, speaker: a.speaker,
+      })),
+      baseForms: [...new Set(inflections.map((i) => i.base))],
+      bases: [],
+      flag: row.flag as string | null,
+    };
+
+    // 变形页内联展示原形的词义（读者搜 `falávamos` 要看到 `falar` 的意思）
+    for (const bw of entry.baseForms.slice(0, 3)) {
       if (bw === entry.word) continue;
-      const br = this.exactQuery.get(bw) as PtRow | undefined;
+      const br = (this.q.head.get(bw) ?? this.q.headCI.get(bw, bw)) as
+        Record<string, unknown> | undefined;
       if (!br) continue;
-      const bm = mapEntry(br);
+      const bid = br.id as number;
+      const brd = this.q.readings.all(bid) as Array<{ ipa: string; region: string | null }>;
+      const bpick = (reg: string) =>
+        normalizePtIpa(brd.find((r) => r.region === reg)?.ipa
+          ?? brd.find((r) => r.region === null)?.ipa ?? null);
       entry.bases.push({
-        word: bm.word, pos: bm.pos, ipaBr: bm.ipaBr, ipaPt: bm.ipaPt,
-        gender: bm.gender, senses: bm.senses,
+        word: br.word as string, pos: br.pos as string | null,
+        ipaBr: bpick('pt-BR') ?? normalizePtIpa(br.ipa_br as string | null),
+        ipaPt: bpick('pt-PT') ?? normalizePtIpa(br.ipa_pt as string | null),
+        gender: br.gender as string | null,
+        senses: this.sensesOf(bid),
       });
     }
     return entry;

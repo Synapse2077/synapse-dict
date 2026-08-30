@@ -49,6 +49,11 @@ export const POS_LABELS: Record<string, string> = {
   //     syllable 只有 `pa`（仅用于 `de pe a pa`）／unknown 只有 `erre` 一条，源头没给词性
   abbrev: '缩写', character: '字母', prep_phrase: '介词短语', symbol: '符号',
   particle: '小品词', infix: '中缀', syllable: '音节', unknown: '未标注',
+  // 🔴 2026-08-29 pt 阶段 3b 预检加：葡语版有 1 条 `root`（`abelh-` = abelha 的词根）。
+  //    映射成 `pref`（前缀）是错的 —— 词根不是前缀。按「一个都不用默认值填平」
+  //    （`[[prompt-self-harm-two-patterns]]`：`pos or "v"` 把分类名说成动词，落库 404 行）
+  //    显式给它一行。⚠️ `abbrev` 上面已经有了，pt 那 1,344 条不用新增。
+  root: '词根',
 };
 
 // 语域标签 → 中文（对应 build.py REGISTERS）。

@@ -20,7 +20,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { ItalianEntryView, SpanishEntryView, FrenchEntryView } from './App';
+import { ItalianEntryView, SpanishEntryView, FrenchEntryView, PortugueseEntryView } from './App';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
@@ -40,9 +40,14 @@ const words = fileArg
 
 // 🔴 2026-08-26 加 fr（阶段 8）。导出器只支持 it/es 时，fr 的展示层缺陷
 //    就只能靠我读服务端 JSON 猜 —— 而缺陷**只在渲染之后才存在**。
+// 🔴 2026-08-30 加 pt（阶段 8）。上面那条注释的第二次实例：
+//    导出器不支持 pt 时，pt 的展示层缺陷同样只能靠我读 JSON 猜。
+//    ⚠️ pt 的视图签名与 it/es/fr 不同（**没有 `speakLocale`**），单独一条分支。
 const View = lang === 'es' ? SpanishEntryView
-  : lang === 'fr' ? FrenchEntryView : ItalianEntryView;
-const locale = lang === 'es' ? 'es-MX' : lang === 'fr' ? 'fr-FR' : 'it-IT';
+  : lang === 'fr' ? FrenchEntryView
+  : lang === 'pt' ? PortugueseEntryView : ItalianEntryView;
+const locale = lang === 'es' ? 'es-MX' : lang === 'fr' ? 'fr-FR'
+  : lang === 'pt' ? 'pt-BR' : 'it-IT';
 const svc = getService(lang) as unknown as { getEntry(w: string): unknown };
 
 /**
