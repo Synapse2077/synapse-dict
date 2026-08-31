@@ -40,8 +40,10 @@ fr 是做到第七天、被用户问「你自己定的规矩自己为什么不�
     python3 tests/test_plan_ledger.py --mutate # 变异验证：一条永远通过的检查等于没检查
 """
 import re
+import shutil
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -79,10 +81,18 @@ DELIVERABLE = {
     #    （2b 只读英文版 `form_of`）⇒ 「非 en-edition 的变形链非空」是它独有的、且永不过期。
     "2c": [("阶段 3 新收变形的链接（src 非 en-edition）",
             "SELECT COUNT(*) FROM inflection WHERE src<>'en-edition'")],
+    # 🔴 同理，2d 的判据不能写「inflection 非空」也不能写「非 en-edition 非空」——
+    #    那两条 2b/2c 早就让它为真了。2d 独有的交付物是**页面级 form_of**
+    #    那一批，它自己带 `src` 标记 ⇒ 这条判据永不过期，且 2d 一被撤销立刻红。
+    "2d": [("页面级 form_of 补进来的变形（阶段 2d）",
+            "SELECT COUNT(*) FROM inflection WHERE src='pt-edition-page'")],
     "3": [("收词后的 dict", "SELECT COUNT(*) FROM dict")],
-    # ⚠️ pt 是**双读音**语言。这里只断言「音标层非空」，收紧成「巴葡和欧葡都非空」
-    #    要等阶段 4 把表结构定下来 —— 已记进收尾单 C3，不留在注释里烂掉。
-    "4": [("pronunciation 音标层", "SELECT COUNT(*) FROM pronunciation")],
+    # ⚠️ pt 是**双读音**语言。旧版只断言「音标层非空」——**补了一种读音、另一种是 0 也能过**。
+    # ⭐ 2026-08-31 收紧（收尾单 C3 销账）：阶段 4 的表结构早已定下，实测
+    #    pt-BR 321,540 / pt-PT 297,241，两边都非空 ⇒ 现在两边各查一次，缺一边就红。
+    "4": [("pronunciation 音标层", "SELECT COUNT(*) FROM pronunciation"),
+          ("巴葡读音 pt-BR", "SELECT COUNT(*) FROM pronunciation WHERE region='pt-BR'"),
+          ("欧葡读音 pt-PT", "SELECT COUNT(*) FROM pronunciation WHERE region='pt-PT'")],
     # 🔴 阶段 5 是这道闸在 fr 上的头号案例：例句和搭配都做了，**关系和频次没做**，
     #    而阶段表读不出任何一边。四层各查一次，缺一层就红。
     "5": [("example 例句层", "SELECT COUNT(*) FROM example"),
@@ -236,53 +246,85 @@ def mutate():
                       r"\1 **✅ 已完成** |", src, count=1, flags=re.M)
 
     # M1：库侧交付物是 0 的阶段，声明 ✅ —— P1 必须红
-    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
-    empty = [n for n, ds in DELIVERABLE.items() for w, q in ds if _safe(con, q) <= 0]
-    con.close()
-    num = empty[0]
-
-    def _m1():
-        con2 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
-        got = [r for r in p1(con2) if ("阶段 %s" % num) in r[1]]
+    #
+    # 🔴🔴 **2026-08-31 修**：旧版是「在**真库**里找一个交付物恰好为 0 的阶段来打」。
+    #    阶段全做完之后**一个都找不着** ⇒ `empty[0]` 直接 IndexError ——
+    #    **账的闸的变异验证从那时起就一次都没跑起来过**（回归闸的 `mutate()` 同日
+    #    发现同一类毛病：临时连接漏注册 `same_sentence`）。
+    #    ⇒ 判据不许依赖「库里恰好还有没做完的事」。改成**确定性**的：
+    #      打一份库的副本、把某个阶段的交付物删掉，看闸红不红。
+    #    这里挑阶段 2d（`src='pt-edition-page'`，上一轮新做的那步）。
+    with tempfile.TemporaryDirectory() as d:
+        db = Path(d) / "m.db"
+        shutil.copy(paths.DB, db)
+        w = sqlite3.connect(db)
+        w.execute("DELETE FROM inflection WHERE src='pt-edition-page'")
+        w.commit()
+        w.close()
+        con2 = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
+        got = [r for r in p1(con2) if "阶段 2d" in r[1]]
         con2.close()
-        return got
-    got = with_plan(declare(num), _m1)
-    print("   M1 %s（阶段 %s 的库侧交付物是 0）"
-          % ("✅ 逮到" if got else "🔴 **漏了**：声明✅ 而交付物是 0，闸没红", num))
+    print("   M1 %s（阶段 2d 声明✅ 而把它的交付物删光）"
+          % ("✅ 逮到" if got else "🔴 **漏了**：声明✅ 而交付物是 0，闸没红"))
     ok += bool(got)
 
     # M6：**带字母后缀的阶段号**（`2c`）声明 ✅ 而链接层还是空的 —— P1 必须红。
     #     这一条同时验两件事：① 2c 的交付物判据真的能红
     #     ② `ROW` 正则认得出 `2c` —— 照抄 fr 的那版只认数字，`2c` 会被**静默跳过**，
     #     那种漏法不会报错、只会安静地少查一个阶段，光看"✅ 全部通过"根本发现不了。
-    def _m6():
-        con2 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
-        got6 = [r for r in p1(con2) if "阶段 2c" in r[1]]
-        con2.close()
-        return got6
-    got = with_plan(declare("2c"), _m6)
-    print("   M6 %s（阶段 2c 声明✅ 而非 en-edition 的变形链是 0）"
+    # 🔴🔴 **2026-08-31：M6/M2/M3 三条一起修，同一个根因** ——
+    #    它们只把**文档**的状态栏翻成 ✅，然后指望**世界**还是没做完的样子。
+    #    写它们那天（08-30）阶段 2c/7/8 确实还没做完，所以"假装声明"就够了；
+    #    做完之后**变异什么都没变**，闸当然不红，三条一起报「漏了」。
+    #    ⇒ 变异必须**真的把被断言的东西拿走**：库侧删行、文件侧指向不存在的路径、
+    #      代码侧指向一份退回老单表版的副本。（M1 同日同因，已改成删副本的行。）
+    def _red_for(stage, con=None):
+        con2 = con or sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+        try:
+            return [r for r in p1(con2) if ("阶段 %s" % stage) in r[1]]
+        finally:
+            con2.close()
+
+    # M6：**带字母后缀的阶段号**（`2c`）—— 这一条同时验两件事：
+    #     ① 2c 的交付物判据真的能红
+    #     ② `ROW` 正则认得出 `2c` —— 照抄 fr 的那版只认数字，`2c` 会被**静默跳过**，
+    #     那种漏法不会报错、只会安静地少查一个阶段，光看"✅ 全部通过"根本发现不了。
+    with tempfile.TemporaryDirectory() as d:
+        db = Path(d) / "m6.db"
+        shutil.copy(paths.DB, db)
+        w = sqlite3.connect(db)
+        w.execute("DELETE FROM inflection WHERE src<>'en-edition'")
+        w.commit()
+        w.close()
+        got = _red_for("2c", sqlite3.connect("file:%s?mode=ro" % db, uri=True))
+    print("   M6 %s（阶段 2c 声明✅ 而非 en-edition 的变形链删光）"
           % ("✅ 逮到" if got else "🔴 **漏了**：带字母的阶段号被正则漏掉了"))
     ok += bool(got)
 
     # M2：阶段 7 声明 ✅ 而闸文件不存在 —— P1 必须红（这条专打 `SELECT 1` 那个坑）
-    def _m2():
-        con2 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
-        got2 = [r for r in p1(con2) if "阶段 7" in r[1]]
-        con2.close()
-        return got2
-    got = with_plan(declare("7"), _m2)
-    print("   M2 %s（阶段 7 声明✅ 而回归闸/契约闸文件还不存在）"
+    #     ⚠️ **不碰真文件**（跑挂了就把闸自己弄丢了），改成把清单指向不存在的路径 ——
+    #     要证明的是「这条检查能不能红」，`SELECT 1` 那种写法在这里必然过不去。
+    keep_files = FILES["7"]
+    try:
+        FILES["7"] = [("回归闸（变异：指向不存在的路径）", "pt/tests/__no_such_gate__.py")]
+        got = _red_for("7")
+    finally:
+        FILES["7"] = keep_files
+    print("   M2 %s（阶段 7 声明✅ 而闸文件不存在）"
           % ("✅ 逮到" if got else "🔴 **漏了**：文件不存在却不红 —— 这就是 `SELECT 1` 的毛病"))
     ok += bool(got)
 
-    # M3：阶段 8 声明 ✅ 而 portuguese.ts 还是老单表版 —— P1 必须红
-    def _m3():
-        con2 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
-        got3 = [r for r in p1(con2) if "阶段 8" in r[1]]
-        con2.close()
-        return got3
-    got = with_plan(declare("8"), _m3)
+    # M3：阶段 8 声明 ✅ 而展示层退回老单表版 —— P1 必须红
+    keep_code = CODE["8"]
+    with tempfile.TemporaryDirectory() as d:
+        old = Path(d) / "portuguese_old.ts"
+        old.write_text("export const q = `SELECT id, word, translation FROM dict`;\n",
+                       encoding="utf-8")
+        try:
+            CODE["8"] = [("展示层已切到多表（变异：换成老单表版）", str(old), "FROM sense")]
+            got = _red_for("8")
+        finally:
+            CODE["8"] = keep_code
     print("   M3 %s（阶段 8 声明✅ 而展示层还只查 dict）"
           % ("✅ 逮到" if got else "🔴 **漏了**：展示层没接却不红"))
     ok += bool(got)

@@ -191,10 +191,22 @@ def main():
     #    被当成"零义项"，插 rank=1 时撞上已有行。
     #    **是 `UNIQUE(word_id, rank)` 拦住的** —— 这次闸救了我，数据没写进去。
     #    ⇒ 「这个词有没有出版义项」本来就该直接问 `sense`，而且它正好与那个 UNIQUE 同键。
+    # 🔴🔴 **2026-08-30 外审第二轮照出来的洞：`is_lemma=1` 这个限定把一整类排除在外。**
+    #    四份报告都点了 `electroencefalograma` 整条空白。全量扫发现
+    #    **19,404 个词形点进去一个字都没有**，而抽样一看全是变形：
+    #        junqueiras / baguettes / jutlandesa / contraparenta …
+    #    回 dump 一查 —— **源头给了它们独立页面和释义**（`plural de junqueira`），
+    #    是这里的 `d.is_lemma=1` 把它们整批挡在扫描之外了。
+    #
+    #    `is_lemma` 是**我们自己打的标**，拿它决定"要不要去源头找释义"，
+    #    等于用自己的分类限制自己的取数（`[[criteria-narrower-than-you-think]]` /
+    #    `[[llm-as-evaluator-discipline]]` ⑫「判据取数把一整类排除在外，判据自己永远不会说」）。
+    #    ⇒ 判据只该问「这个词形有没有出版义项」，与它是不是词元无关。
+    #    实测放开后：**5,198 个词形 / 8,843 条义项**是源头有而我们从没收的。
     need = {w for (w,) in ro.execute(
-        "SELECT d.word FROM dict d WHERE d.is_lemma=1 AND NOT EXISTS("
+        "SELECT d.word FROM dict d WHERE NOT EXISTS("
         "  SELECT 1 FROM sense s WHERE s.word_id=d.id)")}
-    print("■ 零义项词头 %s" % f(len(need)))
+    print("■ 零义项词形 %s（**不限 is_lemma**）" % f(len(need)))
     per, stat = scan(need)
     for k, v in sorted(stat.items()):
         print("   %-30s %10s" % (k, f(v)))

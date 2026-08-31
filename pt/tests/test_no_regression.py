@@ -40,8 +40,10 @@
     python3 tests/test_no_regression.py --mutate   # 变异验证：闸本身是不是恒真的
 
 🔴 **每加一个修复脚本，必须在 CHECKS 里加一行。** 没有断言的修复 ＝ 下一次静默回归。
-🔴 **每条非零都必须在 ACCEPT 里带理由。** 调高任何一个基线都要写清为什么 ——
+🔴 **每条非零都必须在 ACCEPT 里带「期望值 ＋ 理由」。** 调高任何一个基线都要写清为什么 ——
    否则这就成了掩盖回归的开关。
+🔴 **「已接受」不等于「不再看」**：ACCEPT 锁的是数字不是名字，**超了就红**。
+   变异验证里有一条专门打这件事（M-ACCEPT），别把它删了。
 """
 import argparse
 import json
@@ -57,6 +59,7 @@ sys.path.insert(0, str(HERE.parent / "pipeline"))
 sys.path.insert(0, str(HERE.parent / "fixes"))
 
 import paths                                          # noqa: E402
+from dbtool import has_han                            # noqa: E402
 # ⭐ 判据一律 import，不抄。下面每一个都是某个脚本里那一份唯一的判据。
 from build_freq_layer import measurable               # noqa: E402
 from fix_colloc_separator import roundtrip            # noqa: E402
@@ -77,23 +80,40 @@ f = lambda n: format(n, ",")
 TS = str  # 占位，保持行短
 
 # ══════════════════════════════════════════════════════════════════
-# 允许的非零基线。**每一条都要写清为什么**，否则就是掩盖回归的开关。
+# 允许的非零基线：`断言名 → (期望值, 理由)`。**每一条都要写清为什么**，
+# 否则就是掩盖回归的开关。
+#
+# 🔴🔴 **2026-08-31 改掉机制本身：原来这里是「按名字豁免」，不看数字。**
+#    后果当场就在两条上兑现了 ——
+#        A2 从 2,888 掉到 610（C20 免费补完中文），理由文案还写着 2,888；
+#        F3 从 539 涨到 643（**+104**），闸一声没吭。
+#    「已接受」在旧机制下等于「不再看」，而基线**长大**恰恰是回归最常见的样子。
+#    ⇒ 期望值写死：**超了红**（大声）、**低了要求收紧**（不算红，但结尾单独汇总）。
+#    ⚠️ 这不是「把阈值调宽」——判据一个字没改，改的是「已接受」这三个字的含义。
 ACCEPT = {
-    "B4 阶段 2b 的变形关系按词性各存一份":
-        "1,370 组 / 2,766 行，收尾单 C8。数据不算错（`entry_id` 不同），"
-        "展示层去重，归阶段 8。",
-    "B5 阶段 2b 有变形指向自己":
+    # ⚪ B4 **不再进 ACCEPT**：新机制第一次跑就照出它期望 2,766、实际 **0** ——
+    #    C8 早被 `fix_inflection_dedup.py` 真修掉了（`tôdas` 从 5 行变 1 行、
+    #    全库重复组 0），基线是死的。留着＝这条断言从此非零也不会红。
+    "B5 阶段 2b 有变形指向自己": (
+        20,
         "20 条，收尾单 C9。**葡语规则动词的人称不定式与虚拟式将来时同形于不定式**"
-        "（`que eu orlar`）、`-e` 结尾形容词阴阳同形 ⇒ **大部分是对的，不是缺陷**。",
-    "A2 读者可见的义项没有中文":
-        "2,888 条，收尾单 C20/C21。拆开是：**交叉引用族 1,800**（`o mesmo que X`／`sigla de X`，"
-        "能从库里**免费取被引词的中文**，是补不是删 —— 反向查证明这一族有 1,379 条"
-        "模型给出了有用中文，绝不能当指针隐掉）＋ **判据够不着的 1,094 条**"
-        "（`plural de X`／`feminino de X`／源头残渣`transitivo:`）。"
-        "变位指针族 1,746 条已 `hidden=1`。",
-    "F3 例句里的词缀构词式（不该翻，交阶段 8 决定渲染）":
-        "539 条，收尾单 C13。**数据一个字节没动**（照 fr 先例「别在数据里砍」），"
-        "已排除出翻译池。",
+        "（`que eu orlar`）、`-e` 结尾形容词阴阳同形 ⇒ **大部分是对的，不是缺陷**。"),
+    "A2 读者可见的义项没有中文": (
+        581,
+        "581 条，收尾单 C34–C36。**2,888 → 610 → 581**：C20 免费补 1,007、C21b 隐掉 488 条"
+        "冗余指针（08-30），再 08-31 全表复核时补 8 条交叉引用 ＋ 21 条**单复同形**"
+        "（`Adães 的复数（与单数同形）`）。⭐ 610 那次是这条基线第一次被**逐条归位**："
+        "398 被引词不在库里／87 判据够不着／45 连葡语原文都没有／38 我误判成"
+        "「自指噪声」的（**16 条判据宽 ＋ 22 条是葡语真事实**）／20 被引词多义分不开／"
+        "12 被引词在库但自己也没中文／10 还能免费补 —— 加起来正好 610。"
+        "剩下的**都不该猜**（猜错＝用户点名的「义项和释义错配，那才是真灾难」）。"),
+    "F3 例句里的词缀构词式（不该翻，交阶段 8 决定渲染）": (
+        643,
+        "643 条，收尾单 C13。**数据一个字节没动**（照 fr 先例「别在数据里砍」），已排除出翻译池。"
+        "🔴 **从 539 涨到 643 的 104 条已查清，不是回归**："
+        "−1（族J 对调时撞 `UNIQUE(word,text)` 删掉的重复行）"
+        "＋82（**族J 对调把构词式从 `ref` 搬进了 `text`** ⇒ 判据这才够得着，全是 pt-edition，"
+        "对调前一条都不命中）＋23（后收的 ru/pl/ja/el 版例句，id≥100000）。"),
 }
 
 
@@ -228,6 +248,14 @@ def build(con):
                     "AND sql LIKE '%UNIQUE%' AND sql LIKE '%COALESCE%'", (tname,)).fetchone()[0]
                 if not idx:
                     nullable_unique.append(tname)
+    # 族M：`Rio Grande do Norte` 的中文必须带「北」，否则与 do Sul 混掉（外审第二轮四份点了三份）。
+    add("A", "A9 🔴 Rio Grande do Norte 的中文丢了「北」（与南里奥格兰德混淆）",
+        sum(1 for pt_, zh in con.execute(
+                "SELECT ss.text, g.text FROM sense s "
+                "  JOIN sense_src ss ON ss.sense_id=s.id AND ss.lang='pt' "
+                "  JOIN sense_gloss g ON g.sense_id=s.id AND g.lang='zh' "
+                " WHERE COALESCE(s.hidden,0)=0 AND ss.text LIKE '%estado do Rio Grande do Norte%'")
+            if "北里奥格兰德" not in zh and ("里约格兰德" in zh or "里奥格兰德" in zh or "北大河" in zh)))
     add("H", "H1 🔴 有表的 UNIQUE 含可空列且无 COALESCE 兜底索引（NULL≠NULL ⇒ 约束失效）",
         len(set(nullable_unique)))
     add("H", "H2 🔴 sense_relation 出现内容重复（只差 sense_id 的 NULL）",
@@ -269,6 +297,11 @@ def build(con):
     add("F", "F8 🔴 同一个词下躺着同一句话的两个抄本（`UNIQUE(word,text)` 挡不住）",
         q1("SELECT COUNT(*) FROM (SELECT 1 FROM example WHERE COALESCE(hidden,0)=0 "
            "GROUP BY word, %s HAVING COUNT(*)>1)" % _SAME_SQL))
+    # 族L：例句的「中文」栏里必须真的有中文。判据 import `dbtool.has_han`（判据只许一份）。
+    add("F", "F9 🔴 例句的中文译文里一个汉字都没有（外审第二轮）",
+        sum(1 for (v,) in con.execute(
+                "SELECT g.text FROM example_gloss g JOIN example e ON e.id=g.example_id "
+                " WHERE g.lang='zh' AND COALESCE(e.hidden,0)=0") if not has_han(v)))
     add("F", "F5 example.word 不在 dict",
         q1("SELECT COUNT(*) FROM (SELECT DISTINCT word FROM example "
            "EXCEPT SELECT word FROM dict)"))
@@ -308,13 +341,15 @@ def build(con):
     return C
 
 
-def check_brief():
+def check_brief(db=None):
     """`dbtool.session` 每次写库后调这个。→ [(组, 名称, 数值)]，只含**没有理由的红**。
 
     ⚠️ 它**只报不拦**（见 `dbtool._regression_check` 的文档）：写库已经 commit 了，
        而且不是每次红都该回滚 —— 有些是这次写库有意为之。报出来 + 备份路径够决策。
+
+    `db` 只给变异验证用（打一份副本），默认就是 `paths.DB`。
     """
-    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    con = sqlite3.connect("file:%s?mode=ro" % (db or paths.DB), uri=True)
     # 🔴 判据本体是 `fix_example_near_dup.same_sentence`，**注册成 SQL 函数**，
     #    不在 SQL 里重写一版 —— 上一条 F7 就是因为"闸自己写一版"报了 5 条红。
     con.create_function("same_sentence", 1, same_sentence)
@@ -322,7 +357,7 @@ def check_brief():
         C = build(con)
     finally:
         con.close()
-    return [(g, n, f(v)) for g, n, v in C if v and n not in ACCEPT]
+    return [(g, n, f(v)) for g, n, v in C if v and v > ACCEPT.get(n, (0, ""))[0]]
 
 
 def run(trace=False):
@@ -336,19 +371,31 @@ def run(trace=False):
     if trace:
         print("   （全部 %d 条，用时 %.1fs）" % (len(C), time.time() - t0))
     print("═══ 回归闸（pt）：过去每一个修复，现在还在不在 ═══\n")
-    red = 0
+    red, loose = 0, []
     for g, name, got in C:
-        if got == 0:
+        exp, why = ACCEPT.get(name, (0, ""))
+        if got == 0 and not exp:
             print("   ✅ %-58s %8s" % (name, f(got)))
-        elif name in ACCEPT:
-            print("   🟡 %-58s %8s  ← 已接受" % (name, f(got)))
-            print("        理由：%s" % ACCEPT[name])
-        else:
+        elif got > exp:
             red += 1
-            print("   🔴 %-58s %8s" % (name, f(got)))
+            print("   🔴 %-58s %8s%s" % (name, f(got),
+                  "  ← 已接受基线长大了（期望 %s）" % f(exp) if exp else ""))
+            if why:
+                print("        当初的理由：%s" % why)
+        else:
+            if got < exp:
+                loose.append((name, exp, got))
+            print("   🟡 %-58s %8s  ← 已接受（期望 %s）%s"
+                  % (name, f(got), f(exp), "⬇ 该收紧" if got < exp else ""))
+            print("        理由：%s" % why)
     print("\n%s" % ("✅ 没有回归（%d 条断言，%d 条带理由的已接受基线）"
                     % (len(C), sum(1 for _g, n, v in C if v and n in ACCEPT))
                     if not red else "🔴 %d 条红" % red))
+    # ⬇ 不算红（数据变好了），但**必须打印**：基线降下来而理由文案没跟着改，
+    #   就是 A2 那次「理由写 2,888、实际 610」的成因。
+    for name, exp, got in loose:
+        print("⬇  基线该收紧：%s  期望 %s → 实际 %s（改数字的同时改理由文案）"
+              % (name, f(exp), f(got)))
     return 1 if red else 0
 
 
@@ -371,6 +418,10 @@ def mutate():
             con.execute(sql)
             con.commit()
             ro = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
+            # 🔴 2026-08-31：这里漏了注册 —— F8 把 `same_sentence` 做成 SQL 函数之后，
+            #    `build()` 在这条连接上直接抛 `no such function`，
+            #    **变异验证从那天起就一次都没跑起来过**（「闸的闸」自己坏了没人知道）。
+            ro.create_function("same_sentence", 1, same_sentence)
             hit = [v for _g, n, v in build(ro) if n == group_name and v]
             ro.close()
             good = bool(hit)
@@ -405,9 +456,41 @@ def mutate():
               "UPDATE audio SET region_src=NULL WHERE region IS NOT NULL "
               "AND id=(SELECT MIN(id) FROM audio WHERE region IS NOT NULL)",
               "G4 🔴 有 region 却没有 region_src（说不出这个地区是哪来的）")
+        # ── 上一轮（外审第二轮）新建的两条断言，之前没被变异打过 ──────────
+        check("把一条例句译文换成英文（中文栏里没有汉字）",
+              "UPDATE example_gloss SET text='the cat sleeps' WHERE lang='zh' "
+              "AND example_id=(SELECT MIN(example_id) FROM example_gloss WHERE lang='zh')",
+              "F9 🔴 例句的中文译文里一个汉字都没有（外审第二轮）")
+        check("把 `北里奥格兰德` 的「北」抹掉",
+              "UPDATE sense_gloss SET text=REPLACE(text,'北里奥格兰德','里奥格兰德') "
+              "WHERE lang='zh' AND sense_id=(SELECT s.id FROM sense s "
+              "  JOIN sense_src ss ON ss.sense_id=s.id AND ss.lang='pt' "
+              "  JOIN sense_gloss g ON g.sense_id=s.id AND g.lang='zh' "
+              " WHERE ss.text LIKE '%estado do Rio Grande do Norte%' "
+              "   AND g.text LIKE '%北里奥格兰德%' LIMIT 1)",
+              "A9 🔴 Rio Grande do Norte 的中文丢了「北」（与南里奥格兰德混淆）")
+
+        # ── M-ACCEPT：打**新机制本身** ────────────────────────────────
+        # 🔴 上面那个 `check` 只问「计数非零吗」—— 对 ACCEPT 里的条目，非零是**常态**，
+        #    所以它根本打不到「已接受基线长大了」这件事。这一条走 `check_brief()`，
+        #    问的是「闸会不会红」，与 `run()` 的判据同一份。
+        # ⚠️ 前面 9 条变异还留在这份副本里，所以**不能拿「闸有没有红」当判据** ——
+        #    它本来就是红的。判据是「**F3 这一条**插入前不红、插入后红」。
+        was = any(n.startswith("F3") for _g, n, _v in check_brief(db))
+        con.execute("INSERT INTO example (word, text, src) VALUES ('-íssimo', "
+                    "'belo + -íssimo → belíssimo', 'mutation')")
+        con.commit()
+        now = any(n.startswith("F3") for _g, n, _v in check_brief(db))
+        good = now and not was
+        ok += good
+        print("   %s %-52s → %s" % ("✅ 逮到" if good else "🔴 **漏了**",
+                                    "M-ACCEPT 已接受基线 F3 长大 1 条",
+                                    "643 → 644，红了" if good else "闸没红"))
+        con.execute("DELETE FROM example WHERE src='mutation'")
+        con.commit()
         con.close()
-    print("\n   变异 %d/7" % ok)
-    return ok == 7
+    print("\n   变异 %d/10" % ok)
+    return ok == 10
 
 
 if __name__ == "__main__":
