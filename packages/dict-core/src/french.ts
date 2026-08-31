@@ -138,7 +138,22 @@ export type FrenchEntry = {
   baseForms: string[];          // 变形 → 原形（去重，供旧视图用）
   bases: FrenchBase[];          // 原形词连同词义（服务端解析，供内联展示）
   inflNotes: string[];          // 该词形语法说明（= inflections 的中文标签，旧视图用）
+  // 🔴🔴 **2026-08-31 才接上。** 库里 392,013 条 Commons 真人录音 URL（六门里最多，
+  //    是 es/it/pt 的 32 倍），而这份服务从建成起 `FROM audio` 出现 **0 次**
+  //    —— 一个用户都听不到。收尾单 C28 记着，2026-08-29 用户定「归六语种统一做那轮」，
+  //    2026-08-31 用户确认「统一做」⇒ 本次一并接上，与 es/it/pt 用同一个展示组件。
+  audio: FrenchAudio[];
   flag: string | null;
+};
+
+// 一条真人录音（Commons URL，不下载字节）。字段与 es/it/pt 一致，共用前端组件。
+export type FrenchAudio = {
+  file: string;
+  url: string | null;
+  ipa: string | null;
+  speaker: string | null;
+  region: string | null;
+  regionSrc: string | null;
 };
 
 type FrRow = {
@@ -218,6 +233,7 @@ export class FrenchDictService {
   private readonly pronQuery;
   private readonly exampleQuery;
   private readonly colsQuery;
+  private readonly audioQuery;
   private readonly inflQuery;
   private readonly formsQuery;
   private readonly altQuery;
@@ -382,6 +398,20 @@ export class FrenchDictService {
       FROM example e
       WHERE e.word = ? AND COALESCE(e.hidden, 0) = 0
       ORDER BY CASE WHEN e.sense_id IS NULL THEN 1 ELSE 0 END, e.sense_id, e.id
+    `);
+
+    // ⚠️ 排序照 es 的三条理由：① 默认播**法国音**（fr-FR 占 85%，但 fr-CA/fr-CH 共 2.5 万条，
+    //    不排序会随机播到魁北克音）；② 地区来源可信的（`tag`）排前面，`speaker` 推定的排后面；
+    //    ③ 其余按地区名 + 文件名稳定排序 —— 保证同一个词每次播的是同一条。
+    this.audioQuery = this.db.prepare(`
+      SELECT file, COALESCE(url_ogg, url_mp3, url_wav, url_other) AS url,
+             ipa, speaker, region, region_src
+      FROM audio WHERE word = ? AND kind = 'human'
+      ORDER BY
+        CASE WHEN region = 'fr-FR' THEN 0 ELSE 1 END,
+        CASE WHEN region_src = 'tag' THEN 0 WHEN region_src IS NULL THEN 2 ELSE 1 END,
+        region, file
+      LIMIT 8
     `);
 
     this.colsQuery = this.db.prepare(`
@@ -714,6 +744,13 @@ export class FrenchDictService {
       baseForms: [...new Set(infl.map((i) => i.base))],
       bases: [],
       inflNotes: infl.map((i) => i.label).filter(Boolean) as string[],
+      audio: (this.audioQuery.all(row.word) as Array<{
+        file: string; url: string | null; ipa: string | null;
+        speaker: string | null; region: string | null; region_src: string | null;
+      }>).map((a) => ({
+        file: a.file, url: a.url, ipa: a.ipa,
+        speaker: a.speaker, region: a.region, regionSrc: a.region_src,
+      })),
       flag: row.flag,
     };
     return entry;

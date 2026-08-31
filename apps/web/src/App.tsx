@@ -292,6 +292,11 @@ type FrEntry = {
   //    pt 那边一直是配对写法（`bancar 的陈述式现在时第一人称单数`）。
   inflections: { base: string; label: string | null; clickable: boolean }[];
   inflNotes: string[];
+  // 🔴🔴 2026-08-31：库里 392,013 条真人录音，服务层与展示层**都没接**（收尾单 C28）。
+  //    用户 2026-08-29 定「归六语种统一做那轮」、08-31 确认「统一做」⇒ 本次接上，
+  //    与 es/it/pt 共用 `HumanAudioRow`（内联小按钮、带地区来源、死链回退 TTS）。
+  audio: { file: string; url: string | null; ipa: string | null;
+           speaker: string | null; region: string | null; regionSrc: string | null }[];
   flag: string | null;
 };
 
@@ -523,13 +528,37 @@ type PlayableAudio = {
   ipa?: string | null;
 };
 
+// ⭐ **限量规则只有这一份**，契约闸 `import` 它来算期望值。
+//    两边各写一版 ⇒ 闸迟早与实现漂开，那正是 `[[fix-regression-and-gate]]` 的第三种机制。
+export function capAudios<T extends { url: string | null; region?: string | null }>(
+  audios: T[],
+): T[] {
+  const PER_REGION = 2;
+  const TOTAL = 6;
+  const seen = new Map<string, number>();
+  return audios.filter((a) => {
+    if (!a.url) return false;
+    const k = a.region ?? '?';
+    const n = (seen.get(k) ?? 0) + 1;
+    seen.set(k, n);
+    return n <= PER_REGION;
+  }).slice(0, TOTAL);
+}
+
 function HumanAudioRow({ audios, word, fallback, regionLabel }: {
   audios: PlayableAudio[]; word: string; fallback: () => void;
   regionLabel: (raw: string) => string;
 }) {
   const [playing, setPlaying] = useState<string | null>(null);
   const [dead, setDead] = useState<Record<string, true>>({});
-  const usable = audios.filter((a) => a.url);
+  // 🔴 **2026-08-31：每个地区最多留 2 条，总数封顶 6。**
+  //    起因是 fr 接上录音后 `chien` 排出**八个按钮、全写着「法国」**，只是录音人不同 ——
+  //    读者要的是「不同口音」，不是同一口音的八个人。
+  //    ⚠️ 规则放在**这个共用组件**里，不放进各语种的 SQL —— 四门语言同一条规则才叫统一，
+  //    而且 pt 的 `a`（四个「巴西」）也是同一个毛病，一起治。
+  //    ⚠️ 留 2 条不留 1 条：第一条是死链时还有个**真人**备份（组件的兜底是 TTS，差一档）。
+  //    各语种的服务层已按「本土音优先 / 地区来源可信优先」排过序，这里取前面的即可。
+  const usable = capAudios(audios);
   if (usable.length === 0) return null;
 
   const play = (a: PlayableAudio) => {
@@ -2317,6 +2346,16 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
           ))}
         </div>
       )}
+
+      {/* 真人发音：紧跟音标（与 es/it/pt 同一位置、同一个组件）。
+          ⚠️ fr 的录音量是别的语种的 32 倍（39.2 万 vs 1 万），
+          服务层已按「法国音优先 / 地区来源可信优先」排序并 LIMIT 8。 */}
+      <HumanAudioRow
+        audios={entry.audio}
+        word={entry.word}
+        fallback={() => speak(entry.word, speakLocale)}
+        regionLabel={(r) => FR_REGION_CODE_LABELS[r] || r}
+      />
 
       {/* 异体指针：这个拼写是另一个词的异体/旧拼写。把目标词的中文跟着显示出来 ——
           只给裸指针没用，用户查到 `clef` 时最想要的就是 `clé` 的意思。 */}

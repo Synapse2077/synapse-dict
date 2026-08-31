@@ -48,7 +48,8 @@ sys.path.insert(0, str(HERE.parent))
 
 import paths                                     # noqa: E402
 
-PLAN = HERE.parent.parent / "docs" / "FR_PLAN.md"
+ROOT = HERE.parent.parent
+PLAN = ROOT / "docs" / "FR_PLAN.md"
 SHEET = "# 📋 fr 收尾单"
 
 # ⭐ **「完成的定义」就是这张表。** 阶段表里声明 ✅ 的阶段，必须在这里交得出东西。
@@ -132,10 +133,105 @@ def p2():
              % (len(stray), stray[0][:60]))] if stray else []
 
 
+# ══════════════════════════════════════════════════════════════════
+# P3 —— **收尾单里说「已做」的，必须交得出东西。**
+#
+# 🔴🔴 起因就在这张表上：C29 白纸黑字写着「fr 今天已修（复用 es/it 的 `.sense-src`）」，
+#    而组件那两行从没切过去 —— `styles.css:763` 的规则写好了、JSX 没改。
+#    2026-08-31 用户读 fr 的 `banco` 页才发现，中间隔了四天。
+#    **P1 只核阶段表的 ✅，收尾单里的「已做」一直是纯自述。**
+#    ⚠️ 判决性实验：把源语言行退回旧写法，`contract-check-fr.tsx` 当场报 6,646 条红 ——
+#      **闸是真的，它只是没人跑**（展示层改动不写库 ⇒ 任何闸都不触发）。
+#
+# ⚠️ fr 的收尾单与 pt 不同：C1–C28 是「**有理由地不修**」的决定，不是完成声明，
+#    P3 不管它们。它守的是**自称做了**的那几条。
+CLAIM = re.compile(r"^\|\s*(C[0-9]+[a-z]*)\s*\|(.*)$", re.M)
+# ⚠️ 「不成立」也算：**否定结论同样是结论**（`[[record-the-negative-decision]]`）。
+#    C32 判「这不是缺陷」，它的交付物就是那条例句**还在**——我得证明我没顺手删掉它。
+CLAIM_WORDS = ("✅", "已做", "已解决", "已改正", "已修", "不成立")
+
+
+def _has(rel, *needles):
+    def f(_con):
+        t = (ROOT / rel).read_text(encoding="utf-8") if (ROOT / rel).exists() else ""
+        miss = [x for x in needles if x not in t]
+        return (not miss), ("%s 里缺 %s" % (rel, miss) if miss else rel)
+    return f
+
+
+def _sql(q, want):
+    def f(con):
+        try:
+            n = con.execute(q).fetchone()[0]
+        except sqlite3.Error as e:
+            return False, "查不了：%s" % e
+        return (n > 0 if want == "非空" else n == 0), "%s = %s" % (want, n)
+    return f
+
+
+def _both(*fs):
+    def f(con):
+        for g in fs:
+            ok, why = g(con)
+            if not ok:
+                return False, why
+        return True, "全部满足"
+    return f
+
+
+DONE = {
+    # C29：法语原文行必须带 FR 徽标，且契约闸里那条断言还在
+    "C29": _both(_has("apps/web/src/App.tsx", '<span className="sense-src-lang">FR</span>'),
+                 _has("apps/web/src/contract-check-fr.tsx", "源语言行必须带认得出的语种标签")),
+    # C30：变位形式必须用带原形的 `inflections`，不是只有标签的 `inflNotes`
+    "C30": _has("apps/web/src/App.tsx", "entry.inflections.length > 0", "的{x.label}"),
+    # C31：日语版的对译格子已隐
+    "C31": _both(_has("fr/fixes/hide_ja_translation_cells.py", "is_cell"),
+                 _sql("SELECT COUNT(*) FROM example WHERE COALESCE(hidden,0)=0 "
+                      "  AND src='ja-edition' AND (text GLOB '*[一-鿿]*' "
+                      "   OR text GLOB '*[ぁ-ヿ]*')", "为零")),
+    # C28：录音必须真的接上了 —— 服务层查了、展示层画了、限量规则是共用那份
+    "C28": _both(_has("packages/dict-core/src/french.ts", "FROM audio", "audioQuery"),
+                 _has("apps/web/src/App.tsx", "audios={entry.audio}", "export function capAudios"),
+                 _sql("SELECT COUNT(*) FROM audio WHERE kind='human'", "非空")),
+    # C34 自指：P3 这套机制自己在跑，就是它的交付物
+    "C34": lambda _c: (len(DONE) >= 4 and bool(claims()),
+                       "DONE %d 条 / 收尾单自称已做 %d 条" % (len(DONE), len(claims()))),
+    # C32 判「不成立」——它的交付物就是那条例句**还在**（我没有误删它）
+    "C32": _sql("SELECT COUNT(*) FROM example WHERE COALESCE(hidden,0)=0 "
+                "  AND text LIKE 'I know I know%'", "非空"),
+}
+
+
+def claims():
+    s = PLAN.read_text(encoding="utf-8")
+    tail = s[s.index(SHEET):]
+    return [(m.group(1), m.group(2).strip()) for m in CLAIM.finditer(tail)
+            if any(w in m.group(2) for w in CLAIM_WORDS)]
+
+
+def p3(con):
+    bad = []
+    for cid, rest in claims():
+        f = DONE.get(cid)
+        if not f:
+            bad.append(("P3", "收尾单 %s 自称已做，但 DONE 里没有判据（C29 就是这么烂了四天的）：%s"
+                        % (cid, rest[:44])))
+            continue
+        try:
+            ok, why = f(con)
+        except Exception as e:                      # noqa: BLE001
+            bad.append(("P3", "收尾单 %s 的判据跑不了：%s" % (cid, e)))
+            continue
+        if not ok:
+            bad.append(("P3", "收尾单 %s 说「已做」，但判据不成立：%s" % (cid, why)))
+    return bad
+
+
 def report(verbose=True):
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     try:
-        red = p1(con) + p2()
+        red = p1(con) + p2() + p3(con)
     finally:
         con.close()
     if verbose:

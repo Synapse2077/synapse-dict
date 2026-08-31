@@ -29,7 +29,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { PortugueseEntryView } from './App';
+import { PortugueseEntryView, capAudios } from './App';
 
 const svc = getService('pt') as unknown as {
   getEntry(w: string): unknown;
@@ -140,7 +140,10 @@ const CHECKS: Check[] = [
     //    少一个（比如被某个 filter 悄悄吃掉）也red。
     name: '🔴 录音没渲染 / 数量对不上（fr 那次 39 万条一个用户看不见）',
     hit: (e, h) => {
-      const want = e.audio.filter((a: Entry) => a.url).length;
+      // ⚠️ 期望值走 `capAudios`（展示层那份唯一的限量规则），**不在这里重算** ——
+      //    2026-08-31 给共用组件加「每地区最多 2 条」后，旧的「几条录音就该有几个按钮」
+      //    当场报 4 条假红。放宽断言是错的：它的职责是「少一个也红」。
+      const want = capAudios(e.audio as Array<{ url: string | null; region?: string | null }>).length;
       const got = count(h, /class="audio-chip[^"]*"/g);
       return want > 0 && got !== want ? `${want} 条录音，页面上 ${got} 个播放按钮` : null;
     },
