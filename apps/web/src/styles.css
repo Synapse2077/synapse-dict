@@ -872,6 +872,8 @@ body {
 }
 
 .base-pos {
+  /* 🔴 2026-08-31：原本没有左边距 ⇒ `bancar动词` 粘成一坨（四门语言共用这个类）。 */
+  margin-left: 6px;
   font-size: 12px;
   color: var(--text-tertiary);
   font-family: 'Noto Sans', sans-serif;
@@ -1295,7 +1297,12 @@ body {
 }
 
 .sense-example .ex-es,
-.sense-example .ex-it {
+.sense-example .ex-it,
+/* 🔴 2026-08-31：`.ex-fr` / `.ex-pt` 一直不在这张表里 —— fr 的义项内例句
+   从建成起就没有这层样式，pt 今天接上时才发现。类名加了、样式没跟上，
+   页面不会报错、只会看起来不对（用户看 `banco` 的原话：「这个页面排版很奇怪」）。 */
+.sense-example .ex-fr,
+.sense-example .ex-pt {
   font-size: 13.5px;
   line-height: 1.5;
   color: var(--text-secondary);
@@ -1419,4 +1426,59 @@ body {
 .homograph-ipa {
   font-size: 13px;
   color: var(--text-tertiary);
+}
+
+/* 义项级语义关系（pt，2026-08-31）。库里 71,017 条关系带 `sense_id`，旧版展示层
+   `WHERE word_id = ?` 把归属整个丢掉 —— `pinta` 8 个义项的近义词拍平成一列，
+   查「痣」的读者要在一百多个别的义项的词里翻。
+   ⇒ 挂到义项下面。视觉权重压在源语言行之下：它是补充信息，不该抢中文释义。 */
+.sense-rels {
+  margin-top: 3px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-subtle, rgba(128, 128, 128, 0.22));
+}
+
+.sense-rels .rel-group {
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.sense-rels .rel-kind {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+
+/* 异体指针（fr 与 pt 共用这批类名）。
+   🔴 **这一族此前一个字的样式都没有** —— 所以 `异体 → banco de dados数据库`
+   会粘成一坨（目标词和它的中文之间没有任何间距）。fr 也一样，一起修。 */
+.alt-of-row {
+  margin: 4px 0 2px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.alt-of {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.alt-of-plain {
+  color: var(--text-tertiary);
+}
+
+.alt-of-zh {
+  margin-left: 7px;
+  color: var(--text-tertiary);
+}
+
+/* 义项内的异体指针：比词条级更轻，与该义项的中文对齐 */
+.sense-altof {
+  margin-top: 2px;
+  font-size: 12.5px;
+}
+
+.sense-altof .alt-of {
+  font-size: 12.5px;
 }

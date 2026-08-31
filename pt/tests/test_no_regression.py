@@ -147,9 +147,17 @@ def build(con):
     #    ⇒ 改成按**含义**断言阶段 2a 真正修的那件事：
     #      「6,518 个词形因 `alt_of` 被当成变形而零释义」——
     #      所以**带 alt_of 关系的词形必须有可见义项**。这条永远不会过期。
+    # 🔴 **2026-08-31 收窄，而且是在它挡住我的路时收窄的 —— 所以先把边界量清楚：**
+    #    阶段 2f 给 2,597 个**连 `entry` 都没有**的空白词形补了 `alt_of` 指针，这条当场红。
+    #    分开数：带 alt_of 且**有 entry** 却无可见义项 ＝ **0**（2a 修的那批完好无损）；
+    #    红的 2,597 条全是源头**根本没给页面**的词 —— 没有义项可丢，2a 也够不着它们。
+    #    ⇒ 2a 修的是「页面解析出来了、义项却被 alt_of 顶掉」，判据本就该限定在**有 entry** 的词上。
+    #    ⚠️ 收窄不是放宽：有 entry 的词一丢义项照样红，变异 M-B2 专打这件事。
     add("B", "B2 🔴 阶段 2a 的修复丢了：带 alt_of 的词形又变回零释义",
         q1("SELECT COUNT(DISTINCT r.word_id) FROM sense_relation r "
-           "WHERE r.kind='alt_of' AND NOT EXISTS("
+           "WHERE r.kind='alt_of' "
+           "  AND EXISTS(SELECT 1 FROM entry e WHERE e.word_id=r.word_id) "
+           "  AND NOT EXISTS("
            "  SELECT 1 FROM entry e JOIN sense s ON s.entry_id=e.id "
            "  WHERE e.word_id=r.word_id)"))
     add("B", "B3 🔴 单独成格的小品词被当成变形（`BARE_TABLE_CELL`）",
@@ -258,9 +266,21 @@ def build(con):
             if "北里奥格兰德" not in zh and ("里约格兰德" in zh or "里奥格兰德" in zh or "北大河" in zh)))
     add("H", "H1 🔴 有表的 UNIQUE 含可空列且无 COALESCE 兜底索引（NULL≠NULL ⇒ 约束失效）",
         len(set(nullable_unique)))
-    add("H", "H2 🔴 sense_relation 出现内容重复（只差 sense_id 的 NULL）",
+    # 🔴🔴 **2026-08-31：这条闸在报自己的 bug，报了 0。**
+    #    它的名字说的是「只差 `sense_id` 的 NULL 的内容重复」，而它的 SQL
+    #    `GROUP BY word_id, COALESCE(sense_id,-1), kind, target` **把 NULL 当成了区分键**
+    #    ⇒ NULL 行与义项行永远落在不同组里，它要抓的那一类**结构上抓不到**。
+    #    真实规模 12,908 条（接义项级关系时被契约闸逮到，不是被这条逮到的）。
+    #    ⇒ 拆成两条，各自问一件事。
+    add("H", "H2a 🔴 sense_relation 完全相同的行（同 sense_id）",
         q1("SELECT COALESCE(SUM(n),0) FROM (SELECT COUNT(*)-1 n FROM sense_relation "
            "GROUP BY word_id, COALESCE(sense_id,-1), kind, target HAVING COUNT(*)>1)"))
+    add("H", "H2b 🔴 词条级关系与义项级重复（读者同一页看见两遍）",
+        q1("SELECT COUNT(*) FROM sense_relation r WHERE r.sense_id IS NULL "
+           "  AND COALESCE(r.hidden,0)=0 AND EXISTS("
+           "  SELECT 1 FROM sense_relation q WHERE q.word_id=r.word_id AND q.kind=r.kind "
+           "    AND q.target=r.target AND q.sense_id IS NOT NULL "
+           "      AND COALESCE(q.hidden,0)=0)"))
 
     # ── F 组：阶段 5c/5d 例句层 ─────────────────────────────────
     add("F", "F1 🔴 bold 坐标不属于这段文本（`clean_bold` 的判据）",
@@ -449,6 +469,15 @@ def mutate():
               "INSERT INTO example_gloss (example_id,lang,text,src) "
               "VALUES ((SELECT MIN(id) FROM example),'fr','x','m')",
               "F2 🔴 出版层混进了中英之外的语言（方针 A3）")
+        # M-B2：**专打刚收窄的那条**。挑一个「有 entry、有 alt_of、有义项」的词，
+        #       把它的义项删掉 —— 收窄后的 B2 必须照样红，否则就是我把闸改瞎了。
+        check("删掉一个有 entry 的 alt_of 词的全部义项",
+              "DELETE FROM sense WHERE word_id=(SELECT r.word_id FROM sense_relation r "
+              " WHERE r.kind='alt_of' "
+              "   AND EXISTS(SELECT 1 FROM entry e WHERE e.word_id=r.word_id) "
+              "   AND EXISTS(SELECT 1 FROM entry e JOIN sense s ON s.entry_id=e.id "
+              "               WHERE e.word_id=r.word_id) LIMIT 1)",
+              "B2 🔴 阶段 2a 的修复丢了：带 alt_of 的词形又变回零释义")
         check("把一条录音标成 TTS（本步只收真人）",
               "UPDATE audio SET kind='tts-tool' WHERE id=(SELECT MIN(id) FROM audio)",
               "G1 🔴 kind 不是 human（本步不做 TTS）")
@@ -489,8 +518,8 @@ def mutate():
         con.execute("DELETE FROM example WHERE src='mutation'")
         con.commit()
         con.close()
-    print("\n   变异 %d/10" % ok)
-    return ok == 10
+    print("\n   变异 %d/11" % ok)
+    return ok == 11
 
 
 if __name__ == "__main__":

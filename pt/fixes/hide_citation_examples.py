@@ -51,7 +51,15 @@ import paths    # noqa: E402
 CITATION = re.compile(
     r"^\s*(1[5-9]|20)\d\d\s*[,.]"                      # ① 年份后直接跟逗号或句点
     r"|^\s*(1[5-9]|20)\d\d[\s:]+.*"                      # ② 年份后跟空格/冒号，且后文有著录标记
-    r"(\bp[áa]g(ina)?\b|\bpag:|\bp\.\s*\d|\bIn:|ISBN|→ISBN)", re.I)
+    r"(\bp[áa]g(ina)?\b|\bpag:|\bp\.\s*\d|\bIn:|ISBN|→ISBN)"
+    # ③ 2026-08-31 渲染评审又读出两族，都是**维基自己的界面文本**，不是任何语言的句子：
+    #    `For quotations using this term, see Citations:+QD+.`（英文版的"引例见此页"提示）
+    #    —— `+QD+` 那条还被翻成了「太棒了。」，模型翻的是**词条本身**不是这句话。
+    #    `, Luciano Maia, , Simplissimo Livros Ltda, página: ?`（书目残渣，以逗号起头）
+    #    ⚠️ 判据按含义写死这两个形状，不放宽到「含 Citations」——
+    #      正经书目里 `pt.wikisource.org` 链接有 247 条，一放宽就把它们全误伤。
+    r"|^\s*For quotations using this term, see Citations:"
+    r"|^\s*[\"]?,\s+\S", re.I)
 
 
 def plan(con):

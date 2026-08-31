@@ -50,6 +50,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 import paths                                     # noqa: E402
+sys.path.insert(0, str(HERE.parent / 'pipeline'))
+from harvest_pronunciation import is_sampa as _is_sampa   # noqa: E402
 
 ROOT = HERE.parent.parent
 PLAN = ROOT / "docs" / "PT_PLAN.md"
@@ -86,6 +88,12 @@ DELIVERABLE = {
     #    那一批，它自己带 `src` 标记 ⇒ 这条判据永不过期，且 2d 一被撤销立刻红。
     "2d": [("页面级 form_of 补进来的变形（阶段 2d）",
             "SELECT COUNT(*) FROM inflection WHERE src='pt-edition-page'")],
+    # 同理，2e 独有的交付物是**法语版页面**那一批，自带 src 标记，永不过期。
+    "2e": [("法语版页面 form_of 补进来的变形（阶段 2e）",
+            "SELECT COUNT(*) FROM inflection WHERE src='fr-edition-page'")],
+    # 2f 交付的是**关系层**的异体指针，自带 src_ref 前缀，永不过期。
+    "2f": [("空白词形接上的异体指针（阶段 2f）",
+            "SELECT COUNT(*) FROM sense_relation WHERE src_ref LIKE 'alt-form:%'")],
     "3": [("收词后的 dict", "SELECT COUNT(*) FROM dict")],
     # ⚠️ pt 是**双读音**语言。旧版只断言「音标层非空」——**补了一种读音、另一种是 0 也能过**。
     # ⭐ 2026-08-31 收紧（收尾单 C3 销账）：阶段 4 的表结构早已定下，实测
@@ -118,6 +126,17 @@ FILES = {
           ("契约闸", "apps/web/src/contract-check-pt.tsx")],
 }
 
+# 阶段 7 的契约闸：**光有文件不算交付物，跑得过才算。**
+#
+# 🔴🔴 2026-08-31：fr 的源语言行徽标被改回了无标签写法，而 `contract-check-fr.tsx`
+#    里那条断言**一直在、也真的抓得住**（实测退回旧写法当场报 6,646 条红）——
+#    它只是**没人跑**。数据层的闸挂在 `dbtool.session` 上，每次写库自动跑；
+#    而展示层的改动**不写库**，于是任何闸都不会被触发，一路绿到用户读页面。
+#    ⇒ 把契约闸接进这道闸：每次写库顺带跑一遍（实测 4 秒）。
+#    ⚠️ 仍然只覆盖「写库时」。展示层单改不写库那一次仍然漏 —— 那要靠提交前跑，
+#      已记进收尾单 C49，不留在注释里烂掉。
+CONTRACT = ("apps/web/src/contract-check-pt.tsx", ["--limit", "60"])
+
 # 阶段 8 的交付物是**展示层真的改了读取路径**。
 # 🔴 判据来自 `[[it-display-layer-stage8]]` 与 2026-08-29 fr 上的复发：
 #    数据层全绿、库里查得到，而 `french.ts` 里 `FROM audio` 出现 **0 次**
@@ -147,6 +166,24 @@ def declared_done():
     return out
 
 
+def _run_contract():
+    """跑一遍契约闸。→ (过没过, 说明)。跑不起来也算没过 —— 一个跑不起来的闸不是闸。"""
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["npx", "tsx", "--tsconfig", "apps/web/tsconfig.json", CONTRACT[0], *CONTRACT[1]],
+            cwd=ROOT, capture_output=True, text=True, timeout=180)
+    except Exception as e:                      # noqa: BLE001
+        return False, "跑不起来：%s" % e
+    if r.returncode == 0:
+        return True, "通过"
+    # ⚠️ 不能用「这行含 🔴」来挑 —— **断言的名字本身就带 🔴**，
+    #    第一次写成那样，红的时候打印出来的是一条**通过**的断言，看着莫名其妙。
+    #    契约闸的红行长这样：`   🔴 <名字>`（通过的是 `   ✅ <名字>`）。
+    tail = [x.strip() for x in (r.stdout or "").splitlines() if x.startswith("   🔴")]
+    return False, ("／".join(tail[:2]) if tail else (r.stderr or "")[-160:].strip())
+
+
 def p1(con):
     """阶段表声明 ✅ 的阶段，交付物必须真的在。"""
     bad = []
@@ -165,6 +202,10 @@ def p1(con):
             if not (ROOT / rel).exists():
                 bad.append(("P1", "阶段 %s「%s」声明✅，但**%s 不存在**（%s）"
                             % (num, title[:22], what, rel)))
+            elif rel == CONTRACT[0]:
+                ok, why = _run_contract()
+                if not ok:
+                    bad.append(("P1", "阶段 %s 的契约闸**跑不过**：%s" % (num, why)))
         for what, rel, need in CODE.get(num, []):
             p = ROOT / rel
             if not p.exists():
@@ -192,10 +233,175 @@ def p2():
              % (len(stray), stray[0][:60]))] if stray else []
 
 
+# ══════════════════════════════════════════════════════════════════
+# P3 —— **收尾单里说「已做」的，必须交得出东西。**
+#
+# 🔴🔴 2026-08-31 用户看 fr 的 `banco` 逮到的：法语原文行没有语种徽标。
+#    而 `docs/FR_PLAN.md` 的收尾单 C29 白纸黑字写着「**fr 今天已修**（复用 es/it 的 `.sense-src`）」
+#    —— **代码里没有**。账说做了，事没做，而**没有任何闸在核这件事**：
+#    P1 只核**阶段表**的 ✅，收尾单那几十行「✅ 已做」一直是纯自述。
+#
+#    这比任何单个渲染缺陷都要紧：它决定「我说做完了」这句话你能不能信。
+#    ⇒ P3：收尾单里每一条标了 ✅／已做／已解决／已改正 的，
+#      **必须在 DONE 里登记一条能跑的判据**；没登记的和跑不过的，一律红。
+#
+# ⚠️ 判据不许写成永远为真（`SELECT 1` 那个毛病，本文件开头就在骂它）。
+#    每一条问的都是「**这件事真做了才会成立**的那个具体事实」。
+CLAIM = re.compile(r"^\|\s*(C[0-9]+[a-z]*)\s*\|(.*)$", re.M)
+CLAIM_WORDS = ("✅", "已做", "已解决", "已改正")
+
+
+def _sql(q, want):
+    def f(con):
+        n = _safe(con, q)
+        return (n > 0 if want == "非空" else n == 0), "%s = %s" % (want, n)
+    return f
+
+
+def _has(rel, *needles):
+    def f(_con):
+        t = (ROOT / rel).read_text(encoding="utf-8") if (ROOT / rel).exists() else ""
+        miss = [x for x in needles if x not in t]
+        return (not miss), ("%s 里缺 %s" % (rel, miss) if miss else rel)
+    return f
+
+
+def _both(*fs):
+    def f(con):
+        for g in fs:
+            ok, why = g(con)
+            if not ok:
+                return False, why
+        return True, "全部满足"
+    return f
+
+
+DONE = {
+    "C2":  _sql("SELECT COUNT(*) FROM example", "非空"),
+    # 判据 import 生成侧那份，不在这里重写（`is_sampa` 只许有一份）
+    "C5":  lambda con: (
+        (lambda n: (n == 0, "X-SAMPA 冒充 IPA = %d" % n))(
+            sum(1 for (v,) in con.execute("SELECT ipa FROM pronunciation")
+                if _is_sampa({"ipa": v})))),
+    "C8":  _sql("SELECT COUNT(*) FROM (SELECT word_id,base,label_zh FROM inflection "
+                "GROUP BY 1,2,3 HAVING COUNT(*)>1)", "为零"),
+    "C20": _sql("SELECT COUNT(*) FROM sense_gloss WHERE src='xref:resolved'", "非空"),
+    "C21b": _sql("SELECT COUNT(*) FROM inflection WHERE src='pt-edition-prose'", "非空"),
+    # C33 说的是「例句中文补完了」⇒ 问覆盖率，不问行数（行数会随收词变）
+    "C33": lambda con: (
+        (lambda a, b: (b and a * 100 // b >= 97,
+                       "可见例句有中文 %d/%d" % (a, b)))(
+            con.execute("SELECT COUNT(DISTINCT g.example_id) FROM example_gloss g "
+                        " JOIN example e ON e.id=g.example_id "
+                        " WHERE g.lang='zh' AND COALESCE(e.hidden,0)=0").fetchone()[0],
+            con.execute("SELECT COUNT(*) FROM example WHERE COALESCE(hidden,0)=0"
+                        ).fetchone()[0])),
+    # C3 说的是「阶段 4 的交付物判据收紧成双读音各查一次」⇒ 问这道闸自己
+    "C3":  lambda _con: (len(DELIVERABLE.get("4", [])) >= 3,
+                         "阶段 4 交付物 %d 条" % len(DELIVERABLE.get("4", []))),
+    "C39": _sql("SELECT COUNT(*) FROM sense_gloss WHERE src='invariant-plural'", "非空"),
+    # C40 的交付物与 C20 同一个 src ⇒ 用它自己点名的那条内容来核，不数行数
+    "C40": _sql("SELECT COUNT(*) FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
+                " JOIN dict d ON d.id=s.word_id "
+                " WHERE d.word='arrancamento' AND g.lang='zh'", "非空"),
+    "C41": _both(_has("packages/dict-core/src/portuguese.ts", "relBySense"),
+                 _has("apps/web/src/App.tsx", "sense-rels")),
+    "C42": _both(
+        _sql("SELECT COUNT(*) FROM pragma_table_info('sense_relation') WHERE name='hidden'",
+             "非空"),
+        _sql("SELECT COUNT(*) FROM sense_relation r WHERE r.sense_id IS NULL "
+             "  AND COALESCE(r.hidden,0)=0 AND EXISTS("
+             "  SELECT 1 FROM sense_relation q WHERE q.word_id=r.word_id AND q.kind=r.kind "
+             "    AND q.target=r.target AND q.sense_id IS NOT NULL "
+             "      AND COALESCE(q.hidden,0)=0)", "为零")),
+    "C44": _both(_has("apps/web/src/App.tsx", "alt-of-row"),
+                 _has("apps/web/src/contract-check-pt.tsx", "异体指针没渲染")),
+    "C45": _both(_has("pt/pipeline/build_search_prefix.py", "blake2b"),
+                 lambda con: ((lambda v: (len(v.split(":")[-1]) > 8,
+                                          "库里存的指纹 %s" % v))(
+                     con.execute("SELECT v FROM search_prefix_meta "
+                                 " WHERE k='dict_fingerprint'").fetchone()[0]))),
+    "C46": _both(_has("packages/dict-core/src/portuguese.ts", "altOfBySense"),
+                 _has("apps/web/src/App.tsx", "sense-altof")),
+    "C47": _has("apps/web/src/App.tsx", "x.senseId === null).slice(0, 12)"),
+    # C49 自指：P3 这套机制自己在跑，就是它的交付物
+    "C49": lambda _c: (len(DONE) >= 16 and bool(claims()),
+                       "DONE %d 条 / 收尾单自称已做 %d 条" % (len(DONE), len(claims()))),
+    "C50": _both(_has("pt/tests/test_plan_ledger.py", "_run_contract", "CONTRACT = ("),
+                 lambda _c: _run_contract()),
+    "C52": _both(_has("apps/web/src/App.tsx",
+                      '<span className="sense-src-lang">FR</span>'),
+                 _has("apps/web/src/contract-check-fr.tsx", "源语言行必须带认得出的语种标签")),
+    "C53": _both(
+        # ① 自指关系已隐；② 拆出来的行在库里
+        _sql("SELECT COUNT(*) FROM sense_relation r JOIN dict d ON d.id=r.word_id "
+             " WHERE r.target=d.word AND COALESCE(r.hidden,0)=0", "为零"),
+        _sql("SELECT COUNT(*) FROM sense_relation WHERE src_ref LIKE 'split-target:%'",
+             "非空"),
+        _sql("SELECT COUNT(*) FROM sense_relation WHERE COALESCE(hidden,0)=0 "
+             "  AND target LIKE '%/%'", "为零")),
+    "C54": _has("apps/web/src/App.tsx", "REF_SEE_ALSO"),
+    "C55": _both(_has("pt/fixes/hide_citation_examples.py", "For quotations using this term"),
+                 _sql("SELECT COUNT(*) FROM example WHERE COALESCE(hidden,0)=0 "
+                      "  AND text LIKE '%see Citations:%'", "为零")),
+    "C56": _both(_has("apps/web/src/App.tsx", "dupLabel", "HumanAudioRow"),
+                 # 发音必须在音标之后、释义之前 —— 位置本身就是这条的交付物
+                 lambda _c: ((lambda t: (
+                     t.index("<HumanAudioRow", t.index("export function PortugueseEntryView"))
+                     < t.index("<h3>释义</h3>", t.index("export function PortugueseEntryView")),
+                     "发音区块在释义之前"))(
+                     (ROOT / "apps/web/src/App.tsx").read_text(encoding="utf-8")))),
+    # C59：pt 的例句块必须与五门通用标记一致 —— **独一份的那套类名不许再出现**
+    # ⚠️ 只看**真实的 `className=`**，不看注释里提到的类名 ——
+    #    第一版写成「文件里不许出现 example-list」，被我自己写在注释里的那句说明打红了。
+    "C59": lambda _c: ((lambda t: (
+        'className="example-list"' not in t and 'className="example-item"' not in t
+        and t.count('className="ex-pt"') >= 2 and 'className="ex-ref"' in t,
+        "App.tsx 里 pt 例句块的类名"))(
+        (ROOT / "apps/web/src/App.tsx").read_text(encoding="utf-8"))),
+    "C48": _both(_has("apps/web/src/styles.css", ".alt-of-zh", ".ex-pt"),
+                 lambda _c: ((lambda t: ("margin-left" in t.split(".base-pos {")[1][:200],
+                                         ".base-pos 的左边距"))(
+                     (ROOT / "apps/web/src/styles.css").read_text(encoding="utf-8")))),
+}
+
+
+def claims():
+    """→ [(条目号, 处置文本)]，只含**自称已做**的行。"""
+    s = PLAN.read_text(encoding="utf-8")
+    tail = s[s.index(SHEET):]
+    out = []
+    for m in CLAIM.finditer(tail):
+        cid, rest = m.group(1), m.group(2)
+        if any(w in rest for w in CLAIM_WORDS):
+            out.append((cid, rest.strip()))
+    return out
+
+
+def p3(con):
+    """收尾单里说「已做」的，必须交得出东西。"""
+    bad = []
+    for cid, rest in claims():
+        f = DONE.get(cid)
+        if not f:
+            bad.append(("P3", "收尾单 %s 自称已做，但 DONE 里没有判据 —— "
+                              "这正是 fr 的 C29 那个洞（账说修了，代码里没有）：%s"
+                        % (cid, rest[:44])))
+            continue
+        try:
+            ok, why = f(con)
+        except Exception as e:                      # noqa: BLE001
+            bad.append(("P3", "收尾单 %s 的判据跑不了：%s" % (cid, e)))
+            continue
+        if not ok:
+            bad.append(("P3", "收尾单 %s 说「已做」，但判据不成立：%s" % (cid, why)))
+    return bad
+
+
 def report(verbose=True):
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     try:
-        red = p1(con) + p2()
+        red = p1(con) + p2() + p3(con)
     finally:
         con.close()
     if verbose:
@@ -329,6 +535,35 @@ def mutate():
           % ("✅ 逮到" if got else "🔴 **漏了**：展示层没接却不红"))
     ok += bool(got)
 
+    # M7：**收尾单里凭空加一条「✅ 已做」** —— P3 必须红。
+    #     这一条打的正是 fr 的 C29 那个洞：**账说做了、什么都没做，而闸一声不吭**。
+    def _m7():
+        con2 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+        try:
+            return [r for r in p3(con2) if "C99" in r[1]]
+        finally:
+            con2.close()
+    fake = src.replace(SHEET, SHEET + "\n\n| # | 事 | 规模 |\n|---|---|---|\n"
+                       "| C99 | ✅ **已做**：一件根本没做的事 | 0 |")
+    got = with_plan(fake, _m7)
+    print("   M7 %s（收尾单凭空多一条「✅ 已做」而 DONE 里没有判据）"
+          % ("✅ 逮到" if got else "🔴 **漏了**：账可以随便说已做，没人核"))
+    ok += bool(got)
+
+    # M8：**判据不成立时也要红**（不只是"有没有登记"）。
+    #     把 C42 的判据换成一个必然不成立的，P3 必须报出来。
+    keep = DONE["C42"]
+    try:
+        DONE["C42"] = lambda _c: (False, "变异：假装这件事没做成")
+        con2 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+        got = [r for r in p3(con2) if "C42" in r[1]]
+        con2.close()
+    finally:
+        DONE["C42"] = keep
+    print("   M8 %s（登记了判据但判据不成立）"
+          % ("✅ 逮到" if got else "🔴 **漏了**：判据挂了却不红"))
+    ok += bool(got)
+
     # M4：收尾单后面塞一条游离 📋 —— P2 必须红
     got = with_plan(src + "\n📋 变异用的游离记账，马上删。\n", p2)
     print("   M4 %s" % ("✅ 逮到游离记账" if got else "🔴 **漏了**：游离 📋 没红"))
@@ -339,7 +574,7 @@ def mutate():
     print("   M5 %s" % ("✅ 逮到收尾单消失" if got else "🔴 **漏了**：收尾单没了却不红"))
     ok += bool(got)
 
-    print("\n   变异 %d/6" % ok)
+    print("\n   变异 %d/8" % ok)
     return ok
 
 

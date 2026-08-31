@@ -285,6 +285,12 @@ type FrEntry = {
   relations: FrRelationGroup[];   // 近义/反义/上下位…（阶段 5 补做 2026-08-27）
   baseForms: string[];
   bases: FrBase[];
+  // 🔴 2026-08-31：后端一直在返回 `inflections`（**带原形**），前端这份副本只抄了
+  //    `inflNotes`（只有标签）。后果在 `été` 上一眼可见：它同时是 `être` 和 `aller`
+  //    的过去分词，页面印出「过去分词 / 过去分词」两条一模一样的标签，再另起一块列两个原形
+  //    —— **读者无法把标签和原形对上**。3,402 个词形是这个形状。
+  //    pt 那边一直是配对写法（`bancar 的陈述式现在时第一人称单数`）。
+  inflections: { base: string; label: string | null; clickable: boolean }[];
   inflNotes: string[];
   flag: string | null;
 };
@@ -303,6 +309,10 @@ type PtSense = {
   regions: string[];
   registers: string[];
   topics: string[];
+  // 🔴 **逐义项的语义关系**（2026-08-31 接）。es 早就是这么渲染的，it/fr/pt 一直拍平在词条级 ——
+  //    `pinta` 8 个义项，查「痣」的读者会看到另外两个粗俗义项的 110 个近义词混在一起。
+  relations: PtRelationGroup[];
+  altOf: PtAltOf[];          // 这条义项自己的异体指针（价值是让目标可点 + 带上它的中文）
 };
 type PtReading = {
   ipa: string; notation: string | null; region: string | null;
@@ -540,7 +550,20 @@ function HumanAudioRow({ audios, word, fallback, regionLabel }: {
     <div className="audio-row">
       <span className="audio-row-label">真人发音</span>
       {usable.map((a) => {
-        const region = a.region ? regionLabel(a.region) : '未标注';
+        // 🔴 2026-08-31：`region` 为空时原样印「未标注」——`banco` 两条录音都没地区，
+        //    两个按钮就都写着「未标注」，读者**分不清哪个是哪个**（用户看 banco 时暴露）。
+        //    pt 全库 5,510 条（60%）无地区**但有录音人** ⇒ 退到录音人名。
+        //    ⚠️ 退到「有信息的那个」，不是编一个地区出来 —— 录音人是源头给的事实。
+        //    （es/it 共用这个组件，同样受益：它们也有无地区的录音。）
+        // 🔴 2026-08-31 渲染评审：`a` 有四条录音，标签是「巴西 巴西 ~ 巴西 ~ 巴西 ~」——
+        //    **同名按钮读者分不清点哪个**。⇒ 同一个标签出现多次时，把录音人带上。
+        //    ⚠️ 只在**重复时**带，单条时保持简洁（`Afeganistão` 只有一条，不必啰嗦）。
+        const base = a.region ? regionLabel(a.region)
+          : (a.speaker ? a.speaker.replace(/_/g, ' ') : '未标注');
+        const dupLabel = usable.filter((x) => (x.region ? regionLabel(x.region)
+          : (x.speaker ? x.speaker.replace(/_/g, ' ') : '未标注')) === base).length > 1;
+        const region = dupLabel && a.speaker
+          ? `${base} · ${a.speaker.replace(/_/g, ' ')}` : base;
         const hint = [
           a.speaker ? `录音人 ${a.speaker}` : null,
           a.regionSrc === 'speaker' ? '地区按录音人推定' :
@@ -2388,8 +2411,23 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
                     </div>
                     {/* 法语原文定义 —— 阶段 1.5 裁决收回来的，96.0% 的可见义项有。
                         放在中文之下、英文之上：它是**这门语言自己的说法**，权威性高于英文对应词。 */}
-                    {s.fr && <div className="sense-fr" lang="fr"><FrText text={s.fr} /></div>}
-                    {s.en && <div className="sense-en"><FrText text={s.en} /></div>}
+                    {/* 🔴🔴 **2026-08-31 补做**。`FR_PLAN` 收尾单 C29 写着「fr 今天已修
+                        （复用 es/it 的 `.sense-src`）」—— **没修**：`styles.css:763` 的
+                        `.sense-src[lang='fr'] .sense-src-lang` 规则确实写好了，而组件这两行
+                        从来没切过去，法语原文一直是**无徽标、且 `.sense-fr` 连样式都没有**的裸行。
+                        ⇒ 做了一半就记了账。用户看 fr 的 `banco` 逮到：
+                        「这个法语解释，好像没有标明义项是 fr 还是 en」。
+                        账会说谎这件事已做成闸（`test_plan_ledger.py` P3）。 */}
+                    {s.fr && (
+                      <div className="sense-src" lang="fr">
+                        <span className="sense-src-lang">FR</span><FrText text={s.fr} />
+                      </div>
+                    )}
+                    {s.en && (
+                      <div className="sense-src" lang="en">
+                        <span className="sense-src-lang">EN</span><FrText text={s.en} />
+                      </div>
+                    )}
                     {/* 这条义项下的例句（阶段 5，中文 99.9%）。
                         🔴 限 3 条：`passer` 有 138 条例句，全铺出来会把释义挤没
                            —— es 展示层已知的三条线索之一就是「超长内容撑版面」。 */}
@@ -2411,9 +2449,16 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.baseForms.length > 0 && (
         <section className="entry-section">
           <h3>变位形式</h3>
-          {entry.inflNotes.length > 0 && (
+          {/* 🔴 2026-08-31 改用 `inflections`（**带原形**）而不是 `inflNotes`（只有标签）：
+              `été` 同时是 `être` 和 `aller` 的过去分词，只印标签就是两条一模一样的
+              「过去分词」，再另起一块列两个原形 —— 读者对不上。3,402 个词形是这个形状。
+              pt 一直是配对写法。同一 (原形,标签) 去重：源头会给同一对多行。 */}
+          {entry.inflections.length > 0 && (
             <ul className="infl-notes">
-              {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}
+              {[...new Map(entry.inflections
+                .filter((x) => x.label)
+                .map((x) => [`${x.base}\u0000${x.label}`, x])).values()]
+                .map((x, k) => <li key={k}>{x.base} 的{x.label}</li>)}
             </ul>
           )}
           <div className="base-list">
@@ -2598,8 +2643,16 @@ function PtPhonetics({ word, ipaBr, ipaPt, speak }: {
  * ⚠️ 判据只做两件事：把连续逗号压成一个、去掉首尾的孤立标点。
  *    **不猜内容、不重排字段** —— 那是源头的著录格式，我们没有权威改它。
  */
+// 🔴 2026-08-31 渲染评审读出来的：`Acre` 的出处栏印着
+//    `Rio Acre sur l’encyclopédie Wikipédia (en portugais)` —— 那是**法语版的「参见」链接**，
+//    不是这条例句的出处。29 条。
+// ⚠️ 判据只认这一个形状，**不放宽到「出处里含 Wikipédia」** ——
+//    那样会误伤 247 条正经书目（`1933, Graciliano Ramos, … Cahetés^(pt.wikisource.org)`）。
+const REF_SEE_ALSO = /\bsur l[’']encyclop[ée]die\b/i;
+
 function ptCleanRef(raw: string | null): string | null {
   if (!raw) return null;
+  if (REF_SEE_ALSO.test(raw)) return null;
   const s = raw
     .replace(/\s*,\s*(?=,)/g, '')      // 连续逗号（空字段留下的）
     .replace(/^[\s,.:;-]+/, '')
@@ -2624,6 +2677,43 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
       </header>
 
       <PtPhonetics word={entry.word} ipaBr={entry.ipaBr} ipaPt={entry.ipaPt} speak={speak} />
+
+      {/* 🔴 **2026-08-31 从页尾挪上来**（用户：「真人发音怎么跑到下面去了？」）。
+          发音是读音的一部分，该紧跟音标 —— 原来它排在「搭配 / 固定短语」后面。
+          ⭐ 同时换成 es/it 早就在用的 `HumanAudioRow`：内联小按钮、带录音人与地区来源、
+          **死链自动回退 TTS**；pt 原来是页尾一排裸 `<audio controls>`，链接失效就静默变哑。
+          ⚠️ `PtAudio` 没有 `file` 字段（`HumanAudioRow` 拿它当 key 与死链标记），
+          用 URL 末段补上 —— 那正是 Commons 的文件名。 */}
+      <HumanAudioRow
+        audios={entry.audio.map((a) => ({
+          file: decodeURIComponent(a.url.split('/').pop() ?? a.url),
+          url: a.url, speaker: a.speaker, region: a.region, regionSrc: a.regionSrc,
+        }))}
+        word={entry.word}
+        fallback={() => speak(entry.word, entry.ipaBr ? 'pt-BR' : 'pt-PT')}
+        regionLabel={(r) => (r === 'pt-BR' ? '巴西' : r === 'pt-PT' ? '葡萄牙' : r)}
+      />
+
+      {/* 🔴🔴 **2026-08-31 补**：`dict-core` 的 `altOf` 一直在返回，**这一行漏了写** ——
+          库里 7,947 条 `alt_of` 一个用户都看不见。和 it 那次一模一样（意语原文导了
+          89,531 条、接口一直在返回、组件那一行漏了写，用户问了才发现）。
+          fr 的组件里有这一块，pt 照抄过来 —— 只给裸指针没用，
+          查 `Affonso` 的读者要的是 `Afonso` 的意思，所以把目标词的中文跟着显示。
+          判据由契约闸守（`altOf` 非空就必须出现 `.alt-of`）。 */}
+      {entry.altOf.length > 0 && (
+        <div className="alt-of-row">
+          {entry.altOf.map((a) => (
+            <span className="alt-of" key={a.target}>
+              异体 →{' '}
+              {a.clickable
+                ? <a href={`#${encodeURIComponent(a.target)}`}
+                     onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
+                : <span className="alt-of-plain">{a.target}</span>}
+              {a.zh && <span className="alt-of-zh">{a.zh}</span>}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* 葡语本质徽标：动词看变位类/过去分词/及物性，名词看性别/复数，形容词看阴性形；CEFR 贯穿 */}
       <div className="entry-meta-row entry-badges">
@@ -2683,6 +2773,35 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
                         <span className="sense-src-lang">EN</span>{s.en}
                       </div>
                     )}
+                    {s.altOf.length > 0 && (
+                      <div className="sense-altof">
+                        {s.altOf.map((a) => (
+                          <span className="alt-of" key={a.target}>
+                            → {a.clickable
+                              ? <a href={`#${encodeURIComponent(a.target)}`}
+                                   onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
+                              : <span className="alt-of-plain">{a.target}</span>}
+                            {a.zh && <span className="alt-of-zh">{a.zh}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {/* 🔴 这条义项下的例句。限 3 条 —— 照 fr 的先例：`banco` 有 14 条例句，
+                        全铺在页尾会把六条义项挤没，读者也分不清哪句配哪义
+                        （用户 2026-08-31 看 `banco` 的原话：「这个页面排版很奇怪」）。 */}
+                    {entry.examples.filter((x) => x.senseId === s.id).slice(0, 3).map((x, xi) => (
+                      <div className="sense-example" key={xi}>
+                        <div className="ex-pt" lang="pt">{x.text}</div>
+                        {x.zh && <div className="ex-zh">{x.zh}</div>}
+                        {!x.zh && x.en && <div className="ex-zh">{x.en}</div>}
+                        {ptCleanRef(x.ref) && <div className="ex-ref">{ptCleanRef(x.ref)}</div>}
+                      </div>
+                    ))}
+                    {s.relations.length > 0 && (
+                      <div className="sense-rels">
+                        <PtRelationGroups groups={s.relations} onWord={onWord} />
+                      </div>
+                    )}
                   </li>
                 ))}
               </ol>
@@ -2701,8 +2820,11 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
           {/* v3 之后变形说明由 `inflections[].label` 承担，`dict.infl` 那列已废 */}
           {entry.inflections.length > 0 && (
             <ul className="infl-notes">
+              {/* ⚠️ 「的」两边不留空格：中文里 `bancar 的 陈述式现在时第一人称单数`
+                  读起来是断开的两截，`bancar 的陈述式现在时第一人称单数` 才是一句话。
+                  （原形是拉丁字母，它**前面**那个空格要留。） */}
               {entry.inflections.map((x, k) => (
-                <li key={k}>{x.base} 的 {x.label ?? '变位形式'}</li>
+                <li key={k}>{x.base} 的{x.label ?? '变位形式'}</li>
               ))}
             </ul>
           )}
@@ -2753,62 +2875,62 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
           而 `french.ts` 里 `FROM audio` 出现 **0 次** —— 一个用户都看不见。
           pt 的地区标记是**有出处的**（`region_src` = tag / filename / speaker），
           说不出出处的一律不标，不猜。 */}
-      {entry.audio.length > 0 && (
-        <section className="entry-section">
-          <h3>真人发音</h3>
-          <div className="audio-row">
-            {entry.audio.map((a, i) => (
-              <audio className="audio-clip" key={i} controls preload="none" src={a.url}
-                data-region={a.region ?? ''}
-                title={a.region
-                  ? `${a.region === 'pt-BR' ? '巴西' : '葡萄牙'}${a.speaker ? ` · ${a.speaker}` : ''}`
-                  : (a.speaker ?? '未标地区')} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {entry.examples.length > 0 && (
+      {entry.examples.some((x) => x.senseId === null) && (
         <section className="entry-section">
           <h3>例句</h3>
-          <ul className="example-list">
-            {entry.examples.slice(0, 12).map((x, i) => (
-              <li className="example-item" key={i}>
-                <div className="example-text" lang="pt">{x.text}</div>
-                {x.zh && <div className="example-zh">{x.zh}</div>}
-                {!x.zh && x.en && <div className="example-en">{x.en}</div>}
-                {ptCleanRef(x.ref) && (
-                  <div className="example-ref">{ptCleanRef(x.ref)}</div>
-                )}
-              </li>
-            ))}
-          </ul>
+          {/* ⚠️ 只留**没有义项归属**的（40,438 条）；有归属的 10,581 条已经画在
+              各自义项下面了，两边都印＝读者同一页看见两遍。
+              🔴 **2026-08-31 换成五门通用的标记**（用户：「pt 的这部分和其他语言不一致，样式上」）：
+              这块原来用的是 `.example-list`/`.example-item`/`.example-text`——**全项目独一份**，
+              而 es/it/fr **以及 pt 自己的义项内例句**用的都是 `.sense-example`/`.ex-*`。
+              后果是同一页上两种例句样式并存。 */}
+          {entry.examples.filter((x) => x.senseId === null).slice(0, 12).map((x, i) => (
+            <div className="sense-example" key={i}>
+              <div className="ex-pt" lang="pt">{x.text}</div>
+              {x.zh && <div className="ex-zh">{x.zh}</div>}
+              {!x.zh && x.en && <div className="ex-zh">{x.en}</div>}
+              {ptCleanRef(x.ref) && <div className="ex-ref">{ptCleanRef(x.ref)}</div>}
+            </div>
+          ))}
         </section>
       )}
 
       {entry.relations.length > 0 && (
         <section className="entry-section">
-          <h3>语义关系</h3>
-          {entry.relations.map((g) => (
-            <div className="rel-group" key={g.kind}>
-              <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
-              <span className="rel-targets">
-                {g.targets.map((t, i) => (
-                  <span key={i}>
-                    {i > 0 && '、'}
-                    {t.clickable
-                      ? <a href={`#${encodeURIComponent(t.word)}`}
-                          onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
-                      : <span className="rel-plain">{t.word}</span>}
-                  </span>
-                ))}
-                {g.total > g.targets.length && <span className="rel-more">… 共 {g.total}</span>}
-              </span>
-            </div>
-          ))}
+          {/* ⚠️ 标题说清这里是**没有义项归属**的那一批（库里 82,435 条），
+              有归属的 71,017 条已经画在各自义项下面了。 */}
+          <h3>语义关系（未标注义项）</h3>
+          <PtRelationGroups groups={entry.relations} onWord={onWord} />
         </section>
       )}
     </article>
+  );
+}
+
+// 关系组的渲染**只有这一份**，词条级与义项级共用（两处各抄一遍＝迟早分叉）。
+function PtRelationGroups(
+  { groups, onWord }: { groups: PtRelationGroup[]; onWord: (w: string) => void },
+) {
+  return (
+    <>
+      {groups.map((g) => (
+        <div className="rel-group" key={g.kind}>
+          <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
+          <span className="rel-targets">
+            {g.targets.map((t, i) => (
+              <span key={i}>
+                {i > 0 && '、'}
+                {t.clickable
+                  ? <a href={`#${encodeURIComponent(t.word)}`}
+                      onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
+                  : <span className="rel-plain">{t.word}</span>}
+              </span>
+            ))}
+            {g.total > g.targets.length && <span className="rel-more">… 共 {g.total}</span>}
+          </span>
+        </div>
+      ))}
+    </>
   );
 }
 

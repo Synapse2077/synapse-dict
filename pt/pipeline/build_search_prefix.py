@@ -48,6 +48,7 @@
     python3 -u pipeline/build_search_prefix.py --mutate
 """
 import argparse
+import hashlib
 import sqlite3
 import sys
 import time
@@ -120,8 +121,24 @@ def build(con, ks, verbose=True):
 
 
 def fingerprint(con):
-    n, mx = con.execute("SELECT COUNT(*), COALESCE(MAX(id),0) FROM dict").fetchone()
-    return "%d:%d" % (n, mx)
+    """预计算表的「上游变没变」指纹。
+
+    🔴 **2026-08-31 改**：旧版是 `COUNT(*):MAX(id)`，只看得见**增删**。
+       而排序真正依赖的是 `word` / `word_norm` / `is_lemma`（见 LIVE 的 ORDER BY）——
+       这三列被 **UPDATE** 时行数和最大 id 一个字不变，**指纹静默不动、下拉排序已经错了**。
+       （查过：目前没有脚本改这三列 ⇒ 当时是潜在风险不是现行故障；
+        但 `[[case-folding-contaminates-columns]]` 那轮改过 `dict` 的别的列，
+        改到这三列只是时间问题，而那种坏法**不会报错、只会安静地排错**。）
+    ⇒ 指纹改成对**排序依赖的那三列**做哈希。判据＝「LIVE 的 ORDER BY 用到什么，就哈什么」。
+    ⚠️ 全表 77 万行流式哈希实测 ~1.4 秒，闸每次跑一遍值这个钱。
+    """
+    h = hashlib.blake2b(digest_size=12)
+    n = 0
+    for w, wn, il in con.execute(
+            "SELECT word, word_norm, is_lemma FROM dict ORDER BY id"):
+        n += 1
+        h.update(("%s\x00%s\x00%s\x00" % (w, wn, il)).encode("utf-8"))
+    return "%d:%s" % (n, h.hexdigest())
 
 
 def apply(con, rows):
@@ -164,6 +181,46 @@ def gate(con, verbose=True):
         if not out:
             print("     ✅ 全部通过")
     return out
+
+
+def mutate_fingerprint():
+    """⭐ 专打新指纹：**只 UPDATE 排序依赖的列**，行数与 MAX(id) 一个字不变。
+
+    旧指纹（`COUNT:MAX(id)`）在这三种改动下**纹丝不动** —— 那正是它的盲区。
+    """
+    import shutil
+    import tempfile
+    ok = 0
+    with tempfile.TemporaryDirectory() as d:
+        db = Path(d) / "fp.db"
+        shutil.copy(paths.DB, db)
+        ro = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
+        base = fingerprint(ro)
+        old_style = ro.execute("SELECT COUNT(*), COALESCE(MAX(id),0) FROM dict").fetchone()
+        ro.close()
+        cases = [
+            ("翻转一个词的 is_lemma", "UPDATE dict SET is_lemma=1-is_lemma WHERE id=(SELECT MIN(id) FROM dict)"),
+            ("改一个词形的大小写",     "UPDATE dict SET word=upper(word) WHERE id=(SELECT MIN(id) FROM dict WHERE word<>upper(word))"),
+            ("改一个 word_norm",      "UPDATE dict SET word_norm=word_norm||'x' WHERE id=(SELECT MIN(id) FROM dict)"),
+        ]
+        for name, sql in cases:
+            w = sqlite3.connect(db)
+            w.execute(sql)
+            w.commit()
+            w.close()
+            ro = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
+            now = fingerprint(ro)
+            now_old = ro.execute("SELECT COUNT(*), COALESCE(MAX(id),0) FROM dict").fetchone()
+            ro.close()
+            caught, blind = now != base, now_old == old_style
+            ok += caught and blind
+            print("   %s %-24s 新指纹%s／旧指纹%s"
+                  % ("✅" if (caught and blind) else "🔴 **漏了**", name,
+                     "变了" if caught else "**没变**",
+                     "看不见（正是它的盲区）" if blind else "也变了"))
+            base = now
+    print("\n   指纹变异 %d/%d" % (ok, len(cases)))
+    return 0 if ok == len(cases) else 1
 
 
 def mutate(rows):
@@ -233,7 +290,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--mutate", action="store_true")
+    ap.add_argument("--mutate-fp", action="store_true",
+                    help="只打指纹：证明它认得出「只改排序列」这种旧指纹的盲区")
     a = ap.parse_args()
+    if a.mutate_fp:
+        return mutate_fingerprint()
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     ks = keys(con)
     print("■ 待预计算前缀 %s 个（1–%d 字符，含大小写变体）" % (format(len(ks), ","), MAXLEN))

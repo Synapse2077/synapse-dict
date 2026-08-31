@@ -45,7 +45,14 @@ function render(entry: Entry): string {
   } as never));
 }
 
-const text = (h: string) => h.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+// 🔴 2026-08-31：比对两边必须**同样归一**，否则断言在报自己的 bug。
+//    这里踩到两条：例句中文里的 `&` 在 HTML 里是 `&amp;`、中文里的换行被这一行压成空格
+//    ⇒ 直接 `includes(原文)` 必然找不到，报出 4 条「例句没渲染」的假红（例句其实都在）。
+const norm = (x: string) => x
+  .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'")
+  .replace(/\s+/g, ' ').trim();
+const text = (h: string) => norm(h.replace(/<[^>]*>/g, ' '));
 const count = (h: string, re: RegExp) => (h.match(re) ?? []).length;
 
 const CHECKS: Check[] = [
@@ -99,27 +106,104 @@ const CHECKS: Check[] = [
       ? `${e.inflections.length} 条变形，HTML 里没有 .infl-notes` : null,
   },
   {
+    // 🔴 **2026-08-31 改成按内容判**。旧版数的是 `.example-item` / `.example-zh` 两个**类名**，
+    //    今天把例句挂进义项（`.sense-example` / `.ex-zh`）之后当场报 4+4 条假红 ——
+    //    例句一条没丢，`agro` 的那条就画在它的义项下面。
+    //    ⇒ 数类名的断言**跟着布局漂**；改成问「**该出现的那句话，页面上有没有**」。
     name: '🔴 例句没渲染',
-    hit: (e, h) => (e.examples.length > 0 && !/class="example-item"/.test(h))
+    hit: (e, h) => (e.examples.length > 0
+      && !/class="sense-example"/.test(h))
       ? `${e.examples.length} 条例句，HTML 里一条都没有` : null,
   },
   {
+    // 布局的规矩：每条义项下最多 3 条、页尾的无归属例句最多 12 条。
+    // 断言只问**这些该显示的**里有中文的那几条，其中文有没有真的出现在页面文本里。
     name: '🔴 例句有中文却没渲染出来',
     hit: (e, h) => {
-      const want = e.examples.slice(0, 12).filter((x: Entry) => x.zh).length;
-      const got = count(h, /class="example-zh"/g);
-      return want > 0 && got < want ? `前 12 条里有中文的 ${want}，渲染 ${got}` : null;
+      const t = text(h);
+      const shown: Entry[] = [];
+      for (const s of e.senses) {
+        shown.push(...e.examples.filter((x: Entry) => x.senseId === s.id).slice(0, 3));
+      }
+      shown.push(...e.examples.filter((x: Entry) => x.senseId === null).slice(0, 12));
+      const miss = shown.filter((x) => x.zh && !t.includes(norm(x.zh).slice(0, 24)));
+      return miss.length
+        ? `该显示的 ${shown.length} 条里，有中文却没出现在页面上的 ${miss.length}（如「${miss[0].zh.slice(0, 20)}」）`
+        : null;
     },
   },
   {
-    name: '🔴 录音没渲染（fr 那次 39 万条一个用户看不见）',
-    hit: (e, h) => (e.audio.length > 0 && !/class="audio-clip"/.test(h))
-      ? `${e.audio.length} 条录音，HTML 里没有 <audio>` : null,
+    // 🔴 2026-08-31 改：发音从页尾挪到音标下、换成 `HumanAudioRow` 之后，
+    //    渲染出来的是 `<button class="audio-chip">`，`<audio>` 是点击时才 `new Audio()` 造的
+    //    ⇒ 旧断言查 `.audio-clip` 当场报 4 条假红（录音一条没丢）。
+    // ⭐ 顺手**加强**：不是问「有没有」，是问「**几条录音就该有几个按钮**」——
+    //    少一个（比如被某个 filter 悄悄吃掉）也red。
+    name: '🔴 录音没渲染 / 数量对不上（fr 那次 39 万条一个用户看不见）',
+    hit: (e, h) => {
+      const want = e.audio.filter((a: Entry) => a.url).length;
+      const got = count(h, /class="audio-chip[^"]*"/g);
+      return want > 0 && got !== want ? `${want} 条录音，页面上 ${got} 个播放按钮` : null;
+    },
+  },
+  {
+    // 🔴 2026-08-31：这条闸建成时就该有，没有 ⇒ **7,947 条 alt_of 从阶段 8 那天起一个用户没看见**
+    //    （`dict-core` 一直在返回，`PortugueseEntryView` 那一行漏了写）。
+    //    it 那次同一形状是用户问出来的，这次是接义项级关系时顺手翻出来的。
+    name: '🔴 词条级异体指针没渲染（接口一直在返回，组件漏了那一行）',
+    hit: (e, h) => (e.altOf.length > 0 && !/class="alt-of-row"/.test(h))
+      ? `${e.altOf.length} 条词条级异体，HTML 里没有 .alt-of-row` : null,
+  },
+  {
+    // 🔴 反向的那一半：**义项级的异体不许升级成词条级横幅**。
+    //    这正是 2026-08-31 我自己造出来的缺陷 —— 库里 7,947 条 alt_of 全挂在义项上，
+    //    而渲染是按词条级查的 ⇒ `banco`（银行）页顶印出「异体 → banco de dados」，
+    //    **这句话本身是错的**。用户看 `banco` 时逮到的。
+    name: '🔴 义项级异体没画在义项里（或被升级成了词条级横幅）',
+    hit: (e, h) => {
+      const n = e.senses.reduce((a: number, x: Entry) => a + (x.altOf?.length ?? 0), 0);
+      if (!n) return null;
+      if (!/class="sense-altof"/.test(h)) return `${n} 条义项级异体，HTML 里没有 .sense-altof`;
+      const inSense = new Set<string>(
+        e.senses.flatMap((x: Entry) => (x.altOf ?? []).map((a: Entry) => a.target)));
+      const up = e.altOf.filter((a: Entry) => inSense.has(a.target));
+      return up.length ? `${up.length} 条义项级异体被升级到了词条级（如 ${up[0].target}）` : null;
+    },
   },
   {
     name: '🔴 语义关系没渲染',
     hit: (e, h) => (e.relations.length > 0 && !/class="rel-group"/.test(h))
       ? `${e.relations.length} 组关系，HTML 里没有 .rel-group` : null,
+  },
+  {
+    // 🔴 2026-08-31 接义项级关系时加的。库里 153,452 条关系有 71,017 条带 `sense_id`，
+    //    而旧版展示层查的是 `WHERE word_id = ?` —— **义项归属整个丢掉**：
+    //    `pinta` 8 个义项，查「痣」的读者会看到另外两个粗俗义项的 110 个近义词混在一起。
+    //    ⇒ 断言「义项自己有关系，就必须画在义项里面（`.sense-rels`）」。
+    name: '🔴 义项级关系没画在义项下面（又拍回词条级那个形状）',
+    hit: (e, h) => {
+      const n = e.senses.reduce(
+        (a: number, x: Entry) => a + (x.relations?.length ?? 0), 0);
+      return n > 0 && !/class="sense-rels"/.test(h)
+        ? `${n} 组关系挂在义项上，HTML 里没有 .sense-rels` : null;
+    },
+  },
+  {
+    // ⚠️ 反向的那一半：词条级区块只许画**没有义项归属**的那 82,435 条。
+    //    少了这条，「两边各印一遍」这种回归照样全绿。
+    name: '🔴 同一条关系在词条级和义项级各印了一遍',
+    hit: (e, h) => {
+      const inSense = new Set<string>();
+      for (const x of e.senses) {
+        for (const g of (x.relations ?? [])) {
+          for (const t of g.targets) inSense.add(`${g.kind}\u0000${t.word}`);
+        }
+      }
+      const dup = e.relations.flatMap((g: Entry) =>
+        g.targets.filter((t: Entry) => inSense.has(`${g.kind}\u0000${t.word}`))
+                 .map((t: Entry) => `${g.kind}:${t.word}`));
+      return dup.length && /class="rel-group"/.test(h)
+        ? `词条级重复了义项级的 ${dup.length} 条（如 ${dup[0]}）` : null;
+    },
   },
   {
     name: '🔴 关系被截断却没说总数（读者以为就这么多）',
@@ -131,7 +215,10 @@ const CHECKS: Check[] = [
   {
     name: '🔴 例句出处渲染成了孤立标点（`.` 那族）',
     hit: (_e, h) => {
-      const m = h.match(/class="example-ref">([^<]*)</g) ?? [];
+      // 🔴 2026-08-31：出处行的类名从 `.example-ref` 换成了共用的 `.ex-ref`
+      //    （pt 的例句块统一到五门通用标记）。查旧类名 ⇒ **这条断言从此永远绿**。
+      //    今天第四次撞「换了标记、断言还查旧类名」——所以两个都认。
+      const m = h.match(/class="(?:example-ref|ex-ref)">([^<]*)</g) ?? [];
       const bad = m.filter((x) => x.replace(/.*>/, '').trim().length < 2);
       return bad.length ? `${bad.length} 条出处只剩标点` : null;
     },
@@ -154,7 +241,7 @@ const CHECKS: Check[] = [
 // 「全部通过」就成了假绿。⇒ 每一类形状各取一批，保证每条断言都有活可干。
 // ⚠️ SQLite 的 `UNION ALL` 分支里**不许带 LIMIT**，每支要包一层子查询。
 const LIMIT = Number(process.argv[process.argv.indexOf('--limit') + 1]) || 300;
-const PER = Math.ceil(LIMIT / 5);
+const PER = Math.ceil(LIMIT / 7);
 const arms: Array<[string, string]> = [
   ['多义项词', `SELECT d.word FROM dict d JOIN sense s ON s.word_id=d.id
                  WHERE COALESCE(s.hidden,0)=0 GROUP BY d.id
@@ -169,6 +256,16 @@ const arms: Array<[string, string]> = [
   ['例句有中文', `SELECT e.word FROM example e
                  JOIN example_gloss g ON g.example_id=e.id AND g.lang='zh'
                  WHERE COALESCE(e.hidden,0)=0 GROUP BY e.word LIMIT ${PER}`],
+  // 🔴 2026-08-31 补的第六支。加「异体指针没渲染」那条断言时，五支取样里
+  //    **没有一支是奔 alt_of 去的** ⇒ 断言一次都不触发、绿得毫无意义。
+  //    这正是本文件开头写的假绿：「每一类形状各取一批，保证每条断言都有活可干」。
+  // ⚠️ 分两支取。alt_of 拆级之后（词条级只留 sense_id IS NULL），
+  //    只按「有 alt_of」取样会几乎全取到**义项级**的 ⇒ 词条级那条断言又变空。
+  //    同一个坑今天踩第二次：**断言分了级，取样就必须跟着分级**。
+  ['词条级异体（sense_id 空）', `SELECT d.word FROM dict d JOIN sense_relation r ON r.word_id=d.id
+                 WHERE r.kind='alt_of' AND r.sense_id IS NULL GROUP BY d.id LIMIT ${PER}`],
+  ['义项级异体', `SELECT d.word FROM dict d JOIN sense_relation r ON r.word_id=d.id
+                 WHERE r.kind='alt_of' AND r.sense_id IS NOT NULL GROUP BY d.id LIMIT ${PER}`],
 ];
 const words: string[] = [];
 const bucket = new Map<string, number>();
@@ -186,8 +283,19 @@ for (const w of words) {
   if (!e) continue;
   n++;
   let html = render(e);
-  if (mutate) html = html.replace(/class="audio-clip"/g, 'class="x"')
-    .replace(/class="sense-src-lang"/g, 'class="x"');
+  // ⭐ 变异要**每条断言都打得到**：只抹两个类名，新加的断言就是恒真的
+  //    （`[[fix-regression-and-gate]]`：一条永远通过的检查等于没检查）。
+  //    ③ 抹掉 `sense-rels` ＝ 义项级关系被拍回词条级；
+  //    ④ 把义项级关系原样复制到词条级 ＝ 同一条印两遍那个回归。
+  if (mutate) {
+    html = html.replace(/class="audio-chip[^"]*"/g, 'class="x"')
+      .replace(/class="sense-src-lang"/g, 'class="x"')
+      .replace(/class="sense-rels"/g, 'class="x"')
+      .replace(/class="alt-of-row"/g, 'class="x"')
+      .replace(/class="sense-altof"/g, 'class="x"');
+    const first = e.senses.find((x: Entry) => (x.relations ?? []).length > 0);
+    if (first) e.relations = [...e.relations, ...first.relations];
+  }
   for (const c of CHECKS) {
     const why = c.hit(e, html);
     if (why) {
@@ -210,5 +318,5 @@ for (const c of CHECKS) {
   for (const x of arr) console.log(`        ${x}`);
 }
 console.log(red ? `\n🔴 ${red} 条红` : `\n✅ 全部通过（${CHECKS.length} 条断言）`);
-if (mutate) console.log(`\n（--mutate：抹掉 audio-clip 与 sense-src-lang 两个类名，上面应有 ≥2 条红）`);
+if (mutate) console.log(`\n（--mutate：抹掉 audio-chip / sense-src-lang / sense-rels / alt-of-row / sense-altof 五个类名，并把义项级关系复制到词条级，上面应有 ≥6 条红）`);
 process.exit(mutate ? 0 : (red ? 1 : 0));

@@ -49,6 +49,16 @@ export type PortugueseSense = {
   regions: string[];        // 地区 ← sense_tag kind=region（含安哥拉/莫桑比克等非洲变体）
   registers: string[];      // 语域 ← kind=register
   topics: string[];         // 领域 ← kind=topic（fr 那轮漏收过一整族，这里一开始就接）
+  // 🔴 **逐义项的语义关系**（2026-08-31 接）。库里 153,452 条关系有 71,017 条
+  //    带 `sense_id`，而旧版的 `rel` 查询是 `WHERE word_id = ?` —— **把义项归属整个丢掉**，
+  //    多义词上所有义项的近义词拍平成一个列表：
+  //        pinta（8 个义项）→ aspecto · cara · nevo（痣）… buceta（粗俗义，48+62 条）
+  //    读者查「痣」看到的是一百多个别的义项的近义词。
+  //    ⇒ 有 `sense_id` 的挂到义项上，`sense_id IS NULL` 的留在词条级（见 `relations`）。
+  relations: PortugueseRelationGroup[];
+  // 这条义项自己的异体指针（`banco` 的第 6 条义项 → `banco de dados`）。
+  // 义项的中文往往已经写着「X 的截短形式」，这里的价值是**让 X 可点、并带上它的中文**。
+  altOf: PortugueseAltOf[];
 };
 
 export type PortugueseCollocation = { text: string; zh: string | null };
@@ -87,6 +97,16 @@ export type PortugueseRelationGroup = {
 const PT_REL_ORDER = ['synonym', 'antonym', 'hypernym', 'hyponym',
                       'coordinate', 'holonym', 'meronym'];
 const PT_REL_CAP = 12;
+
+// ⭐ 词条级与义项级**共用这一份**分组/排序/截断（`[[fix-regression-and-gate]]`：
+//    判据只许一份 —— 两处各写一版，迟早排序或上限对不上）。
+function groupRelations(
+  m: Map<string, PortugueseRelationTarget[]>,
+): PortugueseRelationGroup[] {
+  return PT_REL_ORDER.filter((k) => m.has(k)).map((k) => ({
+    kind: k, total: m.get(k)!.length, targets: m.get(k)!.slice(0, PT_REL_CAP),
+  }));
+}
 
 // 一条真人录音（Commons URL，不下载字节）。`region` 与读音同一套取值。
 export type PortugueseAudio = {
@@ -282,11 +302,31 @@ export class PortugueseDictService {
           FROM inflection i JOIN dict d ON d.id = i.word_id
          WHERE i.base_id = ? ORDER BY i.label_zh, d.word LIMIT 200`),
 
+      // ⚠️ 只取**没有义项归属**的那 82,435 条。有归属的走 `relBySense`，
+      //    否则同一条会在词条级和义项级各印一遍。
+      //    实测 71,017 条全部挂在**可见**义项上（挂隐藏义项的 0 条、挂不存在义项的 0 条），
+      //    所以这样拆开不会让任何一条从页面上消失。
       rel: this.db.prepare(`
         SELECT kind, target,
                (SELECT 1 FROM dict d WHERE d.word = sense_relation.target) AS ok
-          FROM sense_relation WHERE word_id = ? AND kind <> 'alt_of'`),
+          FROM sense_relation
+         WHERE word_id = ? AND kind <> 'alt_of' AND sense_id IS NULL
+           AND COALESCE(hidden,0) = 0`),
 
+      relBySense: this.db.prepare(`
+        SELECT r.sense_id, r.kind, r.target,
+               (SELECT 1 FROM dict d WHERE d.word = r.target) AS ok
+          FROM sense_relation r
+         WHERE r.sense_id IN (SELECT id FROM sense WHERE word_id = ?)
+           AND r.kind <> 'alt_of' AND COALESCE(r.hidden,0) = 0`),
+
+      // 🔴🔴 **2026-08-31 拆级。** 旧版是 `WHERE r.word_id = ?` —— 与关系层同一个毛病，
+      //    而它更伤：库里 **7,947 条 alt_of 全部挂在义项上**，一律按词条级渲染就是
+      //    **把义项级的话升级成词条级的断言**。`banco` 页顶上印出「异体 → banco de dados」，
+      //    而 banco 是「银行」，它不是 banco de dados 的异体 —— **这句话本身是错的**。
+      //    （是我 08-31 补 altOf 渲染时造出来的：数据一直在，渲染一接就把错话摆到了最上面。）
+      //    ⇒ 词条级只留 `sense_id IS NULL` 的那 2,597 条（阶段 2f 给空白页接的，
+      //      那些页面上它是唯一内容）；挂义项的走 `altOfBySense`，画进它自己的义项里。
       altOf: this.db.prepare(`
         SELECT r.target,
                (SELECT g.text FROM sense s
@@ -294,7 +334,20 @@ export class PortugueseDictService {
                  WHERE s.word_id = (SELECT id FROM dict WHERE word = r.target)
                    AND COALESCE(s.hidden,0)=0 ORDER BY s.rank LIMIT 1) AS zh,
                (SELECT 1 FROM dict d WHERE d.word = r.target) AS ok
-          FROM sense_relation r WHERE r.word_id = ? AND r.kind = 'alt_of'`),
+          FROM sense_relation r
+         WHERE r.word_id = ? AND r.kind = 'alt_of' AND r.sense_id IS NULL
+           AND COALESCE(r.hidden,0) = 0`),
+
+      altOfBySense: this.db.prepare(`
+        SELECT r.sense_id, r.target,
+               (SELECT g.text FROM sense s
+                  JOIN sense_gloss g ON g.sense_id=s.id AND g.lang='zh'
+                 WHERE s.word_id = (SELECT id FROM dict WHERE word = r.target)
+                   AND COALESCE(s.hidden,0)=0 ORDER BY s.rank LIMIT 1) AS zh,
+               (SELECT 1 FROM dict d WHERE d.word = r.target) AS ok
+          FROM sense_relation r
+         WHERE r.sense_id IN (SELECT id FROM sense WHERE word_id = ?)
+           AND r.kind = 'alt_of' AND COALESCE(r.hidden,0) = 0`),
 
       audio: this.db.prepare(`
         SELECT COALESCE(url_ogg, url_mp3, url_wav, url_other) AS url,
@@ -340,9 +393,31 @@ export class PortugueseDictService {
       else if (t.kind === 'topic') e.topics.push(t.value);
       byId.set(t.sense_id, e);
     }
+    const relRows = this.q.relBySense.all(wordId) as Array<{
+      sense_id: number; kind: string; target: string; ok: number | null;
+    }>;
+    const relBy = new Map<number, Map<string, PortugueseRelationTarget[]>>();
+    for (const r of relRows) {
+      const m = relBy.get(r.sense_id) ?? new Map<string, PortugueseRelationTarget[]>();
+      const arr = m.get(r.kind) ?? [];
+      arr.push({ word: r.target, clickable: !!r.ok });
+      m.set(r.kind, arr);
+      relBy.set(r.sense_id, m);
+    }
+    const altRows = this.q.altOfBySense.all(wordId) as Array<{
+      sense_id: number; target: string; zh: string | null; ok: number | null;
+    }>;
+    const altBy = new Map<number, PortugueseAltOf[]>();
+    for (const r of altRows) {
+      const arr = altBy.get(r.sense_id) ?? [];
+      arr.push({ target: r.target, zh: r.zh, clickable: !!r.ok });
+      altBy.set(r.sense_id, arr);
+    }
     return rows.map((r) => ({
       id: r.id, zh: r.zh, pt: r.pt, en: r.en, pos: r.pos, gender: r.gender,
       ...(byId.get(r.id) ?? { regions: [], registers: [], topics: [] }),
+      relations: groupRelations(relBy.get(r.id) ?? new Map()),
+      altOf: altBy.get(r.id) ?? [],
     }));
   }
 
@@ -385,12 +460,7 @@ export class PortugueseDictService {
       arr.push({ word: r.target, clickable: !!r.ok });
       relMap.set(r.kind, arr);
     }
-    const relations: PortugueseRelationGroup[] = PT_REL_ORDER
-      .filter((k) => relMap.has(k))
-      .map((k) => ({
-        kind: k, total: relMap.get(k)!.length,
-        targets: relMap.get(k)!.slice(0, PT_REL_CAP),
-      }));
+    const relations = groupRelations(relMap);
 
     // 变形标签同样要去重，而且**要吃掉"泛化标签"**：
     // 外审逮到 `podaste` 同时列「陈述式第二人称单数」和「陈述式简单过去时第二人称单数」，
