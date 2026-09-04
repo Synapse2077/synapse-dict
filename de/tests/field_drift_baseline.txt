@@ -1,0 +1,47 @@
+CONFLICT	Bundesanwaltschaft	genitive	Bundesanwaltschaft	der
+CONFLICT	Bundesanwaltschaft	plural	Bundesanwaltschaften	die
+CONFLICT	Fausthandschuh	genitive	Fausthandschuhs	Fausthandschuhes
+CONFLICT	Gummihandschuh	genitive	Gummihandschuhs	Gummihandschuhes
+CONFLICT	Handbuch	genitive	Handbuchs	Handbuches
+CONFLICT	Handschuhfach	genitive	Handschuhfachs	Handschuhfaches
+CONFLICT	Schiff	gender	m/f	n
+CONFLICT	Stil	genitive	Stiles	Stils
+CONFLICT	Untote	gender	f/m	f
+CONFLICT	Untote	genitive	Untoten	Untoter
+CONFLICT	Untote	plural	Untoten	Untote
+CONFLICT	auspfeifen	partizip2	ausgepfeift	ausgepfiffen
+CONFLICT	auspfeifen	praeteritum	pfeifte	pfiff
+CONFLICT	auspfeifen	vclass	weak	strong-1
+CONFLICT	b*msen	vclass	irregular	weak
+CONFLICT	f*cken	vclass	irregular	weak
+CONFLICT	high	superlative	am highesten	am highsten
+CONFLICT	k*cken	vclass	irregular	weak
+CONFLICT	p*ppen	vclass	irregular	weak
+CONFLICT	v*geln	vclass	irregular	weak
+CONFLICT	ver*rschen	vclass	irregular	weak
+LLMFILL	aux	304
+LLMFILL	comparative	6205
+LLMFILL	gender	758
+LLMFILL	genitive	3711
+LLMFILL	noun_variants	1
+LLMFILL	partizip2	300
+LLMFILL	plural	9009
+LLMFILL	praeteritum	306
+LLMFILL	reflexive	0
+LLMFILL	sep_prefix	232
+LLMFILL	separable	232
+LLMFILL	superlative	6205
+LLMFILL	vclass	0
+UPSTREAM	aux	0
+UPSTREAM	comparative	0
+UPSTREAM	gender	1
+UPSTREAM	genitive	1
+UPSTREAM	noun_variants	553
+UPSTREAM	partizip2	0
+UPSTREAM	plural	1
+UPSTREAM	praeteritum	0
+UPSTREAM	reflexive	1
+UPSTREAM	sep_prefix	1
+UPSTREAM	separable	1
+UPSTREAM	superlative	0
+UPSTREAM	vclass	0

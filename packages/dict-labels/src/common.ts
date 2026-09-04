@@ -54,6 +54,10 @@ export const POS_LABELS: Record<string, string> = {
   //    （`[[prompt-self-harm-two-patterns]]`：`pos or "v"` 把分类名说成动词，落库 404 行）
   //    显式给它一行。⚠️ `abbrev` 上面已经有了，pt 那 1,344 条不用新增。
   root: '词根',
+  // 🔴 2026-09-01 de 阶段 3 预检加：德语版有 3 条 `circumfix`（`Ge-…-e`、`be-…-t`）。
+  //    环缀是德语构词的真实类型（`Ge-` + 词干 + `-e` 一次成词），
+  //    拆成 prefix + suffix 会丢掉「必须同时出现」这一条。同 `root` 的处理：显式给一行。
+  circumfix: '环缀',
 };
 
 // 语域标签 → 中文（对应 build.py REGISTERS）。

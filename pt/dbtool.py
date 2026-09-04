@@ -181,6 +181,36 @@ KEEP_PLAIN = 2              # 普通（非 keep）备份只留最近这么多个
 # ⇒ keep 计入字节，超了按**稀疏度**淘汰（见 `_thin`），首尾永不删。
 MAX_BACKUP_BYTES = 8 * 1024 ** 3
 
+# 🔴 2026-09-01 第五次：**规则里没有「这门语言做完了」这个概念。**
+#    用户问「pt 的结果还没做整理和备份清理对吧」时的现场：pt 十一个备份 7.9 GB，
+#    `prune_backups` 试算 **删 0 个** —— 不是规则坏了，是它刚好卡在 8 GB 下面 1%。
+#    而那十一个全是 v3 重构途中的阶段里程碑（schema→intake→ipa→2c→5b→audio→…），
+#    每一个的意义都是「万一这一步做错了退回来」。**阶段全做完、三道闸全绿之后，
+#    这个意义就没了** —— 留着的是一条已经走完的楼梯。
+#    ⚠️ 前四次咬人我改的都是**同一层**（补内容→提上限→改豁免方向→换成字节+稀疏度），
+#      这次加的是**一个新维度：时间上的阶段**。预算不该是常数，它该随语种的状态变。
+#    ⇒ 完结之后预算收到 `DONE_BACKUP_BYTES`，`_thin` 的「首尾永不删」照旧生效，
+#      于是活下来的正好是**最老那个（整轮重构之前，不可再生）**
+#      和**最新那个（回滚上一步）**，中间的楼梯全部让干净。
+DONE_BACKUP_BYTES = 1.5 * 1024 ** 3
+
+# 判据是**计划表里那一行**，不是手工开关：
+#   `docs/PT_PLAN.md` 里出现 `# ✅ pt 完结` 才算完结。
+# 🔴 为什么不设一个 `DONE = True` 常量：那是「写着已修」和「真的修了」的老毛病
+#    （收尾单 C49/C50 那一族）。而这一行同时被**账的闸**盯着 ——
+#    阶段表说完成、交付物就必须存在。⇒ 标完结这个动作本身是有代价的，
+#    它不会被顺手打上去，也就不会顺手把备份预算砍掉。
+PLAN_DOC = paths.ROOT / "docs" / "PT_PLAN.md"
+
+
+def _language_is_done():
+    """本语种是否已在计划表里标注完结。读不到文件一律按**未完结**（预算宽松）——
+    删数据的默认值必须偏保守。"""
+    try:
+        return bool(re.search(r"^#+\s*✅\s*pt\s*完结", PLAN_DOC.read_text("utf-8"), re.M))
+    except OSError:
+        return False
+
 
 def _thin(items, when, budget, floor=2):
     """总字节超预算时，反复删掉**时间上最"挤"**的那个。→ (留下的, 删掉的)
@@ -291,7 +321,8 @@ def prune_backups(verbose=True, dry=False):
 
     # ③ 总字节封顶（**keep 也计入**），超了按稀疏度抽稀。
     #    先砍普通的（更不值钱），还超再抽稀 keep。
-    budget = MAX_BACKUP_BYTES
+    done = _language_is_done()
+    budget = DONE_BACKUP_BYTES if done else MAX_BACKUP_BYTES
     used = sum(p.stat().st_size for p in exempt)
     plain, cut = _thin(plain, when, max(budget - used, 0), floor=0) if plain else ([], [])
     drop += cut
@@ -322,8 +353,13 @@ def prune_backups(verbose=True, dry=False):
         if grp in survivors:
             print("   · 清理同标签同日的重试快照：%s（该里程碑仍保留最早的一个）" % p.name)
         else:
-            print("   ⚠️ 淘汰里程碑（总量超 %.0f GB，抽稀掉这个时间点）：%s"
-                  % (MAX_BACKUP_BYTES / 1024 ** 3, p.name))
+            # ⚠️ 文案必须跟着规则改（2026-08-25 的教训：规则从「意外」变成
+            #    「预期行为」而文案还在打 🔴 ＝ 狼来了）。这里再多一种情形：
+            #    完结收紧是**一次性的、可预期的**，不该和日常超预算混着报。
+            print("   %s：%s" % (
+                "· 已完结，楼梯收干净（预算 %.1f GB）" % (budget / 1024 ** 3) if done
+                else "⚠️ 淘汰里程碑（总量超 %.0f GB，抽稀掉这个时间点）" % (budget / 1024 ** 3),
+                p.name))
 
     gone = sorted("%s@%s" % k for k in by_group if k not in survivors)
     if gone:

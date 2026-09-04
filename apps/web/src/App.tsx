@@ -379,13 +379,32 @@ type PtEntry = {
   flag: string | null;
 };
 
+// 🔴 2026-09-04 阶段 8：跟着 `german.ts` 的 v3 重写一起改。
+//    类型漂开的代价是编译期就能看见的（这次 20 个 TS2339），
+//    比"接口返回了但页面不显示"那种沉默缺陷便宜得多。
+type DeRelTarget = { word: string; clickable: boolean };
+type DeRelGroup = { kind: string; targets: DeRelTarget[] };
+type DeAltOf = { target: string; zh: string | null; clickable: boolean };
 type DeSense = {
+  id: number;
   en: string | null;
   zh: string | null;
+  de: string | null;          // 德语原文释义（三语方针的「本语言」那一支，171,313 条）
   pos: string | null;
+  gender: string | null;
   regions: string[];
   registers: string[];
+  relations: DeRelGroup[];
+  altOf: DeAltOf[];
 };
+type DeReading = {
+  ipa: string; notation: string | null; region: string | null;
+  pos: string | null; primary: boolean; src: string | null;
+};
+type DeExample = { senseId: number | null; text: string; zh: string | null; ref: string | null };
+type DeInflection = { base: string; label: string | null; clickable: boolean };
+type DeForm = { form: string; label: string | null };
+type DeAudio = { url: string; region: string | null; regionSrc: string | null; speaker: string | null };
 type DeCollocation = { text: string; zh: string | null };
 type DeBase = {
   word: string;
@@ -418,10 +437,16 @@ type DeEntry = {
   level: string | null;
   senses: DeSense[];
   collocations: DeCollocation[];
-  baseForms: string[];
   bases: DeBase[];
-  inflNotes: string[];
-  flag: string | null;
+  // —— v3 多表（阶段 8 接上）——
+  readings: DeReading[];
+  examples: DeExample[];
+  inflections: DeInflection[];   // 这个词是谁的变形
+  derivations: DeInflection[];   // 构词，**单独一区**（收尾单 C13）
+  forms: DeForm[];               // 词元页反过来看：它有哪些形式
+  relations: DeRelGroup[];       // 词条级
+  audio: DeAudio[];
+  freqZipf: number | null;
 };
 
 type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry | DeEntry;
@@ -3013,7 +3038,7 @@ function groupDeSenses(senses: DeSense[]): { pos: string | null; senses: DeSense
   return groups;
 }
 
-function GermanEntryView({ entry, speakLocale, onWord, speak }: {
+export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
   entry: DeEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
@@ -3112,7 +3137,14 @@ function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         {showStubPos && <span className="badge pos">{posLabel(entry.pos)}</span>}
       </div>
 
-      {entry.isLemma && entry.senses.length > 0 && (
+      {/* 🔴🔴 **这里原来写的是 `entry.isLemma && entry.senses.length > 0`** ——
+          `is_lemma` 是我们自己打的标，拿它决定「要不要显示释义」，
+          实测挡住 **124,291 个有义项的词形**（`'Ndrangheta` 恩德朗盖塔、
+          `'n Abend` 晚上好 …）的整块释义：接口返回完全正确，查库查接口都看不见。
+          pt 那轮契约闸逮到的是同一行（6,520 个），de 是它的 19 倍。
+          ⇒ 判据换成「**有没有义项**」这个事实本身（`[[llm-as-evaluator-discipline]]` ⑫：
+            用自己的分类限制自己的输出，判据自己永远不会说）。 */}
+      {entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
           {groupDeSenses(entry.senses).map((grp, gi) => (
@@ -3126,6 +3158,39 @@ function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                       <DeSenseChips sense={s} />
                     </div>
                     {s.en && <div className="sense-en"><FrText text={s.en} /></div>}
+                    {/* 三语方针的「本语言」那一支（`[[gloss-three-languages]]`）。
+                        1.5a 收 135,179 条 + 1.5c 补 36,134 条 = 171,313 条。 */}
+                    {s.de && <div className="sense-src-de">{s.de}</div>}
+                    {s.altOf.length > 0 && (
+                      <div className="sense-altof">
+                        {s.altOf.map((a, ai) => (
+                          <span key={ai}>
+                            {a.clickable
+                              ? <a href={`#${encodeURIComponent(a.target)}`}
+                                  onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
+                              : a.target}
+                            {a.zh && <span className="alt-zh">（{a.zh}）</span>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {s.relations.length > 0 && (
+                      <div className="sense-relations">
+                        {s.relations.map((g, ri) => (
+                          <span className="rel-group" key={ri}>
+                            <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
+                            {g.targets.slice(0, 8).map((t, ti) => (
+                              <span key={ti}>
+                                {t.clickable
+                                  ? <a href={`#${encodeURIComponent(t.word)}`}
+                                      onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
+                                  : <span className="rel-plain">{t.word}</span>}
+                              </span>
+                            ))}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ol>
@@ -3134,17 +3199,129 @@ function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      {entry.baseForms.length > 0 && (
+      {/* 读音表：`pronunciation` 100.9 万行，昨天一条都没接上。
+          ⚠️ `region` 原样透出（收尾单 C31：两张表目前两套地区码，修法在生成侧）。 */}
+      {entry.readings.length > 1 && (
+        <section className="entry-section">
+          <h3>读音</h3>
+          <ul className="de-readings">
+            {entry.readings.slice(0, 8).map((r, i) => (
+              <li key={i}>
+                <span className="phonetic-value">/{r.ipa}/</span>
+                {r.region && <span className="badge region">{DE_REGION_LABELS[r.region] || r.region}</span>}
+                {r.pos && <span className="badge pos">{posLabel(r.pos)}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {entry.audio.length > 0 && (
+        <section className="entry-section">
+          <h3>真人发音</h3>
+          <div className="de-audio-row">
+            {entry.audio.map((a, i) => (
+              <button className="audio-btn" key={i} type="button"
+                onClick={() => { void new Audio(a.url).play(); }}>
+                <SpeakerIcon />
+                {a.region && <span className="badge region">{DE_REGION_LABELS[a.region] || a.region}</span>}
+                {a.speaker && <span className="audio-speaker">{a.speaker}</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {entry.examples.length > 0 && (
+        <section className="entry-section">
+          <h3>例句</h3>
+          <ul className="example-list">
+            {entry.examples.slice(0, 12).map((e, i) => (
+              <li className="example-item" key={i}>
+                <div className="example-de">{e.text}</div>
+                {e.zh && <div className="example-zh">{e.zh}</div>}
+                {e.ref && <div className="example-ref">{e.ref}</div>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* ③ 构词与变形**分区**（收尾单 C13，外审两家一致）：
+          `Häuslein ← Haus 指小词` 与 `Häuser ← Haus 复数` 并排会被当成格形式。 */}
+      {entry.derivations.length > 0 && (
+        <section className="entry-section">
+          <h3>构词</h3>
+          <div className="de-infl-list">
+            {entry.derivations.map((d, i) => (
+              <span className="de-infl" key={i}>
+                {d.clickable
+                  ? <a href={`#${encodeURIComponent(d.base)}`}
+                      onClick={(e) => { e.preventDefault(); onWord(d.base); }}>{d.base}</a>
+                  : d.base}
+                {d.label && <span className="de-infl-label">{d.label}</span>}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {entry.forms.length > 0 && (
+        <section className="entry-section">
+          <h3>词形变化<span className="section-count">{entry.forms.length}</span></h3>
+          <div className="de-form-grid">
+            {entry.forms.slice(0, 60).map((fm, i) => (
+              <span className="de-form-cell" key={i}>
+                <a href={`#${encodeURIComponent(fm.form)}`}
+                  onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
+                {fm.label && <span className="de-form-label">{fm.label}</span>}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {entry.relations.length > 0 && (
+        <section className="entry-section">
+          <h3>语义关系</h3>
+          {entry.relations.map((g, i) => (
+            <div className="rel-row" key={i}>
+              <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
+              {g.targets.slice(0, 20).map((t, ti) => (
+                <span key={ti}>
+                  {t.clickable
+                    ? <a href={`#${encodeURIComponent(t.word)}`}
+                        onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
+                    : <span className="rel-plain">{t.word}</span>}
+                </span>
+              ))}
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* 词形还原：v3 走 `inflections`（带语法标签、带可点性），
+          不再走老的 `baseForms` 字符串数组 + `inflNotes` 散文。
+          ⚠️ **构词不在这一区**（收尾单 C13，外审两家一致）：
+             `Häuslein ← Haus 指小词` 与 `Häuser ← Haus 复数` 并排会被当成格形式，
+             构词有自己的「构词」区。 */}
+      {entry.inflections.length > 0 && (
         <section className="entry-section">
           <h3>词形还原</h3>
-          {entry.inflNotes.length > 0 && (
-            <ul className="infl-notes">
-              {entry.inflNotes.map((n, i) => <li key={i}>{n}</li>)}
-            </ul>
-          )}
+          <ul className="infl-notes">
+            {entry.inflections.slice(0, 20).map((x, i) => (
+              <li key={i}>
+                {x.clickable
+                  ? <a href={`#${encodeURIComponent(x.base)}`}
+                      onClick={(e) => { e.preventDefault(); onWord(x.base); }}>{x.base}</a>
+                  : x.base}
+                {x.label && <span className="de-infl-label"> {x.label}</span>}
+              </li>
+            ))}
+          </ul>
           <div className="base-list">
-            {entry.baseForms.map((bw) => {
-              const base = entry.bases.find((b) => b.word === bw);
+            {entry.bases.map((base) => {
+              const bw = base.word;
               const bg0 = base?.gender ? base.gender.split('/')[0] : null;
               const bArticle = base?.gender && isNounPos(base.pos)
                 ? (DE_ARTICLE[base.gender] || DE_ARTICLE[bg0 || ''] || '') : '';
