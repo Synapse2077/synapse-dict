@@ -283,10 +283,17 @@ export const TOPIC_LABELS: Record<string, string> = {
 
 // 词汇关系的中文名。`derived` 是「派生词/习语」（`pie` → `a contrapié`），
 // 与「相关词」分开：前者是从这个词长出来的，后者只是语义相邻。
+// 🔴 2026-09-05：`expression`/`proverb` 补进来 —— 它们是 de 的 C37（关系层重收）
+//    引进的两个 kind（12,803 ＋ 1,058 行），**而这张表没跟着加** ⇒ 德语页面上
+//    直接印出英文原词：`Haus` 的关系行里混着 `expression auf jemanden Häuser bauen können`、
+//    `proverb ein Haus ist leichter angezündet als gelöscht`。
+//    ⚠️ 三层数据的闸全绿（kind 在值域内、关系挂对了义项），**是渲染出来才看见的**
+//      —— `[[it-display-layer-stage8]]` 那条又中一次。
+//    ⇒ 契约闸新加一条：`sense_relation.kind` 的每个值都必须在这张表里有名字。
 export const REL_LABELS: Record<string, string> = {
   synonym: '近义', antonym: '反义', hypernym: '上位', hyponym: '下位',
   holonym: '整体', meronym: '部分', coordinate: '同类', related: '相关',
-  derived: '派生',
+  derived: '派生', expression: '习语', proverb: '谚语',
 };
 
 export const TRANS_LABELS: Record<string, string> = { t: '及物', i: '不及物', ti: '及物/不及物' };

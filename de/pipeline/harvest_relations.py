@@ -18,9 +18,13 @@
 落库存的是 `sense_id`，不是下标。
 
 ⚠️ `sense_index` 有多种写法（`"1"` / `"1-3"` / `"1, 2"` / 缺失）。
-   **只认单个纯数字**，其余一律 `sense_id=NULL`（关系仍然收，只是挂在词上）。
    🔴 **判不出就说判不出，不猜** —— 猜错了是把关系接到错误的义项上，
      比不挂更伤（`[[verification-gates-not-sampling]]`：错配才是真灾难）。
+   ⚠️ **2026-09-04 修正：`1-3` / `1,2` 不是"猜"，是源头写清楚了的。**
+     第一版只认单个纯数字，把 26,950 条**带着明确义项归属**的关系降级成词级显示 ——
+     判据「不猜」是对的，但「多值＝在猜」这一步是错的。区间和列表都是确定写法，
+     只有跨度 >20 那种才当"这一栏被写进了别的东西"丢掉。
+     ⇒ 一条源头关系可以落成**多行**（`1-3` 说的是三条义项都有这个关系）。
 
 ═══ 🔴 关系是源头的事实，不绑在"我能不能挂上义项"上 ═══
 `[[dont-gate-facts-on-my-uncertainty]]`（2026-09-01 阶段 2a 刚犯过）：
@@ -73,6 +77,40 @@ KIND = {
     "troponyms": "troponym",
 }
 PURE_INT = re.compile(r"^\s*(\d+)\s*$")
+# `sense_index` 的多值写法：`1-3`、`1, 2`、`2、4`。**2026-09-04 之前一律"不猜"**，
+# 于是 26,950 条带着明确义项归属的关系被降级成词级显示。它们不是猜的 —— 源头写得很清楚。
+MULTI_INT = re.compile(r"^\s*\d+(\s*[-–,、]\s*\d+)+\s*$")
+
+
+def sense_indexes(si, n):
+    """`sense_index` → 0 起的义项下标列表。认不了返回 None，越界返回 []。
+
+    🔴 **不做启发式**：只认「纯数字」「区间」「逗号/顿号列表」三种确定写法。
+       区间跨度 >20 一律不认 —— 那种十有八九是把别的东西写进了这一栏。
+    """
+    s = str(si).strip()
+    if PURE_INT.match(s):
+        k = int(s) - 1
+        return [k] if 0 <= k < n else []
+    if not MULTI_INT.match(s):
+        return None
+    out = []
+    for part in re.split(r"[,、]", s):
+        part = part.strip()
+        if "-" in part or "–" in part:
+            try:
+                a, b = [int(x) for x in re.split(r"[-–]", part)]
+            except Exception:
+                return None
+            if b < a or b - a > 20:
+                return None
+            out += list(range(a - 1, b))
+        else:
+            try:
+                out.append(int(part) - 1)
+            except Exception:
+                return None
+    return [k for k in out if 0 <= k < n]
 
 
 def opener(p):
@@ -92,9 +130,9 @@ def harvest(words, bridges):
        库里 260,828 条义项 ＝ 德语版 135,179（阶段 1.5a）＋ 英文版 125,649（七月建库）。
        只收德语版，48 万条关系挂不上义项 —— 不是数据缺，是桥不对。
     """
-    rows, stat, seen = [], Counter(), set()
+    rows, stat, seen = [], Counter(), {}
 
-    def take(w, sid, kind, tgt, tags, ref, ed):
+    def take(w, sid, kind, tgt, tags, ref, ed, hidden=0):
         if not tgt:
             stat["丢：目标为空"] += 1
             return
@@ -103,13 +141,22 @@ def harvest(words, bridges):
             return
         key = (w, sid, kind, tgt)
         if key in seen:
-            stat["重复（同词同义项同类型同目标）"] += 1
+            # 🔴 去重键里**没有** `hidden`，而 UNIQUE 约束也没有 —— 同一个键只能留一行。
+            #    ⇒ 撞键时**可见的赢**：先来一条 hidden 再来一条可见，不能因为
+            #      "先到先得"就把该展示的那条挡掉（这个顺序完全取决于源头字段的遍历
+            #      顺序，是个隐含契约，正是要在这里拆掉的那种）。
+            i = seen[key]
+            if not hidden and rows[i][5]:
+                rows[i] = rows[i][:5] + (0,) + rows[i][6:]
+                stat["撞键：hidden 被可见的顶掉"] += 1
+            else:
+                stat["重复（同词同义项同类型同目标）"] += 1
             return
-        seen.add(key)
+        seen[key] = len(rows)
         rows.append((words[w], sid, kind, tgt,
                      json.dumps(tags, ensure_ascii=False) if tags else None,
-                     0, "%s-edition" % ed, ref))
-        stat["收下（%s 版）" % ed] += 1
+                     hidden, "%s-edition" % ed, ref))
+        stat["收下（%s 版）%s" % (ed, "・hidden" if hidden else "")] += 1
 
     for ed in ("de", "en"):
         path, need_filter = EDITIONS[ed]
@@ -132,24 +179,46 @@ def harvest(words, bridges):
                 for field, kind in KIND.items():
                     for j, it in enumerate(e.get(field) or []):
                         stat["源头关系条数"] += 1
-                        sid, si = None, it.get("sense_index")
-                        if ed == "de":
-                            m = PURE_INT.match(str(si)) if si else None
-                            if m:
-                                k = int(m.group(1)) - 1      # 源里从 1 数起
-                                if 0 <= k < len(senses):
-                                    gl = ((senses[k].get("glosses") or [""])[0] or "").strip()
-                                    sid = bridge.get((w, gl))
-                                    stat["  de 下标解析成功" if sid
-                                         else "  de 下标解析了但义项挂不回库"] += 1
-                                else:
-                                    stat["  de 下标越界"] += 1
-                            elif si:
-                                stat["  de 下标不是单个数字（1-3 / 1,2 之类），不猜"] += 1
-                            else:
-                                stat["  de 源头没给下标"] += 1
-                        take(w, sid, kind, (it.get("word") or "").strip(),
-                             it.get("tags"), "kk-%s:%s:%s:%d" % (ed, w, field, j), ed)
+                        si = it.get("sense_index")
+                        tgt = (it.get("word") or "").strip()
+                        ref = "kk-%s:%s:%s:%d" % (ed, w, field, j)
+                        if ed != "de" or not si:
+                            if ed == "de":
+                                stat["  de 源头没给下标（词级显示是对的）"] += 1
+                            take(w, None, kind, tgt, it.get("tags"), ref, ed)
+                            continue
+                        ks = sense_indexes(si, len(senses))
+                        if ks is None:
+                            stat["  de 下标写法认不了"] += 1
+                            take(w, None, kind, tgt, it.get("tags"), ref, ed)
+                            continue
+                        if not ks:
+                            stat["  de 下标越界"] += 1
+                            take(w, None, kind, tgt, it.get("tags"), ref, ed)
+                            continue
+                        # 🔴 **一条源头关系可以落成多行** —— `sense_index: "1-3"` 说的是
+                        #    「这三条义项都有这个关系」，不是「随便挑一条」。
+                        sids = [bridge.get((w, ((senses[k].get("glosses") or [""])[0] or "").strip()))
+                                for k in ks]
+                        got = [x for x in sids if x]
+                        if got:
+                            stat["  de 下标解析成功" if len(got) == len(ks)
+                                 else "  de 下标解析成功（部分义项我们没收）"] += 1
+                            for sid in got:
+                                take(w, sid, kind, tgt, it.get("tags"), ref, ed)
+                            continue
+                        # 🔴🔴 **源头说了是第 N 义的关系，而第 N 义我们没收** ⇒ `hidden=1`。
+                        #    这一族 43,424 条，`Haus` 就在里面：德语版第 14 义是
+                        #    「锤头的中段」，Auge/Bahn/Finne/Pinne 是锤头的其他部位 ——
+                        #    完全正确的**锤子**词条内部关系。我们没收那一义，
+                        #    于是页面上成了「Haus（房子）的反义词是 Auge（眼睛）」。
+                        #    ⚠️ 不是删行：关系本身是源头的事实，删了就查不回来
+                        #      （`[[dont-gate-facts-on-my-uncertainty]]`）。
+                        #      但**「A 的第 14 义的反义词」不等于「A 的反义词」** ——
+                        #      丢掉义项绑定会把一句真话变成一句假话。
+                        #      ⇒ 留行、留证据、不展示。`hidden` 这一列就是为这件事建的。
+                        stat["  🔴 de 下标解析了但这一义我们没收 ⇒ hidden"] += 1
+                        take(w, None, kind, tgt, it.get("tags"), ref, ed, hidden=1)
 
                 # ── 义项级（英文版才有）──
                 for si_, s in enumerate(senses):
@@ -209,7 +278,17 @@ def main():
     for src, w, txt, sid in con.execute(
             "SELECT x.src, d.word, x.text, x.sense_id FROM sense_src x "
             "JOIN dict d ON d.id=x.word_id WHERE x.text IS NOT NULL AND x.sense_id IS NOT NULL"):
-        ed = "de" if src == "de-edition" else "en"
+        # 🔴 2026-09-04 修：原来写死 `src == "de-edition"`，那是**只有一个德语来源**
+        #    时写的判据。之后德语释义又多了两层 —— `de-edition-backfill`（1.5c
+        #    唯一映射，36,134 条）和 `de-edition-adjudicated`（C29 裁决，47,604 条）——
+        #    它们会被这一行判成"英文版"，于是：
+        #      · 德语桥**一条都不长**（还是 135,179），重跑等于白跑；
+        #      · 英文桥里混进 8.4 万条德语原文（配不上任何英文释义，无害但是错的）。
+        #    ⇒ 判据要问「**这是不是德语版的释义**」，不是「它是不是那一个来源名」。
+        #    这正是 `Haus` 反义词挂到「房子」上的原因：源头写着 `sense_index: 14`
+        #    （第 14 义是**锤头的一部分**，Auge/Bahn/Finne/Pinne 都是锤子部件），
+        #    桥接不上 ⇒ sense_id 留 NULL ⇒ 渲染成整个词的反义词。
+        ed = "de" if src.startswith("de-edition") else "en"
         bridges[ed].setdefault((w, (txt or "").strip()), sid)
     n_before = con.execute("SELECT count(*) FROM sense_relation").fetchone()[0]
     print("■ 库内词形 %s ／ 桥：德语版 %s 条・英文版 %s 条 ／ 现有关系 %s（阶段 2a 的 alt_of）"
@@ -233,9 +312,34 @@ def main():
         print("\n(未加 --apply，不写库)")
         return 0
 
+    # 🔴 **重跑必须先删再写，`INSERT OR IGNORE` 单独用是错的。**
+    #    UNIQUE 是 `(word_id, sense_id, kind, target)` —— `sense_id` 在键里。
+    #    桥变好之后，同一条关系会带着**真的 sense_id** 再来一次，与库里那条
+    #    `sense_id=NULL` 的**不冲突** ⇒ 两条并存，而旧的那条照样渲染成
+    #    "整个词的反义词"。`OR IGNORE` 挡得住完全一样的行，挡不住"同一件事的两种说法"。
+    #    ⇒ 本层是**纯派生**（扫 dump 重算），删掉本层再整层重写才是它该有的语义。
+    #
+    # 🔴🔴 **删的范围按 `kind` 圈，不按 `src` 圈。** 第一版我写的是
+    #    `WHERE src IN ('de-edition','en-edition')` ——「阶段 2a 的 alt_of 是另一层」，
+    #    这句话对，但 **2a 写进去的 8,917 条 alt_of 用的正是 `en-edition` 这个 src**，
+    #    于是一条不剩地被删掉了（账的闸当场报「2a alt_of 归位成的关系是 0」，
+    #    已回滚重来）。
+    #    ⚠️ 这和我同一次改动里刚修掉的那个 bug（`src == "de-edition"` 圈不住
+    #      三个德语来源）**是同一个形状**：拿**来源名**去圈「这个产出器拥有哪些行」。
+    #      来源名是给「这条数据是谁给的」用的，回答不了「这一层是谁写的」。
+    #    ⇒ 判据换成「本产出器生产的 kind」，也就是 `KIND` 的值域本身 ——
+    #      它已经在文件顶上声明过一次，这里 import 那一份，不另抄。
+    own = sorted(set(KIND.values()))
+    n_old = con.execute(
+        "SELECT count(*) FROM sense_relation WHERE kind IN (%s)"
+        % ",".join("?" * len(own)), own).fetchone()[0]
     con.close()
-    print("\n■ 将写入 sense_relation %s 行" % f(len(rows)))
-    with dbtool.session("keep-v3-5c-relations", expect={"#sense_relation": len(rows)}) as s:
+    print("\n■ 删旧 %s 行 ／ 写入 %s 行 ／ 净 %+d"
+          % (f(n_old), f(len(rows)), len(rows) - n_old))
+    with dbtool.session("keep-v3-5c-relations",
+                        expect={"#sense_relation": len(rows) - n_old}) as s:
+        s.execute("DELETE FROM sense_relation WHERE kind IN (%s)"
+                  % ",".join("?" * len(own)), own)
         s.executemany(
             "INSERT OR IGNORE INTO sense_relation "
             "(word_id,sense_id,kind,target,tags,hidden,src,src_ref) "

@@ -85,6 +85,81 @@ DERIV = [
 DROP = {"form-of", "alt-of", "combined-form", "multiword-construction",
         "table-tags", "inflection-template", "class"}
 
+# ══════════════════════════════════════════════════════ 语域／时代（2026-09-04 加）
+# 起因：外审拿渲染成品挑错，三条都指到同一件事 ——
+#   `kömmt`「现在时第三人称单数」  源头 tags = [archaic, dialectal, …]
+#   `gib`  「现在时第一人称单数」  源头 tags = [colloquial, …]（标准形是 gebe）
+#   `nimm` 同上
+# 两家都说「这是错的，标准形不是它」。**回源之后判两家都错**：英文版确实收了
+# `ich gib` 这个**口语**一单、`kömmt` 这个**古／方言**三单，数据是对的 ——
+# 错的是我们**把源头的语域标扔了**，只显示语法位置，于是读者看到的是
+# 「kömmt 是 kommen 的现在时第三人称单数」这句**没有前提的话**。
+#
+# 🔴 判据收窄了两轮，两轮都是被数据打回来的（`[[criteria-narrower-than-you-think]]`）：
+#   第一版「带语域标就加前缀」 → 64,245 行
+#   第二版 去掉标签里已写的   → 14,548 行
+#   第三版 ⇒ **4,510 行**，去掉了下面两族：
+#     ① `formal`+`rare` 47,048 行 **全部**落在虚拟式 II 上 —— 那是英文版给整个
+#        虚拟式 II 范式打的**惯例标**，不是这个形式的属性。给四万七千行统一加
+#        「正式·罕用」是在**加噪声不是加信息**（`[[proxy-metric-gets-optimized]]`：
+#        指标涨了、目的坏了）。⇒ `formal`/`rare` 一律不进前缀。
+#     ② `kk-*-forms` 那族 10,251 行标签**本身就是**「废弃异体形式」「口语异体形式」，
+#        再加前缀＝「废 · 废弃异体形式」。
+# ⚠️ 保留「这个形式受限」这一族（废/古/旧/方言/口语/非规范/诗/谑/俚/书面），
+#    去掉「有多罕见」那一族（rare/formal）—— 前者是读者用得上的前提，后者是频次。
+REGISTER = [
+    ("obsolete", "废"),
+    ("archaic", "古"),
+    ("dated", "旧"),
+    ("dialectal", "方言"),
+    ("regional", "地区"),
+    ("colloquial", "口语"),
+    ("informal", "口语"),
+    ("nonstandard", "非规范"),
+    ("slang", "俚"),
+    ("poetic", "诗"),
+    ("literary", "书面"),
+    ("humorous", "谑"),
+]
+# 标签里已经把语域写进去了的那族（`kk-*-forms` 的「废弃异体形式」等），不再加前缀
+REG_IN_LABEL = ("废弃", "口语", "古体", "罕用", "旧式", "非规范", "方言")
+
+
+def register_of(tags):
+    """→ 该加的语域前缀（`古/方言`），没有就 ''。**判据只许这一份**，闸 import 它。"""
+    t = set(tags or ())
+    out = []
+    for k, zh in REGISTER:
+        if k in t and zh not in out:
+            out.append(zh)
+    return "/".join(out)
+
+
+def _with_register(t, lab):
+    """把语域前缀接到语法说明前面。已经写在标签里的不重复加。
+
+    🔴 **必须幂等**：这个函数既用在生成侧（tags → 新标签），也用在修复脚本
+       （已落库标签 → 补前缀），还会被闸调用。不幂等的话「古 · 单数与格」
+       再过一遍就变成「古 · 古 · 单数与格」，而闸会把这当成"没修好"报红。
+       ⚠️ `REG_IN_LABEL` 挡不住它 —— 「古」不在那张表里（表里是「古体」）。
+    """
+    if lab == "变形" or any(a in lab for a in REG_IN_LABEL):
+        return lab
+    r = register_of(t)
+    if not r or lab.startswith(r + " · "):
+        return lab
+    return "%s · %s" % (r, lab)
+
+
+def register_ok(tags, lab):
+    """→ 这一行的标签是不是已经带上了它该带的语域前缀。**闸问这个，不问"再跑一遍等不等"**。"""
+    if not lab or lab == "变形":
+        return True
+    if any(a in lab for a in REG_IN_LABEL):
+        return True
+    r = register_of(tags)
+    return (not r) or lab.startswith(r + " · ")
+
 # compose 识别的全部语法 tag（供 build.py drop-ledger 归桶）
 COMPOSE_TAGS = (
     {k for pairs in (MOOD, TENSE, PERSON, NUMBER, GENDER, CASE, STRENGTH, DEGREE, DERIV)
@@ -94,11 +169,40 @@ COMPOSE_TAGS = (
        "negative", "future", "future-i", "future-ii", "perfect", "pluperfect",
        "dependent", "independent"}
     | DROP
+    | {k for k, _ in REGISTER}          # 2026-09-04 起语域标也被渲染，不再算"未识别"
 )
 
 
 def _pick(t, pairs):
     return [zh for k, zh in pairs if k in t]
+
+
+# 变化类。**这张表和判据只许一份**，闸与修复脚本都 import 这里。
+KLASSEN_ZH = ("强变化", "弱变化", "混合变化")
+
+
+def klassen_run_together(label):
+    """→ 这个标签是不是把多个变化类**连写**了（收尾单 C15 的那个 bug）。
+
+    🔴 判据问的是「**有没有分隔**」，不是「有几个」——
+       `强变化/弱变化/混合变化阳性单数宾格` 有三个变化类，但它是**对的**：
+       源头说这个形式在强/弱/混合变化下都一样。
+       `强变化弱变化混合变化阳性单数宾格` 才是 bug —— 德语里没有这个词。
+    ⚠️ 2026-09-04 修完 C15 之后，回归闸的 B3 仍报 122,356 ——
+       **那时是闸的判据过期了**（它数的是个数）。而修复脚本里另写了一份带分隔符检查的，
+       两份判据打架 ⇒ 抽到这里，谁都别再自己写一遍。
+    """
+    if not label:
+        return False
+    n = sum(label.count(k) for k in KLASSEN_ZH)
+    if n <= 1:
+        return False
+    # 连写 = 两个变化类之间**紧挨着**，中间没有分隔符
+    for a in KLASSEN_ZH:
+        for b in KLASSEN_ZH:
+            if a + b in label:
+                return True
+    return False
 
 
 def compose(tags, legacy=False):
@@ -115,7 +219,15 @@ def compose(tags, legacy=False):
          变形层一重跑就把修复冲掉。**修复必须做在产生这个值的地方。**
     """
     t = set(x for x in tags if x not in DROP)
+    lab = _grammar(t, legacy)
+    # `legacy` 是「按七月建库那天算」，语域前缀是九月加的 ⇒ 不进 legacy（同 DERIV）
+    if legacy or not lab:
+        return lab
+    return _with_register(t, lab)
 
+
+def _grammar(t, legacy=False):
+    """tags 集合 → 纯语法说明（不含语域前缀）。"""
     # —— 构词：优先级最高，且**互斥于**格的组合（它不是一个格）——
     if not legacy:
         for k, zh in DERIV:
@@ -187,15 +299,14 @@ def compose(tags, legacy=False):
     g = _pick(t, GENDER)
     n = _pick(t, NUMBER)
     ca = _pick(t, CASE)
+    # 🔴🔴 **收尾单 C15：同一个函数里两种拼法，多值时连写成一个不存在的词。**
+    #    源头会把三种变化类打包在一个条目里（这个形式在强/弱/混合变化下都一样），
+    #    而 `"".join` 把它拼成 `强变化弱变化混合变化` —— **德语里没有这个词**。
+    #    性和格从一开始就用 `"/".join`（`阳性/中性`、`主格/宾格`），是对的；
+    #    级、变化类、数漏了。**全库 122,356 行。**
+    #    ⇒ 五项统一用 `/`：它们表达的都是「这几种情况下都一样」，不是「先 A 后 B」。
     parts = []
-    if deg:
-        parts.append("".join(deg))
-    if st:
-        parts.append("".join(st))
-    if g:
-        parts.append("/".join(g))
-    if n:
-        parts.append("".join(n))
-    if ca:
-        parts.append("/".join(ca))
+    for x in (deg, st, g, n, ca):
+        if x:
+            parts.append("/".join(x))
     return "".join(parts)

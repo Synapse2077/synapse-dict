@@ -147,6 +147,7 @@ export type GermanEntry = {
   inflections: GermanInflection[];   // ③ 这个词是谁的变形
   derivations: GermanInflection[];   // ③ 构词，**单独一区**
   forms: GermanForm[];               // 词元页反过来看：它有哪些形式
+  derivedForms: GermanForm[];        // 词元页反过来看：**它派生出了谁**（C38）
   relations: GermanRelationGroup[];  // 词条级（sense_id 为空的那 763,001 条）
   audio: GermanAudio[];
   bases: GermanBase[];
@@ -231,7 +232,15 @@ export class GermanDictService {
       senses: this.db.prepare(`
         SELECT s.id, s.pos, s.gender,
                (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='zh' LIMIT 1) AS zh,
-               (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='de' LIMIT 1) AS de,
+               -- 🔴🔴 原来是 LIMIT 1 且没有 ORDER BY —— 一条义项可以挂多条德语释义
+               -- （C29 裁决的设计：德语版常把我们的一条拆得更细，Kastanie 的「树」与「果」都该挂），
+               -- 而那个查询**随机取一条**。外审当场逮到：stehen「合适，好看，合身」
+               -- 挂着 seq=0 nicht funktionieren（错的）和 seq=1 gut passen（对的），
+               -- 页面显示的正是**错的那条**。
+               -- ⇒ 按 seq 排序并全部取出（换行连接，组件逐行渲染）。
+               (SELECT GROUP_CONCAT(text, char(10)) FROM
+                  (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='de'
+                    ORDER BY seq)) AS de,
                (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='en' LIMIT 1) AS en
           FROM sense s WHERE s.word_id = ? ORDER BY s.rank`),
 
@@ -273,10 +282,25 @@ export class GermanDictService {
           FROM inflection i WHERE i.word_id = ? AND i.kind = 'derivation'
          ORDER BY i.base, i.label_zh LIMIT 60`),
 
+      // 🔴 2026-09-05：这条**漏了 `kind` 过滤**（收尾单 C38）。
+      //    `inflectionsOf` 与 `derivOf` 都按 `kind` 分了区（C13 那轮加的），
+      //    而反方向的 `forms` 没有 ⇒ 我把 `stellen ← stehen` 改成 `derivation`
+      //    之后，另外两条查询都躲开了它，**这一条照样把它印在「词形变化」里**。
+      //    ⇒ 「同一个字段有几个读取路径，分区就得做几遍」——
+      //      与 `[[fix-regression-and-gate]]` 第二种机制（换了读取路径）同源，
+      //      只是这次是**同一次改动里的另一条路径**，不是隔天。
       forms: this.db.prepare(`
         SELECT DISTINCT d.word AS form, i.label_zh AS label
           FROM inflection i JOIN dict d ON d.id = i.word_id
-         WHERE i.base_id = ? ORDER BY i.label_zh, d.word LIMIT 200`),
+         WHERE i.base_id = ? AND i.kind <> 'derivation'
+         ORDER BY i.label_zh, d.word LIMIT 200`),
+      // 反方向的构词：**谁是这个词派生出来的**（`stehen` → `stellen 使役派生`）。
+      // 这是真信息，不该被上面那条一并挡掉 —— 它该去「构词」那一区。
+      derivedForms: this.db.prepare(`
+        SELECT DISTINCT d.word AS form, i.label_zh AS label
+          FROM inflection i JOIN dict d ON d.id = i.word_id
+         WHERE i.base_id = ? AND i.kind = 'derivation'
+         ORDER BY i.label_zh, d.word LIMIT 60`),
 
       // ⚠️ 词条级只取**没有义项归属**的（763,001 条）。有归属的走 `relBySense`，
       //    否则同一条会在词条级和义项级各印一遍。
@@ -429,6 +453,7 @@ export class GermanDictService {
       inflections: inf(this.q.inflOf.all(row.id)),
       derivations: inf(this.q.derivOf.all(row.id)),
       forms: this.q.forms.all(row.id) as GermanForm[],
+      derivedForms: this.q.derivedForms.all(row.id) as GermanForm[],
       relations: groupRelations(relMap),
       audio: (this.q.audio.all(row.word) as Array<{
         url: string; region: string | null; region_src: string | null; speaker: string | null;

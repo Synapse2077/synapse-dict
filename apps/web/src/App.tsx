@@ -444,6 +444,7 @@ type DeEntry = {
   inflections: DeInflection[];   // 这个词是谁的变形
   derivations: DeInflection[];   // 构词，**单独一区**（收尾单 C13）
   forms: DeForm[];               // 词元页反过来看：它有哪些形式
+  derivedForms: DeForm[];        // 词元页反过来看：**它派生出了谁**（C38，与变形分区）
   relations: DeRelGroup[];       // 词条级
   audio: DeAudio[];
   freqZipf: number | null;
@@ -3160,7 +3161,9 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                     {s.en && <div className="sense-en"><FrText text={s.en} /></div>}
                     {/* 三语方针的「本语言」那一支（`[[gloss-three-languages]]`）。
                         1.5a 收 135,179 条 + 1.5c 补 36,134 条 = 171,313 条。 */}
-                    {s.de && <div className="sense-src-de">{s.de}</div>}
+                    {s.de && s.de.split('\n').map((line, di) => (
+                      <div className="sense-src-de" key={di}>{line}</div>
+                    ))}
                     {s.altOf.length > 0 && (
                       <div className="sense-altof">
                         {s.altOf.map((a, ai) => (
@@ -3271,6 +3274,23 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
           <h3>词形变化<span className="section-count">{entry.forms.length}</span></h3>
           <div className="de-form-grid">
             {entry.forms.slice(0, 60).map((fm, i) => (
+              <span className="de-form-cell" key={i}>
+                <a href={`#${encodeURIComponent(fm.form)}`}
+                  onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
+                {fm.label && <span className="de-form-label">{fm.label}</span>}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 🔴 构词与变形必须分区（收尾单 C13/C38）：`stellen` 不是 `stehen` 的一个形式，
+          是它的**使役派生**。印在「词形变化」里等于说 `stellen` 是 `stehen` 的一个格。 */}
+      {entry.derivedForms.length > 0 && (
+        <section className="entry-section">
+          <h3>构词<span className="section-count">{entry.derivedForms.length}</span></h3>
+          <div className="de-form-grid">
+            {entry.derivedForms.slice(0, 40).map((fm, i) => (
               <span className="de-form-cell" key={i}>
                 <a href={`#${encodeURIComponent(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>

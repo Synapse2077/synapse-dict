@@ -77,13 +77,17 @@ sys.path.insert(0, str(HERE.parent / "fixes"))
 
 import paths                                              # noqa: E402
 # ⭐ 判据一律 import，不抄。下面每一个都是某个脚本里那一份唯一的判据。
-from fix_colloc_separator import roundtrip                # noqa: E402
-from harvest_pronunciation import DELIM, ELLIPSIS, looks_like_spelling   # noqa: E402
+from build_v3_schema import CJK                           # noqa: E402
+from harvest_pronunciation import DELIM, looks_like_spelling, truncated  # noqa: E402
 from fill_freq import unambiguous                         # noqa: E402
 from translate_examples import is_shell, KNOWN_BAD        # noqa: E402
 from harvest_audio import FOREIGN                         # noqa: E402
 from harvest_relations import KIND                        # noqa: E402
 from recover_alt_of import REL_KIND                       # noqa: E402
+from infl_compose import klassen_run_together             # noqa: E402
+from normalize_region import DOMAIN as REGION_DOMAIN      # noqa: E402
+from drop_article_forms import bad_rows as _article_forms # noqa: E402
+from drop_bad_comparatives import bad_rows as _bad_comparatives  # noqa: E402
 
 # 🔴 `sense_relation.kind` 有**两个**生成者，值域是它们的并集：
 #    阶段 5c 的 `harvest_relations.KIND`（12 个）＋ 阶段 2a 的 `recover_alt_of.REL_KIND`。
@@ -119,35 +123,53 @@ FAKE_INFL = ({"variant"}, {"alternative"}, {"abbreviation"},
 # 否则就是掩盖回归的开关。锁的是**数字**：超了红、低了要求收紧。
 ACCEPT = {
     "A3 义项没有中文": (
-        436,
-        "436 条，收尾单 C19，逐条对得上账：模型判定给不出 340 ＋ 给了英文被写库前的判据"
+        416,   # 🔴 2026-09-05 从 436 收紧到 416：收尾单 C38 删掉 27 条「释义是解析残渣」
+               #    的义项，其中 20 条本来就没有中文。**是闸自己报「⬇ 该收紧」我才来改的**，
+               #    不是我记得。低了不改＝下次真涨回 436 时它一声不吭。
+        "416 条，收尾单 C19，逐条对得上账：模型判定给不出 **320**（原 340，C38 删掉的 20 条"
+        "「释义是 wikitext 残渣」的义项就在这一桶里）＋ 给了英文被写库前的判据"
         "挡下 24（`Bombardierkäfer → bombardier beetle`，**宁可当成缺不当成错**）＋"
         "只有英文原文本族够不着 72。三类都是**缺不是错**，读者看到的是没有。"),
     "B2 变形悬空原形（base_id 为空）": (
-        858,
-        "858 行，收尾单 C10。`base` 文本都在（其中 base 也为空的是 **0**），只是原形词头"
+        857,
+        "857 行（C32 删掉 408 条冗余行时顺带少了 1 条），收尾单 C10。`base` 文本都在（其中 base 也为空的是 **0**），只是原形词头"
         "还没进 dict。**不是缺陷是阶段顺序**：阶段 3 收词之后由 2c 补链回填，"
         "剩下这批的原形连德语版都没有独立条目。⚠️ 展示层查变形**必须走 "
         "`inflection.word_id`，别走 `base_id`**。"),
-    "B3 变形标签把变化类连写（C15）": (
-        122_356,
-        "122,356 行，收尾单 C15，**已知未修**。根因在 `infl_compose.py` 同一个函数里两种"
-        "拼法（性与格 `\"/\".join`、变化类与级 `\"\".join`）⇒ `强变化弱变化混合变化阳性单数宾格`。"
-        "**确定性 bug，判据不用讨论**，但修它要重跑 2b ⇒ 顺序上必须 2b→2c，本轮不动。"),
-    "B4 假变形：异体/缩写/地区拼写被标成变形（C16）": (
-        56_332,
-        "56,332 行，收尾单 C16，**已知未修**。与阶段 2a 同一个病：2a 只扫条目的 `alt_of`，"
-        "没扫 `inflection` 这一侧。⭐ `recover_alt_of.KIND_ZH` 现成有中文 ⇒ 零模型调用可修，"
-        "但要重跑 2b。⚠️ **不含 `[\"auxiliary\"]` 13,493**：那是变位表里的 `haben`/`sein` 行，"
-        "该不该算「假变形」是另一个问题，没想清楚之前不进这条基线（`[[record-the-negative-decision]]`）。"),
-    "D6 有义项的词形没有读音": (
-        18_127,
-        "18,127 个，收尾单 C21。**有意留空**：①源头 `ipa` 是 `[…]` 占位符 10,688"
+    # ⚪ **B3 / B4 不再进 ACCEPT：2026-09-04 已修**（`fixes/relabel_inflection.py`
+    #    从存着的 `tags` 重算 189,763 行标签；根因 `infl_compose.compose()` 的
+    #    「同一函数里两种拼法」也已改掉，所以重跑 2b 不会倒退）。
+    #    留着空基线＝这两条从此非零也不会红，所以**删掉**。
+    "D6 有义项的词形没有读音（读者口径）": (
+        34_606,  # 🔴🔴 2026-09-05 判据口径改成「读者看得见的」⇒ 18,124 → 47,453，
+                 #    当天做完 C41（补英文版音标 12,847 个词形）⇒ 47,453 → **34,606**。
+                 #    差的 29,329 个词形 `dict.ipa` 有值但 `pronunciation` 没有行，
+                 #    而阶段 8 之后展示层只读后者 ⇒ 页面上一个音标都没有。
+                 #    **数字先涨 2.6 倍是因为它以前在量错的东西，再降是因为真的补上了。**
+        "34,606 个（收尾单 C21）。分三块，逐块对得上账："
+        "①**真·源头也没有** 18,124 —— 源头 `ipa` 是 `[…]` 占位符 10,688（德语版自己说没有）"
+        "＋德语版整个没给 7,439，已定不造 G2P（C5）；"
+        "②**只有遗留列 `dict.ipa` 有值、今天的英文版也不给了** 16,483（收尾单 C41 的残余）——"
+        "12,328 个词形**根本不在**今天的英文版德语条目里（dump 是 8-31 重下的，"
+        "七月那份已被保留策略清掉）、4,155 个条目还在但没有可用音标；"
+        "③零头。<br>"
+        "✅ **2026-09-05 已补 12,847**（`fixes/fill_ipa_from_en.py`，`src='en-edition'`）。"
+        "推翻了本条原来写的「英文版与德语版 39% 实质分歧、有意不搬」——**那 39% 是我度量出来的**，"
+        "见收尾单 C41。<br>"
+        "🔴 旧理由（阶段 7 写的）是「只查 `pronunciation` 是闸的口径窄」——"
+        "**那句话在阶段 8 之后就反了**，留在这里作为「判据会随读取路径过期」的实例。"
+        "原文：18,127 个，收尾单 C21。**有意留空**：①源头 `ipa` 是 `[…]` 占位符 10,688"
         "（德语版自己说这里没有音标）②德语版整个没有 7,439。已定不造 G2P（C5），"
         "外版只能再补 203 个。🔴 分母是 `dict.ipa` ∪ `pronunciation` ——"
         "只查 `pronunciation` 会得到 47,456，那是**闸的口径窄**不是回归。"),
     "B5 空白页（无义项、无变形、无指针）": (
-        49_363,
+        49_364,
+        "🔴 **2026-09-05 从 49,363 涨到 49,364，涨的那一个是有意的**（收尾单 C38）："
+        "`Strassendirnen` 唯一那条义项的释义是 `==== Worttrennung ====` —— 纯 wikitext 残渣，"
+        "页面上正把它当定义印着。删掉之后这一页从**印着错东西**变成**空白**。"
+        "⇒ 这是**拿「错」换「缺」**，正是 `FRAMEWORK §一` 定的方向（错比缺更伤权威），"
+        "所以基线跟着涨 1 而不是回头把残渣留着让数字好看。"
+        "⚠️ 涨 1 要写清楚是哪一个词、为什么 —— 说不出是哪一个就不是「有意的」，是回归。\n"
         "49,363 个，收尾单 C28。**阶段 2d 之后**（67,315 → 49,363，-26.7%），逐条对得上账："
         "①源头两版 `forms` 里**根本没有归属** 45,119 ②有归属但按判据**有意不连** 4,244"
         "（纯指针页上的兄弟变格形 `Bittens → Bitten`／形式就是词头自己／三元组去重）。"
@@ -156,7 +178,7 @@ ACCEPT = {
         "扫 dump 发现**只对三分之二成立**，33.0% 源头明明给了归属。"
         "⇒ 闸的价值不在于它绿，在于它逼着把每个数字重新量一遍。"),
     "H6 两张表的 region 值域不同源（C31）": (
-        6,
+        0,
         "6 个值只出现在一张表里，收尾单 C31：`pronunciation` 用 `at`/`ch`/`de-north`/`de`"
         "（kaikki 原样），`audio` 用 `de-AT`/`de-CH`（BCP-47 风格）—— 交集是空的。"
         "⚠️ 展示层的 `DE_REGION_LABELS` 已把两套都译成中文，页面上看不出问题，"
@@ -180,6 +202,36 @@ ACCEPT = {
 }
 
 
+# ⭐ **这四条收尾单也要引用**（账的闸 P5：收尾单的「规模」栏也锁数字）。
+#    提到模块级是为了**判据只许一份** —— 两道闸问同一件事时，绝不能各写一版 SQL。
+#    `[[fix-regression-and-gate]]` 第三种机制就是这么来的：闸与它守的逻辑判据不一致，
+#    于是闸在报自己的 bug。这里的风险更隐蔽：两道闸各自都绿，而它们锁的是**两个不同的数**。
+Q_SENSE_NO_ZH = ("SELECT COUNT(*) FROM sense s WHERE NOT EXISTS"
+                 "(SELECT 1 FROM sense_gloss g WHERE g.sense_id=s.id AND g.lang='zh')")
+Q_INFL_ORPHAN_BASE = "SELECT COUNT(*) FROM inflection WHERE base_id IS NULL"
+Q_EXAMPLE_NO_ZH = ("SELECT COUNT(*) FROM example e WHERE NOT EXISTS"
+                   "(SELECT 1 FROM example_gloss g WHERE g.example_id=e.id AND g.lang='zh')")
+# 🔴🔴 **2026-09-05：这条判据的口径反过来了，因为阶段 8 换了读取路径。**
+#    旧口径是 `dict.ipa ∪ pronunciation`，理由写在收尾单 C21 里：
+#    「只查 `pronunciation` 会得到 47,456，那是**闸的口径窄**」。
+#    那个判断是**阶段 7 做的，当时 `german.ts` 还是老单表版、确实读 `dict.ipa`**。
+#    阶段 8 把展示层重写成 v3 之后，`HEAD` 里**根本没有 `ipa`**，读音只从
+#    `pronunciation` 出 ⇒ **旧口径把读者看不见的数据算成了「已覆盖」**。
+#    实测差额 **29,329 个有义项的词形**：`dict.ipa` 有值、`pronunciation` 没有行、
+#    页面上一个音标都没有（`Rohprodukt` 库里躺着 `ˈʁoːpʁɔdʊkt`，渲染出来是空的）。
+#    ⇒ 判据换成**读者口径**：只算 `pronunciation`。18,124 → **47,453**。
+#    ⚠️ 这不是回归，是**闸终于开始量对的东西**（`[[fix-regression-and-gate]]` 第二种机制：
+#      数据还在、查原列永远绿，而用户看到的是没有）。
+Q_WORD_NO_IPA = ("SELECT COUNT(*) FROM (SELECT DISTINCT s.word_id FROM sense s "
+                 "WHERE NOT EXISTS(SELECT 1 FROM pronunciation p WHERE p.word_id=s.word_id))")
+
+
+def _has(con, name):
+    """→ 这张表在不在。闸不许因为一张表没了就崩 —— 那是 A1 的活，不是别的断言的死法。"""
+    return con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+                       (name,)).fetchone()[0] > 0
+
+
 def build(con):
     q1 = lambda s: con.execute(s).fetchone()[0]
     C = []
@@ -189,19 +241,33 @@ def build(con):
     add("A", "A1 v3 的十三张表少了任何一张",
         len(TABLES) - q1("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN %r"
                          % (TABLES,)))
-    # 判据本体是 `fix_colloc_separator.roundtrip`，不在闸里重写一版。
-    # 🔴🔴 **第一版查错了对象，同样是个恒真的断言**：`roundtrip` 是给
-    #    `dict.collocation`（一行「德语 中文」、多行用 \n 分隔）设计的，
-    #    我拿去比 v3 `collocation.text`（只有德语部分）⇒ `split_colloc` 切不出中文、
-    #    按设计原样返回 ⇒ 恒等，永远 0。逮到它的是变异 M1。
-    #    ⇒ **「import 生成侧的判据」还不够，得喂它生成侧那个对象。**
-    add("A", "A2 搭配分隔符不可逆",
-        sum(1 for (c,) in con.execute("SELECT collocation FROM dict "
-                                      "WHERE collocation IS NOT NULL AND collocation<>''")
-            for ln in c.split("\n") if ln.strip() and roundtrip(ln) != ln))
-    add("A", "A3 义项没有中文",
-        q1("SELECT COUNT(*) FROM sense s WHERE NOT EXISTS"
-           "(SELECT 1 FROM sense_gloss g WHERE g.sense_id=s.id AND g.lang='zh')"))
+    # 🔴🔴 **2026-09-05 换了口径，因为它查的那一列被降掉了。**
+    #    旧 A2 查 `dict.collocation`（一行「德语 中文」）能不能被 `roundtrip` 原样拼回。
+    #    那是**迁移锚点列**，阶段 0 计划里写着「阶段 8 之后降列」，2026-09-05 已降。
+    #    降之前用**真的切分器** `split_colloc` 逐行验过：16,783 行**一条不差**
+    #    地对应到 v3 的 (`collocation.text`, `collocation_gloss.text`) 三元组
+    #    ⇒ 内容没丢，只是问题的形状变了。
+    #    ⚠️ 旧问题（一个串里德中混着、切不开）在 v3 结构下**不可能再发生** ——
+    #      德语和中文本来就在两张表。新口径问的是「**切的时候有没有切干净**」。
+    #    ⇒ **退役一条断言，必须用同一件事的 v3 形状替换，不许直接删。**
+    #      判据 import `build_v3_schema.CJK`，不在闸里另写一个汉字正则。
+    add("A", "A2 搭配的德中没切干净（v3 口径）",
+        sum(1 for (t,) in con.execute("SELECT text FROM collocation") if CJK.search(t or ""))
+        + (con.execute("SELECT COUNT(*) FROM collocation c WHERE NOT EXISTS("
+                       "SELECT 1 FROM collocation_gloss g WHERE g.collocation_id=c.id "
+                       "AND g.lang='zh')").fetchone()[0]
+           if _has(con, "collocation_gloss")
+           # 🔴 表整个没了 ⇒ **所有搭配都没有中文**，这就是 A2 该报的数。
+           #    变异 M10 (`DROP TABLE collocation_gloss`) 逮到过：第一版直接查这张表，
+           #    表一没就**整个闸崩掉**。A1 会报「少了一张表」，但那不该让 A2 连跑都跑不起来 ——
+           #    **会崩的闸比会误报的闸更糟：它一条结论都给不出。**
+           #    ⚠️ 这个洞是我 2026-09-05 换 A2 取数对象时引入的（旧版查 `dict.collocation`，
+           #      碰不到这张表）。**换取数对象时不只要问「断言对不对」，还要问
+           #      「它依赖的东西不在时会怎样」。**
+           else con.execute("SELECT COUNT(*) FROM collocation").fetchone()[0])
+        + (sum(1 for (t,) in con.execute("SELECT text FROM collocation_gloss WHERE lang='zh'")
+               if not CJK.search(t or "")) if _has(con, "collocation_gloss") else 0))
+    add("A", "A3 义项没有中文", q1(Q_SENSE_NO_ZH))
     add("A", "A4 sense_gloss 指向不存在的义项",
         q1("SELECT COUNT(*) FROM sense_gloss g LEFT JOIN sense s ON s.id=g.sense_id "
            "WHERE s.id IS NULL"))
@@ -212,19 +278,39 @@ def build(con):
     add("B", "B1 变形指向自己",
         q1("SELECT COUNT(*) FROM inflection i JOIN dict d ON d.id=i.word_id "
            "JOIN dict b ON b.id=i.base_id WHERE d.word=b.word"))
-    add("B", "B2 变形悬空原形（base_id 为空）",
-        q1("SELECT COUNT(*) FROM inflection WHERE base_id IS NULL"))
-    # 🔴 按含义查：**一个标签里出现了多个互斥的变化类**。
-    #    不查写死的子串对 —— 第一版只列了两对，漏掉一半（61,297 vs 122,356）。
+    add("B", "B2 变形悬空原形（base_id 为空）", q1(Q_INFL_ORPHAN_BASE))
+    # 🔴 判据 import 生成侧那一份 `klassen_run_together`，闸不自己写。
+    #    🔴🔴 **2026-09-04 这条判据错过两次，方向相反**：
+    #      v1 只列了两个子串对 ⇒ 漏掉一半（61,297 vs 122,356）；
+    #      v2 数「出现几个变化类」⇒ C15 修好之后**仍报 122,356**，因为正确的
+    #         `强变化/弱变化/混合变化…` 照样有三个 —— **闸差点把修复说成没修**。
+    #      ⇒ v3 问的是「有没有**分隔**」，而且判据搬进 `infl_compose`，
+    #        修复脚本与闸共用一份（之前是两份，打架）。
     add("B", "B3 变形标签把变化类连写（C15）",
         sum(1 for (x,) in con.execute("SELECT label_zh FROM inflection WHERE label_zh IS NOT NULL")
-            if sum(x.count(k) for k in KLASSEN) > 1))
+            if klassen_run_together(x)))
     # 🔴 解析 JSON 再比**集合**，不拿字符串比（存的是带空格的 JSON、元素顺序不保证）。
     add("B", "B4 假变形：异体/缩写/地区拼写被标成变形（C16）",
         _fake_infl(con))
     # 🔴🔴 **这条没有 ACCEPT，是真红。** C11 当初记 6 条并注明「收词之后必须重量」——
     #    这就是那次重量：阶段 3 收进来的词形有一大批从没被 2c 连过线。
     add("B", "B5 空白页（无义项、无变形、无指针）", _blank_pages(con))
+    # 🔴🔴 **收尾单 C34：冠词被写成名词的变格形式**（`die ← 20-Jährige 主格`）。
+    #    源头的名词变格表带冠词列，解析时把冠词那一格当成了词形（99.2% 来自 `kk-fr-forms`）。
+    #    ⚠️ **是读渲染成品读出来的** —— 混在 536 万行变形里，
+    #      任何按行数/不变量做的闸都看不见，而它就摆在 `die`/`der`/`das`
+    #      这些**最高流量**的页面上。
+    #    🔴 根因在生成侧（`link_edition_forms` 不认得"这一格是冠词列"），
+    #      **重跑 2c 会让它回来** ⇒ 这条断言就是拦它的（`[[replay-scripts-undo-fixes]]`）。
+    #    判据 import `drop_article_forms.bad_rows`，闸不自己写一遍 SQL。
+    add("B", "B6 冠词被写成名词的变格形式（C34）", _article_forms(con))
+    # 🔴🔴 **收尾单 C7：造出来的比较级／最高级**（`in → iner`、`butch → butcher`、
+    #    `crazy → crazier`）。根因是七月用豆包给一等字段补空、没留来源标记。
+    #    判据两个**独立**信号相交：①`entry` 没有这个值（＝kaikki 没给）
+    #    ②声称的形式在全库 120 万词形里**不存在**。
+    #    ⚠️ 判据 import `drop_bad_comparatives.bad_rows`，闸不自己写一遍
+    #      —— 那正是本文件开头骂的第三种机制。
+    add("B", "B7 造出来的比较级（C7）", len(_bad_comparatives(con)))
 
     # ── D 组：音标层（阶段 4）───────────────────────────────────
     # 🔴 只查**首尾**定界符。C23：`apaʁt[ə]ˈmɑ̃ː` 中间的 `[ə]` 是"可选央元音"的标准记法、
@@ -238,9 +324,16 @@ def build(con):
     add("D", "D1 音标首尾还带定界符",
         sum(1 for (x,) in con.execute("SELECT ipa FROM pronunciation WHERE ipa IS NOT NULL AND ipa<>''")
             if x[0] in DELIM or x[-1] in DELIM))
-    add("D", "D2 音标含省略号",
-        sum(1 for (x,) in con.execute("SELECT ipa FROM pronunciation")
-            if ELLIPSIS.search(x or "")))
+    # 🔴 2026-09-05：判据从「含省略号」换成 `truncated(ipa, word)`（收尾单 C22）。
+    #    「含不含 …」是**形式**，「这条音标是不是半截」才是**含义** ——
+    #    德语的分离式习语 `weder … noch [ˈveːdɐ … nɔx]` 能独立读，
+    #    它的 `…` 对应词形自己的空位。旧判据把这 10 条当占位符丢了。
+    #    ⚠️ 闸必须跟着生成侧改，否则就是 `[[fix-regression-and-gate]]` 第三种机制
+    #      （闸与它守的逻辑用了两个不同判据 ⇒ 闸在报自己的 bug）。
+    add("D", "D2 音标是半截/占位符",
+        sum(1 for w, x in con.execute("SELECT d.word, p.ipa FROM pronunciation p "
+                                      "JOIN dict d ON d.id=p.word_id")
+            if truncated(x or "", w)))
     add("D", "D3 音节切分冒充读音",
         sum(1 for w, x in con.execute("SELECT d.word, p.ipa FROM pronunciation p "
                                       "JOIN dict d ON d.id=p.word_id")
@@ -254,11 +347,7 @@ def build(con):
         q1("SELECT COUNT(*) FROM (SELECT word_id,ipa,notation,pos FROM pronunciation "
            "GROUP BY 1,2,3,4 HAVING COUNT(*)>1)"))
     # 🔴 分母是 `dict.ipa` ∪ `pronunciation` —— 老扁平列里的音标也算数（C21 就是这么量的）。
-    add("D", "D6 有义项的词形没有读音",
-        q1("SELECT COUNT(*) FROM (SELECT DISTINCT s.word_id FROM sense s "
-           "JOIN dict d ON d.id=s.word_id "
-           "WHERE COALESCE(d.ipa,'')='' "
-           "  AND NOT EXISTS(SELECT 1 FROM pronunciation p WHERE p.word_id=s.word_id))"))
+    add("D", "D6 有义项的词形没有读音（读者口径）", q1(Q_WORD_NO_IPA))
 
     # ── E 组：例句层（阶段 5a / 5b）────────────────────────────
     # 🔴 判据的后半句不能丢：源头给了粗体位置就认，因为词常以**变形**出现
@@ -275,9 +364,7 @@ def build(con):
     add("E", "E4 example_gloss 指向不存在的例句",
         q1("SELECT COUNT(*) FROM example_gloss g LEFT JOIN example e ON e.id=g.example_id "
            "WHERE e.id IS NULL"))
-    add("E", "E5 例句没有中文",
-        q1("SELECT COUNT(*) FROM example e WHERE NOT EXISTS"
-           "(SELECT 1 FROM example_gloss g WHERE g.example_id=e.id AND g.lang='zh')"))
+    add("E", "E5 例句没有中文", q1(Q_EXAMPLE_NO_ZH))
 
     # ── F 组：语义关系（阶段 5c）───────────────────────────────
     add("F", "F1 关系目标为空或自指",
@@ -400,7 +487,13 @@ def _region_split(con):
         "SELECT DISTINCT region FROM pronunciation WHERE region IS NOT NULL")}
     b = {r for (r,) in con.execute(
         "SELECT DISTINCT region FROM audio WHERE region IS NOT NULL")}
-    return len(a ^ b)
+    # 🔴🔴 **2026-09-04 判据改过一次，理由必须写清楚**：
+    #    v1 是 `len(a ^ b)`（两张表值域必须相同）—— C31 修完当场报 1，
+    #    因为 `de-DE` 只在音标表有：阶段 6 定了 `De-` 前缀只表示「德语」不表示「德国」，
+    #    录音表**有意**不写 `de-DE`。那是**覆盖面差异，不是词汇表冲突**。
+    #    ⇒ v2 问「值在不在同一张登记表里」，表 import `normalize_region.DOMAIN`。
+    #    ⭐ 检验这不是放水：修之前的 `at`/`ch`/`de` 都不在域里 ⇒ v2 照样报红。
+    return len((a | b) - REGION_DOMAIN)
 
 
 def _blank_pages(con):
@@ -519,12 +612,13 @@ def mutate():
             print("   %-4s %s（%s：%s → %s）"
                   % (label, "✅ 逮到" if good else "🔴 **漏了**", name, f(before), f(after)))
 
-        # 🔴 变异必须打在**断言真正查的那个对象**上。第一版打 `collocation.text`
-        #    而断言查 `dict.collocation` ⇒ 变异空转、报「漏了」（这正是它该报的）。
-        check("M1", "UPDATE dict SET collocation=replace(collocation,' ','  ') "
-                    "WHERE collocation IS NOT NULL AND collocation<>'' "
-                    "AND rowid IN (SELECT rowid FROM dict WHERE collocation IS NOT NULL "
-                    "AND collocation<>'' LIMIT 40)", "A2 搭配分隔符不可逆")
+        # 🔴 变异必须打在**断言真正查的那个对象**上。这条被改过两次：
+        #    第一版打 `collocation.text` 而断言查 `dict.collocation` ⇒ 空转；
+        #    2026-09-05 `dict.collocation` 降列、断言换成 v3 口径 ⇒ **对象又变回来了**。
+        #    ⇒ 每次改断言的取数对象，都要回来核这条变异还打不打得中。
+        check("M1", "UPDATE collocation SET text=text||'中' "
+                    "WHERE rowid IN (SELECT rowid FROM collocation LIMIT 40)",
+              "A2 搭配的德中没切干净（v3 口径）")
         check("M2", "DELETE FROM sense_gloss WHERE lang='zh' AND rowid IN "
                     "(SELECT rowid FROM sense_gloss WHERE lang='zh' LIMIT 500)",
               "A3 义项没有中文")
@@ -551,6 +645,16 @@ def mutate():
         #    实测拿掉后 `WHERE word=?` 从 `SEARCH (word=?)` 退回 `SCAN`（120 万行）。
         check("M11", "DROP INDEX idx_word_bin",
               "A6 有 NOCASE 索引却没有配套 BINARY 索引")
+        # 🔴 2026-09-05：D2 的判据换了形状（`truncated` 第四版加了连字符，收尾单 C42），
+        #    而**它一直没有变异**。判据改了、没人打它一下，就不知道它还咬不咬得住
+        #    —— 这正是 M4 逮到「恒假的 GLOB 模式」那次的教训。
+        #    ⚠️ 变异要打在判据**新增的那一半**上：注入的是连字符半截，不是省略号，
+        #      否则第三版的旧判据也能通过，这条变异等于没测新东西。
+        check("M12", "INSERT INTO pronunciation "
+                     "(word_id,ipa,notation,is_primary,src,src_ref) "
+                     "SELECT d.id,'-ˌbaɐ̯t','phonemic',0,'en-edition','mutate' FROM dict d "
+                     " WHERE d.word NOT GLOB '-*' LIMIT 20",
+              "D2 音标是半截/占位符")
         con.close()
 
     # M-ACCEPT：**「已接受」不许等于「不再看」。** 把一条已接受基线顶上去，闸必须红。

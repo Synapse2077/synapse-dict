@@ -20,7 +20,8 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { ItalianEntryView, SpanishEntryView, FrenchEntryView, PortugueseEntryView } from './App';
+import { ItalianEntryView, SpanishEntryView, FrenchEntryView, PortugueseEntryView,
+         GermanEntryView } from './App';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
@@ -45,9 +46,10 @@ const words = fileArg
 //    ⚠️ pt 的视图签名与 it/es/fr 不同（**没有 `speakLocale`**），单独一条分支。
 const View = lang === 'es' ? SpanishEntryView
   : lang === 'fr' ? FrenchEntryView
-  : lang === 'pt' ? PortugueseEntryView : ItalianEntryView;
+  : lang === 'pt' ? PortugueseEntryView
+  : lang === 'de' ? GermanEntryView : ItalianEntryView;
 const locale = lang === 'es' ? 'es-MX' : lang === 'fr' ? 'fr-FR'
-  : lang === 'pt' ? 'pt-BR' : 'it-IT';
+  : lang === 'pt' ? 'pt-BR' : lang === 'de' ? 'de-DE' : 'it-IT';
 const svc = getService(lang) as unknown as { getEntry(w: string): unknown };
 
 /**

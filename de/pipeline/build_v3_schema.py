@@ -236,6 +236,14 @@ DDL = [
          UNIQUE(word, file)
        )""",
 ]
+def _register_where():
+    """语域标预筛的谓词 —— 与 `test_plan_ledger._c36` 用的是同一串（都由 `REGISTER` 生成）。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from infl_compose import REGISTER
+    assert all(k.isascii() and k.isalpha() for k, _ in REGISTER), "REGISTER 的键必须是纯字母"
+    return " OR ".join("tags LIKE '%%%s%%'" % k for k, _ in REGISTER)
+
+
 IDX = [
     "CREATE INDEX idx_sense_word ON sense(word_id)",
     "CREATE INDEX idx_sensesrc_word ON sense_src(word_id)",
@@ -252,6 +260,27 @@ IDX = [
     "CREATE INDEX idx_col_sense ON collocation(sense_id)",
     "CREATE INDEX idx_colg_lang ON collocation_gloss(lang)",
     "CREATE INDEX idx_audio_word ON audio(word)",
+    # 🔴 2026-09-05 补。收尾单 C32 的判据是
+    #      `EXISTS(SELECT 1 FROM inflection b WHERE b.word_id=a.word_id AND b.base=a.base
+    #              AND b.kind='derivation')`
+    #    —— 相关子查询跑在 536 万行上，只有 `idx_infl_word(word_id)` 时是
+    #    「外层全扫 536 万 × 内层按 word_id 取一堆再过滤」⇒ **一次要跑 15 分钟以上**。
+    #    而这条判据挂在账的闸里、账的闸挂在 `dbtool.session` 上 ⇒ **每次写库都跑一遍**。
+    #    ⚠️ 它从 09-04 建 C32 那天起就是慢的，我一整天都以为「写库本来就慢」。
+    #      加上覆盖索引之后 **15 分钟 → 2.02 秒**，计划从
+    #      `SEARCH b USING INDEX idx_infl_word` 变成 `USING COVERING INDEX`。
+    #    ⇒ `[[query-perf-collation-traps]]`「性能问题要等数据长大才咬人」的第五次实例；
+    #      这一次的新形状是**慢的是闸本身**，而闸是绿的，所以没有任何东西会报警。
+    "CREATE INDEX idx_infl_word_base_kind ON inflection(word_id, base, kind)",
+    # 同上：C16/C32 的判据都要按 label_zh 先筛（ 有 50 万行）。
+    "CREATE INDEX idx_infl_label ON inflection(label_zh)",
+    # 🔴 **局部索引**：收尾单 C36 的判据要在 536 万行里找「tags 带语域标」的那 14,967 行，
+    #    12 个 LIKE 全表扫 **8.15 秒**，而这道闸挂在每次写库上。
+    #    索引谓词就是那串 OR ⇒ **0.03 秒，行数一模一样**。
+    #    ⚠️ 谓词由 `infl_compose.REGISTER` 生成，两边永远同源；
+    #      真改了 `REGISTER` 而索引没跟上，后果是**变慢不是变错**（回退全表扫），
+    #      且账的闸的计时预算会当场把它报出来。
+    "CREATE INDEX idx_infl_register ON inflection(id) WHERE " + _register_where(),
 ]
 
 # 中文释义的来源：`translation_src` 整列是空的（0 行），逐条来源**证明不了**。

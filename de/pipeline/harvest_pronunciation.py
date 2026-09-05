@@ -17,6 +17,15 @@
    ⇒ 为 203 个词形引入一整套归一 + 质量闸不划算。变形层要不要收法语版
      （10,486 / 903,814）等这一步做完再单独决定 —— 那是另一个问题。
 
+⚠️ **2026-09-05（C41）：上面那句「六个外版一个不收」漏掉了第八个来源。**
+   那 203 是「德语版之外的**六个外版**还能多补谁」，而**英文版德语切片不在那六版里**
+   —— 它是我们**建库的源**，它给的音标七月就以 `dict.ipa` 躺在库里，
+   只是阶段 8 换了读取路径之后读者看不见了。实测它还能补 12,847 个**有真义项**的词形。
+   ⇒ `pronunciation` 现在有两个来源：`de-edition` ＋ `en-edition`
+     （`fixes/fill_ipa_from_en.py`，复用本文件的四道过滤与 `REGION`）。
+   🔴 教训：**落点度量的分母里漏掉了一个已经在库里的来源** ——
+     我把「外版」和「建库源」当成两回事，而对音标层它们是同一类东西。
+
 ═══ 🔴 判据跟着数据走，pt 那套有三条搬不过来 ═══
 ① **notation 不能按定界符判。** pt 用「`[…]`→narrow，其余 phonemic」，
    而**德语版 131,501 条音标 100% 是 `[…]`** —— 那是这一版的行文约定，
@@ -61,9 +70,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fixes"))
+
 import dbtool                                   # noqa: E402
 import paths                                    # noqa: E402
 from intake_edition_words import EDITIONS        # noqa: E402
+# region 的登记值域在 C31 那里定的，**这里 import 不重写**（判据只许一份）。
+from normalize_region import DOMAIN as REGION_DOMAIN   # noqa: E402
 
 f = lambda n: format(n, ",")
 SRC = "de-edition"
@@ -78,14 +91,71 @@ SEP = re.compile(r"[-‐‑–·.·|/‧⋅  ​]")
 #    读者看到 `…zoːn` 得不到任何信息 —— **半截音标是"错"不是"缺"**。
 #    ⇒ 判据从"整串是不是占位符"改成"**这串能不能独立读**"。
 ELLIPSIS = re.compile(r"…")
+# 半截音标的第二种记号：源头用连字符标「前/后半截同上」。字符集与 `ipa_conventions.HYPH` 同。
+HYPH = "-‐‑–"
+
+
+def truncated(ipa, word):
+    """→ 这条音标是不是「半截/占位符」。**判据只许这一份**，闸 import 它。
+
+    🔴 **第三版（2026-09-05）**。前两版的历史见上面那段注释，第二版「含 `…` 一律丢」
+       的理由是「这串能不能独立读」—— 对 `…zoːn`（源头只给了后半截）完全成立，
+       但它**同时误杀了德语的分离式习语**：
+
+           weder … noch        [ˈveːdɐ … nɔx]
+           entweder … oder     [ˈɛntˌveːdɐ … ˈoːdɐ]
+           sowohl … als auch   [zoˈvoːl … als ˈʔaʊ̯x]
+           auf … hin           [aʊ̯f … hɪn]
+
+       这些**能独立读**，`…` 对应的是**词形自己的空位**，不是截断。
+       ⇒ 判据换成：**音标里的 `…` 合法，当且仅当词形本身也有 `…`。**
+         这才是「省略号在这里是什么意思」，而不是「有没有省略号」。
+       实测：德语版里被误杀 10 条（另 7 条是真半截 `EuPs → [ˈ…]`，照丢）。
+
+    🔴 **第四版（2026-09-05，做 C41 时）**：省略号不是源头唯一的「接续」记号，
+       **连字符是另一个**，而且量大得多。英文版给 `Svalbard` 四条读音：
+
+           ˈsvaːlˌbart   ˈsʋaːlˌbaʁt   -ˌbaɐ̯t   -ˌbaːt
+
+       后两条的 `-` 意思是「前半截同上、后半截读成这样」。单独摆到页面上就是
+       **读者读不出任何东西的半截**，与 `…zoːn` 一模一样。实测 1,309 条
+       （英文版 1,288 ＋ 德语版 21 —— **阶段 4 就漏了，C41 只是把它放大了 60 倍**）。
+    ⚠️ 判据必须**按位置**配、不能按包含配：`…` 那条用「词形里有没有 `…`」够了，
+       连字符不行 —— `USB-Stick` 词形中间就有连字符，按包含判会把 `-ˌʃtɪk` 放行。
+       ⇒ **音标开头的连字符合法，当且仅当词形也以连字符开头**（结尾同理）。
+       词缀条目（`-algie` → `-alˈɡiː`）因此照样收得进来。
+    """
+    w = word or ""
+    if "…" in ipa and "…" not in w:
+        return True
+    if ipa[:1] in HYPH and w[:1] not in HYPH:
+        return True
+    if ipa[-1:] in HYPH and w[-1:] not in HYPH:
+        return True
+    return False
 # 地区标记 → region 值。**只收真·地区**，录音人性别/语域/词形标记不进这一列。
+# 🔴🔴 **值域是 C31 登记的那一份，不是 kaikki 原样。**
+#    2026-09-05 之前这张表产的是 `at`/`ch`/`de`（kaikki 内部约定），而 C31
+#    已经把**落库的行**统一成了 BCP-47（`de-AT`/`de-CH`/`de-DE`）。生成侧没跟着改
+#    ⇒ C41 复用本表补英文版音标时，577 行当场把 C31 撤销了一半
+#    （`[[replay-scripts-undo-fixes]]`）。现在这张表**直接产登记值域里的值**。
 REGION = {
-    "Austrian German": "at", "Austria": "at",
-    "Swiss Standard German": "ch", "Switzerland": "ch",
-    "Germany": "de", "German": "de",
+    "Austrian German": "de-AT", "Austria": "de-AT",
+    "Swiss Standard German": "de-CH", "Switzerland": "de-CH",
+    "Germany": "de-DE", "German": "de-DE",
     "North German": "de-north", "Northern German": "de-north",
     "South German": "de-south", "Southern German": "de-south",
+    # ⭐ 2026-09-05（C41）：英文版用**连字符**写同一批地区名，德语版用空格。
+    #    这四个是**在英文版落点集上全量数过的**（33 种标记逐条看完）：
+    #    `Southern-Germany` 256／`Swiss` 4／`Northern-Germany` 3／`Austrian` 1。
+    # 🔴 有意**不**收的：`Northern` 15／`Southern` 8／`Western` 6／`Bavaria` 6／
+    #    `Westphalian` 1 —— 前三个单独出现时说不出是哪一国的北/南/西，
+    #    后两个比值域细。**判不出就不硬判**，硬塞一个值＝拿「错」换「缺」。
+    "Southern-Germany": "de-south", "Northern-Germany": "de-north",
+    "Swiss": "de-CH", "Austrian": "de-AT",
 }
+# 🔴 **import 时就断言**，别等写完库让闸去发现。判据只许一份：值域在 C31 那里登记。
+assert set(REGION.values()) <= REGION_DOMAIN, set(REGION.values()) - REGION_DOMAIN
 
 
 def opener(p):
@@ -148,7 +218,7 @@ def harvest(keep):
                     stat["🔴 丢弃：X-SAMPA 冒充 IPA"] += 1
                     continue
                 v = bare(raw)
-                if not v or ELLIPSIS.search(v):
+                if not v or truncated(v, w):
                     stat["🔴 丢弃：含省略号（占位符或半截音标）"] += 1
                     continue
                 if looks_like_spelling(v, w):
@@ -185,9 +255,19 @@ def gate2(con, expect):
          q("SELECT count(*) FROM pronunciation WHERE ipa GLOB '*…*'"), 0),
         ("notation 值域外", q("SELECT count(*) FROM pronunciation "
                             "WHERE notation NOT IN ('phonemic','narrow')"), 0),
-        ("region 值域外", q("SELECT count(*) FROM pronunciation WHERE region IS NOT NULL "
-                          "AND region NOT IN ('at','ch','de','de-north','de-south')"), 0),
-        ("src 不是 de-edition", q("SELECT count(*) FROM pronunciation WHERE src<>'de-edition'"), 0),
+        # 🔴 2026-09-05 改：原来在这里**手抄了一遍值域**，而 C31 之后那份抄本就过期了
+        #    —— 它列的是 kaikki 原样值，库里已经是 BCP-47。从 C31 到今天没人跑过这道闸，
+        #    所以它红着也没人看见（**没人跑的闸等于没有闸**）。⇒ 改成 import 登记表。
+        ("region 值域外（值域在 C31 `normalize_region.DOMAIN` 登记）",
+         q("SELECT count(*) FROM pronunciation WHERE region IS NOT NULL AND region NOT IN (%s)"
+           % ",".join("'%s'" % v for v in sorted(REGION_DOMAIN))), 0),
+        # 🔴 2026-09-05 改：原来写死 `src<>'de-edition'` 应为 0。
+        #    那条断言把「**本步**只写德语版」写成了「**这张表**只有德语版」——
+        #    来源名回答的是「这条数据是谁给的」，回答不了「这一层是谁写的」。
+        #    C41 补进英文版音标（`fixes/fill_ipa_from_en.py`）那一刻它就会红，
+        #    而**数据是对的**。⇒ 换成值域断言；「本步只写德语版」由那一步自己的反向闸守。
+        ("src 值域外（只许 de-edition / en-edition）",
+         q("SELECT count(*) FROM pronunciation WHERE src NOT IN ('de-edition','en-edition')"), 0),
         # 🔴 表上的 UNIQUE 因 entry_id 恒 NULL 而不生效，这里必须自己查
         ("🔴 重复行（同词形同词性同音标）",
          q("SELECT count(*) FROM (SELECT word_id,ipa,notation,COALESCE(pos,'') FROM pronunciation "

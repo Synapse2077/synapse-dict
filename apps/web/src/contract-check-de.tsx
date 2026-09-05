@@ -131,6 +131,23 @@ const CHECKS: Check[] = [
     },
   },
   {
+    // 🔴🔴 2026-09-05 加（收尾单 C38）。上面那条只查**「这个词是谁的变形」**那个方向
+    //    （`inflection.word_id = 我`），而词元页上的「词形变化」栏走的是**反方向**
+    //    （`inflection.base_id = 我`）—— 那条查询当时没过滤 `kind`。
+    //    于是 `stellen ← stehen 使役派生` 一直印在 `stehen` 的「词形变化」里，
+    //    **而 C13 那条断言是绿的**：它压根没看这个方向。
+    //    ⇒ 「同一个区分有几个读取路径，断言就得写几条」。
+    name: '🔴 ② 构词漏进了「词形变化」栏（反方向，C38）',
+    hit: (e, h) => {
+      if (!e.derivedForms || (e.derivedForms as Entry[]).length === 0) return null;
+      const m = h.match(/<h3>词形变化[\s\S]*?<\/section>/);
+      if (!m) return null;
+      const inForms = text(m[0]);
+      const leak = (e.derivedForms as Entry[]).filter((d) => inForms.includes(d.form));
+      return leak.length ? `${leak.length} 条构词漏进了词形变化栏（如 ${leak[0].form}）` : null;
+    },
+  },
+  {
     name: '🔴 ② 构词混进了变形区（收尾单 C13，读者会当成格形式）',
     hit: (e, h) => {
       if (e.derivations.length === 0) return null;
@@ -174,6 +191,22 @@ const CHECKS: Check[] = [
     name: '🔴 词形变化没渲染',
     hit: (e, h) => (e.forms.length > 0 && !/class="de-form-grid"/.test(h))
       ? `${e.forms.length} 个形式，HTML 里没有 .de-form-grid` : null,
+  },
+  {
+    // 🔴🔴 2026-09-05：C37 给关系层引进了 `expression`(12,803) / `proverb`(1,058) 两个 kind，
+    //    **而 `REL_LABELS` 没跟着加** ⇒ `App.tsx` 那句 `REL_LABELS[g.kind] || g.kind`
+    //    静默回退成英文原词，`Haus` 页面上印着
+    //    `expression auf jemanden Häuser bauen können`、`proverb ein Haus ist leichter…`。
+    //    ⚠️ **三层数据的闸全绿**（kind 在值域内、关系挂对了义项）——
+    //      是渲染出来才看见的（`[[it-display-layer-stage8]]` 又中一次）。
+    //    ⚠️ 判据按**含义**写：不是「有没有这两个词」（那样只防已知的两个），
+    //      而是「**分组名里有没有不含汉字的**」—— 下一个新 kind 照样当场红。
+    name: '🔴 语义关系分组名没有中文（把英文 kind 直接印给读者）',
+    hit: (_e, h) => {
+      const raw = [...h.matchAll(/class="rel-kind">([^<]*)</g)]
+        .map((m) => m[1]).filter((s) => s.trim() && !/[一-鿿]/.test(s));
+      return raw.length ? `${[...new Set(raw)].join('/')} 没有中文名` : null;
+    },
   },
   {
     name: '🔴 隐藏的例句漏到了页面上',
@@ -257,7 +290,10 @@ for (const w of words) {
       .replace(/class="de-infl-list"/g, 'class="x"')
       .replace(/class="sense-altof"/g, 'class="x"')
       .replace(/class="rel-row"/g, 'class="x"')
-      .replace(/class="de-form-grid"/g, 'class="x"');
+      .replace(/class="de-form-grid"/g, 'class="x"')
+      // 🔴 新断言读的是**分组名的内容**，抹类名打不到它 ⇒ 单独造一条变异：
+      //    把一个已有中文名的分组还原成英文 kind，正是 C37 那个缺陷的形状。
+      .replace(/class="rel-kind">近义</g, 'class="rel-kind">synonym<');
   }
   for (const c of CHECKS) {
     const why = c.hit(e, html);

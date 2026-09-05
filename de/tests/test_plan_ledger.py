@@ -55,6 +55,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
+# C15/C16/C31 的判据要 import 生成侧与修复侧那一份（判据只许一份）。
+sys.path.insert(0, str(HERE.parent / "pipeline"))
+sys.path.insert(0, str(HERE.parent / "fixes"))
+# P5 要 import 回归闸的模块级判据常量（共用的一律 import，不重写）
+sys.path.insert(0, str(HERE))
 
 import paths                                     # noqa: E402
 
@@ -341,7 +346,256 @@ def _both(*fs):
 
 # ⚠️ 判据不许写成永远为真（`SELECT 1` 那个毛病，本文件开头就在骂它）。
 #    每一条问的都是「**这件事真做了才会成立**的那个具体事实」。
+def _zero(sql, label):
+    """判据 = 这条 SQL 必须数出 0。**问的是数据，不是文件在不在。**"""
+    def f(con):
+        n = con.execute(sql).fetchone()[0]
+        return n == 0, ("%s = %d" % (label, n))
+    return f
+
+
+def _py(fn, label):
+    """判据 = 一个 Python 谓词（用于 SQLite 表达不了的，比如 ASCII-only 的大小写）。"""
+    def f(con):
+        n = fn(con)
+        return n == 0, ("%s = %d" % (label, n))
+    return f
+
+
+def _c15(con):
+    """变化类连写。判据 import 生成侧 `klassen_run_together`，SQL 只做**预筛**。
+
+    ⚠️ 预筛必须**只放宽不收紧**：连写＝两个变化类紧挨着，而三个类名都以「变化」结尾，
+       所以连写必然出现「变化强」「变化弱」「变化混」之一。反过来不成立
+       （命中的不一定是连写）—— 那没关系，真判据在后面。
+    🔴 不下推的代价：把 536 万行 `label_zh` 整列拉进 Python **32.7 秒**，
+       而这道闸挂在每次写库上。下推后 **2.6 秒**。
+    """
+    from infl_compose import klassen_run_together
+    return sum(1 for (x,) in con.execute(
+        "SELECT label_zh FROM inflection WHERE label_zh LIKE '%变化强%' "
+        "OR label_zh LIKE '%变化弱%' OR label_zh LIKE '%变化混%'")
+        if klassen_run_together(x))
+
+
+def _c16(con):
+    import json as _j
+    from link_blank_forms import is_spelling_variant
+    # ⚠️ `label_zh='变形'` 下推到 SQL（原来在 Python 里 `continue`）：27.0 秒 → 约 5 秒。
+    n = 0
+    for t, lab in con.execute("SELECT tags, label_zh FROM inflection "
+                              "WHERE label_zh='变形' AND tags IS NOT NULL"):
+        if lab != "变形":
+            continue
+        try:
+            if is_spelling_variant(_j.loads(t)):
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
+def _c36(con):
+    """C36：变形标签该带语域前缀而没带的行。判据 import 生成侧 `infl_compose.register_ok`。
+
+    ⚠️ **先用 SQL 把范围缩到「tags 里出现过语域词」的那批**（约 1.5 万行），
+       再逐行 JSON 解析。第一版对全表 536 万行逐行 `json.loads`，
+       而这道闸挂在 `dbtool.session` 上 —— **每次写库都要跑一遍**，
+       一条判据把每次写库拖慢一分多钟。
+    🔴 预筛必须**由 `REGISTER` 自己生成**，不许在这里手抄一份词表：
+       手抄的那份会随着 `REGISTER` 增删而悄悄漏掉新词 ⇒ 闸静默变宽。
+       预筛只能**放宽**不能收紧（`LIKE '%archaic%'` 会多捞，真判据仍是 `register_ok`）。
+    """
+    import json as _j
+    from infl_compose import register_ok, REGISTER
+    # 🔴 **必须用字面量拼，不能用 `LIKE ?`**：这条预筛靠局部索引 `idx_infl_register`
+    #    （索引谓词就是下面这串 OR），而 SQLite **无法证明 `?` 蕴含索引谓词** ——
+    #    实测参数化 8.44 秒走全表扫、字面量 0.03 秒走索引，**行数一模一样 14,967**。
+    #    ⚠️ 拼字符串前先断言键是纯 ASCII 字母（不是"我记得它们是"）。
+    #    ⚠️ `REGISTER` 改了而索引没跟着改 ⇒ 只是变慢、**不会变错**（回退成全表扫），
+    #      而计时闸会当场把它报出来。这是有意选的失败方式。
+    assert all(k.isascii() and k.isalpha() for k, _ in REGISTER), "REGISTER 的键必须是纯字母"
+    where = " OR ".join("tags LIKE '%%%s%%'" % k for k, _ in REGISTER)
+    n = 0
+    for t, lab in con.execute(
+            "SELECT tags, label_zh FROM inflection WHERE (%s)" % where):
+        try:
+            tt = set(_j.loads(t))
+        except Exception:
+            continue
+        if not register_ok(tt, lab):
+            n += 1
+    return n
+
+
+def _c37(con):
+    """C37：源头把关系绑在某一条义项上、而那条义项我们没收 —— 这种行不许可见。
+
+    🔴 **锁的是数字不是名字**（`[[fix-regression-and-gate]]` 第四种机制：
+       「已接受」＝「不再看」）。这批是**源头本来就没给下标**的真·词条级关系，
+       词级显示是对的。超了 ⇒ 有新的「第 N 义的关系被说成整个词的」溜进来；
+       低了 ⇒ 说明判据能收得更紧，要回来改这个数而不是让它默默变小。
+
+    ⭐ **锁当天就兑现了一次**：C38 把 33 条「目标是德语版词类小标题」
+       （`stehen` 的派生栏印着 `Adjektive`/`Substantive`/`Verben`）改成 `hidden=1`，
+       这个数从 188,494 掉到 **188,461**，闸立刻报红要求我来改这个数字。
+       换成「按名字豁免」的写法，这 33 条的消失就会一声不吭 —— 那正是它要防的。
+    """
+    n = con.execute(
+        "SELECT COUNT(*) FROM sense_relation "
+        "WHERE src='de-edition' AND sense_id IS NULL AND hidden=0").fetchone()[0]
+    return 0 if n == 188_461 else n
+
+
+def _c31(con):
+    from normalize_region import DOMAIN
+    a = {r for (r,) in con.execute("SELECT DISTINCT region FROM pronunciation "
+                                   "WHERE region IS NOT NULL")}
+    b = {r for (r,) in con.execute("SELECT DISTINCT region FROM audio WHERE region IS NOT NULL")}
+    return len((a | b) - DOMAIN)
+
+
+def _c43(con):
+    """C43：`sense_relation.kind` 里有没有**读者会看到英文名**的值。
+
+    🔴 判据必须两侧都取真的：一侧是库里**可见**的 kind 值域（`hidden=0`），
+       另一侧是展示层那张标签表 `packages/dict-labels/src/common.ts` 的 `REL_LABELS`。
+       ⚠️ TS 没法 import，只能正则取 —— 于是**必须给取数本身加一道自检**：
+         取不到 ≥8 个键就说明表结构变了、正则失效，这时要**报红而不是报 0**。
+         一个「解析失败 ⇒ 集合为空 ⇒ 差集为空 ⇒ 绿」的闸是最坏的那种假绿。
+    """
+    src = (ROOT / "packages" / "dict-labels" / "src" / "common.ts").read_text(encoding="utf-8")
+    m = re.search(r"REL_LABELS[^=]*=\s*\{(.*?)\}", src, re.S)
+    keys = set(re.findall(r"'?([A-Za-z_][\w-]*)'?\s*:", m.group(1))) if m else set()
+    if len(keys) < 8:
+        return -1                    # 解析失败：报红，别报 0
+    # 🔴 **判据第一版比它要描述的东西宽**（`[[criteria-narrower-than-you-think]]`）：
+    #    它拿「库里所有可见 kind」去比，于是把 `alt_of` 也算了进来 —— 而 `alt_of`
+    #    **根本不走 `REL_LABELS` 这条渲染路径**：`german.ts` 的关系查询写着
+    #    `AND r.kind <> 'alt_of'`，它由单独的「异体」区渲染（契约闸另有两条断言盯着）。
+    #    ⇒ 值域必须与**取数那一侧**对齐：只算真的会流经这张标签表的 kind。
+    have = {k for (k,) in con.execute(
+        "SELECT DISTINCT kind FROM sense_relation "
+        " WHERE COALESCE(hidden,0)=0 AND kind <> 'alt_of'")}
+    return len(have - keys)
+
+
+def _c41(con):
+    """C41 的「已做那一档」：英文版音标层收进来了、且**一行都没越界**。
+
+    🔴 两条都要查，缺一条都能被绕过：
+      ① 只查「层在不在」—— 补到已经有德语版音标的词形上也算绿，那是重复读音；
+      ② 只查「没越界」—— 一行都没写也是 0 越界，**永远通过的检查等于没检查**。
+    ⚠️ 越界那条的判据与 `fixes/fill_ipa_from_en.py` 闸③说的是同一件事。
+    """
+    over = con.execute(
+        "SELECT COUNT(DISTINCT p.word_id) FROM pronunciation p WHERE p.src='en-edition' "
+        "  AND EXISTS(SELECT 1 FROM pronunciation q WHERE q.word_id=p.word_id "
+        "             AND q.src='de-edition')").fetchone()[0]
+    if over:
+        return over
+    n = con.execute("SELECT COUNT(*) FROM pronunciation WHERE src='en-edition'").fetchone()[0]
+    # ⚠️ 这个下限问的是「**那一轮到底跑没跑**」，不是「有多少行」——
+    #    行数由 P5 锁在文档那一栏（判据只许一份，期望值只许一份）。
+    # 🔴 第一版写 27,000（＝落库当天的行数），**同一天就红了**：C42 清掉 1,290 条
+    #    半截音标之后剩 25,830。把「这一步做了吗」的判据钉在一个会被正常清理改动的
+    #    精确数上，等于给自己造一条**会因为做对事而报红**的闸。
+    #    ⇒ 下限放到「空的/几千条的都说明那一轮没跑或没落库」这个量级（同 C29 的写法）。
+    return 0 if n >= 20_000 else 1
+
+
 DONE = {
+    # 🔴 下面四条 2026-09-04 加。判据**一律 import 生成侧/修复侧那一份**，
+    #    问的是「**这件事真做了才会成立的那个数据事实**」，不是「脚本文件在不在」。
+    "C15": _py(_c15, "变化类仍连写的行"),
+    "C16": _py(_c16, "tags 说是异体、标签仍是「变形」的行"),
+    "C31": _py(_c31, "region 落在登记值域之外的值"),
+    # C42：判据 import 修复侧那一份（`drop_half_ipa.bad_rows` → `truncated`），
+    # 闸不自己写一遍「音标开头有没有连字符」—— 那正是本文件开头骂的第三种机制。
+    "C42": _py(lambda con: len(__import__("drop_half_ipa").bad_rows(con)), "半截音标"),
+    "C43": _py(_c43, "关系分组名读者会看到英文的 kind 值"),
+    # C41 仍是 🟡（残 16,483 补不了：今天的英文版不给了），但「补英文版那一档」已做完
+    # ⇒ 同 C29 的处理：不改文案绕过去，给它一条只有真做了才成立的判据。
+    "C41": _py(_c41, "英文版音标层缺失或越界补到德语版已覆盖的词形上"),
+    # ⚠️ C21 与 C41 **共用同一条判据**，不各写一版：C21 行里那句「已补 12,847」
+    #    说的就是 C41 这一件事。两行各写一版 SQL ⇒ 两道闸各自都绿、锁的却是两个数。
+    "C21": _py(_c41, "英文版音标层缺失或越界补到德语版已覆盖的词形上（同 C41）"),
+    # C29 仍是 🟡（①③ 两档有意不做），但行里写了「②那一档已做完」⇒ 闸把它算作自称已做，
+    # **这是对的**。⇒ 不改文案绕过去（那是「靠人记」），给它一条**只有真做了才成立**的判据：
+    #   ① 裁决层非空且不是零头 —— 空的/几百条的都说明那一轮没跑或没落库；
+    #   ② 同一义项没有逐字重复的德语释义 —— v1 有 561 条，v2 靠源侧去重清成 0。
+    #      这一条尤其要留着：它是 v1 那个缺陷的**专用闸**，重跑退化会当场红。
+    "C29": _both(
+        _zero("SELECT CASE WHEN (SELECT COUNT(*) FROM sense_gloss "
+              "WHERE lang='de' AND src='de-edition-adjudicated') >= 40000 THEN 0 ELSE 1 END",
+              "裁决层为空或明显偏小"),
+        _zero("SELECT COALESCE(SUM(c-1),0) FROM (SELECT sense_id,text,COUNT(*) c "
+              "FROM sense_gloss WHERE lang='de' GROUP BY 1,2 HAVING COUNT(*)>1)",
+              "同一义项挂了逐字相同的德语释义"),
+    ),
+    # C38：外审残单一次清。五族各一条判据，**都是「真做了才成立」的数据事实**。
+    "C38": _both(
+        _zero("SELECT COUNT(*) FROM sense_gloss g WHERE g.lang='zh' "
+              "AND (TRIM(g.text) LIKE '%：' OR TRIM(g.text) LIKE '%:')",
+              "中文释义仍以冒号结尾（把小标题当定义）"),
+        _zero("SELECT COUNT(*) FROM sense_gloss g WHERE g.lang='de' AND g.text LIKE '%====%' "
+              "AND NOT EXISTS(SELECT 1 FROM sense_gloss z WHERE z.sense_id=g.sense_id "
+              "               AND z.lang IN ('zh','en'))",
+              "wikitext 残渣且该义项无中英文"),
+        _zero("SELECT COUNT(*) FROM inflection WHERE tags LIKE '%causative%' "
+              "AND kind<>'derivation'", "使役派生仍算在变形里"),
+        # ⚠️ `section_rels` 返回的是 id 列表，`_py` 要的是计数 —— 这里 len 一下。
+        _py(lambda con: len(__import__("review_residue").section_rels(con)),
+            "德语版词类小标题仍作为关系可见"),
+    ),
+    # C7：**造出来的比较级已清**（254 条）。判据 import 修复侧那一份 ——
+    #    两个独立信号相交：`entry` 没给（＝kaikki 没给）＋ 声称的形式在全库不存在。
+    #    ⚠️ C7 整条**没做完**（还剩 27,008 条说不出来源），但它声称做完的**那一部分**
+    #      必须交得出东西 —— 这正是 P3 要拦的：局部的「已做」也是「已做」。
+    "C7": _py(lambda con: len(__import__("drop_bad_comparatives").bad_rows(con)),
+              "造出来的比较级（无 entry 背书且形式不存在）"),
+    # C40：判据已改（`…` 合法当且仅当词形本身也有 `…`）。
+    #    它声称的是**生成侧的判据变了**，所以判据要问一件「真改了才成立的数据事实」：
+    #    库里不许存在按新判据算的「半截音标」。与回归闸 D2 同一份 `truncated`。
+    #    ⚠️ 那 10 条待落的数据**不在这条判据里** —— 它们是「缺」，而这条问的是「有没有错」。
+    "C40": _py(lambda con: sum(
+        1 for w, x in con.execute("SELECT d.word, p.ipa FROM pronunciation p "
+                                  "JOIN dict d ON d.id=p.word_id")
+        if __import__("harvest_pronunciation").truncated(x or "", w)),
+        "库里按新判据算仍是半截的音标"),
+    # C1：来源列已回填。判据问「有值却说不出来源」—— 注意 `unknown` **也算说得出**
+    #    （`[[ipa-provenance-columns]]`：证明不了就写 unknown，那是一个诚实的答案，
+    #    不是空值）。空着才是「从没回填」。
+    "C1": _both(
+        _zero("SELECT COUNT(*) FROM dict WHERE COALESCE(ipa,'')<>'' "
+              "AND COALESCE(ipa_src,'')=''", "有 ipa 却说不出来源"),
+        _zero("SELECT COUNT(*) FROM dict WHERE COALESCE(gender,'')<>'' "
+              "AND COALESCE(gender_src,'')=''", "有 gender 却说不出来源"),
+        # 反向：没有值就不许写来源，否则来源列自己变成噪声源
+        _zero("SELECT COUNT(*) FROM dict WHERE COALESCE(ipa,'')='' "
+              "AND COALESCE(ipa_src,'')<>''", "没有 ipa 却写了来源"),
+    ),
+    # C2：两列从来没填过 ⇒ 随降列消失。两条各查一次：
+    #    ①锚点列真的一列不剩 ②`example` 的家（v3 的表）真的有东西。
+    #    只查①的话，「把表也删了」同样能让它绿 —— 那正是「消失」和「搬走」的区别。
+    "C2": _both(
+        _zero("SELECT COUNT(*) FROM pragma_table_info('dict') WHERE name IN "
+              "('definition','translation','translation_src','meta','collocation',"
+              "'example','flag')", "迁移锚点列还剩几列没删"),
+        _zero("SELECT CASE WHEN (SELECT COUNT(*) FROM example) > 0 THEN 0 ELSE 1 END",
+              "example 表为空"),
+    ),
+    # C36/C37：2026-09-04 外审那轮加。两条都 import 生成侧的判据，不另抄一份。
+    "C36": _py(_c36, "该带语域前缀而没带的变形行"),
+    "C37": _py(_c37, "可见且未挂义项的德语版关系（锁 188,461，超或低都要看）"),
+    # C34：冠词被写成名词的变格形式。判据 import `drop_article_forms.bad_rows`，
+    #      不在这里重写一遍 SQL（那 12 个冠词的表只许一份）。
+    "C34": _py(lambda con: __import__("drop_article_forms").bad_rows(con),
+               "冠词指向非冠词词元的行"),
+    "C32": _zero(
+        "SELECT COUNT(*) FROM inflection a WHERE a.kind<>'derivation' AND a.label_zh='变形' "
+        "AND EXISTS(SELECT 1 FROM inflection b WHERE b.word_id=a.word_id AND b.base=a.base "
+        "AND b.kind='derivation')", "与构词行重复的泛泛「变形」行"),
     # C3：建库主源重下 + MANIFEST 重跑。两件事各查一次 ——
     #     只查文件在，会漏掉"下回来了但清单还在说谎"。
     "C3": _both(_file("data/dumps/kaikki.org-dictionary-German.jsonl"),
@@ -349,8 +603,41 @@ DONE = {
 }
 
 
+# 🔴🔴 **一条判据自己跑多久，也要有人看着**（2026-09-05 加）。
+#    起因：C32 的判据里有个相关子查询跑在 536 万行的 `inflection` 上而缺覆盖索引，
+#    **一次要 15 分钟以上**。它从 09-04 建 C32 那天就是这样，而我一整天都以为
+#    「写库本来就慢」—— 因为**闸是绿的**，绿的东西不会有人去看它花了多久。
+#    ⇒ 加一条上限：任何一条判据超过 `SLOW` 秒就报出来。
+#      与 `[[fix-regression-and-gate]]` 第四种机制同源：**「通过了」不等于「还健康」。**
+#    ⚠️ **阈值不能是一个绝对秒数**：冷缓存下扫一整列 536 万行就要 14 秒，
+#      写死 20 秒会在冷启动时误报 —— 而误报的闸最后会被无视（狼来了）。
+#      ⇒ 预算**自校准**：拿本次运行里「扫一整列」的实测成本当单位，
+#        任何一条判据不许超过 **3 个全列扫**。冷暖都成立，且量级判断不变
+#        （C32 那条 15 分钟的 ≈ 60 个全列扫，照样当场红）。
+#      ⚠️ **第一版标定太紧（3 倍 / 下限 6 秒），当场在冷暖之间抖了**：
+#        同一条 C32，暖缓存 1.18 秒、冷缓存 7.9 秒 —— 后者报红，而它没有任何毛病。
+#        标定查询自己会被前面的语句焐热，而各条判据打的是冷页 ⇒ 单位偏小。
+#        ⇒ 放宽到 **10 倍 / 下限 30 秒**。这**不是**「调高上限让它变绿」：
+#          我先把每一条都真的改快了（C32 15 分钟→1.2 秒、C36 8.5→0.09 秒），
+#          现在最慢的一条暖 3.7 秒／冷 8 秒，离 30 秒还有一个量级；
+#          而它要抓的那种病（C32 原来 900 秒 ≈ 450 个全列扫）照样一眼报红。
+#        **判据是「量级」不是「秒数」** —— 抖动会让闸被无视，那比没有闸更糟。
+SLOW_FACTOR = 10.0
+SLOW_FLOOR = 30.0
+
+
+def _slow_budget(con):
+    """→ 本次运行的单条判据耗时预算（秒）。**用实测的全列扫当单位。**"""
+    import time
+    t0 = time.time()
+    con.execute("SELECT COUNT(label_zh) FROM inflection").fetchone()
+    return max(SLOW_FLOOR, (time.time() - t0) * SLOW_FACTOR)
+
+
 def p3(con):
-    """收尾单里说「已做」的，必须交得出东西。"""
+    """收尾单里说「已做」的，必须交得出东西 —— **而且判据自己要跑得动**。"""
+    import time
+    slow = _slow_budget(con)
     bad = []
     for cid, rest in claims():
         f = DONE.get(cid)
@@ -359,20 +646,169 @@ def p3(con):
                               "这正是 fr 的 C29 那个洞（账说修了，代码里没有）：%s"
                         % (cid, rest[:44])))
             continue
+        t0 = time.time()
         try:
             ok, why = f(con)
         except Exception as e:                      # noqa: BLE001
             bad.append(("P3", "收尾单 %s 的判据跑不了：%s" % (cid, e)))
             continue
+        dt = time.time() - t0
+        if dt > slow:
+            bad.append(("P3", "收尾单 %s 的判据跑了 %.1f 秒（本次预算 %.1f＝10 个全列扫）—— "
+                              "它挂在每次写库上，先去看查询计划缺哪条索引、"
+                              "或把过滤下推到 SQL，**不要靠调高倍数让它变绿**" % (cid, dt, slow)))
         if not ok:
             bad.append(("P3", "收尾单 %s 说「已做」，但判据不成立：%s" % (cid, why)))
+    return bad
+
+
+# ══════════════════════════════════════════════════════════════════
+# **P5 —— 收尾单「规模」那一栏的数字，也要锁。**
+#
+# 🔴🔴 起因（2026-09-05）：用户问「剩下还有哪些工作」，我拿收尾单回答之前
+#    先用库复核了 11 条，**6 条对不上**：
+#        C4  18,127 → 18,124   C19 436 → 416
+#        C13  5,264 →  7,161   C10 590 → 857
+#        C9      64 →     48   C17 475,237 → 475,018
+#        C23     17 →     14   C33   3 → **5（涨了）**
+#    回归闸的 ACCEPT 早就锁数字了（低了会自己喊「⬇ 该收紧」，2026-09-05 当天喊对了四次），
+#    **而收尾单没有这个机制** —— 于是它一路漂到现在没人吭声。
+#    这正是 `[[fix-regression-and-gate]]` 第四种机制：「已接受」＝「不再看」，
+#    只不过这次的载体是**文档**不是闸。
+#
+# ⇒ 规矩两条：
+#    ① 末栏是纯数字的行，要么在 `SIZES` 里给一条**能从库里重算**的判据，
+#      要么在 `SIZE_EXEMPT` 里写清**为什么重算不了**。两样都没有 ⇒ 红。
+#      这一条是**覆盖锁**：以后新增带数字的记账行，必须当场表态。
+#    ⚠️ `SIZES` 的值**只有 (判据, 说明) 两项，没有期望数字** —— 期望值只许有一份，
+#      就是文档那一栏。第一版我顺手多留了个数字字段（P5 根本不读它），
+#      **字面量闸当场逮到 8 处「期望值写死」** —— 它是对的：那种字段迟早会跟文档打架。
+#    ② 已声明 ✅ 的行不进 P5 —— 它们由 `DONE` 锁着，**判据只许一份**。
+#
+# ⚠️ 四条与回归闸共用的判据 **import 回归闸的模块级常量**，不在这里重写 SQL。
+#    两道闸各写一版 SQL、各自都绿、锁的却是两个不同的数 —— 那比不锁更糟。
+SIZES = {
+    # C2 由降列解决：判据从「那一列是不是空的」换成「**那一列还在不在**」。
+    # ⚠️ 旧判据在列被删掉的那一刻**直接抛异常**（`no such column: example`）——
+    #    是 P5 当场报出来的。一个查已消失对象的判据不是绿也不是红，是**跑不了**，
+    #    而跑不了的判据等于没有判据。⇒ 判据必须跟着它描述的东西一起演进。
+    "C2":  ("SELECT COUNT(*) FROM pragma_table_info('dict') "
+            "WHERE name IN ('definition','translation','translation_src','meta',"
+            "'collocation','example','flag')",
+            "迁移锚点列还剩几列没删"),
+    "C9":  ("SELECT COUNT(DISTINCT r.sense_id) FROM sense_relation r "
+            "WHERE r.kind='alt_of' AND r.sense_id IS NOT NULL AND NOT EXISTS"
+            "(SELECT 1 FROM sense_gloss g WHERE g.sense_id=r.sense_id AND g.lang='zh')",
+            "alt_of 义项没有中文"),
+    "C10": ("@Q_INFL_ORPHAN_BASE", "变形悬空原形（base_id 为空）"),
+    "C13": ("SELECT COUNT(*) FROM inflection WHERE kind='derivation'",
+            "构词行（阶段 8 必须与变形分区）"),
+    "C17": ("SELECT COUNT(*) FROM inflection WHERE label_zh='变形' "
+            "AND REPLACE(REPLACE(tags,' ',''),'\"','')='[form-of]'",
+            "标签是光秃秃「变形」且源头只给了 form-of"),
+    "C19": ("@Q_SENSE_NO_ZH", "义项没有中文"),
+    "C21": ("@Q_WORD_NO_IPA", "有义项的词形没有读音"),
+    "C23": ("SELECT COUNT(*) FROM pronunciation WHERE ipa LIKE '%[ə]%'",
+            "音标中间的可选央元音 [ə]（不是没剥干净）"),
+    "C26": ("@Q_EXAMPLE_NO_ZH", "例句没有中文"),
+    "C28": ("@_blank_pages", "空白页（无义项、无变形、无指针）"),
+    # C41：只有遗留列 `dict.ipa` 有值、读者看不见的词形。**能重算就锁死**。
+    "C41": ("SELECT COUNT(*) FROM (SELECT DISTINCT s.word_id FROM sense s "
+            "JOIN dict d ON d.id=s.word_id WHERE COALESCE(d.ipa,'')<>'' "
+            "AND NOT EXISTS(SELECT 1 FROM pronunciation p WHERE p.word_id=s.word_id))",
+            "只有 dict.ipa 有值、pronunciation 没有行的词形"),
+    "C29": ("SELECT COUNT(*) FROM (SELECT DISTINCT s.word_id FROM sense s WHERE NOT EXISTS"
+            "(SELECT 1 FROM sense_gloss g WHERE g.sense_id=s.id AND g.lang='de'))",
+            "缺德语原文释义的词形"),
+    "C33": ("SELECT COUNT(*) FROM inflection a WHERE a.label_zh LIKE '指小词%' "
+            "AND EXISTS(SELECT 1 FROM inflection b WHERE b.word_id=a.word_id "
+            "AND b.base=a.base AND b.label_zh LIKE '%复数%')",
+            "标「指小词」而同一(词形,原形)另有「复数」行"),
+}
+
+# 重算不了的，**必须写清为什么**。豁免本身是可见的，不是沉默。
+SIZE_EXEMPT = {
+    "C39": "1,374 是**扫法语版 dump + 跑消去阶梯**得出的（真值集 "
+           "`data/work/de/probe/fr_de_ipa_sets.tsv`，按词形聚合），库里没有对应的可重算计数。"
+           "⭐ 归一链**已经固化成代码**了（`probes/ipa_conventions.py` 16 类消去器 + "
+           "`c39_fr_audit.py` 的争议读法族），重跑 `python3 -u probes/c39_fr_audit.py` 就能复算 —— "
+           "但它依赖 700MB 的法语版 dump，不适合放进每次都跑的闸里。"
+           "🔴 旧文案说的 36,090 与那份 `fr_de_ipa_pairs.tsv` **都已作废**："
+           "它每个词形只放我们的一条音标、而且不是首选那条（`du` 拿 `daɪ̯n` 去比）。",
+    "C40": "10 条是**扫德语版 dump** 数出来的（判据 `harvest_pronunciation.truncated`），"
+           "库里查不到「源头有而我们没收」这件事。判据本身由回归闸 D2 盯着；"
+           "下次重跑音标层这 10 条落库后，这一行应改成 ✅ 并由 D2 锁死。",
+    "C4":  "阶段 4 当时的快照口径（分母是那时的词形集），阶段 3 收词之后分母变了 ⇒ "
+           "**现役口径是 C21**（18,124，已锁）。这一行留作历史，不再单独重算。",
+    "C7":  "🔴 末栏那个数（27,008）问的是「有多少值**说不出来源**」，而判据本身就是"
+           "「没有来源标记」—— 库里没有可重算的标记。回填 `*_src`（C1）之后才变成可锁的，"
+           "届时移进 SIZES。⚠️ C7 里**已经做完的那部分**（254 条造出来的比较级）"
+           "由 DONE 锁着，不在这条豁免范围内。",
+    "C8":  "要重扫 dump 逐条比对才能重算，成本与 21 条的收益不匹配。",
+    "C11": "6 个空白页是漂移基线里「上游不再产生变形」那一桶的子集，判据在漂移基线那边。",
+    "C14": "3 个**具名**可分动词（zutreffen/einleuchten/vorfallen）的一次性核对，不是可重算的集合。",
+    "C18": "51 条来自一次抽样（功能词的语法定义会被规则 5 判成留空），没有全量判据。",
+    "C20": "88/129 是一次抽样的**比例**结论（判据比它要描述的东西宽），不是库里的一个计数。",
+    "C22": "10,486 要扫**法语版 dump** 才能重算 —— 这条本身就是「待做」，做的时候会顺带锁上。",
+    "C24": "19,066 是 `fill_freq` 一次运行时**挡下**的条数，不是库里现存的一个集合。",
+    "C25": "残 2 是当时**闸自身 bug** 报出的假红条数（已改成 import 生成侧的 `unambiguous()`），"
+           "属于历史记录，库里没有对应物。",
+    "C27": "703 是 5b 控制判据的一次抽样结论（三条判据偏宽），不是可重算计数。",
+    "C30": "1,733 是 1.5c 一次运行时被词性关挡下的条数，同 C24。",
+}
+
+
+def _size_criteria():
+    """把 `@名字` 解析成回归闸里那一份判据。**共用的一律 import，不重写。**"""
+    import test_no_regression as reg
+    return {"@Q_INFL_ORPHAN_BASE": reg.Q_INFL_ORPHAN_BASE,
+            "@Q_SENSE_NO_ZH": reg.Q_SENSE_NO_ZH,
+            "@Q_WORD_NO_IPA": reg.Q_WORD_NO_IPA,
+            "@Q_EXAMPLE_NO_ZH": reg.Q_EXAMPLE_NO_ZH,
+            "@_blank_pages": reg._blank_pages}
+
+
+SIZE_ROW = re.compile(r"^\|\s*(C\d+)\s*\|(.+)\|\s*([\d,]+)\s*\|\s*$", re.M)
+
+
+def p5(con):
+    """收尾单末栏的数字，必须与库里重算出来的一致。"""
+    s = PLAN.read_text(encoding="utf-8")
+    if SHEET not in s:
+        return []
+    sheet = s[s.index(SHEET):]
+    named = _size_criteria()
+    bad = []
+    for m in SIZE_ROW.finditer(sheet):
+        cid, body, num = m.group(1), m.group(2), int(m.group(3).replace(",", ""))
+        if any(w in body[:14] for w in ("✅",)):
+            continue                                  # 由 DONE 锁着，判据只许一份
+        spec = SIZES.get(cid)
+        if not spec:
+            if cid in SIZE_EXEMPT:
+                continue
+            bad.append(("P5", "收尾单 %s 末栏写着数字 %s，却**既没有判据也没有豁免理由** —— "
+                              "带数字的记账行必须当场表态（SIZES 或 SIZE_EXEMPT）"
+                        % (cid, format(num, ","))))
+            continue
+        sql, label = spec
+        try:
+            got = named[sql](con) if sql.startswith("@") and callable(named.get(sql)) \
+                else con.execute(named.get(sql, sql)).fetchone()[0]
+        except Exception as e:                        # noqa: BLE001
+            bad.append(("P5", "收尾单 %s 的规模判据跑不了：%s" % (cid, e)))
+            continue
+        if got != num:
+            arrow = "涨了" if got > num else "少了（账没跟上，去改数字**并改理由文案**）"
+            bad.append(("P5", "收尾单 %s 账上写 %s，库里实际 %s —— %s（%s）"
+                        % (cid, format(num, ","), format(got, ","), arrow, label)))
     return bad
 
 
 def report(verbose=True):
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     try:
-        red = p1(con) + p2() + p3(con) + p4()
+        red = p1(con) + p2() + p3(con) + p4() + p5(con)
     finally:
         con.close()
     if verbose:
