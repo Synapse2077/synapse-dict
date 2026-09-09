@@ -480,6 +480,23 @@ def _c43(con):
     return len(have - keys)
 
 
+def _c13(_con):
+    """C13：**展示层把构词与变形分了区**（两个方向都要分）。
+
+    🔴 判据查的是**读取路径**，不是数据：`kind='derivation'` 的行一直都在，
+       C13 骂的是「它和 `Häuser → Haus` 并排渲染，读者会当成格形式」。
+       ⇒ 只有 `german.ts` **两个方向**都按 `kind` 分流了，这件事才算做完
+       （C38 补的正是反方向：词元页「它派生出了谁」那一栏原来没过滤）。
+    ⚠️ 与回归闸 L 组同一个思路：`german.ts` 是查词页唯一的取数入口。
+    """
+    src = (ROOT / "packages" / "dict-core" / "src" / "german.ts").read_text(encoding="utf-8")
+    need = ["i.word_id = ? AND i.kind <> 'derivation'",   # 正向：这个词形有哪些变形
+            "i.word_id = ? AND i.kind = 'derivation'",    # 正向：构词单独一区
+            "i.base_id = ? AND i.kind <> 'derivation'",   # 反向：它是谁的变形
+            "i.base_id = ? AND i.kind = 'derivation'"]    # 反向：它派生出了谁（C38）
+    return sum(1 for s in need if s not in src)
+
+
 def _c41(con):
     """C41 的「已做那一档」：英文版音标层收进来了、且**一行都没越界**。
 
@@ -514,6 +531,11 @@ DONE = {
     # 闸不自己写一遍「音标开头有没有连字符」—— 那正是本文件开头骂的第三种机制。
     "C42": _py(lambda con: len(__import__("drop_half_ipa").bad_rows(con)), "半截音标"),
     "C43": _py(_c43, "关系分组名读者会看到英文的 kind 值"),
+    "C13": _py(_c13, "`german.ts` 里没按 kind 分区的取数路径条数"),
+    # C7 与 P5 共用同一条判据（`unsourced`）：一个问「还剩几条说不出来源」，
+    # 一个问「账上那个数对不对」。**同一份 SQL 只此一处**，不各写一版。
+    "C7": _py(lambda con: __import__("backfill_field_src").unsourced(con),
+              "一等字段的值说不出来源"),
     # C41 仍是 🟡（残 16,483 补不了：今天的英文版不给了），但「补英文版那一档」已做完
     # ⇒ 同 C29 的处理：不改文案绕过去，给它一条只有真做了才成立的判据。
     "C41": _py(_c41, "英文版音标层缺失或越界补到德语版已覆盖的词形上"),
@@ -708,6 +730,9 @@ SIZES = {
             "标签是光秃秃「变形」且源头只给了 form-of"),
     "C19": ("@Q_SENSE_NO_ZH", "义项没有中文"),
     "C21": ("@Q_WORD_NO_IPA", "有义项的词形没有读音"),
+    # ⭐ C7 **2026-09-06 从 SIZE_EXEMPT 移进来** —— 豁免文案当初就写着「回填 `*_src` 之后
+    #    才变成可锁的，届时移进 SIZES」。补完 `field_src` 它就可重算了，说到做到。
+    "C7":  ("@_unsourced", "一等字段的值说不出来源"),
     "C23": ("SELECT COUNT(*) FROM pronunciation WHERE ipa LIKE '%[ə]%'",
             "音标中间的可选央元音 [ə]（不是没剥干净）"),
     "C26": ("@Q_EXAMPLE_NO_ZH", "例句没有中文"),
@@ -733,17 +758,17 @@ SIZE_EXEMPT = {
            "⭐ 归一链**已经固化成代码**了（`probes/ipa_conventions.py` 16 类消去器 + "
            "`c39_fr_audit.py` 的争议读法族），重跑 `python3 -u probes/c39_fr_audit.py` 就能复算 —— "
            "但它依赖 700MB 的法语版 dump，不适合放进每次都跑的闸里。"
-           "🔴 旧文案说的 36,090 与那份 `fr_de_ipa_pairs.tsv` **都已作废**："
+           "🔴 旧文案说的 36,090 与那份 `fr_de_ipa_pairs.tsv` **都已作废**（后者 2026-09-06 已删）："
            "它每个词形只放我们的一条音标、而且不是首选那条（`du` 拿 `daɪ̯n` 去比）。",
+    "C44": "200 MB 是**按列求和文本字节**量出来的（`SUM(LENGTH(desc_en))`），"
+           "不是一个「缺陷计数」—— 末栏那个数是**占用**不是**条数**，库里没有对应的可重算计数判据。"
+           "⚠️ 这一行是**否定结论**（量过、判定不做），不是待办；重新考虑的触发条件写在行里。",
     "C40": "10 条是**扫德语版 dump** 数出来的（判据 `harvest_pronunciation.truncated`），"
            "库里查不到「源头有而我们没收」这件事。判据本身由回归闸 D2 盯着；"
            "下次重跑音标层这 10 条落库后，这一行应改成 ✅ 并由 D2 锁死。",
     "C4":  "阶段 4 当时的快照口径（分母是那时的词形集），阶段 3 收词之后分母变了 ⇒ "
            "**现役口径是 C21**（18,124，已锁）。这一行留作历史，不再单独重算。",
-    "C7":  "🔴 末栏那个数（27,008）问的是「有多少值**说不出来源**」，而判据本身就是"
-           "「没有来源标记」—— 库里没有可重算的标记。回填 `*_src`（C1）之后才变成可锁的，"
-           "届时移进 SIZES。⚠️ C7 里**已经做完的那部分**（254 条造出来的比较级）"
-           "由 DONE 锁着，不在这条豁免范围内。",
+
     "C8":  "要重扫 dump 逐条比对才能重算，成本与 21 条的收益不匹配。",
     "C11": "6 个空白页是漂移基线里「上游不再产生变形」那一桶的子集，判据在漂移基线那边。",
     "C14": "3 个**具名**可分动词（zutreffen/einleuchten/vorfallen）的一次性核对，不是可重算的集合。",
@@ -765,7 +790,8 @@ def _size_criteria():
             "@Q_SENSE_NO_ZH": reg.Q_SENSE_NO_ZH,
             "@Q_WORD_NO_IPA": reg.Q_WORD_NO_IPA,
             "@Q_EXAMPLE_NO_ZH": reg.Q_EXAMPLE_NO_ZH,
-            "@_blank_pages": reg._blank_pages}
+            "@_blank_pages": reg._blank_pages,
+            "@_unsourced": reg._unsourced}
 
 
 SIZE_ROW = re.compile(r"^\|\s*(C\d+)\s*\|(.+)\|\s*([\d,]+)\s*\|\s*$", re.M)

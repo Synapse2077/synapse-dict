@@ -21,7 +21,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
 import { ItalianEntryView, SpanishEntryView, FrenchEntryView, PortugueseEntryView,
-         GermanEntryView } from './App';
+         GermanEntryView, EnglishEntryView } from './App';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
@@ -44,11 +44,20 @@ const words = fileArg
 // 🔴 2026-08-30 加 pt（阶段 8）。上面那条注释的第二次实例：
 //    导出器不支持 pt 时，pt 的展示层缺陷同样只能靠我读 JSON 猜。
 //    ⚠️ pt 的视图签名与 it/es/fr 不同（**没有 `speakLocale`**），单独一条分支。
-const View = lang === 'es' ? SpanishEntryView
+// 🔴 2026-09-09 加 en（阶段 7 外审）。**上面那条注释的第三次实例** ——
+//    导出器不支持 en 时，英语的展示层缺陷同样只能靠我读 JSON 猜。
+//    ⚠️ 我当天先另写了一个 `render-entries.tsx` 才发现本文件早就存在且更周到
+//      （行内 `<span>` 开标签、`&#x27;` 都处理了）。已删除那个重复件 ——
+//      `[[refactor-mindset-code-quality]]`：**动手前先找有没有现成的**。
+//    ⭐ 加上之后第一次渲染就照出两个缺陷：`panther[Panthera`（wikitext 残渣）
+//      与 `oneself` 的中文到不了读者（展示层判据问的是"有没有义项"而非"有没有中文"）。
+const View = lang === 'en' ? EnglishEntryView
+  : lang === 'es' ? SpanishEntryView
   : lang === 'fr' ? FrenchEntryView
   : lang === 'pt' ? PortugueseEntryView
   : lang === 'de' ? GermanEntryView : ItalianEntryView;
-const locale = lang === 'es' ? 'es-MX' : lang === 'fr' ? 'fr-FR'
+const locale = lang === 'en' ? 'en-US'
+  : lang === 'es' ? 'es-MX' : lang === 'fr' ? 'fr-FR'
   : lang === 'pt' ? 'pt-BR' : lang === 'de' ? 'de-DE' : 'it-IT';
 const svc = getService(lang) as unknown as { getEntry(w: string): unknown };
 

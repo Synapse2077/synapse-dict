@@ -112,7 +112,7 @@ DEAD = ["example", "flag"]          # 两列都是 0 行死数据
 
 NEW_TABLES = ("sense_src", "sense", "sense_gloss", "sense_tag", "sense_relation",
               "pronunciation", "example", "example_gloss",
-              "collocation", "collocation_gloss", "audio")
+              "collocation", "collocation_gloss", "audio", "field_src")
 
 DDL = [
     # ── 义项两层：证据层 / 出版层（`SCHEMA` §2.-1）────────────────────────
@@ -218,6 +218,23 @@ DDL = [
          text           TEXT NOT NULL,
          src            TEXT,
          PRIMARY KEY(collocation_id, lang)
+       )""",
+    # ── 一等字段的 provenance（收尾单 C7，2026-09-05 加）──────────────────
+    #    ⭐ **有行 ＝ 这个值没有源头背书**（可验证：kaikki 认识这个词、但没给这个字段）。
+    #    有背书的值不进本表 —— 它们的出处就是 `entry.src`，重复存一份是坏味道。
+    # 🔴 **不做成 `dict` 上的 11 个 `*_src` 列**：`dict` 刚从 33 列降到 26 列
+    #    （阶段 0 的 `--drop-cols`），再加回去是往回走；而且那 11 列有 92% 的行是空的
+    #    —— **列强迫每一行都留一格，表只让需要说话的行说话**。
+    # ⚠️ `ipa` / `gender` 有意不进本表：`ipa_src`/`gender_src` 两列早于 v3 就存在、
+    #    且已由 C1 回填。两处存储是历史包袱，但**判据只写一份**
+    #    （`fixes/backfill_field_src.py` 的 `unsourced()`，两道闸都 import 它）。
+    """CREATE TABLE field_src (
+         word_id INTEGER NOT NULL,        -- → dict.id
+         field   TEXT    NOT NULL,        -- dict 的列名；值域见 backfill_field_src.FIELDS
+         src     TEXT    NOT NULL,        -- 目前恒为 'unsourced'
+                                          --   ＝「无源头背书，逐行来源不可考」
+                                          --   🔴 有意不写 `model:doubao`：那是项目史不是行级证据
+         PRIMARY KEY (word_id, field)
        )""",
     """CREATE TABLE audio (
          id         INTEGER PRIMARY KEY AUTOINCREMENT,

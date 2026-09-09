@@ -88,6 +88,7 @@ from infl_compose import klassen_run_together             # noqa: E402
 from normalize_region import DOMAIN as REGION_DOMAIN      # noqa: E402
 from drop_article_forms import bad_rows as _article_forms # noqa: E402
 from drop_bad_comparatives import bad_rows as _bad_comparatives  # noqa: E402
+from backfill_field_src import unsourced as _unsourced      # noqa: E402
 
 # 🔴 `sense_relation.kind` 有**两个**生成者，值域是它们的并集：
 #    阶段 5c 的 `harvest_relations.KIND`（12 个）＋ 阶段 2a 的 `recover_alt_of.REL_KIND`。
@@ -99,10 +100,13 @@ f = lambda n: format(n, ",")
 ROOT = HERE.parent.parent
 GERMAN_TS = ROOT / "packages" / "dict-core" / "src" / "german.ts"
 
-# v3 的十三张表。少一张就是被 DROP 重建了。
+# v3 的十四张表。少一张就是被 DROP 重建了。
+# ⭐ 2026-09-06 加 `field_src`（收尾单 C7 的一等字段 provenance）——
+#    加表要**同时**改三处：这里、`build_v3_schema.NEW_TABLES`/`DDL`、以及 L1 的基线与理由。
+#    漏掉任何一处，闸要么漏看这张表，要么因为它红而没人说得清为什么。
 TABLES = ("sense_src", "sense", "sense_gloss", "sense_tag", "sense_relation", "entry",
           "pronunciation", "example", "example_gloss", "collocation",
-          "collocation_gloss", "audio", "inflection")
+          "collocation_gloss", "audio", "inflection", "field_src")
 
 # 变化类：连写 bug（C15）的判据 —— 一个标签里出现多个变化类就是那个 bug。
 # **按含义写**：不是"标签太长"，是"三种互斥的变化类被拼进了同一个词"。
@@ -189,14 +193,17 @@ ACCEPT = {
         "（`Unze`）重问两次都把德语原句抄回 ⇒ 写成 `KNOWN_BAD` 大声放弃。都是**缺不是错**。"),
     # ── L 组：阶段 8 债务，**现在是故意红的** ──────────────────────
     "L1 展示层还没接 v3 的表": (
-        2,
-        "2 张，**阶段 8 之后（13 → 2）**：`sense_src` 与 `entry`，两张都是**有意不接**。\n"
+        3,
+        "3 张，**阶段 8 之后（13 → 2），2026-09-06 因 C7 新建 `field_src` 而 +1**："
+        "`sense_src`、`entry`、`field_src`，三张都是**有意不接**。\n"
+        "      · `field_src` 是**一等字段的证据层**（哪些值没有源头背书），与 `sense_src` 同理："
+        "读者该看的是值本身，不是它的出处。**它存在就是为了给我们审计用的**。\n"
         "      · `sense_src` 是**证据层**（出处/留底），读者该看的是出版层 "
         "`sense`/`sense_gloss` —— es/it/fr/pt **四门的展示层都不读它**。\n"
         "      · `entry` 是词条层；de 的逐词条德语一等字段走 `dict` 扁平列 + "
         "`nounVariants`（多性别名词那一束）覆盖，**与 pt 同一设计**（it/fr 读 entry 是另一种做法）。\n"
         "      ⚠️ **有意不改判据把它做成 0** —— 改判据能让闸变绿，那是为了好看而放水；"
-        "基线锁在 2、理由写在这里，**将来谁再漏掉一张表就是 3，当场红**。\n"
+        "基线锁在 3、理由写在这里（2026-09-06 因 C7 新建 `field_src` 从 2 调到 3），**将来谁再漏掉一张表就是 4，当场红**。\n"
         "      🔴 这个数从 13 掉到 2 是闸自己报出来的（「⬇ 基线该收紧」），"
         "不是我记得去改的 —— 那一段正是 `[[fix-regression-and-gate]]` 第四种机制的解药。"),
 }
@@ -232,13 +239,34 @@ def _has(con, name):
                        (name,)).fetchone()[0] > 0
 
 
-def build(con):
+class _Stop(Exception):
+    """`build(only=…)` 算到目标那一条就跳出，**并把那条的值一起带出来**（`args[0]`）。"""
+
+
+def build(con, trace=None, only=None):
+    """→ [(组, 断言名, 值)]。`trace` 给一个 list 就顺便记下**每条断言各花了多久**。
+
+    ⭐ 计时靠的是「两次 `add` 之间的时间差」：`add(组, 名, 值)` 是在**表达式算完之后**
+       才被调用的，所以相邻两次调用的间隔就是后一条断言的计算耗时。
+    🔴 2026-09-06 修：`--trace` 的帮助文字一直写着「逐条计时」，而它**只打了总时间** ——
+       名不副实的开关比没有这个开关更坏，因为它让人以为量过了。
+       （这次为了回答「慢在哪」，我是手工一条条量的；本该是免费的。）
+    """
     q1 = lambda s: con.execute(s).fetchone()[0]
     C = []
-    add = lambda g, name, got: C.append((g, name, got))
+    _t = [time.time()]
+
+    def add(g, name, got):
+        C.append((g, name, got))
+        if trace is not None:
+            now = time.time()
+            trace.append((name, now - _t[0]))
+            _t[0] = now
+        if only is not None and name == only:
+            raise _Stop(got)          # 值随异常带出，后面的断言不再计算
 
     # ── A 组：阶段 0 表结构与义项层 ─────────────────────────────
-    add("A", "A1 v3 的十三张表少了任何一张",
+    add("A", "A1 v3 的十四张表少了任何一张",
         len(TABLES) - q1("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN %r"
                          % (TABLES,)))
     # 🔴🔴 **2026-09-05 换了口径，因为它查的那一列被降掉了。**
@@ -311,6 +339,15 @@ def build(con):
     #    ⚠️ 判据 import `drop_bad_comparatives.bad_rows`，闸不自己写一遍
     #      —— 那正是本文件开头骂的第三种机制。
     add("B", "B7 造出来的比较级（C7）", len(_bad_comparatives(con)))
+    # 🔴🔴 **收尾单 C7：德语一等字段的值说不出出处。**
+    #    七月用豆包给一等字段补空、没留来源标记 —— 而「说不清来源」**不等于「错」**
+    #    （C7 的判据被数据打回过三次，最后靠两个独立信号相交才逮到真的 254 条）。
+    #    ⇒ 这条断言守的是**可追溯性**，不是正确性：每个值都要能说出
+    #      「kaikki 给的」还是「没有源头背书」。
+    #    ⚠️ 判据 import `backfill_field_src.unsourced`，闸不自己写一遍 ——
+    #      它要同时知道**两条存储路径**（`ipa_src`/`gender_src` 两列 + `field_src` 表），
+    #      在这里重写一份必然漏掉其中一条。
+    add("B", "B8 一等字段的值说不出来源（C7）", _unsourced(con))
 
     # ── D 组：音标层（阶段 4）───────────────────────────────────
     # 🔴 只查**首尾**定界符。C23：`apaʁt[ə]ˈmɑ̃ː` 中间的 `[ə]` 是"可选央元音"的标准记法、
@@ -513,7 +550,7 @@ def _bad_caps(con):
 
 
 def _display_debt(path=None):
-    """→ v3 的十三张表里，展示层**一张都没提到**的个数。
+    """→ v3 的十四张表里，展示层**一张都没提到**的个数。
 
     判据按含义：`german.ts` 是查词页唯一的取数入口，它没有**查**某张表，
     就等于那张表的数据读者看不到。⚠️ 这不是「代码风格检查」，
@@ -550,7 +587,8 @@ def check_brief(db=None):
 def run(trace=False):
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     t0 = time.time()
-    C = build(con)
+    tr = [] if trace else None
+    C = build(con, tr)
     con.close()
     print("═══ 回归闸（de）：过去每一个修复，现在还在不在 ═══\n")
     red, loose = 0, []
@@ -571,7 +609,14 @@ def run(trace=False):
                   % (name, f(got), f(exp), "⬇ 该收紧" if got < exp else ""))
             print("        理由：%s" % why)
     if trace:
-        print("\n   （全部 %d 条，用时 %.1fs）" % (len(C), time.time() - t0))
+        total = time.time() - t0
+        print("\n   ── 逐条计时（慢的在前）──")
+        for name, dt in sorted(tr, key=lambda x: -x[1])[:12]:
+            print("   %8.2fs  %5.1f%%  %s" % (dt, 100.0 * dt / total, name))
+        print("   %8.2fs          其余 %d 条合计"
+              % (total - sum(d for _n, d in sorted(tr, key=lambda x: -x[1])[:12]),
+                 max(len(tr) - 12, 0)))
+        print("\n   （全部 %d 条，用时 %.1fs）" % (len(C), total))
     print("\n%s" % ("✅ 没有回归（%d 条断言，%d 条带理由的已接受基线）"
                     % (len(C), sum(1 for _g, n, v in C if v and n in ACCEPT))
                     if not red else "🔴 %d 条红" % red))
@@ -640,21 +685,31 @@ def mutate():
                     "(SELECT rowid FROM sense_relation LIMIT 15)", "F3 关系 kind 值域外")
         check("M9", "UPDATE audio SET region='de-XX', region_src=NULL WHERE rowid IN "
                     "(SELECT rowid FROM audio LIMIT 8)", "H3 有地区却说不出是怎么判的")
-        check("M10", "DROP TABLE collocation_gloss", "A1 v3 的十三张表少了任何一张")
-        # 🔴 第四次撞的那个坑：拿掉配套的 BINARY 索引，闸必须响。
-        #    实测拿掉后 `WHERE word=?` 从 `SEARCH (word=?)` 退回 `SCAN`（120 万行）。
-        check("M11", "DROP INDEX idx_word_bin",
-              "A6 有 NOCASE 索引却没有配套 BINARY 索引")
+        check("M10", "DROP TABLE collocation_gloss", "A1 v3 的十四张表少了任何一张")
         # 🔴 2026-09-05：D2 的判据换了形状（`truncated` 第四版加了连字符，收尾单 C42），
         #    而**它一直没有变异**。判据改了、没人打它一下，就不知道它还咬不咬得住
         #    —— 这正是 M4 逮到「恒假的 GLOB 模式」那次的教训。
         #    ⚠️ 变异要打在判据**新增的那一半**上：注入的是连字符半截，不是省略号，
         #      否则第三版的旧判据也能通过，这条变异等于没测新东西。
+        check("M13", "DELETE FROM field_src WHERE rowid IN "
+                     "(SELECT rowid FROM field_src LIMIT 300)",
+              "B8 一等字段的值说不出来源（C7）")
         check("M12", "INSERT INTO pronunciation "
                      "(word_id,ipa,notation,is_primary,src,src_ref) "
                      "SELECT d.id,'-ˌbaɐ̯t','phonemic',0,'en-edition','mutate' FROM dict d "
                      " WHERE d.word NOT GLOB '-*' LIMIT 20",
               "D2 音标是半截/占位符")
+        # 🔴🔴 **M11 必须排在最后一条**（2026-09-06 从中间挪到这里）。
+        #    它是唯一一条会**拖慢后续变异**的变异：掉了 `idx_word_bin` 之后
+        #    `WHERE word=?` 从 `SEARCH` 退回 `SCAN`（120 万行）。实测排在它后面的断言
+        #    **B8 107.7s → 328.2s、D2 71.5s → 315.6s（3–4 倍）**。
+        #    ⚠️ 变异是**累积**打在同一份副本上的，所以「谁排在谁后面」有成本含义 ——
+        #      这不是洁癖：M12/M13 之前白跑了好几分钟。
+        #    ⭐ 挪顺序**不改变任何一条的判据与取值**（索引只影响快慢、不影响结果），
+        #      验收方式就是这一轮输出与挪动前**逐条同名同值**。
+        # 🔴 第四次撞的那个坑：拿掉配套的 BINARY 索引，闸必须响。
+        check("M11", "DROP INDEX idx_word_bin",
+              "A6 有 NOCASE 索引却没有配套 BINARY 索引")
         con.close()
 
     # M-ACCEPT：**「已接受」不许等于「不再看」。** 把一条已接受基线顶上去，闸必须红。
@@ -678,19 +733,32 @@ def mutate():
     real = _display_debt()
     hit = got == 0 and real > 0
     ok += hit
-    print("   M-DISPLAY %s（接好 v3 十三张表的假 german.ts → 债务 %d；真的是 %d）"
+    print("   M-DISPLAY %s（接好 v3 十四张表的假 german.ts → 债务 %d；真的是 %d）"
           % ("✅ 逮到" if hit else "🔴 **漏了**", got, real))
 
     print("\n   变异 %d/%d" % (ok, tot))
     return 0 if ok == tot else 1
 
 
-def _one(db, name):
+def _one(db, name, cache=None):
+    """→ 某一条断言的值。
+
+    ⭐ 两处提速，**都不碰任何一条判据**（2026-09-06）：
+      ① `build(only=name)` —— 算到目标那一条就停，后面的不算。逐条计时显示耗时前 4 条
+         （B3 8.5s / D3 7.6s / B1 6.9s / B4 6.1s ＝ 全闸 62%）排在中前部，平均省掉一半以上。
+      ② `cache` —— 见 `mutate()`：变异是**累积**打在同一份副本上的，
+         第 N 条的「变异前」就是第 N−1 条的「变异后」，不必重算。
+    🔴 **提速只许改「算多少次」，不许改「怎么算」** —— 判据一个字没动；
+       改完必须重跑全套变异，逐条对上改之前那一轮的结果，否则等于没验证。
+    ⚠️ 名字打错时返回 0（与改动前同）—— 变异会因此报「漏了」，是看得见的红，不是静默。
+    """
+    if cache is not None and name in cache:
+        return cache[name]
     con = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
     try:
-        for _g, n, v in build(con):
-            if n == name:
-                return v
+        build(con, only=name)
+    except _Stop as e:
+        return e.args[0]
     finally:
         con.close()
     return 0

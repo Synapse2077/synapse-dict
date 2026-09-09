@@ -18,7 +18,17 @@ ROOT = Path(__file__).resolve().parent.parent      # 仓库根
 DATA = ROOT / "data"
 
 DB      = DATA / "db" / "synapse-dict-en.sqlite"                    # 成品库
-KK      = DATA / "dumps" / "kaikki.org-dictionary-English.jsonl"                 # 英文版 per-language 切片（建库源）
+
+# ═══ 🔴 en 是六门里唯一盘上同时留着两个版本主源的 ═══
+# 另五门的建库源都是不带日期的规范名、只有一份；en 有意留两份并**都带日期**，
+# 理由是这门语言的版本漂移已经骗过我一次（2026-09-06，见 docs/EN_PLAN.md §1.4）：
+# 我拿「kaikki 只比库里多 93 个词」下过「换基底收词收益为零」的结论，
+# 而那 93 是**同源自比** —— 库里那 52.7 万 Wiktionary 层就是 KK_2025 灌进去的。
+# ⇒ 不留一个不带日期的名字，任何一处引用都必须说清楚它读的是哪一版。
+KK      = DATA / "dumps" / "kaikki.org-dictionary-English-20260828.jsonl"   # 建库源（v3 主干）3.21 GB
+KK_2025 = DATA / "dumps" / "kaikki.org-dictionary-English-20250424.jsonl"   # 存证：现库 52.7 万新词层的来源
+#         ⚠️ KK_2025 一个字节都不许删（[[external-anchor-gates]]：锚外部 dump 的闸永不过期）。
+#         de 那轮七月的包被保留策略清掉，直接导致 16,483 个词形的读音**说不清是哪来的、也补不回来**。
 WORK    = DATA / "work" / "en"                  # 过程产物：runs / 冲突表 / 模型输出
 BACKUPS = DATA / "backups"                          # 写库前的自动备份
 DUMPS   = DATA / "dumps"

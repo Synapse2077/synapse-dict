@@ -670,6 +670,13 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/* 「未标注词性」这一组：它说的是**源头没给**，不是一种词性。
+   用弱色 + 常规字重与真词性区分开 —— 同样的重音会让读者以为它也是个词类。 */
+.pos-group-label.pos-group-unset {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
 .sense-list {
   margin: 0;
   padding-left: 22px;

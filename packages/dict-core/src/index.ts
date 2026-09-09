@@ -9,6 +9,7 @@ import { SpanishDictService } from './spanish.js';
 import { FrenchDictService } from './french.js';
 import { PortugueseDictService } from './portuguese.js';
 import { GermanDictService } from './german.js';
+import { EnglishDictService } from './english.js';
 export * from './italian.js';
 export * from './spanish.js';
 export * from './french.js';
@@ -406,7 +407,15 @@ export type LanguageProbe = LanguageMeta & {
  *    所以这张表跟着 LANGUAGES 走，加语言时必须一起填。
  */
 const MAIN_TABLE: Record<string, string> = {
-  en: 'stardict',   // ECDICT 底座（见 en/ 目录），与其余语种不同构
+  // 🔴 2026-09-08 修：en 原本写 `stardict`。阶段 0（09-07）把老表改名成 `legacy_dict`、
+  //    新建 v3 的 `dict` 之后，这一行让探活报「库里没有 stardict 表」，
+  //    **en 被从可用语种里摘掉整整一天** —— 正是上面那段注释警告过的同一种故障，
+  //    而且这次是**我自己改的名把自己的探活打翻的**。
+  //    ⚠️ 修的顺序不能反：先接上 `EnglishDictService`（读 v3 多表），**再**修这一行。
+  //       先修探活会让它通过、然后在第一个请求上 500 —— 把可见的宕机变成隐蔽的。
+  //    ⇒ en 现在与其余五门同构，这张表其实已经可以退化成常量，
+  //      但**保留它**：加语言时它仍是唯一的登记处。
+  en: 'dict',
   es: 'dict', it: 'dict', fr: 'dict', pt: 'dict', de: 'dict',
 };
 
@@ -444,7 +453,8 @@ export function ttsDirFor(code: string): string {
 }
 
 type AnyService = DictionaryService | SpanishDictService | ItalianDictService
-  | FrenchDictService | PortugueseDictService | GermanDictService;
+  | FrenchDictService | PortugueseDictService | GermanDictService
+  | EnglishDictService;
 const serviceCache = new Map<string, AnyService>();
 
 export function getService(code: string): AnyService {
@@ -457,7 +467,7 @@ export function getService(code: string): AnyService {
     else if (lang === 'fr') svc = new FrenchDictService(dbPathFor('fr'));   // 法语专属服务
     else if (lang === 'pt') svc = new PortugueseDictService(dbPathFor('pt')); // 葡语专属服务
     else if (lang === 'de') svc = new GermanDictService(dbPathFor('de'));   // 德语专属服务
-    else svc = new DictionaryService(dbPathFor('en'));                      // 英语（含未知回退）
+    else svc = new EnglishDictService(dbPathFor('en'));                     // 英语（含未知回退）
     serviceCache.set(lang, svc);
   }
   return svc;

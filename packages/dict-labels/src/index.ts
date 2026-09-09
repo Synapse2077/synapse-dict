@@ -16,3 +16,4 @@ export * from './it.js';
 export * from './fr.js';
 export * from './pt.js';
 export * from './de.js';
+export * from './en.js';

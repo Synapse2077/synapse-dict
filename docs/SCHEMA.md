@@ -817,3 +817,65 @@ it  entry.src_ref     = 'kk-en:pie:noun:3:0' ← 词形+词性+词源号，内�
 
 🔴 旧列 `dict.infl` / `dict.exchange` **有意不删**，冻结成迁移锚点 ——
 删了闸①就永远失去参照物（同 it 对 `dict.ipa` 的处置）。
+
+---
+
+## 十二、`field_src`：一等字段的 provenance（de，2026-09-06）
+
+**问题**（de 收尾单 C7）：七月用模型给一等字段补空、**没留来源标记**，
+于是 25,996 个值说不出出处 —— `comparative`/`superlative` 各 5,951、`plural` 9,009、
+`genitive` 3,711、`aux`/`praeteritum`/`partizip2`/`separable`/`sep_prefix` 各几百。
+
+⚠️ **「说不清来源」不等于「错」。** 抽样看绝大多数是对的（`sorgen für → gesorgt`、
+`Kernchemie → -` 有意写无复数）。这张表守的是**可追溯性**，不是正确性；
+补 provenance 的那一步**一个值都不许改**。
+
+### 判据：事实可验证，来源不可考 —— 两件事分开写
+
+    有行 ＝ 这个值没有源头背书        ← 可验证：kaikki 认识这个词、但没给这个字段
+    src = 'unsourced'               ← 「逐行来源不可考」，**有意不写 model:xxx**
+
+de 实测那 25,996 条 **100%** 是「`entry` 行在、该字段空」，
+「压根没有 entry 行」的**一条都没有** ⇒ 前半句是事实。
+后半句只有项目史支撑、没有行级证据 ⇒ 按 `[[ipa-provenance-columns]]`「证明不了就别硬写」。
+
+```sql
+CREATE TABLE field_src (
+  word_id INTEGER NOT NULL,   -- → dict.id
+  field   TEXT    NOT NULL,   -- dict 的列名
+  src     TEXT    NOT NULL,   -- 目前恒为 'unsourced'
+  PRIMARY KEY (word_id, field)
+)
+```
+
+### ⭐ 为什么是窄表，不是每字段一个 `*_src` 列
+
+| | 列（11 个 `*_src`） | 窄表 |
+|---|---|---|
+| `dict` 宽度 | 26 → 37（**刚从 33 降到 26，等于往回走**）| 不变 |
+| 空置率 | 那 11 列 **92% 的行是空的** | 只存需要说话的行 |
+| 加一个字段 | 改表结构 | 加行 |
+
+**列强迫每一行都留一格，表只让需要说话的行说话。**
+⇒ 「有没有一部分行需要额外说明」是选表还是选列的判据；
+一等字段的 provenance 属于**少数行需要说话**，所以是表。
+
+🔴 **有意不合并进 `entry`**：那是源头的证据层，把模型填的值塞进去会污染它
+（同 §2.-1 证据层 / 出版层不能混）。
+🔴 **有意不用「一列逗号拼字段名」**：`dict.translation` 那个 `\n` 拼串的教训 ——
+一个串没有单一来源，最后只能整列退场。
+
+### 加一张表要同时改的三处（漏一处闸就说不清话）
+
+1. `<lang>/pipeline/build_v3_schema.py` 的 `NEW_TABLES` + `DDL`
+2. 回归闸 A1 的表清单（少一张 = 被 DROP 重建）
+3. 回归闸 L1「展示层还没接的表」**基线与理由** ——
+   `field_src` 与 `sense_src` 同理，是**证据层、有意不给读者看**，
+   所以基线 +1 并写清为什么，**不是改判据让它变绿**。
+
+### 判据只写一份
+
+`unsourced()` 一个函数同时知道**两条存储路径**（早于 v3 的 `ipa_src`/`gender_src` 两列
+＋ `field_src` 表），回归闸 B8 与账的闸 P5 都 import 它。
+⚠️ 它在表不存在时要给出「全部无背书」的数而**不抛异常** ——
+崩掉的断言会让整道闸一条结论都出不来。

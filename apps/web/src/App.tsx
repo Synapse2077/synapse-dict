@@ -8,7 +8,8 @@ import {
   FR_AUX_LABELS, FR_VGROUP_LABELS, FR_ADJPOS_LABELS, FR_REGION_LABELS,
   FR_REGION_CODE_LABELS, FR_PRON_CONTEXT_LABELS, FR_ARTICLE,
   PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE, ptInflHeading,
-  DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel } from '@synapse-dict/dict-labels';
+  DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel,
+  EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
 
@@ -22,22 +23,37 @@ type SearchItem = {
 };
 
 // English entry (legacy stardict schema)
+// ⭐ 阶段 8（2026-09-08）：从**老扁平版**换成 v3 多表版。
+//    老版读 `definition`/`translation`/`phonetic` 那几列 —— 阶段 0 把老表改名成
+//    `legacy_dict` 之后它们整个不存在了。字段与 `dict-core/src/english.ts` 一一对应。
+type EnForm = { form: string; label: string | null; kind: string };
+type EnFormOf = { base: string; label: string | null; kind: string; clickable: boolean };
+type EnReading = { ipa: string; notation: string; region: string | null; src: string };
+type EnAudio = { file: string; url: string | null; region: string | null;
+                 regionSrc: string | null; speaker: string | null };
+type EnExample = { text: string; zh: string | null; ref: string | null; modern: string | null };
+type EnSense = {
+  id: number; rank: number; pos: string | null; en: string | null; zh: string | null;
+  /** 义项中文的来源：model:def ／ template:form_of ／ ecdict-core ／ ecdict */
+  src: string | null;
+  tags: { kind: string; value: string }[];
+  relations: { kind: string; targets: { word: string; clickable: boolean }[] }[];
+  altOf: { target: string; clickable: boolean }[];
+  examples: EnExample[];
+};
 type EnEntry = {
   lang: 'en';
-  id: number;
-  word: string;
-  phonetic: string | null;
-  phoneticUk: string | null;
-  phoneticUs: string | null;
-  phoneticDisplay: string | null;
-  translation: string | null;
-  definition: string | null;
-  exchange: string | null;
-  tag: string | null;
-  collins: number | null;
-  oxford: number | null;
-  bnc: number | null;
-  frq: number | null;
+  id: number; word: string; pos: string | null; isLemma: boolean;
+  rulers: { collins: number | null; oxford: number | null; examTag: string | null;
+            bnc: number | null; freqRank: number | null; freqZipf: number | null };
+  readings: EnReading[];
+  audio: EnAudio[];
+  senses: EnSense[];
+  forms: EnForm[];
+  formOf: EnFormOf[];
+  relations: { kind: string; targets: { word: string; clickable: boolean }[] }[];
+  /** 🔴 **六成的词只有这个**（`legacy_gloss`）—— senses 空而本字段非空是正常形态 */
+  legacy: { text: string; qual: string } | null;
 };
 
 // Spanish entry (西语专属；数据源自 kaikki，经 es/build.py 产出扁平 dict 表)
@@ -1154,7 +1170,7 @@ export default function App() {
       <div className="detail-column">
         {/* SWR：有词条就一直显示（含切换/加载中），避免闪空或回弹欢迎页 */}
         {entry && entry.lang === 'en' && (
-          <EnglishEntry entry={entry as EnEntry} onWord={goToWord} speak={speakWord} />
+          <EnglishEntryView entry={entry as EnEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
         {entry && entry.lang === 'it' && (
@@ -1222,103 +1238,292 @@ export default function App() {
 
 // --- English entry detail (unchanged layout) ---
 
-function EnglishEntry({ entry, onWord, speak }: {
-  entry: EnEntry; onWord: (w: string) => void; speak: (word: string, locale: string) => void;
+/**
+ * 相邻同词性的义项并成一组 —— 与 `groupUnifiedByPos`(es)/`groupItSenses`/
+ * `groupFrSenses`/`groupPtSenses`/`groupDeSenses` **同一个形状**。
+ * 🔴 是「相邻合并」不是「按词性重排」：kaikki 的义项顺序是词典自己的编排，
+ *    重排会把 `butterfly` 的名词义与动词义交叉次序打乱。
+ */
+function groupEnSenses(senses: EnSense[]): { pos: string | null; senses: EnSense[] }[] {
+  const out: { pos: string | null; senses: EnSense[] }[] = [];
+  for (const s of senses) {
+    const last = out[out.length - 1];
+    if (last && last.pos === s.pos) last.senses.push(s);
+    else out.push({ pos: s.pos, senses: [s] });
+  }
+  return out;
+}
+
+export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
+  entry: EnEntry; speakLocale: string; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
 }) {
-  const translations = parseTranslation(entry.translation);
-  const definitions = parseDefinition(entry.definition);
-  const exchanges = parseExchange(entry.exchange);
-  const tags = parseTags(entry.tag);
+  const r = entry.rulers;
+  const exams = enExamLabels(r.examTag);
+  // ⚠️ **类名一律用共用的那一套**（`.sense-*` / `.rel-*` / `.example-*` / `.exchange-*`）。
+  //    我第一版发明了 13 个 `en-*` 类名 —— **`styles.css` 里一条都没有**，
+  //    页面能渲染但完全没有样式；而且 `layout-probe` 数的是 `class="rel-row"`，
+  //    自造类名让它把 `cat` 的关系数成 **0 行**。
+  //    `[[dict-labels-package]]` 那条的同源教训：**共用件已经有的，别另起炉灶。**
+  // 🔴 读音按地区分组：`uk`/`us` 是读者要的两档，其余（au/ca/nz/…）并成一档，
+  //    **判不出地区的（region=null）单列**，不塞进英式或美式 —— 那是造事实。
+  const byRegion = new Map<string, EnReading[]>();
+  for (const rd of entry.readings) {
+    const k = rd.region ?? '';
+    const a = byRegion.get(k) ?? []; a.push(rd); byRegion.set(k, a);
+  }
+  const order = ['uk', 'us', 'au', 'ca', 'nz', 'ie', 'in', 'gb-sct', 'gb-wls', 'za', ''];
+  const regions = [...byRegion.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const localeOf = (reg: string) => (reg === 'uk' ? 'en-GB' : reg === 'us' ? 'en-US' : speakLocale);
+  // 分组结果要在两处用到（组标题、以及"是不是唯一一组"），先算一次。
+  const senseGroups = groupEnSenses(entry.senses);
 
   return (
     <article className="entry-detail">
       <header className="entry-header">
         <h2 className="entry-word">{entry.word}</h2>
         <div className="entry-meta-row">
-          <CollinsStars rating={entry.collins} />
-          {entry.oxford === 1 && <span className="badge oxford">Oxford 3000</span>}
-          {tags.map((t) => <span className="badge tag" key={t}>{t}</span>)}
+          <CollinsStars rating={r.collins} />
+          {r.oxford === 1 && <span className="badge oxford">Oxford 3000</span>}
+          {/* ⭐ 考纲标签是 en 独有的资产（五门都没有），放在最显眼处 */}
+          {exams.map((t) => <span className="badge tag" key={t}>{t}</span>)}
+          {!entry.isLemma && <span className="badge">变形</span>}
         </div>
       </header>
 
-      <div className="phonetic-row">
-        {entry.phoneticUk && (
-          <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-GB')} title="播放英式发音" type="button">
-            <span className="phonetic-label">英</span>
-            <span className="phonetic-value">/{entry.phoneticUk}/</span>
-            <SpeakerIcon />
-          </button>
-        )}
-        {entry.phoneticUs && (
-          <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-US')} title="播放美式发音" type="button">
-            <span className="phonetic-label">美</span>
-            <span className="phonetic-value">/{entry.phoneticUs}/</span>
-            <SpeakerIcon />
-          </button>
-        )}
-        {!entry.phoneticUk && !entry.phoneticUs && (
-          <button className="phonetic-btn" onClick={() => speak(entry.word, 'en-US')} title="播放发音" type="button">
-            {entry.phonetic && <span className="phonetic-value">/{entry.phonetic}/</span>}
-            <SpeakerIcon />
-          </button>
-        )}
-      </div>
+      {regions.length > 0 && (
+        <div className="phonetic-row">
+          {regions.map((reg) => {
+            const list = byRegion.get(reg)!;
+            const label = reg ? (EN_REGION_LABELS[reg] ?? reg) : null;
+            return (
+              <button className="phonetic-btn" key={reg || '_'} type="button"
+                      onClick={() => speak(entry.word, localeOf(reg))}
+                      title={reg ? `播放${label}式发音` : '播放发音'}>
+                {label && <span className="phonetic-label">{label}</span>}
+                <span className="phonetic-value">/{list[0].ipa}/</span>
+                {list.length > 1 && <span className="rel-more">+{list.length - 1}</span>}
+                <SpeakerIcon />
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      {translations.length > 0 && (
+      {/* 🔴 这个词是谁的变形 —— 放在最前面：读者查 `cats` 首先要知道它是 cat 的复数 */}
+      {entry.formOf.length > 0 && (
+        <div className="sense-altof">
+          {entry.formOf.map((f, i) => (
+            <span key={i}>
+              {f.clickable
+                ? <button className="rel-link" type="button" onClick={() => onWord(f.base)}>{f.base}</button>
+                : <span>{f.base}</span>}
+              <span className="exchange-label"> 的{f.label}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          <dl className="definition-list">
-            {translations.map((item, i) => (
-              <div className="def-item" key={i}>
-                {item.pos && <dt>{item.pos}</dt>}
-                <dd>{item.text}</dd>
-              </div>
-            ))}
-          </dl>
+          {/* 🔴🔴 **2026-09-09 改：按词性分组，与另外五门统一。**
+              用户点出「es 的释义先按名词/动词分类，英语不是这样，德语好像也不一样」。
+              en 原来把词性当成**逐条的行内徽标**，`butterfly` 于是连印 8 个 `n`：
+                 改前                       改后
+                 n                          名词
+                 蝴蝶                        1. 蝴蝶
+                 n 定语用法                   2. [医] 蝶形胶布
+                 [医]蝶形胶布                 3. [泳] 蝶泳
+                 n                           …
+                 [泳]蝶泳
+              两处不一致，都是**漏抄共用件**，不是 en 有意从简：
+                ① 没分组     —— es/it/fr/pt/de 五门全有 `pos-group` + `pos-group-label`
+                ② 印的是原码 —— 直接印 `s.pos` 的 `n`/`name`，而共用的 `posLabel()`
+                                （`dict-labels` 的 `POS_LABELS`）**26 种取值一个不缺**，
+                                我核过：en 的 27 种 pos 里除 null 外全部命中。
+              `[[dict-labels-package]]`／`[[refactor-mindset-code-quality]]`：
+              **共用件已经有的，别另起炉灶，也别不抄。** */}
+          {senseGroups.map((grp, gi) => (
+          <div className="pos-group" key={gi}>
+            {/* 🔴 **无词性的组，只要它不是唯一的一组，就必须自己说出来。**
+                en 有 **223 万条**义项 `pos` 为空（老词典层只有 14.95% 带词性），
+                其中 **34,762 个词**是「有的有、有的没有」（0.91%）。这些词里，
+                无标题的组紧跟在有标题的组后面，读者会顺着上一个标题读下去：
+                  giffen   专名 ─ 吉芬
+                           （无标题）─ 低质商品   ← 那是经济学的吉芬商品，不是人名
+                ⚠️ 这正是我刚在**数据层**修掉的「专名标记传播」（见 EN_PLAN §15.3），
+                   展示层不说话就会把它**原样重造一遍**。
+                ⚠️ 唯一一组时不加标题 —— 老词典层绝大多数词是这样，
+                   给两百多万条统一印「未标注词性」是加噪声不是加信息。
+                （es 73 个词、it 1,455 个词也是这个形状，同一处待办。） */}
+            {grp.pos
+              ? <div className="pos-group-label">{posLabel(grp.pos)}</div>
+              : senseGroups.length > 1
+                && <div className="pos-group-label pos-group-unset">未标注词性</div>}
+          <ol className="sense-list">
+            {grp.senses.map((s) => {
+              /* ⚠️ topic 桶**按来源分**（2026-09-09 改）：
+                   · kaikki 的 topic 是上千种英文 slug（`natural-sciences`），
+                     没有映射表 ⇒ 有意不显示（见 dict-labels/src/en.ts）；
+                   · 老词典层的是中文短码（`计`／`医`／`化`），**自解释、读者要的**
+                     —— 藏掉它等于把 68 万条已经有的学科信息扔了。
+                 🔴 判据用**来源**不用「是不是中文」：后者是形式代理，
+                   源头哪天给了中文 slug 就会误判。 */
+              const chips = s.tags.filter((t) => t.kind !== 'topic' || s.src === 'ecdict');
+              return (
+              <li className="sense-item" key={s.id}>
+                {/* 🔴 徽标**跟在中文后面同一行**，与 es/it/fr/pt/de 一致
+                    （`<div class="sense-zh">{中文}<SenseChips/></div>`）。
+                    原来 en 把它单独放在中文**上面**的一个块级 div 里，于是
+                      计
+                      传真系统
+                    印成两行，读者读不出这个「计」是在修饰下面那条。
+                    ⚠️ 词性徽标已上移到分组标题，这里只剩逐条不同的语域/地区/学科标记。
+                    ⚠️ `zh` 为空时（指针义项，3,360 条）也要把徽标印出来 ——
+                       条件问的是「这一行有没有东西可印」，不是「有没有中文」。 */}
+                {(s.zh || chips.length > 0) && (
+                  <div className="sense-zh">
+                    {s.zh}
+                    {chips.length > 0 && (
+                      <span className="sense-chips">
+                        {chips.map((t, i) => (
+                          <span className="badge tag" key={i}>{enLabel(t.kind, t.value)}</span>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* 🔴 源语言行要带**认得出的语种徽标**（`.sense-src` + `.sense-src-lang`）。
+                    这是 fr 2026-08-29 已经修过的同一个缺陷 —— 当时的注释写着
+                    「es/it 早就有分色徽标，fr 是**漏抄**」，而 en 和 de 一直没跟上，
+                    中文行与英文行同字号同颜色堆在一起，读者扫一眼分不清哪行是哪种语言。
+                    ⇒ 这是**第三次**同形状。`[[fix-regression-and-gate]]`：
+                       修复只落在发现它的那一门语言里，等于没做成机制。 */}
+                {s.en && (
+                  <div className="sense-src" lang="en">
+                    <span className="sense-src-lang">EN</span>{s.en}
+                  </div>
+                )}
+                {s.altOf.length > 0 && (
+                  <div className="sense-altof">
+                    异体：{s.altOf.map((a, i) => (
+                      <span key={i}>
+                        {a.clickable
+                          ? <button className="rel-link" type="button" onClick={() => onWord(a.target)}>{a.target}</button>
+                          : a.target}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {s.relations.map((g) => (
+                  <div className="rel-row" key={g.kind}>
+                    <span className="rel-kind">{EN_RELATION_LABELS[g.kind] ?? g.kind}</span>
+                    {g.targets.slice(0, 12).map((t, i) => (
+                      <span className="rel-item" key={i}>
+                        {t.clickable
+                          ? <button className="rel-link" type="button" onClick={() => onWord(t.word)}>{t.word}</button>
+                          : <span className="rel-plain">{t.word}</span>}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+                {s.examples.length > 0 && (
+                  <ul className="example-chips">
+                    {s.examples.slice(0, 4).map((x, i) => (
+                      <li key={i}>
+                        {/* 🔴🔴 **出处在前、引文在后**（2026-09-09 外审改）。
+                            原来的顺序是 引文→中文→出处，出处落在译文之后 ——
+                            外审**三次独立读错**，都判成「出处混在例句前/顺序混乱/
+                            张冠李戴」，因为读者无从判断那行出处属于上一条还是下一条。
+                            维基词典自己的体例也是出处引出引文。
+                            ⭐ 这条是**只有渲染成品才发现得了**的缺陷：
+                            数据完全正确，`ref` 挂在对的那条例句上，闸永远绿。 */}
+                        {x.ref && <div className="rel-plain">{x.ref}</div>}
+                        <div className="example-chip">{x.text}</div>
+                        {/* 🔴 阶段 5e 之前 zh 一律为 null —— **例句照样显示**，不靠中文过滤 */}
+                        {x.zh && <div className="example-label">{x.zh}</div>}
+                        {x.modern && <div className="example-label">今：{x.modern}</div>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+              );
+            })}
+          </ol>
+          </div>
+          ))}
         </section>
       )}
 
-      {definitions.length > 0 && (
+      {/* 🔴🔴 **六成的词只有这个**（`legacy_gloss`，2,419,312 个词形）。
+          `senses` 空而这里非空是**正常形态**，不是缺陷 —— 不显示它就是六成的空白页。
+
+          🔴🔴 **2026-09-09 修**：条件原本是 `entry.senses.length === 0` ——
+          问的是「**有没有义项**」，而这一块要解决的是「**读者有没有中文可看**」。
+          `oneself`（freq_rank 7,598）有 1 条义项，是**没有中文的指针义项**
+          （`A person's self: general form of himself…`）⇒ 走不进这个分支，
+          而 ECDICT 的「pron. 自己, 亲自」我已经在库里放行了，页面上仍然是空的。
+          ⚠️ **数据修好不等于到达读者** —— 库里 `published=1` 查得到、闸 F1 报 0，
+          真渲染出来才看见（`[[it-display-layer-stage8]]`、PITFALLS §I）。
+          ⇒ 判据换成「**没有任何一条义项带中文**」。 */}
+      {entry.legacy && !entry.senses.some((s) => s.zh) && (
         <section className="entry-section">
-          <h3>English</h3>
-          <dl className="definition-list en">
-            {definitions.map((item, i) => (
-              <div className="def-item" key={i}>
-                {item.pos && <dt>{item.pos}</dt>}
-                <dd>{item.text}</dd>
-              </div>
-            ))}
-          </dl>
+          {/* 🔴 标题要分得清：`senses` 空时它**就是**释义区（六成的词是这样）；
+              而当上面已经印了一块英文义项时，再来一个同名「释义」会被读成重复。
+              ⇒ 有义项时叫「中文释义」，说清这一块补的是什么。 */}
+          <h3>{entry.senses.length === 0 ? '释义' : '中文释义'}</h3>
+          <div className="sense-detail">
+            {entry.legacy.text.split('\n').map((line, i) => <div key={i}>{line}</div>)}
+          </div>
         </section>
       )}
 
-      {exchanges.length > 0 && (
+      {/* 🔴 词条级关系：12.1% 的可见关系挂在这里，不渲染就一条到不了读者 */}
+      {entry.relations.length > 0 && (
+        <section className="entry-section">
+          <h3>词汇关系</h3>
+          {entry.relations.map((g) => (
+            <div className="rel-row" key={g.kind}>
+              <span className="rel-kind">{EN_RELATION_LABELS[g.kind] ?? g.kind}</span>
+              {g.targets.slice(0, 20).map((t, i) => (
+                <span className="rel-item" key={i}>
+                  {t.clickable
+                    ? <button className="rel-link" type="button" onClick={() => onWord(t.word)}>{t.word}</button>
+                    : <span className="rel-plain">{t.word}</span>}
+                </span>
+              ))}
+              {g.targets.length > 20 && <span className="rel-more">+{g.targets.length - 20}</span>}
+            </div>
+          ))}
+        </section>
+      )}
+
+      {entry.forms.length > 0 && (
         <section className="entry-section">
           <h3>词形变化</h3>
           <div className="exchange-list">
-            {exchanges.map((ex) => (
-              <div className="exchange-item" key={ex.label}>
-                <span className="exchange-label">{ex.label}</span>
-                <span className="exchange-words">
-                  {ex.words.map((w) => (
-                    <a key={w} className="exchange-link" href={`#${encodeURIComponent(w)}`}
-                      onClick={(e) => { e.preventDefault(); onWord(w); }}>
-                      {w}
-                    </a>
-                  ))}
-                </span>
-              </div>
+            {entry.forms.map((f, i) => (
+              <span className="exchange-item" key={i}>
+                <button className="rel-link" type="button" onClick={() => onWord(f.form)}>{f.form}</button>
+                {f.label && <span className="exchange-label">{f.label}</span>}
+              </span>
             ))}
           </div>
         </section>
       )}
 
-      {(entry.bnc != null && entry.bnc > 0 || entry.frq != null && entry.frq > 0) && (
+      {entry.audio.length > 0 && (
         <section className="entry-section">
-          <h3>词频</h3>
-          <div className="freq-row">
-            {entry.bnc != null && entry.bnc > 0 && <span className="freq-item">BNC: <strong>{entry.bnc}</strong></span>}
-            {entry.frq != null && entry.frq > 0 && <span className="freq-item">COCA: <strong>{entry.frq}</strong></span>}
+          <h3>真人发音</h3>
+          <div className="exchange-list">
+            {entry.audio.slice(0, 6).map((a, i) => (
+              <span className="exchange-item" key={i}>
+                {a.url && <audio controls preload="none" src={a.url} />}
+                {a.region && <span className="badge">{EN_REGION_LABELS[a.region] ?? a.region}</span>}
+              </span>
+            ))}
           </div>
         </section>
       )}
@@ -1326,10 +1531,6 @@ function EnglishEntry({ entry, onWord, speak }: {
   );
 }
 
-// --- Spanish entry detail ---
-
-// 两种 sense shape 共用（旧的 SpanishSense 与新的 SpanishUnifiedSense），
-// 后者多一个 topics（主题标签，`escalera` 的"顺子"义带 poker）。
 function SenseChips({ sense }: { sense: SpanishSense | SpanishUnifiedSense }) {
   const chips: { cls: string; text: string }[] = [];
   if (sense.gender) chips.push({ cls: `g g-${sense.gender}`, text: GENDER_LABELS[sense.gender] || sense.gender });

@@ -13,10 +13,12 @@ C39 问的是「**我们已经给出去的对不对**」（外部源当**审核�
 英文版那一轮的「实质分歧」**16.8% → 3.3%**（`[[residual-bucket-is-not-evidence]]`）。
 ⇒ 同一条链算出来的 36,090 **必然也偏大**，先用新链重算，再谈要不要做。
 
-⚠️ 本脚本**只读**：读现成的真值集 `data/work/de/probe/fr_de_ipa_pairs.tsv`
-   （501,056 行 = 两版都给了音标的词形，去重后 484,401 个词形；
-   外锚文件，`[[external-anchor-gates]]`：锚外部 dump 的闸不过期），
-   不写库、不下载、不调模型。
+⚠️ 本脚本**只读**：读真值集 `data/work/de/probe/fr_de_ipa_sets.tsv`
+   （484,895 个词形，按词形聚合；外锚文件，`[[external-anchor-gates]]`：
+   锚外部 dump 的闸不过期），不写库、不下载、不调模型。
+🔴 旧真值集 `fr_de_ipa_pairs.tsv` **取数有错、已于 2026-09-06 删除** ——
+   留着它的风险不是占 28 MB，是**下一个人会用错的那一份**（错在哪见 `rebuild()`）。
+   要复现它：`--rebuild` 重扫法语版即可，它不是不可再生的东西。
 
 ═══ 🔴 已知的过度合并（`probes/ipa_conventions.py --gate` 全量跑过，逐条看过实样）═══
 消去阶梯里合并最狠的两条是 `d_stress`（15,914 组）与 `d_long`（8,147 组）——
@@ -58,7 +60,6 @@ from ipa_conventions import (BUCKETS, bucket, refine, _nfc,      # noqa: E402
                              variants, full_key, d_space, d_syll, d_stress, d_legacy)
 
 f = lambda n: format(n, ",")
-PAIRS = paths.WORK / "probe" / "fr_de_ipa_pairs.tsv"   # 旧真值集，取数有错，见 rebuild()
 SETS  = paths.WORK / "probe" / "fr_de_ipa_sets.tsv"    # 新真值集：按词形聚合
 
 # ═══ 德语本身有争议的读法：**这一族不是缺陷，要单独摘出来** ═══
@@ -170,7 +171,7 @@ def rebuild():
                     fr.setdefault(w, set()).add(v)
     print("■ 扫完法语版 %s 行，两版都有音标的词形 %s" % (f(n), f(len(fr))))
 
-    PAIRS.parent.mkdir(parents=True, exist_ok=True)
+    SETS.parent.mkdir(parents=True, exist_ok=True)
     with open(SETS, "w", encoding="utf-8") as out:
         for w in sorted(fr):
             out.write("%s\t%s\t%s\t%s\n" % (w, "|".join(sorted(prim.get(w, ()))),
