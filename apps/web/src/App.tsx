@@ -1310,13 +1310,31 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
         </div>
       )}
 
+      {/* 🔴🔴 **2026-09-10 从页尾挪上来，并换成共用的 `HumanAudioRow`。**
+          pt **2026-08-31 就修过这一条**（用户当时问「真人发音怎么跑到下面去了？」），
+          注释原话：「发音是读音的一部分，该紧跟音标 —— 原来它排在『搭配 / 固定短语』后面」。
+          es/it/fr/pt 四门早就用 `HumanAudioRow`，**en 和 de 一直停在 pt 修之前那个样子**：
+          页尾一个 `<h3>真人发音</h3>` + 一排裸 `<audio controls>`。
+          ⭐ 换过来白拿三样：内联小按钮／带录音人与地区来源／**死链自动回退 TTS**
+             —— 裸 `<audio>` 碰上死链是**静默变哑**，而 dump 里的音频 URL 约 10% 是死链。
+          ⭐ 限量规则（每地区最多 2 条、总数封顶 6）由 `capAudios` 一处说了算，闸 import 它。
+          🔴 这是同一处「漏抄共用件」的第五次（es/it → fr → pt → en/de），
+             `[[fix-regression-and-gate]]`：修复只落在发现它的那一门语言里，等于没做成机制。 */}
+      <HumanAudioRow
+        audios={entry.audio}
+        word={entry.word}
+        fallback={() => speak(entry.word, speakLocale)}
+        regionLabel={(r) => EN_REGION_LABELS[r] ?? r}
+      />
+
       {/* 🔴 这个词是谁的变形 —— 放在最前面：读者查 `cats` 首先要知道它是 cat 的复数 */}
       {entry.formOf.length > 0 && (
         <div className="sense-altof">
           {entry.formOf.map((f, i) => (
             <span key={i}>
               {f.clickable
-                ? <button className="rel-link" type="button" onClick={() => onWord(f.base)}>{f.base}</button>
+                ? <a className="rel-link" href={`#${encodeURIComponent(f.base)}`}
+                     onClick={(ev) => { ev.preventDefault(); onWord(f.base); }}>{f.base}</a>
                 : <span>{f.base}</span>}
               <span className="exchange-label"> 的{f.label}</span>
             </span>
@@ -1410,7 +1428,8 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                     异体：{s.altOf.map((a, i) => (
                       <span key={i}>
                         {a.clickable
-                          ? <button className="rel-link" type="button" onClick={() => onWord(a.target)}>{a.target}</button>
+                          ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
+                              onClick={(ev) => { ev.preventDefault(); onWord(a.target); }}>{a.target}</a>
                           : a.target}
                       </span>
                     ))}
@@ -1422,7 +1441,8 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                     {g.targets.slice(0, 12).map((t, i) => (
                       <span className="rel-item" key={i}>
                         {t.clickable
-                          ? <button className="rel-link" type="button" onClick={() => onWord(t.word)}>{t.word}</button>
+                          ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                              onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
                           : <span className="rel-plain">{t.word}</span>}
                       </span>
                     ))}
@@ -1490,7 +1510,8 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
               {g.targets.slice(0, 20).map((t, i) => (
                 <span className="rel-item" key={i}>
                   {t.clickable
-                    ? <button className="rel-link" type="button" onClick={() => onWord(t.word)}>{t.word}</button>
+                    ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                              onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
                     : <span className="rel-plain">{t.word}</span>}
                 </span>
               ))}
@@ -1506,7 +1527,8 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
           <div className="exchange-list">
             {entry.forms.map((f, i) => (
               <span className="exchange-item" key={i}>
-                <button className="rel-link" type="button" onClick={() => onWord(f.form)}>{f.form}</button>
+                <a className="rel-link" href={`#${encodeURIComponent(f.form)}`}
+                   onClick={(ev) => { ev.preventDefault(); onWord(f.form); }}>{f.form}</a>
                 {f.label && <span className="exchange-label">{f.label}</span>}
               </span>
             ))}
@@ -1514,19 +1536,6 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      {entry.audio.length > 0 && (
-        <section className="entry-section">
-          <h3>真人发音</h3>
-          <div className="exchange-list">
-            {entry.audio.slice(0, 6).map((a, i) => (
-              <span className="exchange-item" key={i}>
-                {a.url && <audio controls preload="none" src={a.url} />}
-                {a.region && <span className="badge">{EN_REGION_LABELS[a.region] ?? a.region}</span>}
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
     </article>
   );
 }
@@ -2932,6 +2941,8 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
   speak: (word: string, locale: string) => void;
 }) {
   const posParts = entry.pos ? entry.pos.split('/') : [];
+  // 🔴 限量规则只许有一份 —— 组件和契约闸走同一个 `deShownExamples`。
+  const shownEx = deShownExamples(entry.senses, entry.examples) as Set<unknown>;
   const isVerb = posParts.includes('v');
   const isNoun = posParts.some((p) => p === 'n' || p === 'name');
   const isAdj = posParts.includes('adj');
@@ -3055,7 +3066,7 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
                     {/* 🔴 这条义项下的例句。限 3 条 —— 照 fr 的先例：`banco` 有 14 条例句，
                         全铺在页尾会把六条义项挤没，读者也分不清哪句配哪义
                         （用户 2026-08-31 看 `banco` 的原话：「这个页面排版很奇怪」）。 */}
-                    {entry.examples.filter((x) => x.senseId === s.id).slice(0, 3).map((x, xi) => (
+                    {entry.examples.filter((x) => x.senseId === s.id && shownEx.has(x)).map((x, xi) => (
                       <div className="sense-example" key={xi}>
                         <div className="ex-pt" lang="pt">{x.text}</div>
                         {x.zh && <div className="ex-zh">{x.zh}</div>}
@@ -3230,6 +3241,25 @@ function DeSenseChips({ sense }: { sense: DeSense }) {
   );
 }
 
+/**
+ * de 的例句分两处渲染，**这份规则只许有一份**，契约闸 `import` 它来算期望值。
+ * 🔴 两边各写一版必然漂开 —— 2026-09-10 例句改成按义项归位时，
+ *    闸里那条 `slice(0, 12)` 当场报 66 条假红（同一天 `capAudios` 已经踩过一次）。
+ *   · 挂在义项上的：嵌在该义项下，**每条义项最多 3 句**（与 es/fr/pt 同一上限）
+ *   · `senseId` 为空的：另起一个词条级「例句」区，**最多 12 句**
+ */
+export function deShownExamples(
+  senses: { id: number }[],
+  examples: { senseId: number | null }[],
+): Set<{ senseId: number | null }> {
+  const out = new Set<{ senseId: number | null }>();
+  for (const s of senses) {
+    for (const x of examples.filter((e) => e.senseId === s.id).slice(0, 3)) out.add(x);
+  }
+  for (const x of examples.filter((e) => !e.senseId).slice(0, 12)) out.add(x);
+  return out;
+}
+
 function groupDeSenses(senses: DeSense[]): { pos: string | null; senses: DeSense[] }[] {
   const groups: { pos: string | null; senses: DeSense[] }[] = [];
   for (const s of senses) {
@@ -3245,6 +3275,8 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
   speak: (word: string, locale: string) => void;
 }) {
   const posParts = entry.pos ? entry.pos.split('/') : [];
+  // 🔴 限量规则只许有一份 —— 组件和契约闸走同一个 `deShownExamples`。
+  const shownEx = deShownExamples(entry.senses, entry.examples) as Set<unknown>;
   const isVerb = posParts.includes('v');
   const isNoun = posParts.some((p) => p === 'n' || p === 'name');
   const isAdj = posParts.some((p) => p === 'adj' || p === 'adv');
@@ -3270,6 +3302,25 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
           </button>
         </div>
       )}
+
+      {/* 🔴🔴 **2026-09-10 从「读音」区下面挪上来，并换成共用的 `HumanAudioRow`。**
+          与 en 同一次改动、同一个理由（pt 2026-08-31 就修过）：发音是读音的一部分，
+          该紧跟音标。de 原来是自建的 `.de-audio-row` + `.audio-btn`，
+          **没有限量、没有死链回退、没有重名消歧** —— 三样共用件早就有：
+            · `capAudios` 每地区 ≤2、总数 ≤6（fr 的 `chien` 曾排出八个都写「法国」的按钮）
+            · 死链自动回退 TTS（dump 里约 10% 音频 URL 是死链，裸播放是**静默变哑**）
+            · 同一标签重复时带上录音人（pt 的 `a` 曾四个按钮都写「巴西」）
+          ⚠️ `GermanAudio` 没有 `file` 字段（`HumanAudioRow` 拿它当 key 与死链标记），
+             用 URL 末段补上 —— 那正是 Commons 的文件名。**照抄 pt 那次的做法。** */}
+      <HumanAudioRow
+        audios={entry.audio.map((a) => ({
+          file: decodeURIComponent(a.url.split('/').pop() ?? a.url),
+          url: a.url, speaker: a.speaker, region: a.region, regionSrc: a.regionSrc,
+        }))}
+        word={entry.word}
+        fallback={() => speak(entry.word, speakLocale)}
+        regionLabel={(r) => DE_REGION_LABELS[r] || r}
+      />
 
       {multiGender ? (
         <div className="de-noun-variants">
@@ -3359,11 +3410,27 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                       {s.zh || <span className="sense-missing">（待补）</span>}
                       <DeSenseChips sense={s} />
                     </div>
-                    {s.en && <div className="sense-en"><FrText text={s.en} /></div>}
+                    {/* 🔴🔴 **2026-09-09：补语种徽标。**这是 fr 2026-08-29 修过的同一个缺陷，
+                        当时的注释写着「es/it 早就有 `.sense-src` + 分色徽标，fr 是**漏抄**」——
+                        en 和 de 一直没跟上，中文/英文/德文三行同字号堆在一起，
+                        读者扫一眼分不清哪行是哪种语言。**这是第四次同形状。**
+                        ⚠️ 更糟的一半只有 de 有：`.sense-src-de` 在 `styles.css` 里
+                           **一条规则都没有**，德语原文用的是继承下来的默认字号和主文本色 ——
+                           页面上它比中文释义还显眼，而英文那行是 13.5px 灰字。
+                           与 fr 修之前的 `.sense-fr` 一模一样。
+                        ⚠️ 多行德语释义只有 **16 条**，每行各带一个 DE 徽标即可，
+                           不为这 16 条给闸开「首行才有徽标」的例外。 */}
+                    {s.en && (
+                      <div className="sense-src" lang="en">
+                        <span className="sense-src-lang">EN</span><FrText text={s.en} />
+                      </div>
+                    )}
                     {/* 三语方针的「本语言」那一支（`[[gloss-three-languages]]`）。
                         1.5a 收 135,179 条 + 1.5c 补 36,134 条 = 171,313 条。 */}
                     {s.de && s.de.split('\n').map((line, di) => (
-                      <div className="sense-src-de" key={di}>{line}</div>
+                      <div className="sense-src" lang="de" key={di}>
+                        <span className="sense-src-lang">DE</span>{line}
+                      </div>
                     ))}
                     {s.altOf.length > 0 && (
                       <div className="sense-altof">
@@ -3395,6 +3462,22 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                         ))}
                       </div>
                     )}
+                    {/* 🔴 挂在这条义项上的例句（见下面词条级例句区那段长注释）。
+                        每条最多 3 句，与 es/fr/pt 同一个上限。 */}
+                    {entry.examples.filter((x) => x.senseId === s.id && shownEx.has(x)).map((x, xi) => (
+                      <div className="sense-example" key={xi}>
+                        {/* 🔴🔴 **出处在前、引文在后** —— en 2026-09-09 外审改过的同一条，
+                            de 一直是「引文 → 中文 → 出处」。外审当时**三次独立读错**，
+                            都判成「出处混在例句前／顺序混乱／张冠李戴」，
+                            因为读者无从判断那行出处属于上一条还是下一条。
+                            维基词典自己的体例也是出处引出引文。
+                            ⭐ 这条是**只有渲染成品才发现得了**的缺陷：
+                               数据完全正确，`ref` 挂在对的那条例句上，闸永远绿。 */}
+                        {x.ref && <div className="example-ref">{x.ref}</div>}
+                        <div className="example-de">{x.text}</div>
+                        {x.zh && <div className="example-zh">{x.zh}</div>}
+                      </div>
+                    ))}
                   </li>
                 ))}
               </ol>
@@ -3403,48 +3486,63 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      {/* 读音表：`pronunciation` 100.9 万行，昨天一条都没接上。
+      {/* 🔴🔴 **2026-09-10：只印真的不一样的读音。**用户看 `schön` 页看出来的：
+          读音区印着「/ʃøːn/ 形容词」「/ʃøːn/ **verb**」—— 同一个音印两遍，
+          第二个还印着英文原码（长写法 `verb` 不在 `POS_LABELS` 里，已补）。
+          实测：读音按词性分出 >1 组的词有 **12,872 个，其中读音真的不同的只有 1,215 个**
+          ⇒ **另外 11,657 个词，这一区把同一个音重复印 2–3 遍，全是噪声**。
+          ⭐ 判据换成「**去重之后还剩几个不同的 IPA**」，而不是「有几行 pronunciation」——
+             后者是形式（表里有几行），前者才是读者关心的（这个词有几种读法）。
+          ⚠️ 词性徽标只在**读音确实分词性**时才印：同一个音配一堆词性徽标是假信息，
+             它会让读者以为「换个词性就要换个读法」。
           ⚠️ `region` 原样透出（收尾单 C31：两张表目前两套地区码，修法在生成侧）。 */}
-      {entry.readings.length > 1 && (
-        <section className="entry-section">
-          <h3>读音</h3>
-          <ul className="de-readings">
-            {entry.readings.slice(0, 8).map((r, i) => (
-              <li key={i}>
-                <span className="phonetic-value">/{r.ipa}/</span>
-                {r.region && <span className="badge region">{DE_REGION_LABELS[r.region] || r.region}</span>}
-                {r.pos && <span className="badge pos">{posLabel(r.pos)}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {(() => {
+        const byIpa = new Map<string, { ipa: string; region: string | null; pos: string[] }>();
+        for (const r of entry.readings) {
+          const k = `${r.ipa}|${r.region ?? ''}`;
+          const hit = byIpa.get(k);
+          if (hit) { if (r.pos && !hit.pos.includes(r.pos)) hit.pos.push(r.pos); }
+          else byIpa.set(k, { ipa: r.ipa, region: r.region, pos: r.pos ? [r.pos] : [] });
+        }
+        const uniq = [...byIpa.values()];
+        if (uniq.length < 2) return null;   // 只有一种读法 ⇒ 词头那行已经印过了
+        return (
+          <section className="entry-section">
+            <h3>读音</h3>
+            <ul className="de-readings">
+              {uniq.slice(0, 8).map((r, i) => (
+                <li key={i}>
+                  <span className="phonetic-value">/{r.ipa}/</span>
+                  {r.region && <span className="badge region">{DE_REGION_LABELS[r.region] || r.region}</span>}
+                  {r.pos.map((p) => <span className="badge pos" key={p}>{posLabel(p)}</span>)}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })()}
 
-      {entry.audio.length > 0 && (
-        <section className="entry-section">
-          <h3>真人发音</h3>
-          <div className="de-audio-row">
-            {entry.audio.map((a, i) => (
-              <button className="audio-btn" key={i} type="button"
-                onClick={() => { void new Audio(a.url).play(); }}>
-                <SpeakerIcon />
-                {a.region && <span className="badge region">{DE_REGION_LABELS[a.region] || a.region}</span>}
-                {a.speaker && <span className="audio-speaker">{a.speaker}</span>}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {entry.examples.length > 0 && (
+      {/* 🔴🔴 **2026-09-10：例句按义项归位。**用户：「词级例句的样式似乎有差异」。
+          de 原来把 40 条例句**一律铺成一个词条级平表**，而 `german.ts` 一直在
+          `SELECT e.sense_id`、`GermanExample.senseId` 也一直透出来了 ——
+          **组件把它扔了**。实测 de 的 44.4 万条例句里 **227,896 条（51.3%）挂在义项上**，
+          这一半的归属信息一条都到不了读者：`schön` 页上「她唱得很美」与
+          「这真是件糟糕的事」并排，读者看不出它们属于**两条不同的义项**。
+          ⇒ 照 es/fr/pt 的做法**分两处**：挂义项的嵌在该义项下（每条最多 3 句），
+             `senseId` 为空的另起一区（最多 12 句）。
+          ⭐ 这是 `[[it-display-layer-stage8]]` 的又一例：**数据全对、接口全对、组件没读**。
+          ⚠️ it 也是同一个形状（39.0% 挂义项、组件同样铺平），**已记账未修**——
+             用户这次点的是 de，不擅自动别的语种（`[[es-only-scope]]`）。 */}
+      {entry.examples.some((x) => !x.senseId) && (
         <section className="entry-section">
           <h3>例句</h3>
           <ul className="example-list">
-            {entry.examples.slice(0, 12).map((e, i) => (
+            {entry.examples.filter((x) => !x.senseId && shownEx.has(x)).map((e, i) => (
               <li className="example-item" key={i}>
+                {/* 出处在前、引文在后 —— 理由同上面义项内那段 */}
+                {e.ref && <div className="example-ref">{e.ref}</div>}
                 <div className="example-de">{e.text}</div>
                 {e.zh && <div className="example-zh">{e.zh}</div>}
-                {e.ref && <div className="example-ref">{e.ref}</div>}
               </li>
             ))}
           </ul>

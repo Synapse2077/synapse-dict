@@ -31,6 +31,8 @@
   --it-soft: rgba(21, 128, 61, 0.12);
   --fr-accent: #7c3aed;   /* 源语言标识：FR 紫，与 EN 蓝 / ES 琥珀 / IT 绿四向拉开 */
   --fr-soft: rgba(124, 58, 237, 0.12);
+  --de-accent: #be123c;   /* 源语言标识：DE 绛红，五向拉开的最后一个色相 */
+  --de-soft: rgba(190, 18, 60, 0.12);
   --topic: #0f7a5f;       /* 学科标签 绿 —— 必须避开阳性的 --accent 蓝 */
 }
 
@@ -62,6 +64,8 @@
   --it-soft: rgba(110, 231, 160, 0.18);
   --fr-accent: #c4b5fd;   /* 源语言标识：FR 紫（暗色下提亮） */
   --fr-soft: rgba(196, 181, 253, 0.18);
+  --de-accent: #fda4af;   /* 源语言标识：DE 绛红（暗色下提亮） */
+  --de-soft: rgba(253, 164, 175, 0.18);
   --topic: #4fc3a1;       /* 学科标签 绿（暗色下提亮） */
 }
 
@@ -772,6 +776,14 @@ body {
   color: var(--fr-accent);
 }
 
+/* 🔴 2026-09-09 补 de。在此之前德语原文走的是 `.sense-src-de` ——
+   `styles.css` 里**一条规则都没有**，于是它以默认字号 + 主文本色渲染，
+   比中文释义还显眼。与 fr 修之前的 `.sense-fr` 完全同形。 */
+.sense-src[lang='de'] .sense-src-lang {
+  background: var(--de-soft);
+  color: var(--de-accent);
+}
+
 .sense-missing {
   color: var(--text-tertiary);
   font-style: italic;
@@ -1358,10 +1370,26 @@ body {
 
 .rel-item { margin-right: 8px; }
 
+/* 🔴 2026-09-10：这条规则是给 `<a>` 写的 —— 它只定颜色和点线下划线，
+   **没有重置 `background` / `border` / `padding` / `font`**，而 `styles.css` 里
+   也没有全局 button 重置。en 曾把它套在 `<button>` 上（5 处，全仓库只有它这么写），
+   浏览器默认按钮外壳整个露出来：灰底 + 边框 + 小一号字 ⇒ 用户看到的「框框」。
+   受影响的不只是「词形变化」，是英语页上**每一个可点的词**。
+   ⇒ en 已全部改成 `<a href="#词" onClick={preventDefault}>`，与另外五门一致。
+   ⚠️ 兜底一条 button 重置，防止下次谁再套上来时页面被默认样式撑破。 */
 .rel-link {
   color: var(--accent);
   text-decoration: none;
   border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+button.rel-link {
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent);
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
 }
 
 .rel-link:hover { border-bottom-style: solid; }

@@ -38,7 +38,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { GermanEntryView } from './App';
+import { GermanEntryView, capAudios, deShownExamples } from './App';
 
 const svc = getService('de') as unknown as {
   getEntry(w: string): unknown;
@@ -83,8 +83,27 @@ const CHECKS: Check[] = [
     name: '🔴 德语原文释义没渲染（it 漏了 89,531 条那个形状）',
     hit: (e, h) => {
       const want = e.senses.filter((s: Entry) => s.de).length;
-      const got = count(h, /class="sense-src-de"/g);
+      // 🔴 2026-09-09 类名从 `.sense-src-de` 换成共用的 `.sense-src[lang="de"]`
+      //    （补语种徽标那次）。判据跟着换 —— 不换的话这条闸恒红，
+      //    而**一条永远红的闸等于没有闸**（`[[fix-regression-and-gate]]`）。
+      const got = count(h, /class="sense-src" lang="de"/g);
       return want > 0 && got < want ? `有德语原文的义项 ${want}，渲染 ${got}` : null;
+    },
+  },
+  {
+    // 🔴 2026-09-09 加。fr 2026-08-29 就有这条，de 一直没有 ——
+    //    于是「德语原文那行认不出是德语」这个缺陷在 de 这边**没有任何闸看得见**：
+    //    上面那条只问「渲染出来没有」，答案一直是"有"。
+    //    ⇒ 这一条问的是**不同的问题：渲染出来的那行，认不认得出是哪种语言**。
+    name: '🔴 源语言行必须带认得出的语种徽标（EN/DE）',
+    hit: (e, h) => {
+      const rows = [...h.matchAll(
+        /<div class="sense-src" lang="(\w+)">(?:<span class="sense-src-lang">(\w+)<\/span>)?/g)];
+      const bare = rows.filter((m) => !m[2]);
+      if (bare.length) return `${bare.length} 行源语言没有语种徽标（lang=${bare[0][1]}）`;
+      const wrong = rows.filter((m) => m[2] !== m[1].toUpperCase());
+      if (wrong.length) return `语种徽标与 lang 不符：lang=${wrong[0][1]} 徽标=${wrong[0][2]}`;
+      return null;
     },
   },
   {
@@ -103,27 +122,35 @@ const CHECKS: Check[] = [
     },
   },
   {
-    // ⚠️ 期望值走**服务层已经限过量的那份**（`entry.audio` 已 LIMIT 8），
-    //    不在这里重算一套限量规则 —— pt 那轮就是因为闸自己算了一份，
-    //    展示层加「每地区最多 2 条」后当场报 4 条假红。
+    // ⚠️ 期望值**必须走展示层自己那份限量规则**，不在这里重算一套 ——
+    //    pt 那轮就是因为闸自己算了一份，展示层加「每地区最多 2 条」后当场报 4 条假红。
+    // 🔴 2026-09-10 判据跟着组件换：de 从自建的 `.de-audio-row`/`.audio-btn`
+    //    换成共用的 `HumanAudioRow`（`.audio-chip`），限量由 `capAudios` 一处说了算。
+    //    旧判据 `e.audio.length` 是**没限过量的原始条数**，不换就会报一批假红。
     name: '🔴 录音没渲染 / 数量对不上（fr 那次 39 万条一个用户看不见）',
     hit: (e, h) => {
-      const want = e.audio.length;
-      const got = count(h, /class="audio-btn"/g);
-      return want > 0 && got !== want ? `${want} 条录音，页面上 ${got} 个播放按钮` : null;
+      const want = capAudios(e.audio as Array<{ url: string | null; region?: string | null }>).length;
+      const got = count(h, /class="audio-chip"/g);
+      return want > 0 && got !== want ? `可渲染录音 ${want} 条，页面上 ${got} 个播放按钮` : null;
     },
   },
   {
+    // 🔴 2026-09-10 例句改成**两处渲染**（挂义项的嵌在义项下 `.sense-example`，
+    //    `senseId` 为空的进词条级 `.example-item`）⇒ 判据只查一个类名会报假红：
+    //    全部例句都挂在义项上的词，HTML 里一条 `.example-item` 都没有。
     name: '🔴 例句没渲染',
-    hit: (e, h) => (e.examples.length > 0 && !/class="example-item"/.test(h))
+    hit: (e, h) => (e.examples.length > 0
+      && !/class="example-item"/.test(h) && !/class="sense-example"/.test(h))
       ? `${e.examples.length} 条例句，HTML 里一条都没有` : null,
   },
   {
-    // 布局规矩：最多渲染 12 条。断言只问**这些该显示的**里有中文的那几条。
+    // ⚠️ 期望值走**组件自己那份限量规则**（`deShownExamples`），不在这里重算 ——
+    //    原来写死 `slice(0, 12)`，改成按义项归位（每义项 ≤3 + 词条级 ≤12）后
+    //    当场报 11 条假红。**同一天 `capAudios` 已经踩过一次同样的坑。**
     name: '🔴 例句有中文却没渲染出来',
     hit: (e, h) => {
       const t = text(h);
-      const shown = e.examples.slice(0, 12) as Entry[];
+      const shown = [...deShownExamples(e.senses, e.examples)] as unknown as Entry[];
       const miss = shown.filter((x) => x.zh && !t.includes(norm(x.zh).slice(0, 20)));
       return miss.length
         ? `该显示的 ${shown.length} 条里，有中文却没出现在页面上的 ${miss.length}（如「${miss[0].zh.slice(0, 18)}」）`
@@ -284,9 +311,16 @@ for (const w of words) {
   if (mutate) {
     html = html
       .replace(/class="sense-zh"/g, 'class="x"')
-      .replace(/class="sense-src-de"/g, 'class="x"')
-      .replace(/class="audio-btn"/g, 'class="x"')
+      .replace(/class="sense-src" lang="de"/g, 'class="x"')
+      // 模拟修复之前的状态：源语言行只有正文、没有语种徽标（照 contract-check-fr 那条）
+      .replace(/<span class="sense-src-lang">\w+<\/span>/g, '')
+      .replace(/class="audio-chip"/g, 'class="x"')
       .replace(/class="example-item"/g, 'class="x"')
+      .replace(/class="sense-example"/g, 'class="x"')
+      // 🔴 抹类名打不到「例句有中文却没渲染出来」——**正文还在页面上**，
+      //    那条断言查的是文字不是类名 ⇒ 单独造一条：把译文整行删掉。
+      //    （2026-09-10：不造这条的话它在 --mutate 下恒绿，看起来却像合格。）
+      .replace(/<div class="example-zh">[^<]*<\/div>/g, '')
       .replace(/class="de-infl-list"/g, 'class="x"')
       .replace(/class="sense-altof"/g, 'class="x"')
       .replace(/class="rel-row"/g, 'class="x"')

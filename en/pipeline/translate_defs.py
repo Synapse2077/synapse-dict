@@ -40,7 +40,6 @@
 
 ═══ 用法（都不自动跑，`--run` 才发请求）═══
     python3 -u pipeline/translate_defs.py --plan     # 干跑：池子 + 报价 + 闸
-    python3 -u pipeline/translate_defs.py --free     # 1.5b 免费段（零 API）
     python3 -u pipeline/translate_defs.py --run      # 1.5c 付费段
     python3 -u pipeline/translate_defs.py --apply    # 落库
 """
@@ -84,12 +83,11 @@ st.CONC = 60
 # 🔴 锚只认 ECDICT 原文这四桶。`fixed`/`judged` 是豆包写的，一个字都不进 payload。
 ANCHOR_QUAL = ("core", "good", "fair", "low")
 DOUBAO_QUAL = ("fixed", "judged")
-# 免费直接贴：只有 core 桶（99.8% ECDICT 原文），且必须单义词·单词性·单行
-FREE_QUAL = ("core",)
+# 🔴 `FREE_QUAL` / `--free` / `SRC_FREE` 已于 2026-09-10 整条废除，
+#    理由见 `pool()` 里那段与 `fixes/redo_ecdict_core_gloss.py`。
 POS_RE = re.compile(r"\b(n|v|vt|vi|a|adj|ad|adv|prep|conj|pron|int|num|art|aux)\.\s")
 NET = re.compile(r"https?://|www\.")
 
-SRC_FREE = "ecdict-core"
 SRC_PAID = "model:def"
 
 
@@ -128,7 +126,11 @@ def deep(wid, rank, real):
 
 
 def pool(con):
-    """→ (free, paid)。free = [(sense_id, 中文)]；paid = [{id,word,pos,en,ref?}]"""
+    """→ (free, paid)。paid = [{id,word,pos,en,ref?}]。
+
+    ⚠️ `free` 自 2026-09-10 起**恒为空列表**，只为不改调用方签名而保留。
+       免费直接贴那条路已整条废除，理由见下面那段长注释。
+    """
     q = con.execute
     ptr = _ptr(q)
     lg = {}
@@ -136,7 +138,7 @@ def pool(con):
         lg[wid] = (txt, qual)
     have = {s for (s,) in q("SELECT sense_id FROM sense_gloss WHERE lang='zh'")}
 
-    # 非指针义项数（免费段判"单义词"要用这个，不是全部义项数）
+    # 非指针义项数（`deep()` 判"多义词"要用这个，不是全部义项数）
     real = {}
     for sid, wid in q("SELECT id, word_id FROM sense"):
         if sid not in ptr:
@@ -150,11 +152,35 @@ def pool(con):
         if sid in ptr or sid in have:
             continue
         txt, qual = lg.get(wid, (None, None))
-        # ── 1.5b 免费：core 桶 · 该词只有一条实义项 · ECDICT 那条单词性单行
-        if (txt and qual in FREE_QUAL and real.get(wid, 0) == 1
-                and len(set(POS_RE.findall(txt))) <= 1 and "\n" not in txt):
-            free.append((sid, txt.strip()))
-            continue
+        # ── 1.5b 免费直接贴：**2026-09-10 整条废除**（见 `fixes/redo_ecdict_core_gloss.py`）
+        #
+        # 原来的判据是：
+        #     qual in ("core",)                        # 质量桶
+        #     and real.get(wid, 0) == 1                # 这个词只有一条实义项
+        #     and len(set(POS_RE.findall(txt))) <= 1   # ECDICT 那行只有一个词性码
+        #     and "\n" not in txt                      # 只有一行
+        #
+        # 🔴 **四条全是形式判据。「这段中文说的是不是就是这条英文义项」—— 从来没验过。**
+        #    用户看页面看出来的：
+        #      mariposa  EN A mariposa lily (Calochortus spp.).
+        #                zh n. = mariposa lily 蝴蝶百合；<西>斗牛士在身后挥动披风的逗牛动作
+        #    四条它全过（1 条义项 ✓ 1 个词性码 ✓ 单行 ✓ core 桶 ✓），而它错了一半。
+        #    更狠的两条（**没有分号也一样错**，所以按分号补救治不了）：
+        #      Te      EN The realm of the dead in Egyptian mythology. ／ zh [化] 碲；[医] 破伤风
+        #      scores  EN A bag of cannabis worth £20.                 ／ zh 大量；二十；得分
+        #    ⇒ `[[criteria-narrower-than-you-think]]`：拿「几行、几个词性」
+        #      当了「几个意思」的代理。**「这个词只有一条 kaikki 义项」
+        #      不等于「ECDICT 那条说的就是它」。**
+        #
+        # ⭐ 那 11,479 条全部改走下面的付费路径 —— 它本来就同时管这三件事：
+        #    `RULES` 第 1 条出词典体（不带词性码）／第 2 条不合并义项／
+        #    `ANCHOR_RULE` 第 8 条「**不吻合 → 完全无视 `ref`**，按 `en` 的意思译」。
+        #    最后一条正是 1.5b 缺的那道内容检查。代价按 1.5c 实测单价 ≈ 2 元。
+        #
+        # 🔴 **这个分支不许再加回来。** 要"免费拿"就得有一道能验内容的闸，
+        #    而内容对不对**规则判不了** —— 这正是当初该停手的地方。
+        #    `fixes/redo_ecdict_core_gloss.py` 的闸④直接 grep 本文件里的
+        #    `free.append(`，加回来它当场报红。
         # ── 1.5c 付费：锚只给 ECDICT 原文四桶，**且不给多义词的深层义项**
         ref = None
         if txt and qual in ANCHOR_QUAL and not NET.search(txt) and not deep(wid, rk, real):
@@ -192,19 +218,15 @@ def gates(con, free, paid):
     noid = sum(1 for i in paid if "id" not in i)
     ok_paid = [i for i in paid if "id" in i]
     leak = [i["id"] for i in ok_paid if i.get("ref") and sid2wid.get(i["id"]) in bad_wids]
-    free_leak = [s for s, _ in free if sid2wid.get(s) in bad_wids]
     checks = [
         # ① 形状：先验 payload 长得对不对，后面几条才敢碰它的字段
         ("payload 一律带 id（那个 175 万 token 的 bug）", noid, 0),
         # ② 内容
         ("🔴 豆包桶的文本混进锚", len(leak), 0),
-        ("🔴 豆包桶的文本混进免费段", len(free_leak), 0),
-        # 🔴 这里**故意写死 "core"，不读 `FREE_QUAL`** —— 判据不许引用它要检查的那个变量。
-        #    读 FREE_QUAL 的话，谁把 `fixed` 加进 FREE_QUAL，这条就跟着放行 ＝ 恒真。
-        ("免费段全部来自 core 桶",
-         sum(1 for s, _ in free if qual_of.get(sid2wid.get(s)) != "core"), 0),
-        ("付费池与免费段不重叠",
-         len({s for s, _ in free} & {i["id"] for i in ok_paid}), 0),
+        # 🔴 2026-09-10 删掉三条免费段的检查（「混进免费段」「全部来自 core 桶」
+        #    「与付费池不重叠」）。免费分支已整条废除 ⇒ `free` 恒空 ⇒ 三条恒真。
+        #    **一条永远通过的检查等于没检查**，留着比删掉更坏：它假装有覆盖。
+        #    （PITFALLS 一句话版 35：变异会随着项目做完而空转。）
         # ③ 方案 (c)：多义词的深层义项一条锚都不许带
         # 🔴🔴 **这里故意不调 `deep()`，阈值写死** —— 判据不许引用它要检查的那个变量。
         #    2026-09-08 变异当场咬到：调 `deep()` 的话，谁把 `DEEP_SENSES` 调大，
@@ -241,9 +263,11 @@ def quote(paid):
 def mutate(con):
     """⭐ 每条闸造一个反例。**期望值全是 0 的闸最容易变成恒真** ——
     这五条守的都是"一个字都不许漏进来"，不造反例就分不清「真的没漏」和「闸瞎了」。"""
-    global ANCHOR_QUAL, FREE_QUAL
+    # 🔴 2026-09-10 删掉 M2（「豆包桶进免费段」）：免费分支废除后 `free` 恒空，
+    #    这条变异**打不红任何一条闸**。打不红的变异和恒真的闸是同一个病。
+    global ANCHOR_QUAL
     print("\n═══ 变异验证 ═══")
-    keep_a, keep_f = ANCHOR_QUAL, FREE_QUAL
+    keep_a = ANCHOR_QUAL
     cases = []
 
     # M1 把豆包桶放进锚 —— 闸必须报"混进锚"
@@ -251,12 +275,6 @@ def mutate(con):
     f, pd = pool(con)
     cases.append(("豆包 fixed 桶进锚", _red(con, f, pd)))
     ANCHOR_QUAL = keep_a
-
-    # M2 把豆包桶放进免费段 —— 闸必须报"混进免费段"+"不是 core"
-    FREE_QUAL = keep_f + ("fixed",)
-    f, pd = pool(con)
-    cases.append(("豆包 fixed 桶进免费段", _red(con, f, pd)))
-    FREE_QUAL = keep_f
 
     # M4 关掉方案 (c)（把 DEEP_SENSES 调到永不触发）—— 闸必须报"深层义项带了锚"
     global DEEP_SENSES
@@ -353,7 +371,20 @@ def apply_(con, paid, free):
         return 1
     sent = {i["id"] for i in paid}
     have = {s for (s,) in con.execute("SELECT sense_id FROM sense_gloss WHERE lang='zh'")}
-    alien = sorted(set(ans) - sent)
+    # 🔴🔴 **2026-09-10 判据收窄。**原来写的是 `set(ans) - sent` ——
+    #    首轮跑（池子＝全量、答案文件为空）时它是对的，**增量重跑时必然红**：
+    #      答案文件**跨轮累加只增不减**，而 `pool()` 会把已落库的 `sid in have` 减掉
+    #      ⇒ 上一轮 106 万条合法答案全部落在 `sent` 之外，被判成「模型编的」。
+    #    实测这次重跑：alien 报 1,060,481 条，回查 **0 条不是合法 sense_id**，
+    #    1,060,481 == 库里 `model:def` 的行数，一条不差。
+    #    ⇒ **闸红了先读，读完是我的判据错**（同 §十三那批 5 条）。
+    #
+    #    它真正要挡的是 2026-09-07 那个 175 万 token 事故：模型没收到 id 就瞎编，
+    #    编中真主键就把中文贴到别的义项上（`[[model-answer-files-key-by-id]]`）。
+    #    **那道防线在 `rows` 的 `s in sent` 上，本条只是探测器** ——
+    #    所以判据换成「既不在本轮池子、也没在库里落过 ＝ 无法解释」。
+    #    ⚠️ 这是 `[[external-anchor-gates]]` 的形状：**锚自己上一版产物的闸必然过期。**
+    alien = sorted(set(ans) - sent - have)
     empty = [s for s, z in ans.items() if not z]
     rows = [(s, normalize(z), SRC_PAID) for s, z in ans.items()
             if normalize(z) and s in sent and s not in have]
@@ -366,7 +397,8 @@ def apply_(con, paid, free):
     checks = [
         ("🔴 答案 id 不在付费池里（＝模型编的）", len(alien), 0),
         ("🔴 要写的 sense_id 已经有中文了", len({s for s, _, _ in rows} & have), 0),
-        ("答案数 ≤ 发出去的条数", int(len(ans) > len(sent)), 0),
+        # 🔴 同上：分母要是**本轮**的。`len(ans)` 是历轮累计，与 `len(sent)` 不可比。
+        ("本次要写的条数 ≤ 发出去的条数", int(len(rows) > len(sent)), 0),
         # 🔴 规整的负控：句末 ！？ 是词义本身，一条都不许被削掉。
         #    ⚠️ 判据是**规整前后数量相等**，不是"等于某个数"——
         #       我第一版写死 479，字面量闸当场报警（写死行数必然过期），
@@ -398,14 +430,13 @@ def apply_(con, paid, free):
 
 def main():
     ap = argparse.ArgumentParser()
-    for f in ("plan", "free", "run", "apply", "mutate"):
+    for f in ("plan", "run", "apply", "mutate"):
         ap.add_argument("--" + f, action="store_true")
     a = ap.parse_args()
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     free, paid = pool(con)
     print("═══ 阶段 1.5 池子 ═══")
-    print("   1.5b 免费直接贴（core 桶单义词）%s 条" % format(len(free), ","))
-    print("   1.5c 付费翻                    %s 条" % format(len(paid), ","))
+    print("   1.5c 付费翻 %s 条（1.5b 免费直接贴已废除，见 pool()）" % format(len(paid), ","))
     print("\n═══ 闸①：花钱之前 ═══")
     if gates(con, free, paid):
         print("\n🔴 闸红，不跑。")
@@ -413,15 +444,6 @@ def main():
     print("\n═══ 报价 ═══")
     quote(paid)
     con.close()
-
-    if a.free:
-        OUT.mkdir(parents=True, exist_ok=True)
-        with dbtool.session("keep-v3-15b-free", expect={"#sense_gloss": len(free)}) as s:
-            s.executemany("INSERT INTO sense_gloss (sense_id,lang,kind,seq,text,src) "
-                          "VALUES (?,'zh','definition',0,?,?)",
-                          [(sid, txt, SRC_FREE) for sid, txt in free])
-        print("\n✅ 1.5b 落库 %s 条" % format(len(free), ","))
-        return 0
 
     if a.run:
         OUT.mkdir(parents=True, exist_ok=True)
@@ -449,7 +471,7 @@ def main():
         return rc
 
     if not a.plan:
-        print("\n(干跑。--free / --run / --apply / --mutate)")
+        print("\n(干跑。--run / --apply / --mutate)")
     return 0
 
 

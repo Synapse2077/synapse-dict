@@ -58,6 +58,17 @@ export const POS_LABELS: Record<string, string> = {
   //    环缀是德语构词的真实类型（`Ge-` + 词干 + `-e` 一次成词），
   //    拆成 prefix + suffix 会丢掉「必须同时出现」这一条。同 `root` 的处理：显式给一行。
   circumfix: '环缀',
+  // 🔴🔴 2026-09-10 补 **de `pronunciation.pos` 的长写法**（用户看 `schön` 页看出来的：
+  //    读音区印着「/ʃøːn/ **verb**」）。根子是 **de 一个库里两套词性取值**：
+  //      `sense.pos`         n / v / phr / pref / suf      ← 短码，上面早就有
+  //      `pronunciation.pos` noun / verb / phrase / prefix / suffix  ← 长写法
+  //    实测 de 的 `pronunciation.pos` 15 种取值里，这 5 种查不到 ⇒ 原样印英文，
+  //    而它们覆盖 **699,802 / 1,034,438 = 67.7%** 的读音行（`noun` 一种就 39 万）。
+  //    ⚠️ 我先想去生成侧把两套统一 —— **不改**：那要重跑阶段 4 且 de 已封版，
+  //       而这里加五行是纯展示层的、可逆的。两套取值是**数据的真实形状**，
+  //       同 `sym`/`abbrev` 那两次：「同一张表要同时认两套取值，这不是重复」。
+  //    🔴 照 `sym` 那次的教训**一次找全**：de 的 15 种取值全部与本表对过，缺的就这 5 种。
+  noun: '名词', verb: '动词', phrase: '短语', prefix: '前缀', suffix: '后缀',
 };
 
 // 语域标签 → 中文（对应 build.py REGISTERS）。
