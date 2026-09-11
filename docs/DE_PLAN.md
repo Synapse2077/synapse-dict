@@ -911,3 +911,106 @@ search_prefix        415,187   （阶段 9）
     de  释义→读音→例句→语义关系→词形还原→搭配
 
 这一项**不是缺陷是不统一**，归用户早先定的「六门样式统一轮」，本次未动。
+
+**2026-09-11 六门字体样式统一（用户定的口径）**
+
+用户看 `Curry` 页：「这一部分的字体样式略有差别」，并定下口径：
+**「内容安排可以不一样，但是字体样式应该要统一」**。
+
+审计六个视图里出现过的**全部 className**，与 `styles.css` 逐个对照：
+
+    语种  类名数  在 styles.css 里根本不存在的
+    en    38     rel-row
+    es    60     —                      ← 唯一一个不缺的
+    it    45     ex-sup
+    fr    60     form-item form-label form-list form-more phonetic-context phonetic-region
+    de    75     **16 个**
+
+de 缺的 16 个：`.example-list` `.example-item` `.example-de` `.example-zh` `.example-ref`
+`.de-form-grid` `.de-form-cell` `.de-form-label` `.de-infl-list` `.de-infl` `.de-infl-label`
+`.de-readings` `.rel-row` `.sense-relations` `.alt-zh` `.section-count`
+
+具体后果（用户看到的就是这些）：
+
+- **`.example-de` 与 `.example-zh` 都没有规则** ⇒ 德语原文与中文译文渲染成
+  **同一个字号、同一个颜色**。别的五门里中文 13px 弱色、原文 13.5px 次级色。
+- **`<ul class="example-list">` 没有 `list-style: none`** ⇒ 保留浏览器默认项目符号与 40px 缩进。
+- **`.de-form-grid` 没有规则** ⇒ 9 个变形挤成一行连排（`Currys单数属格Currys变形…`）。
+- **`.section-count` 没有规则** ⇒ `<h3>词形变化<span>9</span></h3>` 里的 9 用 h3 的字号字重印，
+  看着像标题的一部分（「词形变化9」）。
+- **`.rel-row` 是 en 与 de 共缺**：`.rel-kind`/`.rel-item`/`.rel-more` 早就有规则，
+  **唯独承载布局的容器没有** ⇒ 关系行没有换行、没有间距、没有上下留白。
+
+🔴 **另外：de 视图里 8 处链接是裸 `<a>`，一个 className 都没有**
+（全仓库 13 处裸 `<a>`，8 处在 `GermanEntryView`）⇒ 变形/构词/关系/词形还原
+全都用浏览器默认的蓝字加下划线，而别的语种用 `.rel-link`（点线下划线、无下划线色）。
+⇒ 13 处全部加上 `rel-link`。
+
+**修法：不是补 24 条规则，是把这些名字挂成已有那一份的别名。**
+`styles.css` 里本来就是这个写法（`.ex-es, .ex-it, .ex-fr, .ex-en, .ex-pt { … }`）。
+现在每个视觉角色只有**一个声明块**，选择器列表就是"这个角色有哪些名字"：
+
+    列表容器      .sense-example-list .example-list .de-readings .form-list
+    单条例句      .sense-example .example-item
+    例句原文      .ex-es .ex-it .ex-fr .ex-en .ex-pt .example-de
+    例句中文      .ex-zh .example-zh
+    例句出处      .ex-ref .example-ref
+    关系行容器    .rel-row .sense-relations .rel-targets      ← 新建，原来谁都没有
+    词形横排容器  .exchange-list .de-form-grid .de-infl-list
+    词形单元      .exchange-item .de-form-cell .de-infl
+    词形语法标签  .exchange-label .de-form-label .de-infl-label .form-label
+    弱色小字附注  .rel-more .alt-zh .form-more .phonetic-context .phonetic-region
+
+⚠️ 顺带收掉一处无信息徽标：`Curry` 的读音区四个读音**全是名词**，
+原来四个都印「名词」。**徽标要回答"这两条为什么不同"，答不了就别印**
+⇒ 只在读音确实分词性时才印（与「同一个音不许印两遍」是同一条判据的另一面）。
+
+审计脚本留在 `$CLAUDE_JOB_DIR/tmp/cssaudit.py`，跑完六门现在**一个孤儿类名都没有**。
+
+**2026-09-11 数据：189,931 条例句挂回义项（用户看 `Curry` 页问出来的）**
+
+用户：「我似乎发现，德语是没有义项级例句是吗」。有，但漏挂了一大半：
+
+    改前  可见例句 444,094 ／ 挂义项 227,896 (51.3%)
+          有例句的词 164,869 ／ 其中有义项级的 104,128 (63.2%)
+    改后  挂义项 417,827 (94.1%) ／ 有义项级的词 162,549 (98.6%)
+
+`schön` / `Curry` 恰好落在没挂上的那 36.8% 里，所以看着像「德语没有义项级例句」。
+
+🔴🔴 **根子：桥只认了一个来源名，而来源后来长出了两层。**
+`pipeline/harvest_examples.py`（阶段 5a，2026-09-03）：
+
+    SELECT d.word, x.text, x.sense_id FROM sense_src x
+     WHERE x.src = 'de-edition'          ← 只认这一个
+
+    de-edition               135,153   ← 桥只认了这一层
+    de-edition-adjudicated    47,604   ← 1.5c 之后加的
+    de-edition-backfill       36,134   ← 1.5c 之后加的
+                             ───────
+                             218,891   桥差了 83,712 条
+
+那个文件头还写着「挂不上是正常的，不是缺陷」——**这句话在 2026-09-03 是对的，
+后来两层一加就成了错的**，而注释和判据都没人回头改。
+
+🔴 **这是本项目第二次栽在同一个形状**（第一次是 2026-09-04 修「关系挂错义项」那轮，
+已记在 `[[criteria-narrower-than-you-think]]`：「`src == 'de-edition'` ⇒ 这是德语桥
+—— 德语释义后来又多了两层 8.4 万条 ⇒ 桥一条都不长，重跑等于白跑」）。
+**同一个文件族、同一个来源名、同一种失效方式。**
+
+⇒ 判据换成**事实**不是**来源名**：桥建在「这条义项**有没有德语原文**」
+（`sense_gloss.lang='de'`）上，**一个 `src` 都不写**。来源名会随时间长出新的，
+「有没有德语原文」不会。生成侧与存量各改一处：
+`pipeline/harvest_examples.py`（桥）+ `fixes/relink_examples_to_senses.py`（补挂）。
+
+**判据：逐字节，不猜。**`example.src_gloss` 存着这条例句在源里挂的那条德语释义原文，
+按 (词形, 德语释义原文) 精确匹配：189,931 条命中、**歧义 0 条**（同一键指向两条义项的
+100 个键整条不挂）。⚠️ **不许用「词形 + 第几条义项」当桥** —— 两边义项切分不保证一致。
+
+⚠️ 剩下 25,401 条**留 NULL**：抽 400 条全是**源头有、我们没收录**的义项
+（`April` 作姓氏、`Tribus` 罗马选区，而库里 `April` 只有「第四个月」）。
+它们继续走词条级例句区。**宁可缺，不可错。**
+
+闸：写库前 4 条（含 2 条负控）、写库后 3 条，`dbtool` 全套绿，回归闸 38 条绿，
+契约闸 de 18 条 / en 22 条绿。
+
+⭐ 用户 2026-09-11 定的规矩：**「我们不要被封版这个限制，有错误就改」**。

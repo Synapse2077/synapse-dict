@@ -141,6 +141,19 @@ def sense_index(con):
 def collect(con, verbose=True):
     """→ (行列表, 统计)。纯计算，不写库。"""
     smap = sense_index(con)
+    # 🔴 第二道桥：坐标挂不上时按 (词形, 意语释义原文) 逐字匹配。见文件头那段。
+    #    同一键指向两条义项时整条不挂（宁可缺，不可错）。
+    tmap, _amb = {}, set()
+    for _w, _t, _sid in con.execute(
+            "SELECT d.word, g.text, g.sense_id FROM sense_gloss g "
+            "JOIN sense s ON s.id=g.sense_id JOIN dict d ON d.id=s.word_id "
+            "WHERE g.lang='it' AND g.text IS NOT NULL AND g.text<>''"):
+        _k = (_w, (_t or '').strip())
+        if _k in tmap and tmap[_k] != _sid:
+            _amb.add(_k)
+        tmap.setdefault(_k, _sid)
+    for _k in _amb:
+        tmap.pop(_k, None)
     ids, _ = word_index(con)
     id2word = {i: w for i, w in con.execute("SELECT id, word FROM dict")}
     # 义项现在挂在哪个词形上 —— 用来拦「例句挂到别的词头的义项上」
@@ -181,6 +194,15 @@ def collect(con, verbose=True):
                         c["同一句多版都有，留优先级高的那版"] += 1
                         continue
                     sid = smap.get((src, w, pos, etym, i))
+                    # 坐标挂不上时退到**文本桥**（见文件头）。
+                    # 🔴 键用 `word` 不用 `w`：`w` 是 dump 原词，`word` 是**合并后库里那一行**
+                    #    的写法（撇号空壳），而文本桥是按 `dict.word` 建的。
+                    #    用错键**不会报错，只会静默匹配 0 条** —— 下面那条
+                    #    「义项已被搬到别的词头」的护栏比的也是 `word`。
+                    if sid is None and gloss:
+                        sid = tmap.get((word, gloss.strip()))
+                        if sid is not None:
+                            c["文本桥补挂"] += 1
                     if sid is not None and sense_word.get(sid) != word:
                         c["🔴 义项已被搬到别的词头 ⇒ 降级挂在词上"] += 1
                         sid = None

@@ -440,6 +440,14 @@ body {
   color: var(--accent);
 }
 
+/* 角色：地区徽标（de 读音区的「奥地利」）—— 有意**用中性底色**，
+   不跟学科标签抢颜色。写出来是为了「类名存在但没有规则」这件事不再发生，
+   而不是为了改外观：它本来就该等于 `.badge` 基样式。 */
+.badge.region {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+}
+
 .badge.tag {
   background: var(--surface-soft);
   color: var(--text-secondary);
@@ -561,21 +569,38 @@ body {
 }
 
 /* ---- Exchange / word forms ---- */
-.exchange-list {
+/* 角色：词形/构词的横排容器。 */
+.exchange-list,
+.de-form-grid,
+.de-infl-list {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 24px;
 }
 
-.exchange-item {
+/* 角色：一个「词形 + 它的语法标签」单元。 */
+.exchange-item,
+.de-form-cell,
+.de-infl {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.exchange-label {
+/* 角色：词形旁的语法标签（复数/属格/指小词…）。 */
+.exchange-label,
+.de-form-label,
+.de-infl-label,
+.form-label {
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* 角色：fr 的变形列表项（`<li>`），与 `.exchange-item` 同一个角色。 */
+.form-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .exchange-words {
@@ -1309,10 +1334,47 @@ body {
 /* ---- 例句（2026-08-07 接入）----
    挂在义项下面而不是堆在词条末尾 —— `example.sense_id` 已由 `src_gloss`
    与 `sense_src.text` 精确匹配挂好（79.0%），剩下 21% 单独成块。 */
-.sense-example {
+/* 角色：单条例句 —— 左竖线 + 缩进。 */
+.sense-example,
+.example-item {
   margin-top: 6px;
   padding-left: 10px;
   border-left: 2px solid var(--border);
+}
+
+/* en 的义项内例句是 `<ul>`（一条义项最多 4 句），去掉列表符号与缩进，
+   竖线由 `.sense-example` 自己画。 */
+/* ══ 2026-09-11 六门字体样式统一 ══
+   用户定的口径：「内容安排可以不一样，但是**字体样式应该要统一**」。
+   ⇒ 规矩是 **同一个视觉角色只许有一份声明**，各语种自造的名字**挂成它的别名**，
+     不是各写一份值。下面每一块的选择器列表就是"这个角色有哪些名字"。
+   🔴 起因：审计六个视图的全部类名，**de 有 16 个在本文件里根本不存在**
+     （`.example-de` / `.example-zh` 都没有 ⇒ 德语原文与中文译文渲染成同一个字号同一个颜色，
+      用户原话「这一部分的字体样式略有差别」）；fr 6 个、it 1 个、pt 1 个、
+      `.rel-row` 是 en 与 de 共缺。es 是唯一一个不缺的。
+   ⚠️ 这是 PITFALLS I3「自造类名 = 页面没样式，而且探针看不见它」最大的一次实例。 */
+
+/* 角色：例句/读音/词形的列表容器 —— 去掉浏览器默认的项目符号与 40px 缩进。 */
+.sense-example-list,
+.example-list,
+.de-readings,
+.form-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* 角色：关系行的容器（`近义 a b c` 一整行）。
+   🔴 `.rel-kind` / `.rel-item` / `.rel-more` 早就有规则，**唯独承载布局的容器没有**
+      —— en 和 de 的关系行因此没有换行、没有间距、没有上下留白。 */
+.rel-row,
+.sense-relations,
+.rel-targets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-top: 6px;
 }
 
 .sense-example .ex-es,
@@ -1321,20 +1383,27 @@ body {
    从建成起就没有这层样式，pt 今天接上时才发现。类名加了、样式没跟上，
    页面不会报错、只会看起来不对（用户看 `banco` 的原话：「这个页面排版很奇怪」）。 */
 .sense-example .ex-fr,
-.sense-example .ex-pt {
+/* 🔴 2026-09-10 加 `.ex-en`（en 的例句原来错用了首页药丸按钮的 `.example-chip`）。
+   这是本表第三次「类名加了、样式没跟上」—— 上面那条注释记的是 fr/pt 那次。 */
+.sense-example .ex-en,
+.sense-example .ex-pt,
+/* 🔴 de 的例句正文/译文/出处三个名字在本文件里一个都没有 ⇒ 三行同字号同颜色。 */
+.example-de {
   font-size: 13.5px;
   line-height: 1.5;
   color: var(--text-secondary);
 }
 
-.sense-example .ex-ref {
+.sense-example .ex-ref,
+.example-ref {
   font-size: 11.5px;
   color: var(--text-tertiary);
   opacity: 0.75;
   margin-top: 1px;
 }
 
-.sense-example .ex-zh {
+.sense-example .ex-zh,
+.example-zh {
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-tertiary);
@@ -1414,10 +1483,31 @@ button.rel-link {
 
 /* 截断提示：`buono` 有 763 个近义词，只铺前 12 个 —— 但必须告诉用户还有多少，
    否则「只收了 12 个」是个假印象。 */
-.rel-more {
+/* 角色：弱色小字附注 —— 「+3」「… 共 N 种」「（中文）」「标题旁的计数」。
+   🔴 `.section-count` 没有规则时，`<h3>词形变化<span>9</span></h3>` 里那个 9
+      会用 h3 的字号和字重印出来，看着像标题的一部分（用户看到的「词形变化9」）。 */
+.rel-more,
+.alt-zh,
+.form-more,
+.phonetic-context,
+.phonetic-region {
   font-size: 11.5px;
   color: var(--text-tertiary);
   white-space: nowrap;
+}
+
+.section-count {
+  margin-left: 6px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+/* 角色：意语例句里的上标注（`^(Pas clair)` 一类）。 */
+.ex-sup {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  margin-left: 1px;
 }
 
 /* 非默认读音（意语）：同一个词形的其他读法，不可点（没有对应的音频）。

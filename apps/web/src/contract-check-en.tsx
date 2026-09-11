@@ -238,8 +238,10 @@ const CHECKS: Check[] = [
     name: '🔴 E1 例句没渲染',
     hit: (e, h) => {
       const want = e.senses.reduce((n: number, s: Entry) => n + s.examples.length, 0);
-      return want > 0 && !/class="example-chip"/.test(h)
-        ? `${want} 条例句，HTML 里一条 .example-chip 都没有` : null;
+      // 🔴 2026-09-10 类名跟着组件换：`.example-chip` 原来是**首页药丸按钮**的样式，
+      //    en 的书证错用了它，已改成共用的 `.sense-example` + `.ex-en`。
+      return want > 0 && !/class="ex-en"/.test(h)
+        ? `${want} 条例句，HTML 里一条 .ex-en 都没有` : null;
     },
   },
   {
@@ -247,7 +249,8 @@ const CHECKS: Check[] = [
     hit: (e, h) => {
       const t = text(h);
       for (const s of e.senses) {
-        for (const x of s.examples.slice(0, 4)) {
+        // 🔴 2026-09-10 不再折叠（用户：「不要擅自折叠信息」）⇒ 全部都该渲染
+        for (const x of s.examples) {
           if (x.zh && !t.includes(norm(x.zh).slice(0, 12))) {
             return `例句「${norm(x.text).slice(0, 24)}…」的中文没渲染`;
           }
@@ -264,10 +267,14 @@ const CHECKS: Check[] = [
     //      任何数据层的闸都永远是绿的 —— 它错的只是**先后**。
     name: '🔴 E3 书证出处落在引文后面（外审三次读错的那个顺序）',
     hit: (_e, h) => {
-      for (const li of h.matchAll(/<li>((?:(?!<\/li>)[\s\S])*)<\/li>/g)) {
+      // 🔴 2026-09-10：原来写死 `<li>`，而例句改用 `.sense-example` 之后是
+      //    `<li class="sense-example">` ⇒ **这条闸从那一刻起再也看不见任何东西**，
+      //    正常跑绿、变异也绿。`<li[^>]*>` 才是它真正要匹配的东西。
+      //    ⭐ 逮到它的不是断言本身，是**「断言 N/N 有变异守着」那个反向统计**。
+      for (const li of h.matchAll(/<li[^>]*>((?:(?!<\/li>)[\s\S])*)<\/li>/g)) {
         const s = li[1];
-        const iRef = s.indexOf('<div class="rel-plain">');
-        const iEx = s.indexOf('<div class="example-chip">');
+        const iRef = s.indexOf('<div class="ex-ref">');
+        const iEx = s.indexOf('<div class="ex-en"');
         if (iRef >= 0 && iEx >= 0 && iRef > iEx) {
           return `出处排在引文后面：${norm(s.slice(iEx, iEx + 60).replace(/<[^>]*>/g, ' '))}…`;
         }
@@ -444,10 +451,10 @@ const MUTS: Mut[] = [
     (h) => h.replace(/<span class="rel-more">\+\d+<\/span>/g, '')
       .replace(/(<button class="phonetic-btn"[\s\S]*?<\/button>)[\s\S]*?(<\/div>)/,
                (_m, first, tail) => first + tail)],
-  ['E1 例句没渲染', (h) => h.replace(/class="example-chip"/g, 'class="x"')],
-  ['E2 例句中文没渲染', (h) => h.replace(/<div class="example-label">[^<]*<\/div>/g, '')],
+  ['E1 例句没渲染', (h) => h.replace(/class="ex-en"/g, 'class="x"')],
+  ['E2 例句中文没渲染', (h) => h.replace(/<div class="ex-zh">[^<]*<\/div>/g, '')],
   ['E3 出处排在引文后面（改前的顺序）',
-    (h) => h.replace(/(<div class="rel-plain">[^<]*<\/div>)(<div class="example-chip">[^<]*<\/div>)/g,
+    (h) => h.replace(/(<div class="ex-ref">[^<]*<\/div>)(<div class="ex-en" lang="en">[^<]*<\/div>)/g,
                      '$2$1')],
   ['E4 隐藏的例句漏到页面上（服务层 hidden=0 被改坏）',
     (h, e) => {

@@ -653,7 +653,14 @@ function HumanAudioRow({ audios, word, fallback, regionLabel }: {
           >
             <SpeakerIcon />
             <span className="audio-region">{region}</span>
-            {a.regionSrc === 'speaker' && <span className="audio-inferred" title="地区按录音人推定">~</span>}
+            {/* 🔴 2026-09-10：原来是一个光秃秃的 `~`，用户问「真人发音有个 ~ 是什么意思？」——
+                **只有 title 提示的符号，等于没说**（en 有 32,049/102,751 = 31.2% 是这样）。
+                它说的是：这条录音的**地区是从录音人名字推出来的，不是源头标的**，
+                所以可能不准。⇒ 换成自解释的「推定」，与项目其余标签一致（中文短码、不用符号）。
+                `[[it-display-layer-stage8]]`：**兜底越体面缺陷越难发现**，
+                这里是它的近亲 —— **标记越含蓄，读者越不知道自己在看什么**。 */}
+            {a.regionSrc === 'speaker'
+              && <span className="audio-inferred" title="地区按录音人推定，非源头标注">推定</span>}
           </button>
         );
       })}
@@ -1291,21 +1298,42 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
         </div>
       </header>
 
+      {/* 🔴🔴 **2026-09-10：不折叠，一个地区有几种读法就印几种。**
+          原来每个地区只印第一条，其余压成一个 `+N` 徽标 —— 用户看 `curious` 页问
+          「音标里的 +2、+3 是什么意思？」。三个问题叠在一起：
+            ① `+N` 是个**死胡同**：既说不清是什么，也没有任何办法看到它折起来的东西。
+            ② **印出来的那一条是任意的**：`readings` 的排序是
+               `ORDER BY (region IS NULL), region, notation, ipa` ＝ **按 IPA 字符串字母序**，
+               而 `pronunciation.is_primary` 全库 498,477 行**都是 0**（阶段 4 建了列没填，
+               记在账上的未修项）。`curious` 英式三条里印出来的 `/ˈkjɵːɹɪjəs/` 是个边缘转写，
+               最常见的 `/ˈkjʊəriəs/` 反而被折进了 `+2`。
+               ⇒ **在没有"主读音"这个事实之前，把其中一条摆成唯一的那条就是造事实。**
+            ③ 用户 2026-09-10 定的规矩：「**不要擅自折叠信息**，只有展示了全部信息，
+               我才能从全貌判断思考如何优化」。
+          实测代价可接受：（词形×地区）分组里 **78.60% 只有 1 条**、16.95% 有 2 条，
+          3 条以上只占 **4.45%**。
+          ⚠️ 按 `ipa` 去重再印 —— 同一个音因 `notation` 不同存了两行时，
+             印两遍 `/x/ /x/` 是噪声（de 的读音区刚犯过同一个错）。
+          ⚠️ 第一条可点（朗读），其余是 `.phonetic-alt` 静态展示，与 it/es 同一个类名。 */}
       {regions.length > 0 && (
         <div className="phonetic-row">
           {regions.map((reg) => {
-            const list = byRegion.get(reg)!;
             const label = reg ? (EN_REGION_LABELS[reg] ?? reg) : null;
-            return (
-              <button className="phonetic-btn" key={reg || '_'} type="button"
+            const uniq = [...new Set(byRegion.get(reg)!.map((r) => r.ipa))];
+            return uniq.map((ipa, i) => (i === 0 ? (
+              <button className="phonetic-btn" key={`${reg}|${ipa}`} type="button"
                       onClick={() => speak(entry.word, localeOf(reg))}
                       title={reg ? `播放${label}式发音` : '播放发音'}>
                 {label && <span className="phonetic-label">{label}</span>}
-                <span className="phonetic-value">/{list[0].ipa}/</span>
-                {list.length > 1 && <span className="rel-more">+{list.length - 1}</span>}
+                <span className="phonetic-value">/{ipa}/</span>
                 <SpeakerIcon />
               </button>
-            );
+            ) : (
+              <span className="phonetic-btn phonetic-alt" key={`${reg}|${ipa}`}
+                    title={label ? `${label}式的另一种记法` : '另一种记法'}>
+                <span className="phonetic-value">/{ipa}/</span>
+              </span>
+            )));
           })}
         </div>
       )}
@@ -1435,10 +1463,15 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                     ))}
                   </div>
                 )}
+                {/* 🔴🔴 **2026-09-10：不折叠。**原来是 `slice(0, 12)` 且**没有任何提示** ——
+                    实测 8,989 组超限，**静默丢掉 323,151 个关系目标**。
+                    比 `+N` 更坏：`+N` 至少说了"还有"，这里读者根本不知道自己没看全。
+                    用户 2026-09-10：「不要擅自折叠信息，只有展示了全部信息，
+                    我才能从全貌判断思考如何优化」。 */}
                 {s.relations.map((g) => (
                   <div className="rel-row" key={g.kind}>
                     <span className="rel-kind">{EN_RELATION_LABELS[g.kind] ?? g.kind}</span>
-                    {g.targets.slice(0, 12).map((t, i) => (
+                    {g.targets.map((t, i) => (
                       <span className="rel-item" key={i}>
                         {t.clickable
                           ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
@@ -1449,9 +1482,11 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                   </div>
                 ))}
                 {s.examples.length > 0 && (
-                  <ul className="example-chips">
-                    {s.examples.slice(0, 4).map((x, i) => (
-                      <li key={i}>
+                  <ul className="sense-example-list">
+                    {/* 🔴 不折叠（同上）。原来 `slice(0, 4)`：21,314 条义项超限，
+                        **静默折掉 51,402 句**，同样没有任何提示。 */}
+                    {s.examples.map((x, i) => (
+                      <li className="sense-example" key={i}>
                         {/* 🔴🔴 **出处在前、引文在后**（2026-09-09 外审改）。
                             原来的顺序是 引文→中文→出处，出处落在译文之后 ——
                             外审**三次独立读错**，都判成「出处混在例句前/顺序混乱/
@@ -1459,11 +1494,27 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                             维基词典自己的体例也是出处引出引文。
                             ⭐ 这条是**只有渲染成品才发现得了**的缺陷：
                             数据完全正确，`ref` 挂在对的那条例句上，闸永远绿。 */}
-                        {x.ref && <div className="rel-plain">{x.ref}</div>}
-                        <div className="example-chip">{x.text}</div>
+                        {/* 🔴🔴 **2026-09-10：类名全换。**用户：「例句的样式太丑了，
+                            远不如 es 的样子」。原来用的是 `.example-chip` / `.example-label`
+                            —— 那**根本不是例句样式**，是首页空状态「试试这些词」那排
+                            药丸按钮和它的小标题：
+                              .example-chip  药丸形 + 边框 + 阴影 + **hover 上浮**
+                                             + `cursor: pointer` + **居中**
+                              .example-label 12px **全大写 + 字距 0.06em**
+                            于是 17 世纪的书证被渲染成一排可点的药丸，中文译文被渲染成小标题。
+                            🔴 这比 PITFALLS I3「自造类名 = 页面没样式」**更坏**：
+                               样式存在、页面不报错，只是语义完全对不上，
+                               而任何「有没有渲染出来」的闸都是绿的。
+                            ⇒ 改用 es/it/fr/pt 早就在用的 `.sense-example`
+                               （左侧竖线 + 缩进）+ `.ex-en` / `.ex-zh` / `.ex-ref`。
+                            ⚠️ `.ex-en` 是新加的，`styles.css` 里那条选择器要一起加 ——
+                               fr/pt 的 `.ex-fr`/`.ex-pt` 就是「类名加了、样式没跟上」，
+                               用户当时的原话是「这个页面排版很奇怪」。 */}
+                        {x.ref && <div className="ex-ref">{x.ref}</div>}
+                        <div className="ex-en" lang="en">{x.text}</div>
                         {/* 🔴 阶段 5e 之前 zh 一律为 null —— **例句照样显示**，不靠中文过滤 */}
-                        {x.zh && <div className="example-label">{x.zh}</div>}
-                        {x.modern && <div className="example-label">今：{x.modern}</div>}
+                        {x.zh && <div className="ex-zh">{x.zh}</div>}
+                        {x.modern && <div className="ex-zh">今：{x.modern}</div>}
                       </li>
                     ))}
                   </ul>
@@ -1507,7 +1558,9 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
           {entry.relations.map((g) => (
             <div className="rel-row" key={g.kind}>
               <span className="rel-kind">{EN_RELATION_LABELS[g.kind] ?? g.kind}</span>
-              {g.targets.slice(0, 20).map((t, i) => (
+              {/* 🔴 不折叠（同义项级那条）。原来 `slice(0, 20)` + `+N`：
+                  848 组超限、24,525 个目标。`+N` 比静默丢好，但仍是**看不到内容的死胡同**。 */}
+              {g.targets.map((t, i) => (
                 <span className="rel-item" key={i}>
                   {t.clickable
                     ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
@@ -1515,7 +1568,6 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                     : <span className="rel-plain">{t.word}</span>}
                 </span>
               ))}
-              {g.targets.length > 20 && <span className="rel-more">+{g.targets.length - 20}</span>}
             </div>
           ))}
         </section>
@@ -1868,7 +1920,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
           <ul className="infl-notes">
             {entry.forms.slice(0, 24).map((f, i) => (
               <li key={i}>
-                <a href={`#${encodeURIComponent(f.word)}`}
+                <a className="rel-link" href={`#${encodeURIComponent(f.word)}`}
                   onClick={(e) => { e.preventDefault(); onWord(f.word); }}>{f.word}</a>
                 {' — '}{f.label}
               </li>
@@ -2601,7 +2653,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
             <span className="alt-of" key={a.target}>
               异体 →{' '}
               {a.clickable
-                ? <a href={`#${encodeURIComponent(a.target)}`}
+                ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
                      onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
                 : <span className="alt-of-plain">{a.target}</span>}
               {a.zh && <span className="alt-of-zh">{a.zh}</span>}
@@ -2833,7 +2885,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
           <ul className="form-list">
             {entry.forms.slice(0, 40).map((f, i) => (
               <li className="form-item" key={i}>
-                <a href={`#${encodeURIComponent(f.form)}`}
+                <a className="rel-link" href={`#${encodeURIComponent(f.form)}`}
                    onClick={(e) => { e.preventDefault(); onWord(f.form); }}>{f.form}</a>
                 {f.label && <span className="form-label">{f.label}</span>}
               </li>
@@ -2983,7 +3035,7 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
             <span className="alt-of" key={a.target}>
               异体 →{' '}
               {a.clickable
-                ? <a href={`#${encodeURIComponent(a.target)}`}
+                ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
                      onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
                 : <span className="alt-of-plain">{a.target}</span>}
               {a.zh && <span className="alt-of-zh">{a.zh}</span>}
@@ -3055,7 +3107,7 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
                         {s.altOf.map((a) => (
                           <span className="alt-of" key={a.target}>
                             → {a.clickable
-                              ? <a href={`#${encodeURIComponent(a.target)}`}
+                              ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
                                    onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
                               : <span className="alt-of-plain">{a.target}</span>}
                             {a.zh && <span className="alt-of-zh">{a.zh}</span>}
@@ -3198,7 +3250,7 @@ function PtRelationGroups(
               <span key={i}>
                 {i > 0 && '、'}
                 {t.clickable
-                  ? <a href={`#${encodeURIComponent(t.word)}`}
+                  ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
                       onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
                   : <span className="rel-plain">{t.word}</span>}
               </span>
@@ -3437,7 +3489,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                         {s.altOf.map((a, ai) => (
                           <span key={ai}>
                             {a.clickable
-                              ? <a href={`#${encodeURIComponent(a.target)}`}
+                              ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
                                   onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
                               : a.target}
                             {a.zh && <span className="alt-zh">（{a.zh}）</span>}
@@ -3453,7 +3505,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                             {g.targets.slice(0, 8).map((t, ti) => (
                               <span key={ti}>
                                 {t.clickable
-                                  ? <a href={`#${encodeURIComponent(t.word)}`}
+                                  ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
                                       onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
                                   : <span className="rel-plain">{t.word}</span>}
                               </span>
@@ -3506,6 +3558,11 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         }
         const uniq = [...byIpa.values()];
         if (uniq.length < 2) return null;   // 只有一种读法 ⇒ 词头那行已经印过了
+        // 🔴 **所有读音的词性都一样时，词性徽标不携带任何信息** —— `Curry` 四个读音
+        //    全是名词，印四个「名词」只是噪声。这与上面「同一个音不许印两遍」是同一条
+        //    判据的另一面：**徽标要回答"这两条为什么不同"，答不了就别印。**
+        const posKeys = new Set(uniq.map((r) => r.pos.join('/')));
+        const showPos = posKeys.size > 1;
         return (
           <section className="entry-section">
             <h3>读音</h3>
@@ -3514,7 +3571,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                 <li key={i}>
                   <span className="phonetic-value">/{r.ipa}/</span>
                   {r.region && <span className="badge region">{DE_REGION_LABELS[r.region] || r.region}</span>}
-                  {r.pos.map((p) => <span className="badge pos" key={p}>{posLabel(p)}</span>)}
+                  {showPos && r.pos.map((p) => <span className="badge pos" key={p}>{posLabel(p)}</span>)}
                 </li>
               ))}
             </ul>
@@ -3558,7 +3615,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
             {entry.derivations.map((d, i) => (
               <span className="de-infl" key={i}>
                 {d.clickable
-                  ? <a href={`#${encodeURIComponent(d.base)}`}
+                  ? <a className="rel-link" href={`#${encodeURIComponent(d.base)}`}
                       onClick={(e) => { e.preventDefault(); onWord(d.base); }}>{d.base}</a>
                   : d.base}
                 {d.label && <span className="de-infl-label">{d.label}</span>}
@@ -3574,7 +3631,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
           <div className="de-form-grid">
             {entry.forms.slice(0, 60).map((fm, i) => (
               <span className="de-form-cell" key={i}>
-                <a href={`#${encodeURIComponent(fm.form)}`}
+                <a className="rel-link" href={`#${encodeURIComponent(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
                 {fm.label && <span className="de-form-label">{fm.label}</span>}
               </span>
@@ -3591,7 +3648,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
           <div className="de-form-grid">
             {entry.derivedForms.slice(0, 40).map((fm, i) => (
               <span className="de-form-cell" key={i}>
-                <a href={`#${encodeURIComponent(fm.form)}`}
+                <a className="rel-link" href={`#${encodeURIComponent(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
                 {fm.label && <span className="de-form-label">{fm.label}</span>}
               </span>
@@ -3609,7 +3666,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
               {g.targets.slice(0, 20).map((t, ti) => (
                 <span key={ti}>
                   {t.clickable
-                    ? <a href={`#${encodeURIComponent(t.word)}`}
+                    ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
                         onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
                     : <span className="rel-plain">{t.word}</span>}
                 </span>
@@ -3631,7 +3688,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
             {entry.inflections.slice(0, 20).map((x, i) => (
               <li key={i}>
                 {x.clickable
-                  ? <a href={`#${encodeURIComponent(x.base)}`}
+                  ? <a className="rel-link" href={`#${encodeURIComponent(x.base)}`}
                       onClick={(e) => { e.preventDefault(); onWord(x.base); }}>{x.base}</a>
                   : x.base}
                 {x.label && <span className="de-infl-label"> {x.label}</span>}

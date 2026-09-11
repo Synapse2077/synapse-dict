@@ -32,7 +32,15 @@
    `[[context-you-give-leaks-into-output]]`：给模型的"仅供参考"上下文会直接漏进输出。
 
 ═══ 义项坐标：反解库里现成的 `src_ref`（同 5b，判据只许一份）═══
-只有英文版的义项能挂上（其余版的释义层要等阶段 1.5）。挂不上照收、`sense_id` 留 NULL。
+🔴🔴 **2026-09-11 补第二道桥。**原来这里的结论是「挂不上的主因是我们本来就没收那条义项」
+  —— **那句话只对了一半**：实测 40,430 条未挂义项里 **8,148（20.2%） 条本来就挂得上**，
+  页面上因此看不出一条例句属于哪条义项（用户看 de 的 `Curry` 页问出来的，
+  de 同族漏了 189,931 条）。根子是**坐标桥建在本语言释义层还不存在的时候**，
+  1.5 补出来之后没人回头挂。
+  ⇒ 坐标桥之后加一道**文本桥**：按 (词形, 本语言释义原文) 精确匹配
+    `sense_gloss.lang='pt'`，**一个 `src` 都不写** ——
+    来源名会随时间长出新的，「有没有本语言原文」不会。
+  ⚠️ 挂不上的仍然照收、留 NULL：抽样看过确实是**源头有、我们没收录**的义项。
 
 用法（在 pt/ 目录下）：
     python3 -u pipeline/ingest_examples.py            # 干跑
@@ -95,7 +103,7 @@ def clean_bold(text, offsets):
     return json.dumps(offsets)
 
 
-def scan(ids, sidx, editions):
+def scan(ids, sidx, tidx, editions):
     """→ (rows, glosses, stat)
 
     rows[(word, text)] = dict(...)   —— `UNIQUE(word, text)` 就是这个键
@@ -130,8 +138,13 @@ def scan(ids, sidx, editions):
                 occ = occ_of[(w0, pos_raw, etym)]
                 occ_of[(w0, pos_raw, etym)] += 1
                 for i, sn in enumerate(e.get("senses") or []):
-                    sid = sidx.get((w0, pos_raw, etym, i)) if ed == "en" else None
                     gloss0 = (sn.get("glosses") or [""])[0]
+                    # 坐标桥只覆盖英文版；挂不上时退到**文本桥**（见文件头）。
+                    sid = sidx.get((w0, pos_raw, etym, i)) if ed == "en" else None
+                    if sid is None and gloss0:
+                        sid = tidx.get((w, gloss0.strip()))
+                        if sid is not None:
+                            stat["文本桥补挂"] += 1
                     for ex in (sn.get("examples") or []):
                         t = (ex.get("text") or "").strip()
                         if not t:
@@ -235,10 +248,24 @@ def main():
     for i, w in ro.execute("SELECT id, word FROM dict"):
         ids.setdefault(w, i)
     sidx = sense_index(ro)
+    # 🔴 第二道桥：坐标挂不上时按 (词形, 本语言释义原文) 逐字匹配。见文件头那段。
+    #    同一键指向两条义项时整条不挂（宁可缺，不可错）。
+    tidx, _amb = {}, set()
+    for _w, _t, _sid in ro.execute(
+            "SELECT d.word, g.text, g.sense_id FROM sense_gloss g "
+            "JOIN sense s ON s.id=g.sense_id JOIN dict d ON d.id=s.word_id "
+            "WHERE g.lang='pt' AND g.text IS NOT NULL AND g.text<>''"):
+        _k = (_w, (_t or '').strip())
+        if _k in tidx and tidx[_k] != _sid:
+            _amb.add(_k)
+        tidx.setdefault(_k, _sid)
+    for _k in _amb:
+        tidx.pop(_k, None)
+    print('■ 文本桥可用的义项 %s 个键（歧义 %s 个已剔除）' % (f(len(tidx)), f(len(_amb))))
     ro.close()
     print("■ 义项坐标索引：唯一命中 %s 个键" % f(len(sidx)))
 
-    rows, glosses, stat = scan(ids, sidx, [x for x in a.editions.split(",") if x])
+    rows, glosses, stat = scan(ids, sidx, tidx, [x for x in a.editions.split(",") if x])
     for k, v in sorted(stat.items()):
         print("   %-38s %10s" % (k, f(v)))
     n_sid = sum(1 for r in rows.values() if r["sense_id"] is not None)

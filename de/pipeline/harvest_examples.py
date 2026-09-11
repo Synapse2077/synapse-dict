@@ -6,8 +6,14 @@
 `sense_src.text`（`src='de-edition'`）。⇒ 按 **(词形, 德语释义原文)** 精确匹配，
 挂不上的 `sense_id` 留 NULL、`src_gloss` 原样存着，**不硬挂**。
 
-🔴 **挂不上是正常的，不是缺陷**：库里 260,828 条义项里只有 135,179 条来自德语版
-（其余 125,649 条是七月从英文版建的），德语版的例句本来就只挂得上自己那批。
+⚠️ **挂不上是正常的，不是缺陷** —— 但**这句话的数字是会过期的**：
+   2026-09-03 写下它时桥只有 135,179 条德语义项；到 09-11 德语原文已有 218,891 条
+   （多出 `-adjudicated` / `-backfill` 两层），而桥写死了 `src='de-edition'` 一条没跟上
+   ⇒ **漏挂 189,931 条例句**，`schön` / `Curry` 页面上看起来「德语没有义项级例句」。
+   已改成按 `sense_gloss.lang='de'` 建桥（见 `bridge` 那段），
+   并由 `fixes/relink_examples_to_senses.py` 把存量补挂回去。
+   真正挂不上的只剩 25,401 条 —— 抽 400 条全是**源头有、我们没收录**的义项
+   （`April` 作姓氏、`Tribus` 罗马选区），留 NULL 走词条级例句区。
 ⚠️ **不许用"词形+第几条义项"当桥** —— `[[model-answer-files-key-by-id]]`：
    两边的义项切分不保证一致，按下标挂会把例句贴到别的义项上。
 
@@ -131,11 +137,28 @@ def main():
 
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     words = {w for (w,) in con.execute("SELECT word FROM dict")}
-    bridge = {}
+    # 🔴🔴 **2026-09-11 改：桥的取数口径从「来源名」换成「事实」。**
+    #    原来写的是 `WHERE x.src='de-edition'` —— 那在 2026-09-03 是对的，
+    #    后来德语原文释义又长出两层（`de-edition-adjudicated` 47,604 ＋
+    #    `de-edition-backfill` 36,134），桥一条都没跟着长 ⇒ **漏挂 189,931 条例句**，
+    #    `schön` / `Curry` 这些词在页面上看起来「没有义项级例句」。
+    #    🔴 **这是本项目第二次栽在同一个形状**（第一次是 2026-09-04 修关系挂错义项那轮，
+    #       已记在 `[[criteria-narrower-than-you-think]]`）：
+    #       `src` 回答的是「**这条数据是谁给的**」，而这里要问的是
+    #       「**这条义项有没有德语原文可以用来对**」。来源名会随时间长出新的。
+    #    ⇒ 桥建在 `sense_gloss.lang='de'` 上，**一个 src 都不写**。
+    #    ⚠️ 同时记下歧义：同一 (词形, 原文) 指向两条义项时整条不挂（实测 100 个键）。
+    bridge, ambiguous = {}, set()
     for w, txt, sid in con.execute(
-            "SELECT d.word, x.text, x.sense_id FROM sense_src x "
-            "JOIN dict d ON d.id=x.word_id WHERE x.src='de-edition' AND x.text IS NOT NULL"):
-        bridge.setdefault((w, (txt or "").strip()), sid)
+            "SELECT d.word, g.text, g.sense_id FROM sense_gloss g "
+            "JOIN sense s ON s.id=g.sense_id JOIN dict d ON d.id=s.word_id "
+            "WHERE g.lang='de' AND g.text IS NOT NULL AND g.text<>''"):
+        k = (w, (txt or "").strip())
+        if k in bridge and bridge[k] != sid:
+            ambiguous.add(k)
+        bridge.setdefault(k, sid)
+    for k in ambiguous:
+        bridge.pop(k, None)
     print("■ 库内词形 %s ／ 挂桥可用的德语义项 %s" % (f(len(words)), f(len(bridge))))
 
     print("\n■ 扫德语版…")
