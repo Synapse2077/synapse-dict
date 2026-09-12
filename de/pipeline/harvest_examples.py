@@ -148,17 +148,34 @@ def main():
     #       「**这条义项有没有德语原文可以用来对**」。来源名会随时间长出新的。
     #    ⇒ 桥建在 `sense_gloss.lang='de'` 上，**一个 src 都不写**。
     #    ⚠️ 同时记下歧义：同一 (词形, 原文) 指向两条义项时整条不挂（实测 100 个键）。
-    bridge, ambiguous = {}, set()
+    bridge, ambiguous, cand = {}, set(), {}
     for w, txt, sid in con.execute(
             "SELECT d.word, g.text, g.sense_id FROM sense_gloss g "
             "JOIN sense s ON s.id=g.sense_id JOIN dict d ON d.id=s.word_id "
             "WHERE g.lang='de' AND g.text IS NOT NULL AND g.text<>''"):
         k = (w, (txt or "").strip())
+        cand.setdefault(k, set()).add(sid)
         if k in bridge and bridge[k] != sid:
             ambiguous.add(k)
         bridge.setdefault(k, sid)
+    # 🔴 **歧义分两种，不能一刀切。**干跑对数时逮到的：新桥比库里少挂 261 条，
+    #    全部来自这 100 个歧义键。逐个看下来：
+    #      · **95 个是真重复义项** —— 德语原文和中文释义**都一字不差**
+    #        （`Erdbeermilch` 两条、`Asterisk` 三条…），读者在页面上根本分不出来。
+    #        对这一档拒绝挂载是**净损失**：例句掉回词条级，而挂到哪一条对读者完全一样。
+    #      · **5 个是德语原文撞车但义项确实不同**（中文不一样）⇒ 这一档必须拒绝，
+    #        挂错就是把例句配到别的意思上。
+    #    ⇒ 判据用**含义**（中文释义分不分得开）不用形式（德语文本重不重复）：
+    #      中文也相同 ⇒ 取 `sense_id` 最小的那条（确定性、可复现，不是"先到先得"）；
+    #      中文不同   ⇒ 整条不挂，留 NULL 走词条级。
+    zh_of = {sid: t for sid, t in con.execute(
+        "SELECT sense_id, text FROM sense_gloss WHERE lang='zh'")}
     for k in ambiguous:
-        bridge.pop(k, None)
+        sids = cand[k]
+        if len({zh_of.get(x) for x in sids}) == 1:
+            bridge[k] = min(sids)           # 真重复义项：确定性取最小 id
+        else:
+            bridge.pop(k, None)             # 真歧义：不猜
     print("■ 库内词形 %s ／ 挂桥可用的德语义项 %s" % (f(len(words)), f(len(bridge))))
 
     print("\n■ 扫德语版…")

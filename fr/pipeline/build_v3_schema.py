@@ -92,6 +92,10 @@ DEAD = ["example", "flag"]          # 两列都是 0 行死数据
 # ⚠️ `ipa_src` / `gender_src` 同样是 0 行，但**不删** —— 它们是 `ipa` / `gender` 两列的
 #    来源列，而那两列本步不迁走。记账本第 4 条说的「阶段 4 之前必须回填」指的就是它们。
 
+# 搭配层的出处：整层来自 `b_translate.py` 的 `col` 字段，豆包凭记忆写的，无外部来源。
+# ⚠️ 不写具体模型 id —— 当时 `DOUBAO_MODEL_BATCH_LITE` 解析成哪个版本已查不到了。
+COLLOC_SRC = "llm:doubao"
+
 NEW_TABLES = ("sense_src", "sense", "sense_gloss", "sense_tag", "sense_relation",
               "pronunciation", "example", "example_gloss",
               "collocation", "collocation_gloss", "audio")
@@ -184,6 +188,11 @@ DDL = [
          sense_id INTEGER,                -- → sense.id；本轮全 NULL，挂回义项是编纂工作
          text     TEXT NOT NULL,          -- 法语短语原文
          rank     INTEGER NOT NULL,       -- 该词内顺序，保源序
+         -- 出处（2026-09-12 加）。🔴 **这一层整层没有外部出处** ——
+         -- `dict.collocation` 那一列是 `pipeline/b_translate.py` 里
+         -- 「返回 col 字段：该词最常用搭配或固定短语 1-3 条」让豆包凭记忆写的。
+         -- 展示层据此标注「机器生成」，搜索反查据此降权。见 docs/SCHEMA.md §搭配层出处。
+         src      TEXT,
          UNIQUE(word_id, rank)
        )""",
     """CREATE TABLE collocation_gloss (
@@ -315,10 +324,10 @@ def collect(con):
                 fr_, zh = ln, None
             cid += 1
             rank += 1
-            cols.append((cid, did, rank, fr_))
+            cols.append((cid, did, rank, fr_, COLLOC_SRC))
             stat["搭配"] += 1
             if zh:
-                colglosses.append((cid, "zh", zh, "dict-collocation"))
+                colglosses.append((cid, "zh", zh, COLLOC_SRC))
             else:
                 stat["  🔴 搭配无中文"] += 1
     return senses, glosses, tags, cols, colglosses, stat
@@ -656,7 +665,7 @@ def main():
         s.executemany("INSERT INTO sense_gloss (sense_id,lang,kind,seq,text,src) "
                       "VALUES (?,?,?,?,?,?)", glosses)
         s.executemany("INSERT INTO sense_tag (sense_id,kind,value) VALUES (?,?,?)", tags)
-        s.executemany("INSERT INTO collocation (id,word_id,rank,text) VALUES (?,?,?,?)", cols_)
+        s.executemany("INSERT INTO collocation (id,word_id,rank,text,src) VALUES (?,?,?,?,?)", cols_)
         s.executemany("INSERT INTO collocation_gloss (collocation_id,lang,text,src) "
                       "VALUES (?,?,?,?)", colgl)
 

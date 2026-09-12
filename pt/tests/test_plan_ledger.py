@@ -354,16 +354,36 @@ DONE = {
     # C59：pt 的例句块必须与五门通用标记一致 —— **独一份的那套类名不许再出现**
     # ⚠️ 只看**真实的 `className=`**，不看注释里提到的类名 ——
     #    第一版写成「文件里不许出现 example-list」，被我自己写在注释里的那句说明打红了。
+    # 🔴🔴 **2026-09-12 再收一次：判据的范围必须切到 `PortugueseEntryView` 里面。**
+    #    上一版在**整个 App.tsx** 里搜，而 2026-09-10 改 de 的例句归位时
+    #    `GermanEntryView` 里用了同名的 `.example-list` / `.example-item`
+    #    （已在 styles.css 里挂成共用声明块的别名，视觉上是统一的）
+    #    ⇒ 这条 pt 的记账项被**另一门语言的代码**打红，而 pt 自己一个字节没变。
+    #    这是 `[[criteria-narrower-than-you-think]]` 的镜像：
+    #    **判据的作用域比它要描述的那件事大**，红得莫名其妙，且会一直红下去
+    #    —— 而一条永远红的闸等于没有闸（`[[fix-regression-and-gate]]`）。
     "C59": lambda _c: ((lambda t: (
         'className="example-list"' not in t and 'className="example-item"' not in t
         and t.count('className="ex-pt"') >= 2 and 'className="ex-ref"' in t,
-        "App.tsx 里 pt 例句块的类名"))(
-        (ROOT / "apps/web/src/App.tsx").read_text(encoding="utf-8"))),
+        "PortugueseEntryView 里 pt 例句块的类名"))(
+        _view("PortugueseEntryView"))),
     "C48": _both(_has("apps/web/src/styles.css", ".alt-of-zh", ".ex-pt"),
                  lambda _c: ((lambda t: ("margin-left" in t.split(".base-pos {")[1][:200],
                                          ".base-pos 的左边距"))(
                      (ROOT / "apps/web/src/styles.css").read_text(encoding="utf-8")))),
 }
+
+
+def _view(fn: str) -> str:
+    """截出 `App.tsx` 里某个视图函数的函数体（到下一个 `export function` 为止）。
+
+    🔴 判据的作用域要跟它描述的东西一样大。在整份 `App.tsx` 上查一条
+       「pt 的例句类名」，等于让**另外五门**的代码有权打红 pt 的记账项。
+    """
+    t = (ROOT / "apps/web/src/App.tsx").read_text(encoding="utf-8")
+    i = t.index("export function %s" % fn)
+    j = t.find("\nexport function ", i + 1)
+    return t[i:] if j < 0 else t[i:j]
 
 
 def claims():

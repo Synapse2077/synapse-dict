@@ -50,6 +50,16 @@ const marks = VIEWS
   .filter((x) => x.at >= 0)
   .sort((a, b) => a.at - b.at);
 
+// 🔴🔴 **第一个视图之前的那一段原来完全没人扫。**
+//    2026-09-12 加共用组件 `CollocationSection`（五门的「搭配 / 固定短语」都由它渲染）
+//    时才发现：它定义在六个视图**之前**，所以它用的 `.src-note` / `.colloc-list`
+//    一个都不在扫描范围里 —— 闸报「六门 0 孤儿」，而那条规则当时根本还没写。
+//    `HumanAudioRow`（六门的真人发音行）、搜索结果列表的 `.result-via` 同理。
+//    ⇒ 加一个 `shared` 段，覆盖文件开头到第一个视图之间的全部代码。
+//    ⚠️ 这就是 `[[correct-steps-can-compose-a-hole]]`：**每个视图都扫了、
+//      共用件没人扫 —— 闸的覆盖面和它自称的「六门」之间差了一块，谁都没负责。**
+if (marks.length > 0) marks.unshift({ lang: 'shared(共用件)', at: 0 });
+
 // 🔴 只收**静态**类名：合法 CSS 标识符，且不含模板插值。
 //    第一版没做这一步，`className={`badge g-${g0}`}` 里的 `'avoir'}` `?` `:` `===`
 //    这些三元片段被当成类名报出来 —— **闸自己制造的假红比漏报更浪费人**。
@@ -76,5 +86,44 @@ for (let i = 0; i < marks.length; i += 1) {
 
 // 🔴 反向：`styles.css` 里定义了却没人用的类。**只报不拦** ——
 //    共用件里有一批是给别处（搜索列表、空状态、主题切换）用的，不在本文件的扫描范围内。
-console.log(bad ? `\n🔴 ${bad} 个孤儿类名` : '\n✅ 六门一个孤儿类名都没有');
-process.exit(bad ? 1 : 0);
+
+// ══════════════════════════════════════════════════════════════════
+// 第二条：**裸的行内包装元素**
+//
+// 🔴🔴 起因：用户看 de 的 `Frau` 页问「这个下位怎么所有的字母连在一起了」——
+//    页面上是 `下位 AmmenfrauAmtfrauAufwartefrau…`。根子是 de 的关系目标写成
+//    **光秃秃的 `<span key={ti}>`，一个 className 都没有**，
+//    而 es/it/en/pt 用的都是 `.rel-item { margin-right: 8px }`。
+//    这是 de **第三次**"少写 className"（前两次：8 处裸 `<a>`、16 个没有规则的类名）。
+//
+// ⚠️ **上面那条孤儿类名检查在构造上看不见它** —— 没有类名就没有孤儿。
+// ⚠️ `render-dump` 也看不见：它给每个 `</span>` 补空格，快照里一直是分开的；
+//    而改成"不补"会造出反方向的假象（`ENwoman`，其实 CSS 有 margin）。
+//    **文本导出器在原理上看不见 CSS 间距 ⇒ 这件事只能在源码层守。**
+//
+// 判据：包着 `.rel-link` / `.rel-plain` 的 `<span>` 必须自己带 className。
+//   `<span key={...}>` 后面紧跟 `{...clickable ? <a className="rel-link"` 的那种。
+// ⚠️ 只查这一种形状，不泛泛地禁止裸 `<span>` —— 后者会把一堆正当用法圈进来
+//    （`[[criteria-narrower-than-you-think]]`：判据比它要描述的东西宽）。
+// ⚠️ **第一版就宽了**：它把 pt 报成红的，而 pt 那处写着 `{i > 0 && '、'}` ——
+//    **间距由内容给，不靠 CSS**，那是正当写法。⇒ 排除含显式分隔符的包装。
+//    （同一天第二次：判据写完先问「它圈中的里面有没有正常的」。）
+const naked: string[] = [];
+for (let i = 0; i < marks.length; i += 1) {
+  const { lang, at } = marks[i];
+  const end = i + 1 < marks.length ? marks[i + 1].at : app.length;
+  const body = stripComments(app.slice(at, end), /\/\*[\s\S]*?\*\//g);
+  for (const m of body.matchAll(/<span(?![^>]*className)[^>]*>[\s\S]{0,200}?rel-(?:link|plain)/g)) {
+    // 含显式分隔符（`{i > 0 && '、'}` 一类）的不算 —— 间距由内容给
+    if (/&&\s*'[^']+'/.test(m[0])) continue;
+    naked.push(`${lang}: ${m[0].slice(0, 46).replace(/\s+/g, ' ')}…`);
+  }
+}
+console.log(`\n   ${naked.length ? '🔴' : '✅'} 裸的关系项包装 `
+  + (naked.length ? `${naked.length} 处：` : '0 处'));
+for (const x of naked) console.log(`      ${x}`);
+
+const total = bad + naked.length;
+console.log(total ? `\n🔴 ${bad} 个孤儿类名 ／ ${naked.length} 处裸包装`
+  : '\n✅ 六门：0 孤儿类名、0 裸包装');
+process.exit(total ? 1 : 0);

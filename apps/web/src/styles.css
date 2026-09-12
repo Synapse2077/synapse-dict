@@ -121,6 +121,36 @@ body {
   gap: 10px;
 }
 
+/* logo 现在是「回到首页」按钮（2026-09-12）。
+   🔴 按钮的默认外壳全部重置 —— 不重置的话 logo 会被浏览器框起来、字体变成
+      系统 UI 字体。`.rel-link` 那两次「换了标签就露馅」记在 PITFALLS 44/50。
+   ⚠️ `text-align: left`：按钮默认 `center`，会把「突触词典 / Synapse Dict」
+      两行居中，与原来左对齐的样子不一样。 */
+button.brand {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 10px;
+}
+
+button.brand:hover .brand-name { color: var(--accent); }
+
+/* 键盘可见焦点：`:focus-visible` 只在键盘操作时出现，鼠标点不会留一圈框。 */
+button.brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* 原来是个 `<div>`，靠默认块级把两行摞起来；改成 `<span>` 之后要自己说。 */
+.brand-text {
+  display: block;
+}
+
 .brand-mark {
   width: 30px;
   height: 30px;
@@ -135,12 +165,14 @@ body {
 }
 
 .brand-name {
+  display: block;
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.2px;
 }
 
 .brand-sub {
+  display: block;
   font-size: 12px;
   color: var(--text-tertiary);
   margin-top: 1px;
@@ -962,6 +994,25 @@ body {
   color: var(--text-secondary);
 }
 
+/* ⚠️ 这里原来有一条 `.src-note`（搭配行上的「机器生成 / 词典收录」小标）。
+   2026-09-12 下午用户推翻了「在页面上标出来」：
+       「这些标识还是不要了，用户看了只会产生不信任……而且也没说一定就是错的」
+   ⇒ 规则一并删掉，不留死 CSS。出处仍在 `collocation.src` 里，要标回来是改
+     `CollocationSection` 一个地方的事，而且 `css-audit.ts` 会当场报「类名没有规则」
+     提醒把这段补回来。 */
+
+/* 角色：搜索结果里"这条不是词头，是从搭配反查到的"那行小字。
+   `.result-brief` 已经占了第 2 行，它排第 3 行。 */
+.result-via {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  grid-column: 1 / -1;
+  grid-row: 3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ============================================================
    Responsive
    ============================================================ */
@@ -1204,6 +1255,17 @@ body {
   opacity: 0.45;
   cursor: not-allowed;
   text-decoration: line-through;
+}
+
+/* 角色：真人发音按钮里的地区名（`英`/`美`/`de-AT`…）。
+   🔴 2026-09-12 才补上 —— 它从来没有规则，而这是**六门共用**的那一行。
+      孤儿闸原来只扫六个 `XxxEntryView` 函数体，共用件落在扫描范围之外，
+      所以它一直报「六门 0 孤儿」（见 css-audit.ts 的 shared 段注释）。
+      没有规则时它继承 `.audio-chip` 的 13px，跟旁边的喇叭图标一样大，
+      读者分不清哪个是可点的按钮、哪个是标注。 */
+.audio-region {
+  font-size: 12px;
+  line-height: 1;
 }
 
 /* 地区是按录音人推定的（非原始标注），用一个不显眼的 ~ 标出来，不装作是确定的 */

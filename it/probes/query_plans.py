@@ -19,6 +19,14 @@
 性能问题**要等数据长大才咬人**。今早 76 万行时这条查询感觉不出来，
 灌到 130 万就卡死。⇒ 每次大批量写入之后跑一遍，比事后 debug 便宜得多。
 
+⚠️ **2026-09-12：这个探针只有 it 有，而同一个坑在别的语种照样发生。**
+   当天补 `collocation` 索引时第五次撞它，是 `de/tests/test_no_regression.py` 的 A6
+   逮住的；横量六门又发现三处早就存在、且全在查词主路径上的缺口
+   （`es dict.word` 75.0 ms／`fr dict.word` 171.7 ms／`en legacy_dict.word` 277.4 ms，
+   对照 it/pt/de 的 0.014 ms）。
+   ⇒ **「NOCASE 索引必须配 BINARY 双胞胎」这条判据已提成跨六门的**
+     `scripts/fix_collation_gap.py --check`。本文件继续管 it 自己的热点查询形状。
+
 用法（在 it/ 目录下）：
     python3 probes/query_plans.py
     python3 probes/query_plans.py --mutate    # 变异验证：判据必须能识破假索引

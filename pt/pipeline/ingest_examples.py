@@ -141,10 +141,10 @@ def scan(ids, sidx, tidx, editions):
                     gloss0 = (sn.get("glosses") or [""])[0]
                     # 坐标桥只覆盖英文版；挂不上时退到**文本桥**（见文件头）。
                     sid = sidx.get((w0, pos_raw, etym, i)) if ed == "en" else None
+                    from_text_bridge = False
                     if sid is None and gloss0:
                         sid = tidx.get((w, gloss0.strip()))
-                        if sid is not None:
-                            stat["文本桥补挂"] += 1
+                        from_text_bridge = sid is not None
                     for ex in (sn.get("examples") or []):
                         t = (ex.get("text") or "").strip()
                         if not t:
@@ -155,6 +155,13 @@ def scan(ids, sidx, tidx, editions):
                         tr = (ex.get("english") or ex.get("translation") or "").strip()
                         lang = "en" if ex.get("english") else TR_LANG[ed]
                         if key not in rows:
+                            # 🔴 计数放在**行真正产生**的地方，不放在"桥命中"的地方。
+                            #    第一版数的是**触发次数**（同一句在多个义项/多个版里
+                            #    各触发一次），干跑打出 67,625，而去重后的真实行数是
+                            #    19,135 —— **差 8 倍的计数器比没有计数器更坏**，
+                            #    它会让下一个人以为修复的规模是那么大。
+                            if from_text_bridge:
+                                stat["文本桥补挂（去重后的行）"] += 1
                             rows[key] = {
                                 "word": w, "sense_id": sid, "text": t,
                                 "bold": clean_bold(t, ex.get("bold_text_offsets")),
@@ -167,6 +174,8 @@ def scan(ids, sidx, tidx, editions):
                             if rows[key]["sense_id"] is None and sid is not None:
                                 rows[key]["sense_id"] = sid
                                 stat["合并时补上了义项挂载"] += 1
+                                if from_text_bridge:
+                                    stat["文本桥补挂（去重后的行）"] += 1
                         if tr:
                             if lang in PUBLISH:
                                 g = glosses.setdefault(key, {})

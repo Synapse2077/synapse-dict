@@ -160,8 +160,11 @@ def main():
                         expect={"#collocation": len(k_rows),
                                 "#collocation_gloss": sum(1 for r in rows if r[4])}) as s:
         for (wid, phrase, rank), (sid, _wid, _w, _ph, z) in zip(k_rows, rows):
-            cur = s.execute("INSERT INTO collocation (word_id,text,rank) VALUES (?,?,?)",
-                            (wid, phrase, rank))
+            # 2026-09-12：`collocation.src` 加列后这里也要写 —— 否则重放这个脚本
+            # 会插进一批**没有出处**的行，而展示层是按 src 决定标不标「机器生成」的
+            # ⇒ 无源的行会被当成有源的展示（`[[replay-scripts-undo-fixes]]`）。
+            cur = s.execute("INSERT INTO collocation (word_id,text,rank,src) VALUES (?,?,?,?)",
+                            (wid, phrase, rank, "kaikki:pseudo-sense"))
             kid = cur.lastrowid
             if z:
                 s.execute("INSERT INTO collocation_gloss (collocation_id,lang,text,src) "

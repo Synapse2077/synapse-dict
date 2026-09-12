@@ -70,12 +70,18 @@ function visibleText(html: string): string {
   return html
     .replace(/<(br|hr)\s*\/?>/g, '\n')
     .replace(/<\/(div|p|li|ul|ol|section|h[1-6]|tr|table)>/g, '\n')
+    // 🔴🔴 **2026-09-11：这一行盖住过一个真缺陷，但"不补"同样是假象。**
+    //    用户看 de 的 `Frau` 页问「这个下位怎么所有的字母连在一起了」——
+    //    页面上是 `下位 AmmenfrauAmtfrauAufwartefrau…`（de 的关系目标是光秃秃的
+    //    `<span>`，没有 `.rel-item { margin-right: 8px }`），
+    //    而本导出器给每个 `</span>` 补空格，快照里一直印着「Ammenfrau Amtfrau …」。
+    //    ⚠️ 我试过改成「HTML 里有空白才补」—— **当场造出反方向的假象**：
+    //       `ENwoman`，而 `.sense-src-lang` 有 `margin-right: 7px`，页面上是分开的。
+    //    ⇒ **文本导出器在原理上看不见 CSS 间距，补与不补都在撒谎。**
+    //      保留"补空格"（多数行内 span 确实有 margin，假阴性比假阳性少），
+    //      把「相邻可点词之间有没有间距」这件事交给 `css-audit.ts` 的
+    //      **裸行内元素**检查去守 —— 那是源码层的事实，不是渲染层的猜测。
     .replace(/<\/(td|th|span)>/g, ' ')
-    // 🔴 行内 span 的**开**标签也要换成空格。第一版只换闭标签，
-    //    `<div class="pos-group-label">缩合<span class="pos-group-ipa">/ˈdej/</span></div>`
-    //    被导出成 `缩合/ˈdej/`，看着像"标签和音标挤在一起"——而 CSS 里
-    //    `.pos-group-ipa { margin-left: 8px }`，页面上本来是分开的灰字。
-    //    这种由导出器自己造出来的假象会骗走评审意见，比漏掉真缺陷更坏。
     .replace(/<span[^>]*>/g, ' ')
     .replace(/<[^>]*>/g, '')
     .replace(/&quot;/g, '"').replace(/&#x27;/g, "'")

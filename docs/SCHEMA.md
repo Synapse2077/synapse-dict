@@ -90,7 +90,7 @@ dict            1,136,867   词级：身份 / 音标指针 / 语法本质 / 变�
 ├─ pronunciation      待建   读音（多变体、多记法、多地区）
 ├─ example         50,766   例句原文（西语）
 │   └─ example_gloss  ✅建   例句译文（各语言）；`example.sense_id` 已挂 40,113 条
-├─ collocation     28,960   搭配原文（西语）
+├─ collocation     28,960   搭配原文（西语）＋ `src` 出处 ＋ `text_norm` 检索归一形
 │   └─ collocation_gloss ✅28,960 搭配译文
 └─ audio           11,203   真人录音元数据
 ```
@@ -463,6 +463,61 @@ pronunciation_entry(
 | `sense` | `sense_gloss(sense_id, lang, kind, text, src)` |
 | `example` | `example_gloss(example_id, lang, text, src)` |
 | `collocation` | `collocation_gloss(collocation_id, lang, text, src)` |
+
+### 7.0 🔴 搭配层整层没有外部出处（2026-09-12 才查清）
+
+起因是用户在 es 的 `quiteño` 页上看到「搭配 / 固定短语 · habitante quiteño 基多居民」，
+回到搜索框输入那一整条 —— **什么都没有**，于是问「这种为什么直接查却没有结果呢？」。
+往回查两件事：
+
+**① 搜索层压根不查 `collocation`。** 六门的 `search()` 只查 `dict.word` / `word_norm`。
+
+**② 更要紧的：这一层是模型凭记忆写的，不是从任何 dump 抽的。**
+`es/it/fr/pt/de` 五门的 `pipeline/b_translate.py` 里有同一行 prompt：
+
+    返回 "col" 字段：该词最常用搭配或固定短语 1-3 条，
+    形如 "…… 中文"（本语言在前、中文在后，空格分隔）。
+
+`en` 没有这一层（`collocation` 0 行，目录下也没有 `b_translate.py`）。
+唯一有外部出处的是 it 的 679 条，从 kaikki 的伪义项／子条目搬来。
+
+| 语种 | 搭配 | 其中无外部出处 | 在我们自己语料里查不到佐证 |
+|---|---|---|---|
+| en | 0 | — | — |
+| fr | 13,984 | 13,984 | 6,731 (48.1%) |
+| de | 16,783 | 16,783 | 11,623 (69.3%) |
+| pt | 15,369 | 15,369 | 11,787 (76.7%) |
+| it | 23,877 | 23,198 | 18,995 (79.6%) |
+| es | 28,960 | 28,960 | 24,267 (83.8%) |
+
+🔴 **「查不到佐证」不等于「错」。** 我们的例句语料本来就小，`uñas postizas 假指甲`
+查不到但它是完全正常的西语。**真实错误率至今没有量过。**
+已经确凿的错误只是个别实例：pt 的 `color primária 原色`
+（`color` 在库里两条义项都标着 `archaic`，现代葡语是 `cor primária`）、`Google Search`、
+以及混进来的专名（es 664 / it 492 / pt 364 / fr 190）。
+
+⇒ 用户定的口径是 **「既然已经有了，标记为参考」＋「需要标记他们的来源」**，
+  不是筛掉 —— 拿一个"佐证率"去删数据会误杀，而支撑删的判据我手上没有。
+
+🔴 **同日下午又推翻了其中「标记」那一半**：「这些标识还是不要了，用户看了只会产生不信任……而且也没说一定就是错的」。⇒ **`collocation.src` 照常写、照常查，但展示层不印。**记在这里是因为「决定不做」也是结论（`[[record-the-negative-decision]]`）——不落账，下次分不清是「没想到」还是「想过了不做」。
+
+**出处写进数据，不是写进展示层**（`[[aim-for-perfect-not-cheap]]`）：
+
+    collocation.src   llm:doubao            豆包生成，无外部出处   98,294
+                      kaikki:pseudo-sense   it，kaikki 伪义项          376
+                      kaikki:subentry       it，kaikki 子条目          303
+
+⚠️ `collocation_gloss.src` 原来装的是 `dict-collocation` —— 那是**我们库内部的上一站**
+（"从 `dict.collocation` 那一列迁过来的"），不是出处。一个叫 `src` 的列装着搬运记录，
+下一个读它的人一定会当成出处用。已一并改成真出处。
+
+⚠️ **不写具体模型 id**：跑批用的是环境变量 `DOUBAO_MODEL_BATCH_LITE`，
+当时解析成哪个版本现在查不到了。写 `llm:doubao` 是我知道的，写版本号是我编的。
+
+**同时加了 `collocation.text_norm`**（口径与 `dict.word_norm` 逐字一致，各门用各门自己的
+`pipeline/build.unaccent`）＋ 两条 `COLLATE NOCASE` 索引，让搜索能反查到拥有它的词条。
+落地脚本：`scripts/mark_collocation_src.py` / `scripts/build_collocation_search.py`；
+闸：`apps/web/src/contract-check-colloc.tsx`（5 条断言 × 6 种变异）。
 
 **加一门语言 = 往这三张表加行，别的地方一个字节不动。** 这是整套重构的验收标准。
 

@@ -56,6 +56,8 @@ export type GermanSearchItem = {
   word: string;
   brief: string | null;
   pos: string | null;
+  /** 有值 ＝ 这条不是词头本身，是从别处反查到的；点击落到 `via.word` 的词条。 */
+  via?: GermanSearchVia;
 };
 
 export type GermanRelationTarget = { word: string; clickable: boolean };
@@ -93,7 +95,18 @@ export type GermanExample = {
 
 export type GermanInflection = { base: string; label: string | null; clickable: boolean };
 export type GermanForm = { form: string; label: string | null };
-export type GermanCollocation = { text: string; zh: string | null };
+// 一条搜索结果**不是词头本身**时，说明它是从哪儿反查到的。2026-09-12。
+// 目前只有一种：`collocation`（搭配 / 固定短语）。
+// `src` 是那条搭配的出处（`llm:doubao` / `kaikki:*`），展示层据此标「机器生成」。
+export type GermanSearchVia = { word: string; kind: 'collocation'; src: string | null };
+
+export type GermanCollocation = {
+  text: string; zh: string | null; src: string | null;
+  /** 本语言的原文定义。**本门恒为 null** —— 只有 it 从 kaikki 子条目搬来的 303 条有。
+   *  字段留着是为了让五门共用的 `CollocationSection` 不必写分支
+   *  （`[[multilang-decoupling-essence]]`：按本质设计，不为某一门的数据现状开洞）。 */
+  srcText?: string | null;
+};
 
 export type GermanAudio = {
   url: string;
@@ -264,8 +277,48 @@ export class GermanDictService {
          ORDER BY CASE WHEN e.sense_id IS NULL THEN 1 ELSE 0 END, e.id
          LIMIT 40`),
 
+
+        // ══ 搭配反查（2026-09-12）════════════════════════════════════════════
+      // 起因：用户在词条页上看到「搭配 / 固定短语 · habitante quiteño 基多居民」，
+      // 回到搜索框把这一整条抄进去 —— **什么都没有**。
+      // `search()` 只查 `dict.word` / `word_norm`，`collocation` 根本不在检索范围里。
+      // **页面上印出来的字符串，读者搜一下总该有反应**（与「下位词点不动」同一族）。
+      //
+      // 🔴 两列都查：从页面抄下来的是带重音的原文（命中 `text`），
+      //    自己敲的多半不带重音（命中 `text_norm` —— 归一口径与 `dict.word_norm`
+      //    逐字一致，由 `scripts/build_collocation_search.py` 的尺子闸守着）。
+      // 🔴 两条索引**都必须是 `COLLATE NOCASE`**：SQLite 默认的大小写不敏感 `LIKE`
+      //    不认 BINARY 索引。第一版建成 BINARY，执行计划写着
+      //    `SCAN collocation USING COVERING INDEX idx_col_norm` —— 索引名在、干的是
+      //    全表扫，it 实测 234.7 ms，而这是**每敲一个字符跑一次**的路径。
+    // 🔴🔴 **拆成两条单列查询，不写 `WHERE text LIKE ? OR text_norm LIKE ?`。**
+    //    `OR` 那版两条索引确实都走 SEARCH，但 `MULTI-INDEX OR` **产不出有序结果**
+    //    ⇒ 计划末尾挂着 `USE TEMP B-TREE FOR ORDER BY`，把命中的全部行排一遍才取 20 条。
+    //    实测最坏：it `c%` **923.8 ms**、fr `p%` 285.9 ms —— 而这是每敲一键跑一次的路径。
+    //    拆开之后各自沿索引顺序扫、够 20 条就停，热态 0.28～0.49 ms。
+    //    ⚠️ 代价是排序从"短的在前"变成字母序；读者抄一整条短语来搜时命中唯一，看不见。
+      collocSearchByText: this.db.prepare(`
+        SELECT c.text AS phrase, c.src AS colSrc, c.word_id AS wordId, d.word AS owner,
+               (SELECT text FROM collocation_gloss
+                 WHERE collocation_id = c.id AND lang = 'zh') AS zh
+          FROM collocation c JOIN dict d ON d.id = c.word_id
+         WHERE c.text LIKE ? COLLATE NOCASE
+         ORDER BY c.text COLLATE NOCASE
+         LIMIT ?
+      `),
+
+      collocSearchByNorm: this.db.prepare(`
+        SELECT c.text AS phrase, c.src AS colSrc, c.word_id AS wordId, d.word AS owner,
+               (SELECT text FROM collocation_gloss
+                 WHERE collocation_id = c.id AND lang = 'zh') AS zh
+          FROM collocation c JOIN dict d ON d.id = c.word_id
+         WHERE c.text_norm LIKE ? COLLATE NOCASE
+         ORDER BY c.text_norm COLLATE NOCASE
+         LIMIT ?
+      `),
+
       colloc: this.db.prepare(`
-        SELECT c.text,
+        SELECT c.text, c.src,
                (SELECT text FROM collocation_gloss WHERE collocation_id=c.id AND lang='zh') AS zh
           FROM collocation c WHERE c.word_id = ? ORDER BY c.rank`),
 
@@ -350,10 +403,35 @@ export class GermanDictService {
     type Row = { id: number; word: string; pos: string | null };
     let rows = (this.cached?.all(kw, limit) ?? []) as Row[];
     if (rows.length === 0) rows = this.q.prefix.all(like, like, kw, limit) as Row[];
-    return rows.map((r) => ({
+    const items: GermanSearchItem[] = rows.map((r) => ({
       id: r.id, word: r.word, pos: r.pos,
       brief: (this.q.brief.get(r.id) as { text: string } | undefined)?.text ?? null,
     }));
+    // 词头没填满时，用剩下的名额反查搭配。
+    // 🔴 **词头永远优先，搭配只补位** —— `quiteño` 既是词头又出现在一堆搭配里，
+    //    让搭配挤掉词头就是把主词条藏起来。
+    // 🔴 落点是**拥有这条搭配的词条**（`via.word`），不是短语本身（短语不是词头，
+    //    拿它去 `getEntry` 一定查不到）。展示层据 `via` 渲染来源标记与跳转目标。
+    if (items.length < limit) {
+      const seen = new Set(items.map((x) => x.word.toLowerCase()));
+      type ColHit = { phrase: string; colSrc: string | null; wordId: number;
+        owner: string; zh: string | null };
+      const hits = [
+        ...(this.q.collocSearchByText.all(like, limit) as ColHit[]),
+        ...(this.q.collocSearchByNorm.all(like, limit) as ColHit[]),
+      ];
+      for (const c of hits) {
+        if (items.length >= limit) break;
+        const k = c.phrase.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        items.push({
+          id: c.wordId, word: c.phrase, pos: null, brief: c.zh,
+          via: { word: c.owner, kind: 'collocation', src: c.colSrc },
+        });
+      }
+    }
+    return items;
   }
 
   private sensesOf(wordId: number): GermanSense[] {

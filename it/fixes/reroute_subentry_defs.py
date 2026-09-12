@@ -244,8 +244,10 @@ def main():
                             expect={"#collocation": len(krows),
                                     "#collocation_gloss": 2 * len(krows)}) as s:
             for wid, ph, rk, _x, body, z in krows:
-                cur = s.execute("INSERT INTO collocation (word_id, sense_id, text, rank) "
-                                "VALUES (?, NULL, ?, ?)", (wid, ph, rk))
+                # 2026-09-12：`collocation.src` 加列后这里也要写，理由同
+                # `move_pseudo_senses_to_colloc.py`（`[[replay-scripts-undo-fixes]]`）。
+                cur = s.execute("INSERT INTO collocation (word_id, sense_id, text, rank, src) "
+                                "VALUES (?, NULL, ?, ?, ?)", (wid, ph, rk, "kaikki:subentry"))
                 cid = cur.lastrowid
                 grows += [(cid, "zh", z, SRC_TAG), (cid, "it", body, SRC_TAG)]
             s.executemany("INSERT INTO collocation_gloss (collocation_id, lang, text, src) "

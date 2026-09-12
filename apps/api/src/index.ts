@@ -183,7 +183,22 @@ api.get('/search', route((req, res) => {
   const { keyword, unmatchable } = parseQuery(req.query.q);
   const limit = parseLimit(req.query.limit, 20, 50);
 
-  // 空串、或含 LIKE 通配符（库里没有任何词头含 % _ \，见 validate.ts）⇒ 字面上不可能有结果。
+  // 空串、或含 LIKE 通配符 ⇒ 直接返回空。
+  //
+  // 🔴 **这条短路的理由（"库里没有任何词头含 % _ \"）今天是假的，2026-09-12 实测：**
+  //        fr  6 个   `100 %`、`1 % logement`、`1 % patronal`…
+  //        de 13 个   `100%ig`、`5%-Hürde`、`-%ig`…
+  //        pt  2 个   `100%`、`\ô\`
+  //        es  搭配层还有 1 条 `intervalo de confianza al 95%`
+  //    ⇒ 搜 `100%` 在这三门**一条都返回不了**，而库里明明有。
+  //    这句注释写的时候（只有 es、且当时确实没有）是对的，后来五门陆续收词
+  //    就成了错的，**而注释和判据都没人回头核**
+  //    —— 与 de 那次「桥只认 src='de-edition'」是同一种失效
+  //    （`[[external-anchor-gates]]`：锚自己上一版的闸必然过期）。
+  //
+  // ⚠️ 正确的修法不是继续短路，是给 LIKE 加 `ESCAPE` 把通配符转义掉。
+  //    那要动六门的 `prefixQuery`，**改的是全库检索语义**，等定了再做。
+  //    在那之前这里维持原状：少返回几条，好过让 `%` 打成真通配符去扫全表。
   if (!keyword || unmatchable) {
     res.json({ lang, query: keyword, items: [] });
     return;

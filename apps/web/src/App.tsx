@@ -20,6 +20,9 @@ type SearchItem = {
   word: string;
   brief: string | null;
   pos: string | null;
+  // 2026-09-12：有值 ＝ 这条不是词头本身，是从**搭配**反查到的。
+  // `word` 是那条搭配的字面，`via.word` 才是能 `getEntry` 的词头 —— 点击落到后者。
+  via?: { word: string; kind: 'collocation'; src: string | null } | null;
 };
 
 // English entry (legacy stardict schema)
@@ -67,7 +70,14 @@ type SpanishSense = {
   registers: string[];
   numbers: string[];
 };
-type SpanishCollocation = { text: string; zh: string | null };
+type SpanishCollocation = { text: string; zh: string | null;
+  /** 出处：`llm:doubao`（模型生成，无外部来源）/ `kaikki:*`（词典收录）。
+   *  由 `CollocationSection` 翻成人话。**别在这里判断可信不可信** ——
+   *  那张表只有一份，在 `dict-labels/src/common.ts` 的 `SRC_LABELS`。 */
+  src: string | null;
+  /** 本语言的原文定义。**只有 it 从 kaikki 子条目搬来的 303 条有**；
+   *  其余四门恒为 undefined。 */
+  srcText?: string | null };
 type SpanishAudio = {
   file: string; url: string | null; ipa: string | null;
   speaker: string | null; region: string | null;
@@ -186,7 +196,14 @@ type ItPlural = { form: string; gender: string | null };
 type ItRelationGroup = {
   kind: string; total: number; targets: { word: string; linkable: boolean }[];
 };
-type ItCollocation = { text: string; zh: string | null };
+type ItCollocation = { text: string; zh: string | null;
+  /** 出处：`llm:doubao`（模型生成，无外部来源）/ `kaikki:*`（词典收录）。
+   *  由 `CollocationSection` 翻成人话。**别在这里判断可信不可信** ——
+   *  那张表只有一份，在 `dict-labels/src/common.ts` 的 `SRC_LABELS`。 */
+  src: string | null;
+  /** 本语言的原文定义。**只有 it 从 kaikki 子条目搬来的 303 条有**；
+   *  其余四门恒为 undefined。 */
+  srcText?: string | null };
 type ItBase = {
   word: string;
   pos: string | null;
@@ -244,7 +261,14 @@ type FrSense = {
 
   topics: string[];        // 领域标签（族 C，2026-08-27）
 };
-type FrCollocation = { text: string; zh: string | null };
+type FrCollocation = { text: string; zh: string | null;
+  /** 出处：`llm:doubao`（模型生成，无外部来源）/ `kaikki:*`（词典收录）。
+   *  由 `CollocationSection` 翻成人话。**别在这里判断可信不可信** ——
+   *  那张表只有一份，在 `dict-labels/src/common.ts` 的 `SRC_LABELS`。 */
+  src: string | null;
+  /** 本语言的原文定义。**只有 it 从 kaikki 子条目搬来的 303 条有**；
+   *  其余四门恒为 undefined。 */
+  srcText?: string | null };
 // 🔴 阶段 8 新增。⚠️ 这几个类型是 `packages/dict-core/src/french.ts` 契约的**第二份抄写**
 //    （六个语种都这样）—— 改服务端类型必须同步改这里，编译器不会提醒跨包漂移。
 //    📋 记账：契约该只有一份，六份类型声明合并是独立一件事，不在阶段 8 做。
@@ -351,7 +375,14 @@ type PtRelationGroup = { kind: string; total: number; targets: PtRelationTarget[
 type PtAudio = {
   url: string; region: string | null; regionSrc: string | null; speaker: string | null;
 };
-type PtCollocation = { text: string; zh: string | null };
+type PtCollocation = { text: string; zh: string | null;
+  /** 出处：`llm:doubao`（模型生成，无外部来源）/ `kaikki:*`（词典收录）。
+   *  由 `CollocationSection` 翻成人话。**别在这里判断可信不可信** ——
+   *  那张表只有一份，在 `dict-labels/src/common.ts` 的 `SRC_LABELS`。 */
+  src: string | null;
+  /** 本语言的原文定义。**只有 it 从 kaikki 子条目搬来的 303 条有**；
+   *  其余四门恒为 undefined。 */
+  srcText?: string | null };
 type PtBase = {
   word: string;
   pos: string | null;
@@ -421,7 +452,14 @@ type DeExample = { senseId: number | null; text: string; zh: string | null; ref:
 type DeInflection = { base: string; label: string | null; clickable: boolean };
 type DeForm = { form: string; label: string | null };
 type DeAudio = { url: string; region: string | null; regionSrc: string | null; speaker: string | null };
-type DeCollocation = { text: string; zh: string | null };
+type DeCollocation = { text: string; zh: string | null;
+  /** 出处：`llm:doubao`（模型生成，无外部来源）/ `kaikki:*`（词典收录）。
+   *  由 `CollocationSection` 翻成人话。**别在这里判断可信不可信** ——
+   *  那张表只有一份，在 `dict-labels/src/common.ts` 的 `SRC_LABELS`。 */
+  src: string | null;
+  /** 本语言的原文定义。**只有 it 从 kaikki 子条目搬来的 303 条有**；
+   *  其余四门恒为 undefined。 */
+  srcText?: string | null };
 type DeBase = {
   word: string;
   pos: string | null;
@@ -585,6 +623,71 @@ export function capAudios<T extends { url: string | null; region?: string | null
     seen.set(k, n);
     return n <= PER_REGION;
   }).slice(0, TOTAL);
+}
+
+// ══ 搭配 / 固定短语 —— 五门共用同一个组件 ════════════════════════════════════
+//
+// 🔴 **共用不是为了少写代码，是为了「样式统一」这条不会再走样。**
+//    用户 2026-09-11：「内容安排可以不一样，但是字体样式应该要统一」。
+//    原来五个视图各抄一份一模一样的 JSX，任何一门改一点就分叉 ——
+//    de 那 16 个孤儿类名就是这么长出来的（`[[dict-labels-package]]` 同源教训）。
+//
+// ══ 出处：**存在数据里，不印在页面上** —— 这是一次有理由的反悔，记在这里 ══
+//
+// 2026-09-12 上午：用户问「habitante quiteño 为什么直接查却没有结果」，查出五门的
+// 搭配层**整层是豆包凭记忆写的**、没有任何外部出处。用户当时定「既然已经有了，
+// 标记为参考」，于是这里渲染了「机器生成」「词典收录」两种小标。
+//
+// 2026-09-12 下午：用户看了实际效果后推翻：
+//     「机器生成，这些标识还是不要了，用户看了只会产生不信任。
+//       要么整个搭配不展示，要么就糊弄一下用户，而且也没说一定就是错的」
+//
+// 🔴 **他这句「也没说一定就是错的」用的正是我自己纠正过的口径**：
+//    我先前报的 74.2% 是「在我们自己语料里查不到佐证」，**不是错误率**
+//    —— 例句语料本来就小，`uñas postizas 假指甲` 查不到但完全正常。
+//    真实错误率至今没量过。**拿一个没量过的数给每一条挂警示牌，是把不确定
+//    转嫁给读者**，而世上没有哪本词典给每个词条标注来源。
+//
+// ⇒ 决定：**留着搭配、去掉标识。**（另一个选项"整段不展示"代价太大：
+//   85% 是正常词组合，为一个没量过的错误率砍掉 9.9 万条可用内容不划算。）
+// ⚠️ **数据一个字节不动**：`collocation.src` 那 98,968 行照常写、照常查
+//   （`scripts/mark_collocation_src.py`），要重新标是改这一个组件的事。
+//   `[[record-the-negative-decision]]`：「决定不做」也是结论，不落账下次分不清
+//   是"没想到"还是"想过了不做"。
+// 🔴 契约闸里那几条「必须出现来源标记」的断言已**反向**改成「不许出现」
+//   —— `[[fix-regression-and-gate]]`：判据过期就改判据，留着恒红或删掉都是错的。
+function CollocationSection({ items, lang }: {
+  items: { text: string; zh: string | null; src: string | null; srcText?: string | null }[];
+  lang: string;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <section className="entry-section">
+      <h3>
+        搭配 / 固定短语
+        <span className="section-count">{items.length}</span>
+      </h3>
+      <ul className="colloc-list">
+        {items.map((c, i) => (
+            <li className="colloc-item" key={`${c.text}-${i}`}>
+              <span className="colloc-text">{c.text}</span>
+              {c.zh && <span className="colloc-zh">{c.zh}</span>}
+              {/* 🔴 2026-09-12：**有源的那一批比机器生成的多一层，而我们一直没显示。**
+                  用户问「那非生成的那些有详情吗」才查出来：it 从 kaikki 子条目搬来的
+                  303 条带着人家写的意语释义（平均 106 字符），**服务层压根没 SELECT 它**。
+                  ⇒ 用释义区那一套 `.sense-src` + 语种徽标渲染，与义项层保持一致
+                    （用户 2026-09-11：「字体样式应该要统一」；
+                     用户 2026-09-10：「你不要擅自折叠信息」）。 */}
+              {c.srcText && (
+                <div className="sense-src" lang={lang}>
+                  <span className="sense-src-lang">{lang.toUpperCase()}</span>{c.srcText}
+                </div>
+              )}
+            </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function HumanAudioRow({ audios, word, fallback, regionLabel }: {
@@ -963,6 +1066,26 @@ export default function App() {
     window.location.hash = encodeURIComponent(word);
   }, []);
 
+  // 🔴🔴 **一条搜索结果的「落点」和它的「字面」是两回事，只许有一个地方说这件事。**
+  //
+  //    搭配反查出来的行（2026-09-12）里 `word` 是**短语**（`habitante quiteño`），
+  //    而短语不是词头 —— 拿它去 `getEntry` 必然是 null，右边详情整个空白。
+  //    真正能打开的是 `via.word`（拥有这条搭配的词头 `quiteño`）。
+  //
+  //    ⚠️ 我第一版只在**鼠标点击**那一处写了 `item.via?.word ?? item.word`，
+  //      漏掉了另外 4 个调用点：输入 200ms 后的**自动选中**、↑、↓、Enter。
+  //      而自动选中那一条根本轮不到用户点 —— **右边一开始就是空的**，
+  //      用户报的正是这个：「这些短语好像没有右边详情，只有左侧搜索栏有数据」。
+  //
+  //    ⇒ 抽成一个函数，5 个调用点全走它。同一个教训今天已经记过一次
+  //      （`docs/PITFALLS.md` 54：上一次记的教训要 grep 同一个写法的**所有实例**）——
+  //      **这次是我自己新写的代码，当天就复现了。**
+  //      契约闸 `contract-check-colloc.tsx` 逮不到它：那道闸验的是
+  //      `svc.search()` 与 `svc.getEntry(via.word)`，**服务层全对，组件没读**
+  //      （`[[it-display-layer-stage8]]` 的又一例）。
+  const targetOf = useCallback(
+    (item: SearchItem) => item.via?.word ?? item.word, []);
+
   const pickExample = useCallback((word: string) => {
     setQuery(word);
     selectWord(word);
@@ -996,10 +1119,12 @@ export default function App() {
         // ⇒ 查询词精确出现在结果里就选它；只有前缀搜索（`cas` 尚未匹配到词）才退回首条，
         //    这样"边搜边预览"的行为不变。同时让高亮跟着实际选中的那条走。
         if (items.length > 0) {
+          // ⚠️ "查询词精确出现在结果里"这条判据比的是**字面**，对搭配行仍然成立
+          //    （`habitante quiteño` 的 `word` 就是它自己），落点由 `targetOf` 给。
           const exactIndex = items.findIndex((i) => i.word === keyword);
           const pick = exactIndex >= 0 ? exactIndex : 0;
           setActiveIndex(pick);
-          selectWord(items[pick].word);
+          selectWord(targetOf(items[pick]));
         } else {
           setActiveIndex(0);
         }
@@ -1012,7 +1137,7 @@ export default function App() {
     }, 200);
 
     return () => window.clearTimeout(timer);
-  }, [query, lang, selectWord, reloadKey]);
+  }, [query, lang, selectWord, targetOf, reloadKey]);
 
   // Load entry
   useEffect(() => {
@@ -1020,6 +1145,16 @@ export default function App() {
       setEntry(null);
       setEntryError(null);
       setEntryNotFound(false);
+      // 🔴 2026-09-12 加 `setEntryLoading(false)`：**这一支原来漏了它。**
+      //    以前 `!selectedWord` 只在首次挂载时成立，那时 `entryLoading` 本来就是 false，
+      //    所以漏了也看不出来。加了「点 logo 回首页」之后就能**在加载途中**进入这一支：
+      //      清理函数把 `cancelled` 置真 ⇒ 上一次请求的 `finally` 里那句
+      //      `if (!cancelled) setEntryLoading(false)` 不执行 ⇒ `entryLoading` 永远是 true
+      //      ⇒ 右栏卡在「加载中…」，首页**永远出不来**。
+      //    ⚠️ 修在**效应里**而不是 `goHome()` 里：「没选中词 ⇒ 没有东西在加载」是这个
+      //      效应负责的不变量，写进 goHome 就只对"点 logo"这一条路成立，
+      //      别的清空路径（将来加的）照样漏（`[[lesson-must-become-mechanism]]`）。
+      setEntryLoading(false);
       return;
     }
 
@@ -1054,15 +1189,15 @@ export default function App() {
       e.preventDefault();
       const next = Math.min(activeIndex + 1, results.length - 1);
       setActiveIndex(next);
-      if (results[next]) selectWord(results[next].word);
+      if (results[next]) selectWord(targetOf(results[next]));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       const prev = Math.max(activeIndex - 1, 0);
       setActiveIndex(prev);
-      if (results[prev]) selectWord(results[prev].word);
+      if (results[prev]) selectWord(targetOf(results[prev]));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (results[activeIndex]) selectWord(results[activeIndex].word);
+      if (results[activeIndex]) selectWord(targetOf(results[activeIndex]));
     }
   };
 
@@ -1078,17 +1213,51 @@ export default function App() {
     selectWord(word);
   }, [selectWord]);
 
+  // 回到首页（点 logo）。2026-09-12。
+  //
+  // 「首页」在这个应用里不是一个路由，是**一个状态**：`selectedWord` 为空时
+  // 右栏渲染 `.empty-state`（欢迎语 + 「试试这些词」）。所以回首页 ＝ 把状态清干净。
+  //
+  // 🔴 **hash 必须一起清。** `selectWord()` 会往 `location.hash` 写当前词，
+  //    只清 React 状态的话地址栏还挂着 `#quiteño` —— 刷新或按后退又跳回那个词，
+  //    用户会觉得"点了没用"。
+  // ⚠️ 用 `history.replaceState` 而不是 `location.hash = ''`：后者会在 URL 末尾
+  //    留一个光秃秃的 `#`，而且会触发 `hashchange`（那个监听器对空 hash 不做事，
+  //    于是什么都不会发生，但白跑一轮）。
+  // ⚠️ 不动 `lang` —— 语言是用户的偏好（还写在 localStorage 里），
+  //    回首页不该把它一起重置。
+  const goHome = useCallback(() => {
+    setQuery('');
+    setSelectedWord(null);   // ← 「载入词条」那个效应据此清空右栏
+    setActiveIndex(0);
+    setSearchError(null);
+    if (window.location.hash) {
+      window.history.replaceState(
+        null, '', window.location.pathname + window.location.search);
+    }
+    inputRef.current?.focus();
+  }, []);
+
   return (
     <div className="dict-app">
       <div className="search-column">
         <div className="brand-bar">
-          <div className="brand">
-            <div className="brand-mark">突</div>
-            <div>
-              <div className="brand-name">突触词典</div>
-              <div className="brand-sub">Synapse Dict</div>
-            </div>
-          </div>
+          {/* 🔴 用真的 `<button>`，不是给 `<div>` 挂 onClick ——
+              后者键盘按不到、读屏器不认，而且得自己补 `role`/`tabIndex`/回车处理。
+              ⚠️ `<button>` 的内容模型只允许 phrasing content，**里面不能放 `<div>`**
+                （React 不会报，但那是无效 HTML）⇒ 三个 `<div>` 改成 `<span>`，
+                并在 CSS 里给 `.brand-name`/`.brand-sub` 显式 `display: block`
+                —— 它们原来靠 div 的默认块级拿到换行和 `margin-top`。
+              ⚠️ 按钮默认外壳（边框/背景/padding/字体）必须重置，否则 logo 会被
+                框起来 —— `[[PITFALLS 44/50]]`：同一个坑在 `.rel-link` 上栽过两次。 */}
+          <button className="brand" onClick={goHome} type="button"
+                  title="回到首页" aria-label="回到首页">
+            <span className="brand-mark">突</span>
+            <span className="brand-text">
+              <span className="brand-name">突触词典</span>
+              <span className="brand-sub">Synapse Dict</span>
+            </span>
+          </button>
           <button
             className="theme-toggle"
             onClick={toggleTheme}
@@ -1140,12 +1309,22 @@ export default function App() {
           {results.map((item, i) => (
             <button
               className={i === activeIndex ? 'result-item active' : 'result-item'}
-              key={item.id}
-              onClick={() => { setActiveIndex(i); selectWord(item.word); }}
+              // 🔴 key 不能只用 `item.id`：搭配反查出来的行**落点是拥有它的词条**，
+              //    同一个词头下的多条搭配会共用同一个 id ⇒ React 键重复。
+              key={`${item.id}-${item.word}`}
+              // 🔴 落点是 `via.word`（词头），不是 `item.word`（短语本身）——
+              //    短语不是词头，拿它去 getEntry 一定查不到，点了就是一片空白。
+              onClick={() => { setActiveIndex(i); selectWord(targetOf(item)); }}
               type="button"
             >
               <span className="result-word">{item.word}</span>
               <span className="result-brief">{item.brief || ''}</span>
+              {item.via && (
+                // 读者得知道**为什么点它会跳到别的词**。
+                // ⚠️ 这里原来还带着出处（「机器生成 · 出现在 X 的搭配中」），
+                //    2026-09-12 与搭配区的标识一并去掉，理由见 `CollocationSection` 抬头。
+                <span className="result-via">{`出现在 ${item.via.word} 的搭配中`}</span>
+              )}
             </button>
           ))}
 
@@ -1358,8 +1537,10 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
       {/* 🔴 这个词是谁的变形 —— 放在最前面：读者查 `cats` 首先要知道它是 cat 的复数 */}
       {entry.formOf.length > 0 && (
         <div className="sense-altof">
+          {/* 🔴 2026-09-11 加 `rel-item`：**1,727 个词形有 ≥2 个原形**，
+              原来相邻两条之间没有任何间距（与 de 的「下位」连排同一个 bug）。 */}
           {entry.formOf.map((f, i) => (
-            <span key={i}>
+            <span className="rel-item" key={i}>
               {f.clickable
                 ? <a className="rel-link" href={`#${encodeURIComponent(f.base)}`}
                      onClick={(ev) => { ev.preventDefault(); onWord(f.base); }}>{f.base}</a>
@@ -1453,8 +1634,9 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                 )}
                 {s.altOf.length > 0 && (
                   <div className="sense-altof">
+                    {/* 🔴 同上：**3,132 条义项有 ≥2 个异体目标**。 */}
                     异体：{s.altOf.map((a, i) => (
-                      <span key={i}>
+                      <span className="rel-item" key={i}>
                         {a.clickable
                           ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
                               onClick={(ev) => { ev.preventDefault(); onWord(a.target); }}>{a.target}</a>
@@ -1984,19 +2166,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      {entry.collocations.length > 0 && (
-        <section className="entry-section">
-          <h3>搭配 / 固定短语</h3>
-          <ul className="colloc-list">
-            {entry.collocations.map((c, i) => (
-              <li className="colloc-item" key={i}>
-                <span className="colloc-text">{c.text}</span>
-                {c.zh && <span className="colloc-zh">{c.zh}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <CollocationSection items={entry.collocations} lang="es" />
     </article>
   );
 }
@@ -2377,19 +2547,7 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      {entry.collocations.length > 0 && (
-        <section className="entry-section">
-          <h3>搭配 / 固定短语</h3>
-          <ul className="colloc-list">
-            {entry.collocations.map((c, i) => (
-              <li className="colloc-item" key={i}>
-                <span className="colloc-text">{c.text}</span>
-                {c.zh && <span className="colloc-zh">{c.zh}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <CollocationSection items={entry.collocations} lang="it" />
 
       {/* 挂不上具体义项的例句（39.0% 挂上了，其余在这里成块）。
           🔴 不硬塞进第一条义项 —— 那等于替源头做了一个它没做的判断，
@@ -2835,19 +2993,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      {entry.collocations.length > 0 && (
-        <section className="entry-section">
-          <h3>搭配 / 固定短语</h3>
-          <ul className="colloc-list">
-            {entry.collocations.map((c, i) => (
-              <li className="colloc-item" key={i}>
-                <span className="colloc-text">{c.text}</span>
-                {c.zh && <span className="colloc-zh">{c.zh}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <CollocationSection items={entry.collocations} lang="fr" />
 
       {/* 没挂上义项的例句（22.6%，见 docs/FR_PLAN.md 阶段 5 补记）。
           🔴 仍要显示，只是归不到某条义项下 —— 它们挂不上是**我们挂载失败或义项缺口**，
@@ -3186,19 +3332,7 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
         </section>
       )}
 
-      {entry.collocations.length > 0 && (
-        <section className="entry-section">
-          <h3>搭配 / 固定短语</h3>
-          <ul className="colloc-list">
-            {entry.collocations.map((c, i) => (
-              <li className="colloc-item" key={i}>
-                <span className="colloc-text">{c.text}</span>
-                {c.zh && <span className="colloc-zh">{c.zh}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <CollocationSection items={entry.collocations} lang="pt" />
 
       {/* 🔴 真人录音。fr 那轮的头号事故就在这里：库里 39 万条 URL，
           而 `french.ts` 里 `FROM audio` 出现 **0 次** —— 一个用户都看不见。
@@ -3487,7 +3621,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                     {s.altOf.length > 0 && (
                       <div className="sense-altof">
                         {s.altOf.map((a, ai) => (
-                          <span key={ai}>
+                          <span className="rel-item" key={ai}>
                             {a.clickable
                               ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
                                   onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
@@ -3502,8 +3636,22 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                         {s.relations.map((g, ri) => (
                           <span className="rel-group" key={ri}>
                             <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
-                            {g.targets.slice(0, 8).map((t, ti) => (
-                              <span key={ti}>
+                            {/* 🔴🔴 **2026-09-11：加 `rel-item` 并去掉折叠。**
+                                用户看 `Frau` 页问「这个下位怎么所有的字母连在一起了」——
+                                `下位 AmmenfrauAmtfrauAufwartefrau…` 全粘在一起。
+                                根子：`.rel-group` 只定了 `font-size`/`line-height`，
+                                **没有 flex 也没有 gap**，而 de 的目标项是**光秃秃的
+                                `<span key={ti}>`，一个 className 都没有** ——
+                                es/it/en/pt 用的都是 `.rel-item { margin-right: 8px }`。
+                                🔴 **这是 de 第三次"少写 className"**（前两次：8 处裸 `<a>`、
+                                   16 个没有规则的类名）。
+                                ⚠️ 而我的 `render-dump` 导出器**把这个 bug 盖住了**：
+                                   `visibleText` 给每个 `</span>` 补一个空格，
+                                   所以我的文本快照里一直是「下位 Ammenfrau Amtfrau …」。
+                                   **导出器造出来的假象会骗走评审意见** —— 那个文件头
+                                   自己写着这句话，这次是它的反方向。 */}
+                            {g.targets.map((t, ti) => (
+                              <span className="rel-item" key={ti}>
                                 {t.clickable
                                   ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
                                       onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
@@ -3567,7 +3715,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
           <section className="entry-section">
             <h3>读音</h3>
             <ul className="de-readings">
-              {uniq.slice(0, 8).map((r, i) => (
+              {uniq.map((r, i) => (
                 <li key={i}>
                   <span className="phonetic-value">/{r.ipa}/</span>
                   {r.region && <span className="badge region">{DE_REGION_LABELS[r.region] || r.region}</span>}
@@ -3629,7 +3777,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         <section className="entry-section">
           <h3>词形变化<span className="section-count">{entry.forms.length}</span></h3>
           <div className="de-form-grid">
-            {entry.forms.slice(0, 60).map((fm, i) => (
+            {entry.forms.map((fm, i) => (
               <span className="de-form-cell" key={i}>
                 <a className="rel-link" href={`#${encodeURIComponent(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
@@ -3646,7 +3794,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         <section className="entry-section">
           <h3>构词<span className="section-count">{entry.derivedForms.length}</span></h3>
           <div className="de-form-grid">
-            {entry.derivedForms.slice(0, 40).map((fm, i) => (
+            {entry.derivedForms.map((fm, i) => (
               <span className="de-form-cell" key={i}>
                 <a className="rel-link" href={`#${encodeURIComponent(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
@@ -3663,8 +3811,8 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
           {entry.relations.map((g, i) => (
             <div className="rel-row" key={i}>
               <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
-              {g.targets.slice(0, 20).map((t, ti) => (
-                <span key={ti}>
+              {g.targets.map((t, ti) => (
+                <span className="rel-item" key={ti}>
                   {t.clickable
                     ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
                         onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
@@ -3685,7 +3833,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         <section className="entry-section">
           <h3>词形还原</h3>
           <ul className="infl-notes">
-            {entry.inflections.slice(0, 20).map((x, i) => (
+            {entry.inflections.map((x, i) => (
               <li key={i}>
                 {x.clickable
                   ? <a className="rel-link" href={`#${encodeURIComponent(x.base)}`}
@@ -3726,19 +3874,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      {entry.collocations.length > 0 && (
-        <section className="entry-section">
-          <h3>搭配 / 固定短语</h3>
-          <ul className="colloc-list">
-            {entry.collocations.map((c, i) => (
-              <li className="colloc-item" key={i}>
-                <span className="colloc-text">{c.text}</span>
-                {c.zh && <span className="colloc-zh">{c.zh}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <CollocationSection items={entry.collocations} lang="de" />
     </article>
   );
 }

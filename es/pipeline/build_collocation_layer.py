@@ -59,6 +59,9 @@ import dbtool   # noqa: E402
 import paths    # noqa: E402
 
 CJK = re.compile(r"[一-鿿　-〿＀-￯]")
+# 出处：整层来自 `b_translate.py` 的 `col` 字段，豆包凭记忆写的，无外部来源。
+# ⚠️ 不写具体模型 id —— 当时 `DOUBAO_MODEL_BATCH_LITE` 解析成哪个版本已查不到了。
+SRC = "llm:doubao"
 TABLES = ("collocation", "collocation_gloss")
 DDL = [
     """CREATE TABLE collocation (
@@ -67,6 +70,11 @@ DDL = [
          sense_id INTEGER,              -- → sense.id；本轮全 NULL，挂回义项是编纂工作
          text     TEXT NOT NULL,        -- 西语短语原文
          rank     INTEGER NOT NULL,     -- 该词内顺序，保源序
+         -- 出处（2026-09-12 加）。🔴 **这一层整层没有外部出处** ——
+         -- `dict.collocation` 那一列是 `pipeline/b_translate.py` 里
+         -- 「返回 col 字段：该词最常用的搭配或固定短语 1-3 条」让豆包凭记忆写的。
+         -- 展示层据此标注「机器生成」，搜索反查据此降权。见 docs/SCHEMA.md §搭配层出处。
+         src      TEXT,
          UNIQUE(word_id, rank)
        )""",
     """CREATE TABLE collocation_gloss (
@@ -113,10 +121,10 @@ def collect(con):
                 continue
             cid += 1
             rank += 1
-            cols.append((cid, did, rank, es))
+            cols.append((cid, did, rank, es, SRC))
             stat["搭配"] += 1
             if zh:
-                glosses.append((cid, "zh", zh, "dict-collocation"))
+                glosses.append((cid, "zh", zh, SRC))
                 stat["  有中文"] += 1
             else:
                 stat["  🔴 无中文"] += 1
@@ -195,7 +203,7 @@ def main() -> None:
         for i in IDX:
             s.execute(i)
         s.executemany(
-            "INSERT INTO collocation (id, word_id, rank, text) VALUES (?,?,?,?)", cols)
+            "INSERT INTO collocation (id, word_id, rank, text, src) VALUES (?,?,?,?,?)", cols)
         s.executemany(
             "INSERT INTO collocation_gloss (collocation_id, lang, text, src) "
             "VALUES (?,?,?,?)", glosses)

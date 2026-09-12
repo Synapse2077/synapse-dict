@@ -308,3 +308,56 @@ export const REL_LABELS: Record<string, string> = {
 };
 
 export const TRANS_LABELS: Record<string, string> = { t: '及物', i: '不及物', ti: '及物/不及物' };
+
+// ============================================================================
+// 数据出处的中文名。2026-09-12。
+//
+// ⭐ 起因：用户问「搭配 / 固定短语 habitante quiteño 基多居民，这种为什么直接查
+//    却没有结果呢？」—— 往回查才发现 es/it/fr/pt/de 五门的搭配层**整层是豆包
+//    凭记忆写的**（各门 `pipeline/b_translate.py` 里同一行 prompt 的 `col` 字段），
+//    没有任何外部出处。已确凿的错误：pt 的 `color primária 原色`
+//    （`color` 在库里两条义项都标着 archaic，现代葡语是 `cor primária`）、
+//    `Google Search`、以及 es 664 / it 492 / fr 190 / pt 364 条混进来的专名。
+//
+// 🔴 **不能只在展示层写死一句「仅供参考」** —— 那是拿展示层补丁盖数据问题
+//    （`[[aim-for-perfect-not-cheap]]`）。出处已经作为 `collocation.src`
+//    写进五门的库里（`scripts/mark_collocation_src.py`，98,973 行），
+//    这张表只负责把那个值翻成人话。
+//
+// ⚠️ **数值别写进这里**。「74.2% 在我们自己的语料里查不到佐证」是**佐证率**，
+//    不是**错误率** —— 我们的例句语料本来就小，`uñas postizas 假指甲` 查不到
+//    但它是完全正常的西语。真实错误率至今没有量过，所以文案只说「机器生成」
+//    这个**事实**，不说「多少是错的」这个**我不知道的数**
+//    （`[[verify-before-claiming-confirmed]]`）。
+// ============================================================================
+// 🔴 **2026-09-12 下午起，这张表不再被页面渲染。** 用户看了效果后推翻：
+//     「机器生成，这些标识还是不要了，用户看了只会产生不信任。
+//       要么整个搭配不展示，要么就糊弄一下用户，而且也没说一定就是错的」
+//    ⇒ 表留着，理由有两条，都不是"舍不得删"：
+//      ① `contract-check-colloc.tsx` 拿它当**数据闸**：库里每个 `collocation.src`
+//         取值都必须在这张表里有名字 —— 冒出没见过的来源要当场知道；
+//      ② 它同时是那道**反向断言**的词表：「页面上不许出现这些词」。
+//    删掉它，上面两条就都没有依据了。
+export const SRC_LABELS: Record<string, { short: string; long: string; trusted: boolean }> = {
+  'llm:doubao': {
+    short: '机器生成',
+    long: '由模型凭语言知识生成，未经词典收录，可能有误',
+    trusted: false,
+  },
+  'kaikki:pseudo-sense': {
+    short: '词典收录',
+    long: '来自维基词典该词条下的短语条目',
+    trusted: true,
+  },
+  'kaikki:subentry': {
+    short: '词典收录',
+    long: '来自维基词典该词条下的子条目',
+    trusted: true,
+  },
+};
+
+/** 出处 → 展示用信息。**未知出处不编造名字**，原样回显那个值并当作"不可信"。 */
+export function srcLabel(src: string | null | undefined) {
+  if (!src) return { short: '出处不明', long: '这条数据没有记录出处', trusted: false };
+  return SRC_LABELS[src] ?? { short: src, long: '未知出处：' + src, trusted: false };
+}

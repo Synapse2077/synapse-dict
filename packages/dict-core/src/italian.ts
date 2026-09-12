@@ -16,6 +16,8 @@ export type ItalianSearchItem = {
   word: string;
   brief: string | null;
   pos: string | null;
+  /** 有值 ＝ 这条不是词头本身，是从别处反查到的；点击落到 `via.word` 的词条。 */
+  via?: ItalianSearchVia;
 };
 
 export type ItalianSense = {
@@ -53,7 +55,18 @@ export type ItalianSense = {
   entryPos: string | null;
 };
 
-export type ItalianCollocation = { text: string; zh: string | null };
+// 一条搜索结果**不是词头本身**时，说明它是从哪儿反查到的。2026-09-12。
+// 目前只有一种：`collocation`（搭配 / 固定短语）。
+// `src` 是那条搭配的出处（`llm:doubao` / `kaikki:*`），展示层据此标「机器生成」。
+export type ItalianSearchVia = { word: string; kind: 'collocation'; src: string | null };
+
+export type ItalianCollocation = {
+  text: string; zh: string | null; src: string | null;
+  /** 本语言的原文定义。**只有 kaikki 子条目那 303 条有**（平均 106 字符）——
+   *  它们是从维基词典的子条目搬来的，带着人家写的意语释义。
+   *  🔴 2026-09-12 之前服务层压根没 SELECT 它，页面上一个字都没显示过。 */
+  srcText: string | null;
+};
 
 // 一个复数形。`gender` 只在**与词头性别不同**时有值（异性复数 metaplasmic）——
 // 相同就不是异性复数，写上去等于渲染一个并不存在的性别变化。
@@ -273,7 +286,7 @@ type SenseRow = { id: number; pos: string | null; gender: string | null;
 type TagRow = { sense_id: number; kind: string; value: string };
 type InflRow = { base: string; label_zh: string; tags: string | null };
 type AltRow = { sense_id: number; target: string };
-type ColRow = { text: string; zh: string | null };
+type ColRow = { text: string; zh: string | null; src: string | null; srcText: string | null };
 type AudioRow = { file: string; url_mp3: string | null; url_ogg: string | null;
                   url_wav: string | null; speaker: string | null; region: string | null };
 
@@ -314,6 +327,10 @@ export class ItalianDictService {
   private readonly altTargetQuery;
   private readonly tagsQuery;
   private readonly colsQuery;
+
+  private readonly collocSearchByText;
+
+  private readonly collocSearchByNorm;
   private readonly briefQuery;
   private readonly pronQuery;
   private readonly audioQuery;
@@ -452,10 +469,55 @@ export class ItalianDictService {
       WHERE s.word_id = ?
     `);
 
-    this.colsQuery = this.db.prepare(`
-      SELECT c.text,
+
+    // ══ 搭配反查（2026-09-12）════════════════════════════════════════════
+    // 起因：用户在词条页上看到「搭配 / 固定短语 · habitante quiteño 基多居民」，
+    // 回到搜索框把这一整条抄进去 —— **什么都没有**。
+    // `search()` 只查 `dict.word` / `word_norm`，`collocation` 根本不在检索范围里。
+    // **页面上印出来的字符串，读者搜一下总该有反应**（与「下位词点不动」同一族）。
+    //
+    // 🔴 两列都查：从页面抄下来的是带重音的原文（命中 `text`），
+    //    自己敲的多半不带重音（命中 `text_norm` —— 归一口径与 `dict.word_norm`
+    //    逐字一致，由 `scripts/build_collocation_search.py` 的尺子闸守着）。
+    // 🔴 两条索引**都必须是 `COLLATE NOCASE`**：SQLite 默认的大小写不敏感 `LIKE`
+    //    不认 BINARY 索引。第一版建成 BINARY，执行计划写着
+    //    `SCAN collocation USING COVERING INDEX idx_col_norm` —— 索引名在、干的是
+    //    全表扫，it 实测 234.7 ms，而这是**每敲一个字符跑一次**的路径。
+    // 🔴🔴 **拆成两条单列查询，不写 `WHERE text LIKE ? OR text_norm LIKE ?`。**
+    //    `OR` 那版两条索引确实都走 SEARCH，但 `MULTI-INDEX OR` **产不出有序结果**
+    //    ⇒ 计划末尾挂着 `USE TEMP B-TREE FOR ORDER BY`，把命中的全部行排一遍才取 20 条。
+    //    实测最坏：it `c%` **923.8 ms**、fr `p%` 285.9 ms —— 而这是每敲一键跑一次的路径。
+    //    拆开之后各自沿索引顺序扫、够 20 条就停，热态 0.28～0.49 ms。
+    //    ⚠️ 代价是排序从"短的在前"变成字母序；读者抄一整条短语来搜时命中唯一，看不见。
+    this.collocSearchByText = this.db.prepare(`
+      SELECT c.text AS phrase, c.src AS colSrc, c.word_id AS wordId, d.word AS owner,
              (SELECT text FROM collocation_gloss
                WHERE collocation_id = c.id AND lang = 'zh') AS zh
+        FROM collocation c JOIN dict d ON d.id = c.word_id
+       WHERE c.text LIKE ? COLLATE NOCASE
+       ORDER BY c.text COLLATE NOCASE
+       LIMIT ?
+    `);
+
+    this.collocSearchByNorm = this.db.prepare(`
+      SELECT c.text AS phrase, c.src AS colSrc, c.word_id AS wordId, d.word AS owner,
+             (SELECT text FROM collocation_gloss
+               WHERE collocation_id = c.id AND lang = 'zh') AS zh
+        FROM collocation c JOIN dict d ON d.id = c.word_id
+       WHERE c.text_norm LIKE ? COLLATE NOCASE
+       ORDER BY c.text_norm COLLATE NOCASE
+       LIMIT ?
+    `);
+
+    this.colsQuery = this.db.prepare(`
+      SELECT c.text, c.src,
+             (SELECT text FROM collocation_gloss
+               WHERE collocation_id = c.id AND lang = 'zh') AS zh,
+             -- 意语原文定义：只有 kaikki:subentry 那 303 条有。
+             -- ⚠️ 别假设"搭配就只有原文+中文" —— 有源的那一批比机器生成的多一层，
+             --    不取出来，读者就永远看不到**唯一有人写过释义**的那 303 条的释义。
+             (SELECT text FROM collocation_gloss
+               WHERE collocation_id = c.id AND lang = 'it') AS srcText
       FROM collocation c
       WHERE c.word_id = ?
       ORDER BY c.rank
@@ -795,13 +857,36 @@ export class ItalianDictService {
       //    —— 用长短去选就是拿形式代理当判据（`Saint-Léger` 那次坏掉 1,528 条）。
       //    ⇒ 这里只负责**不重复显示**，取 `rank` 最小的那条（colsQuery 已按 rank 排序）；
       //      「两个译法选哪个」是另一件事，已记账，一条数据都不删。
+      //
+      // 🔴🔴 **2026-09-12：去重不能只"留第一条"，得把后来那条身上多出来的东西并过来。**
+      //    用户问「那非生成的那些有详情吗」才查出来：`kaikki:subentry` 那 303 条
+      //    带着维基词典写的意语释义（平均 106 字符），而其中 **293 条**在同一个词头下
+      //    与一条 `kaikki:pseudo-sense` **文本完全相同**、且 rank 更大
+      //    ⇒ 旧写法每次都留下**内容少的那一条**，那 293 份释义一个字都到不了读者。
+      //    实例：`informatica umanistica` 两行，pseudo-sense(rank 4) 无意语释义、
+      //         subentry(rank 6) 有「è un campo di studi, ricerca, insegnamento…」。
+      //    ⚠️ **「谁在前」和「谁内容多」是两回事**，按位置取就是拿形式代理当判据
+      //      —— 与上面那条「用长短选译文」栽的是同一个跟头。
+      //    ⇒ 顺序仍按 rank（展示顺序不变），但**逐字段补空**：先到的缺什么就从后到的取。
+      //      仍然不做「两个都非空时选哪个」的裁决 —— 那是记着账的另一件事。
       collocations: (() => {
-        const seen = new Set<string>();
-        const out: { text: string; zh: string | null }[] = [];
+        const at = new Map<string, number>();
+        const out: { text: string; zh: string | null; src: string | null;
+          srcText: string | null }[] = [];
         for (const c of this.colsQuery.all(row.id) as unknown as ColRow[]) {
-          if (seen.has(c.text)) continue;
-          seen.add(c.text);
-          out.push({ text: c.text, zh: c.zh ?? null });
+          const i = at.get(c.text);
+          if (i === undefined) {
+            at.set(c.text, out.length);
+            out.push({ text: c.text, zh: c.zh ?? null, src: c.src ?? null,
+              srcText: c.srcText ?? null });
+            continue;
+          }
+          const kept = out[i];
+          kept.zh ??= c.zh ?? null;
+          kept.srcText ??= c.srcText ?? null;
+          // 出处也补空：先到的若是机器生成、后到的有词典出处，读者该看到后者。
+          // ⚠️ 只在先到的**没有**出处时才补，不做"谁更可信"的裁决。
+          kept.src ??= c.src ?? null;
         }
         return out;
       })(),
@@ -858,7 +943,7 @@ export class ItalianDictService {
         id: number; word: string; pos: string | null; infl: string | null;
       }>;
     }
-    return rows.map((r) => {
+    const items: ItalianSearchItem[] = rows.map((r) => {
       const g = this.briefQuery.get(r.id) as { text: string } | undefined;
       return {
         id: r.id,
@@ -869,6 +954,31 @@ export class ItalianDictService {
         brief: g?.text ?? firstLine(r.infl),
       };
     });
+    // 词头没填满时，用剩下的名额反查搭配。
+    // 🔴 **词头永远优先，搭配只补位** —— `quiteño` 既是词头又出现在一堆搭配里，
+    //    让搭配挤掉词头就是把主词条藏起来。
+    // 🔴 落点是**拥有这条搭配的词条**（`via.word`），不是短语本身（短语不是词头，
+    //    拿它去 `getEntry` 一定查不到）。展示层据 `via` 渲染来源标记与跳转目标。
+    if (items.length < limit) {
+      const seen = new Set(items.map((x) => x.word.toLowerCase()));
+      type ColHit = { phrase: string; colSrc: string | null; wordId: number;
+        owner: string; zh: string | null };
+      const hits = [
+        ...(this.collocSearchByText.all(like, limit) as ColHit[]),
+        ...(this.collocSearchByNorm.all(like, limit) as ColHit[]),
+      ];
+      for (const c of hits) {
+        if (items.length >= limit) break;
+        const k = c.phrase.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        items.push({
+          id: c.wordId, word: c.phrase, pos: null, brief: c.zh,
+          via: { word: c.owner, kind: 'collocation', src: c.colSrc },
+        });
+      }
+    }
+    return items;
   }
 
   getEntry(word: string): ItalianEntry | null {
