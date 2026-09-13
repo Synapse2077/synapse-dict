@@ -9,6 +9,10 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+// 词源键：**带来源的不透明键**，理由见 etym.ts（两套编号不是同一个命名空间）。
+import { etymKeyOfEntry } from './etym.js';
+// 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts）。
+import { dropDuplicatedAtSenseLevel } from './relations.js';
 
 // API 列表项契约（与其它服务结构一致；结构化类型，无需跨语种 import）。
 export type ItalianSearchItem = {
@@ -21,6 +25,14 @@ export type ItalianSearchItem = {
 };
 
 export type ItalianSense = {
+  /** 词源号（维基词典的 Etymology 1/2/3…）。没有就 null。
+   *  ⭐ 展示层据此断组：**词性相同且词源相同**才合并 —— 否则两个同形异源的词
+   *  会被并进同一个词性组（用户 2026-09-12 从 en 的 `gore` 问出来的）。 */
+  etymKey: string | null;
+  /** 这条义项自己的语义关系（近义/反义/上下位…）。2026-09-12 补。
+   *  🔴 it 有 27,993 条可见关系挂在义项上，一直被当成词条级渲染 ⇒ **归属丢了**。
+   *  词条级那一份现在只留 `sense_id` 为空的（外加挂在隐藏义项上的 5 条）。 */
+  relations: ItalianRelationGroup[];
   en: string | null;        // 英文 gloss 锚点
   zh: string | null;        // 中文释义
   pos: string | null;       // 逐义项词性
@@ -109,11 +121,13 @@ export type ItalianExample = {
   ref: string | null;       // 文献出处
 };
 
-// 语义关系。一个词最多 763 条（`buono`），所以**分类封顶**，并把总数一起给出去 ——
-// 截断了却不说，用户会以为词典只收了这么多。
+// 语义关系。一个词最多 763 条（`piante`），**不截断**：`targets` 就是全部。
+// 🔴 2026-09-13 删掉了 `total` 字段（原来配合 `REL_CAP=12` 报「共 N 个」）。
+//    删它不是顺手：留着 `total`，"截断"这件事在类型上就还说得出来，
+//    迟早有人把 `slice` 加回去（`[[lesson-must-become-mechanism]]`：
+//    交付物是一道会自己响的闸，不是一句注释）。
 export type ItalianRelationGroup = {
   kind: string;             // synonym / antonym / hypernym / …（REL_LABELS 映射）
-  total: number;
   targets: { word: string; linkable: boolean }[];   // linkable=false 的不做成链接
 };
 
@@ -271,9 +285,18 @@ function parseBaseForms(raw: string | null): string[] {
   return [...new Set(out)];
 }
 
-// 关系分类的展示上限。`buono` 有 763 条，全铺出来就不是词典是词表了。
-// 截断必须连总数一起给（见 ItalianRelationGroup 的注释）。
-const REL_CAP = 12;
+// 🔴🔴 **2026-09-13 取消关系展示上限（原来是 `REL_CAP = 12`）。**
+//    用户看 `branca` 问「近义 …共 13 个，没有全部展开？」——**没有**：12 个铺出来、
+//    第 13 个 `specializzazione` 藏着，页面只给一句不可点的「共 13 个」。
+//    **en 早就把这条路走完了**（见 `App.tsx` 词条级关系那段注释）：原来 `slice(0,20)` + `+N`，
+//    结论是「`+N` 比静默丢好，但仍是**看不到内容的死胡同**」⇒ 不折叠。
+//    这个结论没有推广到 it/fr/pt。实测被藏起来的量：
+//        it 14,452 组 / 131,888 个目标（占全部关系 21.5%）
+//        fr  1,459 组 /  22,264 个（7.0%）　　pt 778 组 / 15,546 个（10.9%）
+//    ⚠️ 其中 4,780 组（it）只藏 1-3 个 —— 13 砍成 12，一点版面都没省下。
+//    ⚠️ 性能是唯一真实的代价，已实测不是问题：最坏的 `piante`（760 个目标）
+//       逐个查 `existsQuery` 共 13.8 ms，典型的 13-20 个是 0.3 ms 以下。
+//       （原注释写「每个查询是微秒级」——实测 19-35 µs/次，量级对得上，结论也对。）
 // 关系分类的展示顺序：先给「换个词说」（近义/反义），再给分类学（上下位/同类/整体部分）。
 const REL_ORDER = ['synonym', 'antonym', 'hypernym', 'hyponym', 'coordinate', 'holonym', 'meronym'];
 // 词级例句的上限。挂上义项的那批不截断（本来就分散在各义项下，最多的也才几条）。
@@ -336,6 +359,8 @@ export class ItalianDictService {
   private readonly audioQuery;
   private readonly exampleQuery;
   private readonly relationQuery;
+
+  private readonly visibleSenseIdQuery;
   private readonly existsQuery;
   private readonly pluralQuery;
   private readonly ttsDir: string;
@@ -410,6 +435,14 @@ export class ItalianDictService {
     this.sensesQuery = this.db.prepare(`
       SELECT s.id, s.pos, s.gender, s.entry_id,
              s.aux AS sense_aux, e.aux AS entry_aux, e.pos AS entry_pos,
+             -- 🔴 词源号（2026-09-12）。用户看 en 的 gore 问「为什么有两轮名词/动词」——
+             --    那是三个不同词源的同形词，而展示层「相邻同词性合组」跨过了词源边界，
+             --    把两个不同源的同词性块并成一个。本门实测 1,005 个词中招。
+             --    ⚠️ 这一段里一个反引号都不能有：整条 SQL 在 TS 模板字符串里。
+             -- ⚠️ etym_no 是**裸编号**不是键；键由 etymKeyOfEntry() 拼上来源。
+             -- 🔴 注释不许写在列的后面：行尾逗号会被一起注释掉，
+             --    SQL 在运行时才炸，而 tsc 一声不吭（第一版就是这么过的）。
+             e.etym_no AS etymNoRaw, e.src AS etymSrc,
              (SELECT text FROM sense_gloss
                WHERE sense_id = s.id AND lang = 'en' AND kind = 'equivalent' AND seq = 0) AS en,
              (SELECT text FROM sense_gloss
@@ -581,8 +614,23 @@ export class ItalianDictService {
     //    ⚠️ 而且那个脚本的 `--verify` 当时**报了绿** —— 它查的是
     //    `WHERE COALESCE(hidden,0)=0`，那只是**假设**展示层会过滤。
     //    「闸在数据层自查、展示层却绕过去」正是回归闸文件头写的第二种机制。
+    // 可见义项的 id 集合。**单独一条查询**，不从 `buildSenses` 的返回值里取 ——
+    // `ItalianSense` 有意不透出 `id`（那是内部主键），为了拿它去改公开类型不划算。
+    // 过滤条件与 `sensesQuery` 逐字一致；不一致就会把某条关系判错级别。
+    this.visibleSenseIdQuery = this.db.prepare(`
+      SELECT id FROM sense WHERE word_id = ? AND COALESCE(hidden, 0) = 0
+    `);
+
+    // 🔴 2026-09-12 带出 `sense_id`：**义项级关系要画进它自己的义项里**。
+    //    it 有 27,993 条可见关系挂在义项上（4.6%），而它们一直被当成词条级渲染
+    //    —— 归属丢了，读者看不出「近义 X」属于第 1 条义项还是第 5 条。
+    //    受影响的多义项词 4,721 个。与 de 例句那次同一个形状：
+    //    **数据全对、接口有字段、组件没读**（`[[it-display-layer-stage8]]`）。
+    // ⚠️ SQL 一个字没加过滤 —— 分流在 JS 里做。加 `sense_id IS NULL` 会让
+    //    「挂在隐藏义项上」的那 5 条整个消失（实测 `posdomani → dopodomani` 就是其一），
+    //    而那几条关系本身没问题，只是它依附的义项被藏了。
     this.relationQuery = this.db.prepare(`
-      SELECT kind, target FROM sense_relation
+      SELECT sense_id, kind, target FROM sense_relation
       WHERE word_id = ? AND kind <> 'alt_of' AND COALESCE(hidden, 0) = 0 ORDER BY id
     `);
 
@@ -740,8 +788,8 @@ export class ItalianDictService {
     return out;
   }
 
-  private relationsOf(wordId: number): ItalianRelationGroup[] {
-    const rows = this.relationQuery.all(wordId) as unknown as { kind: string; target: string }[];
+  /** 把若干条关系行分组、排序、截断。**两级共用这一份** —— 抄两份必然漂移。 */
+  private groupRels(rows: Array<{ kind: string; target: string }>): ItalianRelationGroup[] {
     const byKind = new Map<string, string[]>();
     for (const r of rows) {
       const list = byKind.get(r.kind) ?? [];
@@ -755,14 +803,49 @@ export class ItalianDictService {
       const all = byKind.get(kind)!;
       out.push({
         kind,
-        total: all.length,
-        // 🔴 存在性只查**要显示的那几个**（≤12），不是全部 763 个 ——
-        //    每个查询是微秒级，但 763 × 每次打开词条就不是了。
-        targets: all.slice(0, REL_CAP).map((w) => ({
-          word: w, linkable: this.existsQuery.get(w) !== undefined,
+        // 🔴🔴 2026-09-13：`existsQuery` 声明了**两个**占位符（`word = ? OR word_norm = ?`），
+        //    而这里一直只传了**一个** —— node:sqlite 不报错，缺的那个按 NULL 绑定，
+        //    于是 `word_norm = NULL` 恒不成立，上面注释里写明要走的归一列回退
+        //    **从来没有真正跑过**。实测受害：295 条关系（211 个目标词形）本该点得动、
+        //    却一直印成灰字（`amico dell’uomo` 这类弯撇号/重音符写法）。
+        //    ⭐ 又一次「规则写在注释里、代码却没落实」——`[[criteria-from-meaning-not-form]]`。
+        targets: all.map((w) => ({
+          word: w, linkable: this.existsQuery.get(w, w) !== undefined,
         })),
       });
     }
+    return out;
+  }
+
+  /** 词条级关系：`sense_id` 为空的，**加上**挂在隐藏义项上的（那些没有别处可去）。
+   *  再去掉已经在某条义项下印过的 (类型, 目标)（it 实测 9,173 组会印两遍）。 */
+  private visibleSenseIds(wordId: number): Set<number> {
+    return new Set((this.visibleSenseIdQuery.all(wordId) as Array<{ id: number }>)
+      .map((r) => r.id));
+  }
+
+  private relationsOf(wordId: number): ItalianRelationGroup[] {
+    const visibleSenseIds = this.visibleSenseIds(wordId);
+    const all = this.relationQuery.all(wordId) as unknown as Array<{
+      sense_id: number | null; kind: string; target: string }>;
+    const atSense = all.filter((r) => r.sense_id !== null && visibleSenseIds.has(r.sense_id));
+    const atEntry = all.filter((r) => r.sense_id === null || !visibleSenseIds.has(r.sense_id));
+    return this.groupRels(dropDuplicatedAtSenseLevel(atEntry, atSense));
+  }
+
+  /** 义项级关系：`义项 id → 分组`。 */
+  private relationsBySense(wordId: number): Map<number, ItalianRelationGroup[]> {
+    const visibleSenseIds = this.visibleSenseIds(wordId);
+    const bySense = new Map<number, Array<{ kind: string; target: string }>>();
+    for (const r of this.relationQuery.all(wordId) as unknown as Array<{
+      sense_id: number | null; kind: string; target: string }>) {
+      if (r.sense_id === null || !visibleSenseIds.has(r.sense_id)) continue;
+      const a = bySense.get(r.sense_id) ?? [];
+      a.push({ kind: r.kind, target: r.target });
+      bySense.set(r.sense_id, a);
+    }
+    const out = new Map<number, ItalianRelationGroup[]>();
+    for (const [sid, rows] of bySense) out.set(sid, this.groupRels(rows));
     return out;
   }
 
@@ -784,7 +867,11 @@ export class ItalianDictService {
       list.push({ target: a.target, zh: hit?.text ?? null });
       alts.set(a.sense_id, list);
     }
+    const relBySense = this.relationsBySense(wordId);
     return rows.map((r) => ({
+      etymKey: etymKeyOfEntry((r as { etymSrc?: string | null }).etymSrc,
+        (r as { etymNoRaw?: string | null }).etymNoRaw),
+      relations: relBySense.get(r.id) ?? [],
       en: r.en ?? null,
       zh: r.zh ?? null,
       it: r.it ?? null,
@@ -904,6 +991,8 @@ export class ItalianDictService {
         region: a.region ?? null,
       })).filter((a) => a.url) : [],
       examples: full ? (ex!.get(null) ?? []).slice(0, EX_CAP) : [],
+      // ⚠️ 词条级关系要知道**哪些义项是可见的**，才能把「挂在隐藏义项上」的那几条
+      //    留在词条级、而不是让它们消失。义项已经在上面建好了，直接借用。
       relations: full ? this.relationsOf(row.id) : [],
       tts: [],                          // 文件系统，由 getEntry 填
       // 🔴 2026-08-21 补上去重。上面 `baseForms` 一直是 `new Set(...)`，这一行却不是 ——

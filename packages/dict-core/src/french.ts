@@ -19,6 +19,10 @@
 // ============================================================================
 
 import { DatabaseSync } from 'node:sqlite';
+// 词源键：**带来源的不透明键**，理由见 etym.ts（两套编号不是同一个命名空间）。
+import { etymKeyOfEntry } from './etym.js';
+// 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts）。
+import { dropDuplicatedAtSenseLevel } from './relations.js';
 
 // API 列表项契约（与其它服务结构一致；结构化类型，无需跨语种 import）。
 export type FrenchSearchItem = {
@@ -31,6 +35,13 @@ export type FrenchSearchItem = {
 };
 
 export type FrenchSense = {
+  /** 词源号（维基词典的 Etymology 1/2/3…）。没有就 null。
+   *  ⭐ 展示层据此断组：**词性相同且词源相同**才合并 —— 否则两个同形异源的词
+   *  会被并进同一个词性组（用户 2026-09-12 从 en 的 `gore` 问出来的）。 */
+  etymKey: string | null;
+  /** 这条义项自己的语义关系。2026-09-12 补 —— fr 有 31,136 条可见关系挂在义项上，
+   *  一直被当成词条级渲染 ⇒ 归属丢了。 */
+  relations: FrenchRelationGroup[];
   id: number;
   en: string | null;        // 英文对应词（sense_gloss lang=en kind=equivalent）
   zh: string | null;        // 中文释义（lang=zh kind=equivalent）
@@ -96,17 +107,20 @@ export type FrenchAltOf = { target: string; zh: string | null; clickable: boolea
 // 词元页反向看到的变位/变形形：这个词有哪些形式。
 export type FrenchForm = { form: string; label: string | null };
 
-// 语义关系（阶段 5 补做，2026-08-27）。`total` 是**全部**目标数，`targets` 只带
-// 要显示的前 FR_REL_CAP 个 —— 页面上写「近义词 12 / 共 87」靠的是这个差。
+// 语义关系（阶段 5 补做，2026-08-27）。**不截断**：`targets` 就是全部目标。
+// 🔴 2026-09-13 取消 `FR_REL_CAP = 12`（连同 `total` 字段一起删）。理由同 it：
+//    en 早就定了「`+N` 是看不到内容的死胡同」，而 it/fr/pt 一直还截着。
+//    fr 实测被藏 1,459 组 / 22,264 个目标（占全部关系 7.0%）。
+//    ⭐ `total` 一并删掉不是顺手 —— 留着它，"截断"这件事在类型上就还说得出来，
+//      迟早有人再把 slice 加回去（`[[lesson-must-become-mechanism]]`）。
 export type FrenchRelationTarget = { word: string; clickable: boolean };
 export type FrenchRelationGroup = {
-  kind: string; total: number; targets: FrenchRelationTarget[];
+  kind: string; targets: FrenchRelationTarget[];
 };
 // 展示顺序：先近义反义（查词最常要的），再上下位，再整体部分。
 // ⚠️ `alt_of` **不在这里** —— 它由 altOf 那条线单独承担，不是语义关系。
 const FR_REL_ORDER = ['synonym', 'antonym', 'hypernym', 'hyponym',
                       'coordinate', 'holonym', 'meronym'];
-const FR_REL_CAP = 12;
 
 // 变位形式指向的原形（连同词义与本质字段，供变位页内联展示）。
 export type FrenchBase = {
@@ -255,6 +269,8 @@ export class FrenchDictService {
   private readonly formsQuery;
   private readonly altQuery;
   private readonly relationQuery;
+
+  private readonly visibleSenseIdQuery;
   private readonly altTargetQuery;
   private readonly existsExactQuery;
   private readonly existsNormQuery;
@@ -358,6 +374,14 @@ export class FrenchDictService {
     //     zh equivalent 657,582 ｜ fr definition 648,506 ｜ en equivalent 124,908
     this.sensesQuery = this.db.prepare(`
       SELECT s.id, s.pos, s.gender,
+             -- 🔴 词源号（2026-09-12）。用户看 en 的 gore 问「为什么有两轮名词/动词」——
+             --    那是三个不同词源的同形词，而展示层「相邻同词性合组」跨过了词源边界，
+             --    把两个不同源的同词性块并成一个。本门实测 675 个词中招。
+             --    ⚠️ 这一段里一个反引号都不能有：整条 SQL 在 TS 模板字符串里。
+             -- ⚠️ etym_no 是**裸编号**不是键；键由 etymKeyOfEntry() 拼上来源。
+             -- 🔴 注释不许写在列的后面：行尾逗号会被一起注释掉，
+             --    SQL 在运行时才炸，而 tsc 一声不吭（第一版就是这么过的）。
+             e.etym_no AS etymNoRaw, e.src AS etymSrc,
              (SELECT text FROM sense_gloss
                WHERE sense_id = s.id AND lang = 'en' AND kind = 'equivalent' AND seq = 0) AS en,
              (SELECT text FROM sense_gloss
@@ -365,6 +389,7 @@ export class FrenchDictService {
              (SELECT text FROM sense_gloss
                WHERE sense_id = s.id AND lang = 'fr' AND kind = 'definition' AND seq = 0) AS fr
       FROM sense s
+      LEFT JOIN entry e ON e.id = s.entry_id
       WHERE s.word_id = ? AND COALESCE(s.hidden, 0) = 0
       ORDER BY s.rank
     `);
@@ -512,9 +537,21 @@ export class FrenchDictService {
     //    **数据层补完不接展示层，等于没做**（it 那轮"关系例句录音三张表从没人看"）。
     // ⚠️ 排除 `alt_of` —— 它是变形/异体指针，由上面 altQuery 那条线单独承担，
     //    混进「近义词」里就是把"这是同一个词的另一种拼法"说成"这是个近义词"。
+    // 🔴 2026-09-12 带出 `sense_id`：**义项级关系要画进它自己的义项里**。
+    //    fr 有 31,136 条可见关系挂在义项上（10.4%），一直被当成词条级渲染
+    //    ⇒ 归属丢了；受影响的多义项词 4,946 个。与 de 例句那次同一个形状：
+    //    **数据全对、接口有字段、组件没读**（`[[it-display-layer-stage8]]`）。
+    // ⚠️ SQL 不加过滤，分流在 JS 里做 —— 直接写 `sense_id IS NULL` 会让
+    //    「挂在隐藏义项上」的行整个消失（it 那边实测有 5 条是这个形状）。
     this.relationQuery = this.db.prepare(`
-      SELECT kind, target FROM sense_relation
+      SELECT sense_id, kind, target FROM sense_relation
       WHERE word_id = ? AND kind <> 'alt_of'
+    `);
+
+    // 可见义项的 id 集合。过滤条件与 `sensesQuery` **逐字一致**；
+    // 不一致就会把某条关系判错级别。
+    this.visibleSenseIdQuery = this.db.prepare(`
+      SELECT id FROM sense WHERE word_id = ? AND COALESCE(hidden, 0) = 0
     `);
 
     // 把目标词的中文**跟随读取**出来（不复制数据）。
@@ -630,8 +667,12 @@ export class FrenchDictService {
       arr.push(t.value);
       m.set(t.sense_id, arr);
     }
+    const relBySense = this.relationsBySense(wordId);
     return rows.map((r) => ({
       id: r.id,
+      etymKey: etymKeyOfEntry((r as { etymSrc?: string | null }).etymSrc,
+        (r as { etymNoRaw?: string | null }).etymNoRaw),
+      relations: relBySense.get(r.id) ?? [],
       en: r.en,
       zh: r.zh,
       fr: r.fr,
@@ -652,8 +693,40 @@ export class FrenchDictService {
     return !!this.existsNormQuery.get(w.replace(/’/g, "'"));
   }
 
+  private visibleSenseIds(wordId: number): Set<number> {
+    return new Set((this.visibleSenseIdQuery.all(wordId) as Array<{ id: number }>)
+      .map((r) => r.id));
+  }
+
+  /** 词条级关系：`sense_id` 为空的，**加上**挂在隐藏义项上的（没有别处可去）；
+   *  再去掉已经在某条义项下印过的 (类型, 目标)（fr 实测 7,153 组会印两遍）。 */
   private relationsOf(wordId: number): FrenchRelationGroup[] {
-    const rows = this.relationQuery.all(wordId) as Array<{ kind: string; target: string }>;
+    const vis = this.visibleSenseIds(wordId);
+    const all = this.relationQuery.all(wordId) as Array<{
+      sense_id: number | null; kind: string; target: string }>;
+    const atSense = all.filter((r) => r.sense_id !== null && vis.has(r.sense_id));
+    const atEntry = all.filter((r) => r.sense_id === null || !vis.has(r.sense_id));
+    return this.groupRels(dropDuplicatedAtSenseLevel(atEntry, atSense));
+  }
+
+  /** 义项级关系：`义项 id → 分组`。 */
+  private relationsBySense(wordId: number): Map<number, FrenchRelationGroup[]> {
+    const vis = this.visibleSenseIds(wordId);
+    const bySense = new Map<number, Array<{ kind: string; target: string }>>();
+    for (const r of this.relationQuery.all(wordId) as Array<{
+      sense_id: number | null; kind: string; target: string }>) {
+      if (r.sense_id === null || !vis.has(r.sense_id)) continue;
+      const a = bySense.get(r.sense_id) ?? [];
+      a.push({ kind: r.kind, target: r.target });
+      bySense.set(r.sense_id, a);
+    }
+    const out = new Map<number, FrenchRelationGroup[]>();
+    for (const [sid, rows2] of bySense) out.set(sid, this.groupRels(rows2));
+    return out;
+  }
+
+  /** 分组、去重、排序、截断。**两级共用这一份** —— 抄两份必然漂移。 */
+  private groupRels(rows: Array<{ kind: string; target: string }>): FrenchRelationGroup[] {
     // 🔴 2026-08-28 第二轮外审：`fillâtre` 的 `beau-fils` 同时出现在「近义」和「下位」，
     //    `dictionnaire` 的 `glossaire` 同时是「近义」和「上位」，
     //    `Afghanistan` 的 `Kaboul` 同时是「近义」和「下位」（近义那条源头就是错的）。
@@ -685,11 +758,10 @@ export class FrenchDictService {
       const all = byKind.get(kind)!;
       return {
         kind,
-        total: all.length,
-        // 🔴 存在性只查**要显示的那几个**（≤ FR_REL_CAP）。
-        //    每次查是微秒级，但 `chien` 的下位词有几百个，乘起来就不是了
-        //    （`[[query-perf-collation-traps]]`：性能问题要等数据长大才咬人）。
-        targets: all.slice(0, FR_REL_CAP).map((w) => ({
+        // ⚠️ 存在性现在要对**全部**目标查一遍（`clickable()` 最多两条单索引查询）。
+        //    实测 it 那边最坏的 760 个目标合计 13.8 ms，典型量级 0.3 ms 以下 ——
+        //    这是取消截断唯一的真实代价，量过了，不拦路。
+        targets: all.map((w) => ({
           word: w, clickable: this.clickable(w),
         })),
       };

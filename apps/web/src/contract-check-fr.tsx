@@ -498,7 +498,7 @@ function mutate(words: string[]): void {
     // 这条守的是「alt_of 走词头那条线、不许混进相关词」。数据变异就够 ——
     //    它问的是接口形状，不是组件渲染了没有。
     ['把 alt_of 塞进 relations 分组',
-      (e) => { e.relations = [{ kind: 'alt_of', total: 1,
+      (e) => { e.relations = [{ kind: 'alt_of',
                                 targets: [{ word: 'zzz', clickable: false }] }]; }, () => true],
     ['把 alt_of 标成可点但指向不存在的词',
       (e) => { e.altOf = [{ target: 'zzzz-nope', zh: null, clickable: true }]; }, () => true],
@@ -512,7 +512,7 @@ function mutate(words: string[]): void {
         const syn = e.relations.find((g) => g.kind === 'synonym');
         const t = { ...other.targets[0] };
         if (syn) syn.targets.push(t);
-        else e.relations.push({ kind: 'synonym', total: 1, targets: [t] });
+        else e.relations.push({ kind: 'synonym', targets: [t] });
       },
       (e) => e.relations.some((g) => g.kind !== 'synonym' && g.targets.length > 0)],
   ];

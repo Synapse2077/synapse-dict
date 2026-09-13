@@ -15,6 +15,8 @@ export * from './spanish.js';
 export * from './french.js';
 export * from './portuguese.js';
 export * from './german.js';
+export * from './etym.js';
+export * from './relations.js';
 
 type DictionaryRow = {
   id: number;

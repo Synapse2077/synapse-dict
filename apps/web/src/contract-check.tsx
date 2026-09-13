@@ -142,12 +142,19 @@ const CHECKS: Check[] = [
     },
   },
   {
-    name: '🔴 关系截断了必须把总数说出来',
+    // 🔴🔴 **2026-09-13 判据翻面**：原来这条是「截断了必须把总数说出来」——
+    //    它默认「截断是对的，只要说一声」。用户看 `branca` 问「共 13 个，没有全部展开？」
+    //    之后取消了截断（服务层 `REL_CAP` 已删），判据跟着变成**更强的那个**：
+    //    **一个目标都不许少**。⚠️ 旧判据若留着不动，会变成一条永远绿的闸
+    //    （没有截断 ⇒ `cut` 恒空 ⇒ 恒不报）—— `[[fix-regression-and-gate]]` 的第三种机制。
+    // ⚠️ 词条级与义项级都要数：两处用的是同一个 `RelationGroups`，
+    //    只数词条级的话，义项级漏渲染整批都看不见。
+    name: '🔴 关系不许截断：每个目标都要渲染出来',
     hit: (e, html) => {
-      const cut = e.relations.filter((g) => g.total > g.targets.length);
-      const t = visibleText(html);
-      const miss = cut.filter((g) => !t.includes(`共 ${g.total} 个`));
-      return miss.length ? `${miss.length} 组截断了没说总数（${miss[0].kind} ${miss[0].total}）` : null;
+      const want = [...e.relations, ...e.senses.flatMap((x) => x.relations)]
+        .reduce((n, g) => n + g.targets.length, 0);
+      const got = (html.match(/class="rel-item"/g) || []).length;
+      return want !== got ? `关系目标共 ${want} 个，页面上只有 ${got} 个` : null;
     },
   },
   {
@@ -444,8 +451,8 @@ function mutate(words: string[]): void {
       const parts = [...h.matchAll(/<span class="badge plural"[\s\S]*?<\/span>/g)];
       return parts.length > 1 ? h.replace(parts[parts.length - 1][0], '') : h;
     }, (e) => e.plurals.length > 1],
-    ['组件漏说关系被截断了', (h) => h.replace(/<span class="rel-more">[^<]*<\/span>/g, ''),
-     (e) => e.relations.some((g) => g.total > g.targets.length)],
+    ['🔴 组件少渲染了一个关系目标', (h) => h.replace(/<span class="rel-item">/, '<span class="x">'),
+     (e) => e.relations.some((g) => g.targets.length > 0)],
     ['组件把录音地区的法语原文直接印出来',
      (h) => h.replace(/<span class="audio-region">[^<]*<\/span>/,
                       '<span class="audio-region">Monopoli (Italie)</span>'),

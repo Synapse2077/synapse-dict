@@ -33,7 +33,9 @@ ENV     = ROOT / ".env"
 TTS_VOICES = DATA / "tts" / "voices"
 TTS_OUT    = DATA / "tts" / "es"                 # 成品音频 + manifest.tsv
 
-# ⚠️ 2026-08-11 曾加过 `AUDIO_OUT`（真人录音落盘目录），同日删除：用户决定
-#    **页面不展示真人录音**（见 App.tsx 的 SHOW_HUMAN_AUDIO），落盘就没有意义了。
+# ⚠️ 2026-08-11 曾加过 `AUDIO_OUT`（真人录音落盘目录），同日删除。
 #    结论留在 [[audio-from-commons-not-tts]]：全量仅 276 MB，但没有整包可下，
 #    `upload.wikimedia.org` 有意限流，逐条抓要 6–9 小时。真要做再建。
+#    🔴 2026-09-13 更正上一版注释：当时写的理由是「页面不展示真人录音」，**那是搭错了因果**。
+#    展示走远程 URL、一个字节都不落（`App.tsx` 的 `HumanAudioRow`），
+#    与落不落盘无关；2026-09-13 六门语言已统一展示真人录音，而这里**依然不落盘**。

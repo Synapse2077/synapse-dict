@@ -39,6 +39,9 @@ type EnSense = {
   id: number; rank: number; pos: string | null; en: string | null; zh: string | null;
   /** 义项中文的来源：model:def ／ template:form_of ／ ecdict-core ／ ecdict */
   src: string | null;
+  /** 词源键（**不透明**，形如 `en-edition:1`）。老词典层那 276 万条没有 ⇒ null。
+   *  页面上的序号由 `etymOrder()` 按出场顺序重排，不回显源头编号。 */
+  etymKey?: string | null;
   tags: { kind: string; value: string }[];
   relations: { kind: string; targets: { word: string; clickable: boolean }[] }[];
   altOf: { target: string; clickable: boolean }[];
@@ -157,6 +160,9 @@ type SpanishHomograph = {
 };
 
 type SpanishUnifiedSense = {
+  /** 词源键（**不透明**，形如 `en-edition:1`）。没有就 null。
+   *  ⭐ 分组据此断开：**词性相同且词源相同**才合并；页面序号由 `etymOrder()` 重排。 */
+  etymKey?: string | null;
   id: number;
   rank: number;
   pos: string | null;
@@ -174,6 +180,11 @@ type SpanishUnifiedSense = {
 // Italian entry (意语专属 schema：本质字段 aux/conj/gender/plural 为一等公民)
 type ItExample = { text: string; zh: string | null; en: string | null; ref: string | null };
 type ItSense = {
+  /** 这条义项自己的语义关系（2026-09-12 补）。词条级那一份只留没有义项归属的。 */
+  relations: ItRelationGroup[];
+  /** 词源键（**不透明**，形如 `en-edition:1`）。没有就 null。
+   *  ⭐ 分组据此断开：**词性相同且词源相同**才合并；页面序号由 `etymOrder()` 重排。 */
+  etymKey?: string | null;
   en: string | null;
   zh: string | null;
   it: string | null;       // 意语版原文释义（`sense_gloss.lang='it'`，89,531 条）
@@ -194,7 +205,7 @@ type ItAudio = {
 };
 type ItPlural = { form: string; gender: string | null };
 type ItRelationGroup = {
-  kind: string; total: number; targets: { word: string; linkable: boolean }[];
+  kind: string; targets: { word: string; linkable: boolean }[];
 };
 type ItCollocation = { text: string; zh: string | null;
   /** 出处：`llm:doubao`（模型生成，无外部来源）/ `kaikki:*`（词典收录）。
@@ -250,6 +261,11 @@ type ItEntry = {
 
 // —— 法语（fr）：法语专属 shape，与 es/it 解耦 ——
 type FrSense = {
+  /** 这条义项自己的语义关系（2026-09-12 补）。词条级那一份只留没有义项归属的。 */
+  relations: FrRelationGroup[];
+  /** 词源键（**不透明**，形如 `en-edition:1`）。没有就 null。
+   *  ⭐ 分组据此断开：**词性相同且词源相同**才合并；页面序号由 `etymOrder()` 重排。 */
+  etymKey?: string | null;
   en: string | null;
   zh: string | null;
   pos: string | null;
@@ -283,7 +299,7 @@ type FrExample = {
   en: string | null; ref: string | null; bold: Array<[number, number]>;
 };
 type FrRelationGroup = {
-  kind: string; total: number;
+  kind: string;
   targets: Array<{ word: string; clickable: boolean }>;
 };
 type FrAltOf = { target: string; zh: string | null; clickable: boolean };
@@ -345,6 +361,9 @@ type FrEntry = {
 //    （六个语种都是这么写的）。2026-08-30 阶段 8 把服务改成 v3 多表版，
 //    这里必须跟着改 —— 不改的话新字段在编译期就报「不存在」，改漏了则渲染不出来。
 type PtSense = {
+  /** 词源键（**不透明**，形如 `en-edition:1`）。没有就 null。
+   *  ⭐ 分组据此断开：**词性相同且词源相同**才合并；页面序号由 `etymOrder()` 重排。 */
+  etymKey?: string | null;
   id: number;
   en: string | null;
   zh: string | null;
@@ -371,7 +390,7 @@ type PtInflection = { base: string; label: string | null; clickable: boolean };
 type PtForm = { form: string; label: string | null };
 type PtAltOf = { target: string; zh: string | null; clickable: boolean };
 type PtRelationTarget = { word: string; clickable: boolean };
-type PtRelationGroup = { kind: string; total: number; targets: PtRelationTarget[] };
+type PtRelationGroup = { kind: string; targets: PtRelationTarget[] };
 type PtAudio = {
   url: string; region: string | null; regionSrc: string | null; speaker: string | null;
 };
@@ -433,6 +452,9 @@ type DeRelTarget = { word: string; clickable: boolean };
 type DeRelGroup = { kind: string; targets: DeRelTarget[] };
 type DeAltOf = { target: string; zh: string | null; clickable: boolean };
 type DeSense = {
+  /** 词源键（**不透明**，形如 `en-edition:1`）。没有就 null。
+   *  ⭐ 分组据此断开：**词性相同且词源相同**才合并；页面序号由 `etymOrder()` 重排。 */
+  etymKey?: string | null;
   id: number;
   en: string | null;
   zh: string | null;
@@ -571,28 +593,26 @@ function posLabel(raw: string | null): string {
   return raw.split('/').map((p) => POS_LABELS[p] || p).join('/');
 }
 
-// 真人录音行。音频托管在 Wikimedia Commons，我们只存 URL、在线播，不下载字节。
+// 真人录音。音频托管在 Wikimedia Commons，我们只存 URL、在线播，**不下载字节**。
 // 🔴 dump 里的 URL 实测约 **10% 已失效**（404/302），所以播放失败必须有兜底：
 //    自动降到浏览器 TTS，并把这条标灰，不能让用户点了没反应。
-// 🔴 2026-08-11 用户定：**页面不展示真人录音，但库里的数据不删**。
 //
-// 决定的依据是实测出来的三个数，不是嫌它质量差：
-//   · 覆盖上几乎无损 —— 有真人录音的 9,709 个词形里 **95.5% 已经有合成音**，
-//     真正「只有真人、没有合成音」的只剩 **434 个**；而合成音铺了 196,122 个词形（20 倍）。
-//   · 代价却是永久的 —— 真人录音是三级兜底里**唯一有外网依赖**的一级：
-//     字节在 Commons，落盘要 276 MB / 6–9 小时，且 `upload.wikimedia.org` 是面向读者的
-//     媒体 CDN、**有意限流**（8 并发只涨到 0.6 条/秒，却换来 220 次重试 + 25 条 429），
-//     没有整包可下（Commons 媒体不进 dump；Lingua Libre 的 Download ZIP 也是浏览器端逐条抓）。
-//   · 而且降级是**静默**的 —— 死链时这个组件会悄悄换成 TTS，用户以为自己听到的是真人。
+// 🔴🔴 **2026-09-13：`SHOW_HUMAN_AUDIO` 开关已删除，六门语言一律展示真人录音。**
+//    用户问「是不是只有 es 的真人发音没展示出来」——**是**。en/fr/it/pt/de 五门都在
+//    音标下面无条件渲染 `HumanAudioRow`，只有 es 被这个开关挡着（2026-08-11 定的），
+//    而 es 库里躺着 11,203 条录音 / 9,709 个词形，一条都没人看见。⇒ 用户定：统一都挂上。
 //
-// ⚠️ 做成开关而不是删掉组件，是因为**前提还没验**：`gen_tts.py:338` 喂给 Piper 的是
-//    **词形拼写**（`speech_text(word)`），不是我们已核过的 IPA —— 这违反 2026-08-01 定的
-//    TTS 硬条件①。西语正字法规则强，多数词无妨，但外来词（`software ˈsofdw̝eɾ`、
-//    `web ˈw̝eb`、`Kuwait kuˈw̝ait`）很可能被 Piper 按西语规则念错，而那正是
-//    「标着 A、念出来是 B」——以音频的权威姿态给错读音，比没有音频更伤。
-//    ⇒ 等 Piper 音素化 vs 库内 IPA 的逐条 diff 跑出来，再决定这个开关是删还是留。
-//    数据一直在 `audio` 表里（11,203 条，仅 5.47 MB），改回 true 即可恢复。
-const SHOW_HUMAN_AUDIO = false;
+//    ⚠️ **当初关掉它的三条理由，没有一条在说「真人录音不该展示」**，三条都在说
+//       「**落盘**不划算」：①合成音已铺了 20 倍词形（196,122 vs 9,709）；
+//       ②字节落盘要 276 MB / 6–9 小时，且 `upload.wikimedia.org` 是面向读者的媒体 CDN、
+//       **有意限流**（8 并发只涨到 0.6 条/秒，换来 220 次重试 + 25 条 429，没有整包可下）。
+//       前两条针对的是**下载**，而这个组件从头到尾走远程 URL、一个字节都不落；
+//       ③「死链降级是静默的」已经由组件自己修掉了（标灰 + title 写明「已改用合成音」）。
+//       ⇒ 拿一个「要不要落盘」的结论去挡「要不要展示」，就是
+//       `[[criteria-narrower-than-you-think]]` 的反面：**判据比它要描述的东西宽**。
+//    ⚠️ 那笔「Piper 喂的是词形拼写不是核过的 IPA」的挂账**还挂着**，但它是**合成音**
+//       那一排的账（`gen_tts.py` 的 `speech_text(word)`，违反 2026-08-01 的 TTS 硬条件①），
+//       与真人录音这一排无关 —— 真人录音恰恰是它念错时的对照物。
 
 // 真人录音行。**语种无关**：只认「能播的一条录音」这个结构，地区文案由调用方给函数。
 // 🔴 2026-08-18 从"只吃 SpanishAudio"改成结构化类型 —— 意语要用同一个组件，
@@ -663,10 +683,13 @@ function CollocationSection({ items, lang }: {
   if (items.length === 0) return null;
   return (
     <section className="entry-section">
-      <h3>
-        搭配 / 固定短语
-        <span className="section-count">{items.length}</span>
-      </h3>
+      {/* ⚠️ 标题后面原来跟着一个条数（`.section-count`）。用户 2026-09-12：
+          「搭配 / 固定短语1，后面的数字去掉不显示」——「1」对读者没有信息量，
+          下面一行就是那一条，数它做什么。⇒ 去掉。
+          ⚠️ de 的「词形变化」「构词」两处仍然带条数：那两块**会被截断**
+          （`LIMIT 200`／`LIMIT 60`），数字回答的是「还有多少没显示」，不是噪声。
+          用户点的是搭配这一处，**不擅自推广到那两处**。 */}
+      <h3>搭配 / 固定短语</h3>
       <ul className="colloc-list">
         {items.map((c, i) => (
             <li className="colloc-item" key={`${c.text}-${i}`}>
@@ -810,14 +833,24 @@ function RelationRow({ rels, onWord }: {
 
 // 统一义项按相邻相同词性分组。**相邻聚合而非按 pos 归类** ——
 // 义项顺序本身有意义（`rank`），按 pos 重排会打乱它。
+// 🔴 2026-09-12：分组键加上**词源** —— 用户看 en 的 `gore` 问「为什么有两轮名词/动词」，
+//    那是三个同形异源的词，而只按词性合组会把两个不同源的同词性块并成一个。
+//    详见 `groupEnSenses` 的长注释与 `etymOrder()`（键是不透明的，序号由展示层重排）。
 function groupUnifiedByPos(
   senses: SpanishUnifiedSense[],
-): { pos: string | null; senses: SpanishUnifiedSense[] }[] {
-  const out: { pos: string | null; senses: SpanishUnifiedSense[] }[] = [];
+): { pos: string | null; etym: string | null; senses: SpanishUnifiedSense[] }[] {
+  const out: { pos: string | null; etym: string | null;
+    senses: SpanishUnifiedSense[] }[] = [];
   for (const s of senses) {
+    const etym = s.etymKey ?? null;
     const last = out[out.length - 1];
-    if (last && last.pos === s.pos) last.senses.push(s);
-    else out.push({ pos: s.pos, senses: [s] });
+    // 组的 `etym` 取**第一个已知的**：未知的义项并进来时不该把它抹成 null。
+    if (last && last.pos === s.pos && sameEtymGroup(last.etym, etym)) {
+      last.senses.push(s);
+      if (last.etym === null) last.etym = etym;
+      continue;
+    }
+    out.push({ pos: s.pos, etym, senses: [s] });
   }
   return out;
 }
@@ -1429,15 +1462,104 @@ export default function App() {
  * `groupFrSenses`/`groupPtSenses`/`groupDeSenses` **同一个形状**。
  * 🔴 是「相邻合并」不是「按词性重排」：kaikki 的义项顺序是词典自己的编排，
  *    重排会把 `butterfly` 的名词义与动词义交叉次序打乱。
+ *
+ * ═══ 🔴🔴 2026-09-12：合并**不许跨词源** ═══
+ * 用户看 `gore` 问「为什么有两轮名词/动词」。答案是它有**三个不同词源**
+ * （①血、污物 ②用角刺戳 ③三角形地块），kaikki 按词源分块、每块各有名动：
+ *
+ *     词源①  n 1–5   凝血／大屠杀／污物
+ *            v 6     使沾满血，涂血于       ┐ 旧写法把这两块并成**一个**「动词」组
+ *     词源②  v 7–9   （用角）刺，戳         ┘ ⇒ 读者看不出它们根本不是同一个词
+ *     词源③  n 10–18 三角形地带／布片／纹章
+ *            v 19–20 裁成三角形
+ *
+ * 实测 en **9,375 个词**被跨词源合组，其中 freq_rank<20000 的常用词 **1,196 个**
+ * （`and` `have` `he` `do` `say` `get` `make` `know` `year` `see` 都在里面）。
+ * ⇒ 断组判据加上词源：**词性相同且词源相同**才合并。
+ * ⚠️ 老词典层那 276 万条 `etymNo` 是 null，`null === null` 成立 ⇒ 它们照常合并，
+ *    行为一个字都没变（这也是这条改动**只影响 1.2% 的词**的原因）。
  */
-function groupEnSenses(senses: EnSense[]): { pos: string | null; senses: EnSense[] }[] {
-  const out: { pos: string | null; senses: EnSense[] }[] = [];
+function groupEnSenses(senses: EnSense[]): {
+  pos: string | null; etym: string | null; senses: EnSense[];
+}[] {
+  const out: { pos: string | null; etym: string | null; senses: EnSense[] }[] = [];
   for (const s of senses) {
+    const etym = s.etymKey ?? null;
     const last = out[out.length - 1];
-    if (last && last.pos === s.pos) last.senses.push(s);
-    else out.push({ pos: s.pos, senses: [s] });
+    // 组的 `etym` 取**第一个已知的**：未知的义项并进来时不该把它抹成 null。
+    if (last && last.pos === s.pos && sameEtymGroup(last.etym, etym)) {
+      last.senses.push(s);
+      if (last.etym === null) last.etym = etym;
+      continue;
+    }
+    out.push({ pos: s.pos, etym, senses: [s] });
   }
   return out;
+}
+
+// ══ 词源分块的两个共用件（六门共用）════════════════════════════════════════
+//
+// 🔴🔴 **服务层给的 `etymKey` 是不透明的**（形如 `en-edition:1` / `it-edition:0`）——
+//    因为**两个来源的词源编号不是同一个命名空间**：`che`（it）同时有
+//    `kk-en:che:pron:1`（英文版 Etymology 1）与 `kk-it:che:adj:0`（意语版 Etymology 0），
+//    拿裸数字当键会把两个不同的词并成一个。`fr de`/`fr à` 也是这个形状。
+//    ⇒ 展示层**按出场顺序重新编号**，不回显源头的编号。
+//    ⚠️ 代价：页面上的「词源 ②」不等于维基词典的 "Etymology 2"。
+//      可接受 —— 我们既不展示词源正文，也不链回维基词典，那个数字对读者没有意义；
+//      而「这两块是不同的词」有意义。
+/**
+ * 这条义项能不能并进上一组？**六门共用这一条判据。**
+ *
+ * 🔴🔴 **「不知道」不等于「不一样」。** 第一版写的是「词性相同且词源相同才合并」，
+ *    于是 `etym` 为 `null`（＝**我们没有这条义项的词源信息**）会与任何已知词源不等 ⇒ 断组。
+ *    es 的 `sense.entry_id` 只填了 54.7%，`pasar` 因此被断成**两个「动词」组**：
+ *      义项 1–21  entry_id=10505（词源已知）
+ *      义项 22–44 entry_id=NULL（词源未知）
+ *    而两组都印「动词」、中间没有任何标题解释 —— 用户当场问
+ *    「有两套动词，有什么含义吗？如果都是动词为什么不能合在一起」。**没有含义，是我造的。**
+ *    实测受影响 es 17,477 个词（9.82%）、de 35、it 1、其余 0。
+ *    ⇒ `[[dont-gate-facts-on-my-uncertainty]]`：写 `if <不确定性判据>` 之前先问
+ *      「这一行要表达的是源头给的事实，还是我不知道」。**不知道就别在页面上画线。**
+ *
+ * ⇒ 判据：**两边都有已知词源、且不同**，才算不同组。一边未知就跟着上一组走。
+ * ⚠️ 未知的义项因此会**挂在它前面那一组**上 —— 那也是个假设，但比凭空多切一刀轻：
+ *    多切一刀是**看得见的假信息**（读者会去找两组的区别），挂上去只是没多说话。
+ */
+function sameEtymGroup(prev: string | null, cur: string | null): boolean {
+  if (prev === null || cur === null) return true;   // 有一边不知道 ⇒ 不构成分界
+  return prev === cur;
+}
+
+function etymOrder(groups: { etym: string | null }[]): Map<string, number> {
+  const order = new Map<string, number>();
+  for (const g of groups) {
+    if (g.etym !== null && !order.has(g.etym)) order.set(g.etym, order.size + 1);
+  }
+  return order;
+}
+
+/** 序号 → 圈号。10 以上退回「词源 10」，不硬凑。 */
+const ETYM_MARK = ['', '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨'];
+function etymLabel(n: number): string {
+  return n >= 1 && n < ETYM_MARK.length ? `词源 ${ETYM_MARK[n]}` : `词源 ${n}`;
+}
+
+/**
+ * 该不该印词源标题、以及这一组印几号。六门共用，保证判据只有一份。
+ * → `null` 表示不印。
+ *
+ * 🔴 **只有真的多词源时才印**：98.8% 的词只有一个词源（或压根没有词源号），
+ *    给它们统一印「词源 ①」是加噪声不是加信息 —— 与「唯一一组时不印词性标题」同一条判据。
+ * 🔴 **只在词源**变化**时印**：同一个词源下的名词组、动词组不重复印。
+ */
+function etymHeadOf(
+  groups: { etym: string | null }[], i: number, order: Map<string, number>,
+): string | null {
+  if (order.size <= 1) return null;
+  const g = groups[i];
+  if (g.etym === null) return null;
+  if (i > 0 && groups[i - 1].etym === g.etym) return null;
+  return etymLabel(order.get(g.etym)!);
 }
 
 export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
@@ -1463,6 +1585,8 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
   const localeOf = (reg: string) => (reg === 'uk' ? 'en-GB' : reg === 'us' ? 'en-US' : speakLocale);
   // 分组结果要在两处用到（组标题、以及"是不是唯一一组"），先算一次。
   const senseGroups = groupEnSenses(entry.senses);
+  // 词源编号：**按出场顺序重排**，理由见 `etymOrder()`（两个来源的编号不同源）。
+  const enEtymOrder = etymOrder(senseGroups);
 
   return (
     <article className="entry-detail">
@@ -1573,6 +1697,16 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
               **共用件已经有的，别另起炉灶，也别不抄。** */}
           {senseGroups.map((grp, gi) => (
           <div className="pos-group" key={gi}>
+            {/* 🔴 词源分隔（2026-09-12）。用户看 `gore` 问「为什么有两轮名词/动词」——
+                数据没错，`gore` 是**三个不同词源的同形词**（血/污物、用角刺戳、三角形
+                地块），kaikki 按词源分块。**缺的是页面从来没说过这件事**：
+                读者看到「名词…动词…名词…动词」只会以为是 bug。
+                ⚠️ 只印词源**序号**，不印词源正文 —— 我们没存 `etymology_text`
+                   （kaikki 给了，建库时没收），编一句"源自古英语"是造假。
+                   这一条已记账，要补得回源重抽。 */}
+            {etymHeadOf(senseGroups, gi, enEtymOrder) && (
+              <div className="etym-label">{etymHeadOf(senseGroups, gi, enEtymOrder)}</div>
+            )}
             {/* 🔴 **无词性的组，只要它不是唯一的一组，就必须自己说出来。**
                 en 有 **223 万条**义项 `pos` 为空（老词典层只有 14.95% 带词性），
                 其中 **34,762 个词**是「有的有、有的没有」（0.91%）。这些词里，
@@ -1789,11 +1923,14 @@ function SenseChips({ sense }: { sense: SpanishSense | SpanishUnifiedSense }) {
   );
 }
 
-// 导出供 `contract-check-es.tsx` 渲染 —— 契约闸必须用**组件本身**，
-// 不能自己复刻一份渲染逻辑（那样验的是复刻件，不是用户看到的东西）。
-// 义项折叠阈值。**导出**供契约闸使用 —— 闸要断言「首屏那一段必须渲染」，
-// 自己复制一个 8 就等于两处各写一份，改一处另一处静默失效。
-export const SENSE_FOLD_AT_ES = 8;
+// ⚠️ **义项折叠已去掉**（用户 2026-09-12：「es 的义项折叠也去掉」、
+//    「先全部展示，不做 limit，我看了过后才好做判断」）。
+//    原来是 `SENSE_FOLD_AT_ES = 8` + 一个「展开其余 N 条」按钮 ——
+//    理由是 `mano` 有 26 条义项、冷僻义会把「手」淹掉。那个理由仍然成立，
+//    所以这是**观察态不是终态**：看完之后要重新定折叠规则。
+//    🔴 折叠规则一旦加回来，`contract-check-es.tsx` 里那两处
+//      「只断言首屏那一段」也要跟着改回去 —— 它们现在断言的是**全部义项**。
+
 
 export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   entry: SpanishEntry; speakLocale: string; onWord: (w: string) => void;
@@ -1807,9 +1944,9 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
   //    （`mano` 恰好在第 8 条断开：1–8 两版都有，9–26 只有西语版），
   //    但对用户是**不可预测**的 —— 这个词展开 3 条、那个展开 12 条，说不出理由。
   //    固定条数至少是可解释的。
-  const [showAllSenses, setShowAllSenses] = useState(false);
-  const SENSE_FOLD_AT = SENSE_FOLD_AT_ES;
-  useEffect(() => { setShowAllSenses(false); }, [entry.id]);   // 换词回到折叠态
+  // 分组结果在两处用到（渲染、以及算词源序号），先算一次。**不再切片。**
+  const esGroups = groupUnifiedByPos(entry.unifiedSenses);
+  const esEtymOrder = etymOrder(esGroups);
 
   // 方针④三级兜底在音标行上的落法：有成品合成音就播文件，没有才降到浏览器 TTS。
   // 🔴 **不能拿拉美那份去顶半岛按钮**：用户看着 /θeɾˈbeθa/ 却听到 serˈbesa，
@@ -1946,15 +2083,14 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         </div>
       ) : null}
 
-      {/* 上面那排是合成音（TTS）。真人录音这一排 2026-08-11 起不展示，见 SHOW_HUMAN_AUDIO。 */}
-      {SHOW_HUMAN_AUDIO && (
-        <HumanAudioRow
-          audios={entry.audios}
-          word={entry.word}
-          fallback={() => speak(entry.word, speakLocale)}
-          regionLabel={(r) => ES_REGION_LABELS[r] || r}
-        />
-      )}
+      {/* 上面那排是合成音（TTS），这一排是真人录音 —— 位置与 en/fr/it/pt/de 一致：紧跟音标。
+          2026-09-13 删掉 `SHOW_HUMAN_AUDIO` 之前，六门里只有 es 看不到这一排。 */}
+      <HumanAudioRow
+        audios={entry.audios}
+        word={entry.word}
+        fallback={() => speak(entry.word, speakLocale)}
+        regionLabel={(r) => ES_REGION_LABELS[r] || r}
+      />
 
 
       {/* 西语本质徽标：CEFR 贯穿；名词性别 el/la/复数/阴性，动词变位类/词干变化/过去分词/及物性 */}
@@ -1990,10 +2126,15 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.unifiedSenses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          {groupUnifiedByPos(
-            showAllSenses ? entry.unifiedSenses : entry.unifiedSenses.slice(0, SENSE_FOLD_AT),
-          ).map((grp, gi) => (
+          {esGroups.map((grp, gi) => (
             <div className="pos-group" key={gi}>
+              {/* 词源分块（2026-09-12）。只在**真有多个词源**时出现；序号按出场顺序，
+                  不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
+                  ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
+                     编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
+              {etymHeadOf(esGroups, gi, esEtymOrder) && (
+                <div className="etym-label">{etymHeadOf(esGroups, gi, esEtymOrder)}</div>
+              )}
               {grp.pos && (
                 <div className="pos-group-label">{posLabel(grp.pos)}</div>
               )}
@@ -2004,15 +2145,18 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
                       {s.title}
                       <SenseChips sense={s} />
                     </div>
+                    {/* ══ 六门统一的义项内顺序（2026-09-12，用户点出来的）══
+                        中文(+标签) → 中文副行 → 原文定义 → 异体 → 关系 → 例句
+                        用户原话：「释义部分，en/es 什么的和近义/反义的展示顺序好像不一样」。
+                        实测六个视图**六种顺序**：es 把原文定义排到了例句后面，
+                        pt 把关系排到了例句后面，en/de 才是上面这个。
+                        ⇒ 以 en/de 为准对齐。理由不是"多数服从少数"，是**读的顺序**：
+                          先说是什么（中文）→ 限定（标签）→ 精确定义（原文）→
+                          这是谁的另一种写法（异体）→ 相关的词（关系）→ 怎么用（例句）。
+                          例句最长、放最后；关系是"别的词"，不该插在例句之间。
+                        ⚠️ 内容可以不一样（it/fr 暂无义项级关系块），**顺序必须一样**
+                          —— 用户 2026-09-11：「内容安排可以不一样，但是字体样式应该要统一」。 */}
                     {s.detail && <div className="sense-detail">{s.detail}</div>}
-                    <RelationRow rels={entry.relations.filter((r) => r.senseId === s.id)}
-                                 onWord={onWord} />
-                    {entry.examples.filter((x) => x.senseId === s.id).slice(0, 3).map((x) => (
-                      <div className="sense-example" key={x.id}>
-                        <div className="ex-es" lang="es">{x.text}</div>
-                        {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
-                      </div>
-                    ))}
                     {/* 源语言锚点：英文对应词与西语单语定义。归并之后**同一条义项
                         可能两者都有**（旧结构下它们分属两条），所以不再是二选一。 */}
                     {s.en && (
@@ -2025,19 +2169,19 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
                         <span className="sense-src-lang">ES</span>{s.es}
                       </div>
                     )}
+                    <RelationRow rels={entry.relations.filter((r) => r.senseId === s.id)}
+                                 onWord={onWord} />
+                    {entry.examples.filter((x) => x.senseId === s.id).slice(0, 3).map((x) => (
+                      <div className="sense-example" key={x.id}>
+                        <div className="ex-es" lang="es">{x.text}</div>
+                        {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
+                      </div>
+                    ))}
                   </li>
                 ))}
               </ol>
             </div>
           ))}
-          {entry.unifiedSenses.length > SENSE_FOLD_AT && (
-            <button type="button" className="sense-more"
-                    onClick={() => setShowAllSenses((v) => !v)}>
-              {showAllSenses
-                ? '收起'
-                : `展开其余 ${entry.unifiedSenses.length - SENSE_FOLD_AT} 条义项`}
-            </button>
-          )}
         </section>
       )}
 
@@ -2223,14 +2367,31 @@ export function readingBelongsTo(
   return !(known.length > 1 && known.every((x) => r.entryIds.includes(x)));
 }
 
+// ⭐ it **早就**按 `entryId` 断组了 —— `entry` 是 (词性, 词源, seq) 三元组，
+//    所以跨词源的合并在 it 上本来就不会发生。2026-09-12 只是把 `etym` 一起带出来，
+//    好让视图印出「词源 ①②③」**说明为什么分成了这几块**。
+// ⚠️ 我最初按"数据形状"量出 it 有 1,005 个词中招，那是错的：
+//    **量的是数据，不是这个组件真正的分组键**（`[[measure-landing-not-source]]`）。
 export function groupItSenses(senses: ItSense[]): {
-  pos: string | null; entryId: number | null; senses: ItSense[];
+  pos: string | null; entryId: number | null; etym: string | null; senses: ItSense[];
 }[] {
-  const groups: { pos: string | null; entryId: number | null; senses: ItSense[] }[] = [];
+  const groups: { pos: string | null; entryId: number | null;
+    etym: string | null; senses: ItSense[] }[] = [];
   for (const s of senses) {
     const last = groups[groups.length - 1];
-    if (last && last.pos === s.pos && last.entryId === s.entryId) last.senses.push(s);
-    else groups.push({ pos: s.pos, entryId: s.entryId, senses: [s] });
+    // ⚠️ `entryId` 为空 ＝ **我们没有这条义项的词条归属**，不是「归属不同」。
+    //    与 `sameEtymGroup` 同一条道理：不知道就别在页面上画线
+    //    （es 的 `pasar` 就是这么被断成两个「动词」组的）。it 的 `entry_id`
+    //    填了 99.5%，所以这一条今天几乎不触发 —— **照样写，判据是结构性的**。
+    const sameEntry = last === undefined || last.entryId === null || s.entryId === null
+      ? true : last.entryId === s.entryId;
+    if (last && last.pos === s.pos && sameEntry && sameEtymGroup(last.etym, s.etymKey ?? null)) {
+      last.senses.push(s);
+      if (last.entryId === null) last.entryId = s.entryId;
+      if (last.etym === null) last.etym = s.etymKey ?? null;
+      continue;
+    }
+    groups.push({ pos: s.pos, entryId: s.entryId, etym: s.etymKey ?? null, senses: [s] });
   }
   return groups;
 }
@@ -2250,9 +2411,15 @@ function ItExampleView({ ex }: { ex: ItExample }) {
   );
 }
 
-// 语义关系。分类封顶 12 条（`buono` 有 763 条），**截断了要把总数说出来** ——
-// 不说的话用户会以为词典只收了这么多。
-// 关系分组的**纯展示**组件。语言无关：只认 {kind,total,targets:[{word,可点}]}。
+// 关系分组的**纯展示**组件。语言无关：只认 {kind, targets:[{word, 可点}]}。
+// 🔴🔴 **2026-09-13 取消截断**（原来服务层每类只给前 12 个，这里补一句「共 N 个」）。
+//    用户看 `branca` 问「近义 …共 13 个，没有全部展开？」——**没有**，第 13 个
+//    `specializzazione` 藏着，而那句「共 13 个」既不可点也不说少了哪个。
+//    ⭐ **en 早就把这条路走完了**（见 en 词条级关系那段注释）：原来 `slice(0,20)` + `+N`，
+//      结论是「`+N` 比静默丢好，但仍是**看不到内容的死胡同**」⇒ 不折叠。
+//      那个结论当时只落在 en 一门，it/fr/pt 三门照旧截着 ——
+//      藏起来的量：it 131,888 个目标（21.5%）/ fr 22,264（7.0%）/ pt 15,546（10.9%）。
+//    ⚠️ 用户 2026-09-10 已经定过同一条：「你不要擅自折叠信息」。
 // 🔴 2026-08-27 从 `ItRelationGroups` 抽出来，因为 fr 阶段 5 补做关系层之后要渲染
 //    同一个形状。抄第二份就是 `[[refactor-mindset-code-quality]]` 里用户点名的那件事
 //    （同一文件内 REGION_LABELS 与 REGION_ZH 两张西语地区表已经重复过一次）。
@@ -2260,7 +2427,7 @@ function ItExampleView({ ex }: { ex: ItExample }) {
 //    这里**两个都认** —— 与其改动已经跑绿的服务端契约，不如在展示层容纳差异。
 function RelationGroups({ groups, onWord }: {
   groups: Array<{
-    kind: string; total: number;
+    kind: string;
     targets: Array<{ word: string; linkable?: boolean; clickable?: boolean }>;
   }>;
   onWord: (w: string) => void;
@@ -2279,9 +2446,6 @@ function RelationGroups({ groups, onWord }: {
                 : <span className="rel-plain">{t.word}</span>}
             </span>
           ))}
-          {g.total > g.targets.length && (
-            <span className="rel-more">共 {g.total} 个</span>
-          )}
         </div>
       ))}
     </div>
@@ -2298,6 +2462,9 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
   entry: ItEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  // 分组结果在两处用到（渲染、以及算词源序号），先算一次。
+  const itGroups = groupItSenses(entry.senses);
+  const itEtymOrder = etymOrder(itGroups);
   const isVerb = !!entry.pos && entry.pos.split('/').includes('v');
   const isNoun = !!entry.pos && entry.pos.split('/').some((p) => p === 'n' || p === 'name');
   const showStubPos = entry.isLemma && !!entry.pos && !entry.senses.some((s) => s.pos);
@@ -2421,8 +2588,15 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          {groupItSenses(entry.senses).map((grp, gi, all) => (
+          {itGroups.map((grp, gi, all) => (
             <div className="pos-group" key={gi}>
+              {/* 词源分块（2026-09-12）。只在**真有多个词源**时出现；序号按出场顺序，
+                  不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
+                  ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
+                     编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
+              {etymHeadOf(itGroups, gi, itEtymOrder) && (
+                <div className="etym-label">{etymHeadOf(itGroups, gi, itEtymOrder)}</div>
+              )}
               {grp.pos && (
                 <div className="pos-group-label">
                   {posLabel(grp.pos)}
@@ -2466,6 +2640,23 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
                     {s.it && (
                       <div className="sense-src" lang="it">
                         <span className="sense-src-lang">IT</span>{s.it}
+                      </div>
+                    )}
+                    {/* 🔴 这条义项自己的语义关系（2026-09-12 补）。
+                        起因：用户问块序时我才发现 it/fr 的义项里**根本没有关系块** ——
+                        而库里 it 有 27,993 条、fr 有 31,136 条可见关系是挂在义项上的，
+                        一直被当成词条级渲染 ⇒ **归属丢了**，读者看不出「近义 X」
+                        属于第 1 条义项还是第 5 条。受影响的多义项词 it 4,721 / fr 4,946。
+                        与 de 例句那次同一个形状：数据全对、接口有字段、**组件没读**
+                        （`[[it-display-layer-stage8]]`）。
+                        ⚠️ 位置按六门规范序列：原文定义之后、例句之前
+                        （`contract-check-layout.tsx`）。
+                        ⚠️ 词条级那一份现在只留 `sense_id` 为空的 + 挂在隐藏义项上的，
+                        并去掉了与义项级重复的 (类型, 目标) —— 否则同一条印两遍
+                        （it 9,173 组 / fr 7,153 组，见 `relations.ts`）。 */}
+                    {s.relations.length > 0 && (
+                      <div className="sense-rels">
+                        <ItRelationGroups groups={s.relations} onWord={onWord} />
                       </div>
                     )}
                     {/* 挂在这条义项上的例句。中文 100%（阶段 5 全量翻译），
@@ -2665,12 +2856,23 @@ export function frReadingSlot(
   return r.pos;                                    // ⑤
 }
 
-export function groupFrSenses(senses: FrSense[]): { pos: string | null; senses: FrSense[] }[] {
-  const groups: { pos: string | null; senses: FrSense[] }[] = [];
+// 🔴 2026-09-12：分组键加上**词源** —— 用户看 en 的 `gore` 问「为什么有两轮名词/动词」，
+//    那是三个同形异源的词，而只按词性合组会把两个不同源的同词性块并成一个。
+//    详见 `groupEnSenses` 的长注释与 `etymOrder()`（键是不透明的，序号由展示层重排）。
+export function groupFrSenses(senses: FrSense[]): {
+  pos: string | null; etym: string | null; senses: FrSense[];
+}[] {
+  const groups: { pos: string | null; etym: string | null; senses: FrSense[] }[] = [];
   for (const s of senses) {
+    const etym = s.etymKey ?? null;
     const last = groups[groups.length - 1];
-    if (last && last.pos === s.pos) last.senses.push(s);
-    else groups.push({ pos: s.pos, senses: [s] });
+    // 组的 `etym` 取**第一个已知的**：未知的义项并进来时不该把它抹成 null。
+    if (last && last.pos === s.pos && sameEtymGroup(last.etym, etym)) {
+      last.senses.push(s);
+      if (last.etym === null) last.etym = etym;
+      continue;
+    }
+    groups.push({ pos: s.pos, etym, senses: [s] });
   }
   return groups;
 }
@@ -2720,6 +2922,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
   // 🔴 族 D：读音归属要知道**这一页有哪些词性组**。算一次，词头行与组头共用同一份 ——
   //    两处各算一次就会在「组的边界」上悄悄分叉。
   const frGroups = groupFrSenses(entry.senses);
+  const frEtymOrder = etymOrder(frGroups);
   const frGroupPoses = frGroups.map((g) => g.pos);
   // 🔴 族 B「词形级字段串味」（2026-08-27，两家外审都挑出来了）。
   //    `entry.pos` 是**词形级**的合并串（`livre` = `n/v`，因为 `livre` 同时是
@@ -2873,6 +3076,13 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
           <h3>释义</h3>
           {frGroups.map((grp, gi) => (
             <div className="pos-group" key={gi}>
+              {/* 词源分块（2026-09-12）。只在**真有多个词源**时出现；序号按出场顺序，
+                  不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
+                  ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
+                     编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
+              {etymHeadOf(frGroups, gi, frEtymOrder) && (
+                <div className="etym-label">{etymHeadOf(frGroups, gi, frEtymOrder)}</div>
+              )}
               {grp.pos && (
                 <div className="pos-group-label">
                   {posLabel(grp.pos)}
@@ -2911,6 +3121,23 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
                     {s.en && (
                       <div className="sense-src" lang="en">
                         <span className="sense-src-lang">EN</span><FrText text={s.en} />
+                      </div>
+                    )}
+                    {/* 🔴 这条义项自己的语义关系（2026-09-12 补）。
+                        起因：用户问块序时我才发现 it/fr 的义项里**根本没有关系块** ——
+                        而库里 it 有 27,993 条、fr 有 31,136 条可见关系是挂在义项上的，
+                        一直被当成词条级渲染 ⇒ **归属丢了**，读者看不出「近义 X」
+                        属于第 1 条义项还是第 5 条。受影响的多义项词 it 4,721 / fr 4,946。
+                        与 de 例句那次同一个形状：数据全对、接口有字段、**组件没读**
+                        （`[[it-display-layer-stage8]]`）。
+                        ⚠️ 位置按六门规范序列：原文定义之后、例句之前
+                        （`contract-check-layout.tsx`）。
+                        ⚠️ 词条级那一份现在只留 `sense_id` 为空的 + 挂在隐藏义项上的，
+                        并去掉了与义项级重复的 (类型, 目标) —— 否则同一条印两遍
+                        （it 9,173 组 / fr 7,153 组，见 `relations.ts`）。 */}
+                    {s.relations.length > 0 && (
+                      <div className="sense-rels">
+                        <RelationGroups groups={s.relations} onWord={onWord} />
                       </div>
                     )}
                     {/* 这条义项下的例句（阶段 5，中文 99.9%）。
@@ -3067,12 +3294,23 @@ function PtSenseChips({ sense, dualGender }: { sense: PtSense; dualGender?: bool
   );
 }
 
-function groupPtSenses(senses: PtSense[]): { pos: string | null; senses: PtSense[] }[] {
-  const groups: { pos: string | null; senses: PtSense[] }[] = [];
+// 🔴 2026-09-12：分组键加上**词源** —— 用户看 en 的 `gore` 问「为什么有两轮名词/动词」，
+//    那是三个同形异源的词，而只按词性合组会把两个不同源的同词性块并成一个。
+//    详见 `groupEnSenses` 的长注释与 `etymOrder()`（键是不透明的，序号由展示层重排）。
+function groupPtSenses(senses: PtSense[]): {
+  pos: string | null; etym: string | null; senses: PtSense[];
+}[] {
+  const groups: { pos: string | null; etym: string | null; senses: PtSense[] }[] = [];
   for (const s of senses) {
+    const etym = s.etymKey ?? null;
     const last = groups[groups.length - 1];
-    if (last && last.pos === s.pos) last.senses.push(s);
-    else groups.push({ pos: s.pos, senses: [s] });
+    // 组的 `etym` 取**第一个已知的**：未知的义项并进来时不该把它抹成 null。
+    if (last && last.pos === s.pos && sameEtymGroup(last.etym, etym)) {
+      last.senses.push(s);
+      if (last.etym === null) last.etym = etym;
+      continue;
+    }
+    groups.push({ pos: s.pos, etym, senses: [s] });
   }
   return groups;
 }
@@ -3138,6 +3376,9 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
   entry: PtEntry; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  // 分组结果在两处用到（渲染、以及算词源序号），先算一次。
+  const ptGroups = groupPtSenses(entry.senses);
+  const ptEtymOrder = etymOrder(ptGroups);
   const posParts = entry.pos ? entry.pos.split('/') : [];
   // 🔴 限量规则只许有一份 —— 组件和契约闸走同一个 `deShownExamples`。
   const shownEx = deShownExamples(entry.senses, entry.examples) as Set<unknown>;
@@ -3226,8 +3467,15 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
       {entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          {groupPtSenses(entry.senses).map((grp, gi) => (
+          {ptGroups.map((grp, gi) => (
             <div className="pos-group" key={gi}>
+              {/* 词源分块（2026-09-12）。只在**真有多个词源**时出现；序号按出场顺序，
+                  不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
+                  ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
+                     编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
+              {etymHeadOf(ptGroups, gi, ptEtymOrder) && (
+                <div className="etym-label">{etymHeadOf(ptGroups, gi, ptEtymOrder)}</div>
+              )}
               {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
               <ol className="sense-list">
                 {grp.senses.map((s, i) => (
@@ -3264,6 +3512,11 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
                     {/* 🔴 这条义项下的例句。限 3 条 —— 照 fr 的先例：`banco` 有 14 条例句，
                         全铺在页尾会把六条义项挤没，读者也分不清哪句配哪义
                         （用户 2026-08-31 看 `banco` 的原话：「这个页面排版很奇怪」）。 */}
+                    {s.relations.length > 0 && (
+                      <div className="sense-rels">
+                        <PtRelationGroups groups={s.relations} onWord={onWord} />
+                      </div>
+                    )}
                     {entry.examples.filter((x) => x.senseId === s.id && shownEx.has(x)).map((x, xi) => (
                       <div className="sense-example" key={xi}>
                         <div className="ex-pt" lang="pt">{x.text}</div>
@@ -3272,11 +3525,6 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
                         {ptCleanRef(x.ref) && <div className="ex-ref">{ptCleanRef(x.ref)}</div>}
                       </div>
                     ))}
-                    {s.relations.length > 0 && (
-                      <div className="sense-rels">
-                        <PtRelationGroups groups={s.relations} onWord={onWord} />
-                      </div>
-                    )}
                   </li>
                 ))}
               </ol>
@@ -3389,7 +3637,6 @@ function PtRelationGroups(
                   : <span className="rel-plain">{t.word}</span>}
               </span>
             ))}
-            {g.total > g.targets.length && <span className="rel-more">… 共 {g.total}</span>}
           </span>
         </div>
       ))}
@@ -3446,12 +3693,23 @@ export function deShownExamples(
   return out;
 }
 
-function groupDeSenses(senses: DeSense[]): { pos: string | null; senses: DeSense[] }[] {
-  const groups: { pos: string | null; senses: DeSense[] }[] = [];
+// 🔴 2026-09-12：分组键加上**词源** —— 用户看 en 的 `gore` 问「为什么有两轮名词/动词」，
+//    那是三个同形异源的词，而只按词性合组会把两个不同源的同词性块并成一个。
+//    详见 `groupEnSenses` 的长注释与 `etymOrder()`（键是不透明的，序号由展示层重排）。
+function groupDeSenses(senses: DeSense[]): {
+  pos: string | null; etym: string | null; senses: DeSense[];
+}[] {
+  const groups: { pos: string | null; etym: string | null; senses: DeSense[] }[] = [];
   for (const s of senses) {
+    const etym = s.etymKey ?? null;
     const last = groups[groups.length - 1];
-    if (last && last.pos === s.pos) last.senses.push(s);
-    else groups.push({ pos: s.pos, senses: [s] });
+    // 组的 `etym` 取**第一个已知的**：未知的义项并进来时不该把它抹成 null。
+    if (last && last.pos === s.pos && sameEtymGroup(last.etym, etym)) {
+      last.senses.push(s);
+      if (last.etym === null) last.etym = etym;
+      continue;
+    }
+    groups.push({ pos: s.pos, etym, senses: [s] });
   }
   return groups;
 }
@@ -3460,6 +3718,9 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
   entry: DeEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  // 分组结果在两处用到（渲染、以及算词源序号），先算一次。
+  const deGroups = groupDeSenses(entry.senses);
+  const deEtymOrder = etymOrder(deGroups);
   const posParts = entry.pos ? entry.pos.split('/') : [];
   // 🔴 限量规则只许有一份 —— 组件和契约闸走同一个 `deShownExamples`。
   const shownEx = deShownExamples(entry.senses, entry.examples) as Set<unknown>;
@@ -3586,8 +3847,15 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.senses.length > 0 && (
         <section className="entry-section">
           <h3>释义</h3>
-          {groupDeSenses(entry.senses).map((grp, gi) => (
+          {deGroups.map((grp, gi) => (
             <div className="pos-group" key={gi}>
+              {/* 词源分块（2026-09-12）。只在**真有多个词源**时出现；序号按出场顺序，
+                  不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
+                  ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
+                     编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
+              {etymHeadOf(deGroups, gi, deEtymOrder) && (
+                <div className="etym-label">{etymHeadOf(deGroups, gi, deEtymOrder)}</div>
+              )}
               {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
               <ol className="sense-list">
                 {grp.senses.map((s, i) => (
@@ -3775,7 +4043,11 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
 
       {entry.forms.length > 0 && (
         <section className="entry-section">
-          <h3>词形变化<span className="section-count">{entry.forms.length}</span></h3>
+          {/* ⚠️ 标题不带条数、内容不截断（用户 2026-09-12：「数字都不要，先全部展示，
+          不做 limit，我看了过后才好做判断」）。**这是一个临时的观察态** ——
+          看完之后大概率要重新定一个上限，届时把数字和截断一起加回来：
+          **有截断就必须说总数**，否则读者以为就这么多（`contract-check-pt` 那条断言）。 */}
+          <h3>词形变化</h3>
           <div className="de-form-grid">
             {entry.forms.map((fm, i) => (
               <span className="de-form-cell" key={i}>
@@ -3792,7 +4064,11 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
           是它的**使役派生**。印在「词形变化」里等于说 `stellen` 是 `stehen` 的一个格。 */}
       {entry.derivedForms.length > 0 && (
         <section className="entry-section">
-          <h3>构词<span className="section-count">{entry.derivedForms.length}</span></h3>
+          {/* ⚠️ 标题不带条数、内容不截断（用户 2026-09-12：「数字都不要，先全部展示，
+          不做 limit，我看了过后才好做判断」）。**这是一个临时的观察态** ——
+          看完之后大概率要重新定一个上限，届时把数字和截断一起加回来：
+          **有截断就必须说总数**，否则读者以为就这么多（`contract-check-pt` 那条断言）。 */}
+          <h3>构词</h3>
           <div className="de-form-grid">
             {entry.derivedForms.map((fm, i) => (
               <span className="de-form-cell" key={i}>

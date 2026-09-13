@@ -209,10 +209,28 @@ const CHECKS: Check[] = [
     },
   },
   {
-    name: '🔴 关系被截断却没说总数（读者以为就这么多）',
+    // 🔴🔴 2026-09-13 判据翻面（与 it 那道闸同一天、同一个理由）：
+    //    服务层 `PT_REL_CAP` 已删 ⇒「截断了要说总数」恒不触发，是一条永远绿的假闸。
+    //    换成更强的：**一个目标都不许少**。
+    // ⚠️ pt 的 `PtRelationGroups` 不用 `.rel-item` 包（它用「、」分隔），目标是
+    //    `.rel-link` / `.rel-plain`。但**全页数这两个类名是错的** —— 第一版就这么写，
+    //    当场报 4 个假红（`por` 想 27 得 28、`a` 想 12 得 16）：**异体指针和变形形
+    //    用的是同一个 `.rel-link`**。又一次判据比它要描述的东西宽
+    //    （`[[criteria-narrower-than-you-think]]`，今天第三次）。
+    // ⇒ 只在**关系组自己的容器**里数：从每个 `class="rel-targets">` 切到它后面第一个
+    //    `</span></div>`（= 该容器的收尾；组件里只有这一处是「span 紧跟 div 闭合」）。
+    name: '🔴 关系不许截断：每个目标都要渲染出来',
     hit: (e, h) => {
-      const cut = e.relations.some((g: Entry) => g.total > g.targets.length);
-      return cut && !/class="rel-more"/.test(h) ? '有分类被截断，页面没写「共 N」' : null;
+      const want = [...e.relations, ...e.senses.flatMap((x: Entry) => x.relations)]
+        .reduce((n: number, g: Entry) => n + g.targets.length, 0);
+      let got = 0;
+      for (const m of h.matchAll(/class="rel-targets">/g)) {
+        const from = m.index! + m[0].length;
+        const end = h.indexOf('</span></div>', from);
+        const block = h.slice(from, end < 0 ? h.length : end);
+        got += (block.match(/class="rel-(?:link|plain)"/g) || []).length;
+      }
+      return want !== got ? `关系目标共 ${want} 个，页面上只有 ${got} 个` : null;
     },
   },
   {
@@ -296,6 +314,16 @@ for (const w of words) {
       .replace(/class="sense-rels"/g, 'class="x"')
       .replace(/class="alt-of-row"/g, 'class="x"')
       .replace(/class="sense-altof"/g, 'class="x"');
+    // ⑤ 关系组里**少渲染一个目标**（＝ 截断回来了）。
+    //    ⚠️ 不能直接 `replace(/class="rel-link"/, …)` —— 全页第一个 `.rel-link`
+    //    很可能是异体指针或变形形（断言那边刚因为同一个原因报过 4 条假红）。
+    //    必须先定位到 `.rel-targets` 容器里面，再动它的第一个目标。
+    const rt = html.indexOf('class="rel-targets">');
+    if (rt >= 0) {
+      const head = html.slice(0, rt);
+      const tail = html.slice(rt).replace(/class="rel-(?:link|plain)"/, 'class="x"');
+      html = head + tail;
+    }
     const first = e.senses.find((x: Entry) => (x.relations ?? []).length > 0);
     if (first) e.relations = [...e.relations, ...first.relations];
   }
@@ -321,5 +349,6 @@ for (const c of CHECKS) {
   for (const x of arr) console.log(`        ${x}`);
 }
 console.log(red ? `\n🔴 ${red} 条红` : `\n✅ 全部通过（${CHECKS.length} 条断言）`);
-if (mutate) console.log(`\n（--mutate：抹掉 audio-chip / sense-src-lang / sense-rels / alt-of-row / sense-altof 五个类名，并把义项级关系复制到词条级，上面应有 ≥6 条红）`);
+if (mutate) console.log(`\n（--mutate：抹掉 audio-chip / sense-src-lang / sense-rels / alt-of-row / sense-altof 五个类名，`
+  + `把义项级关系复制到词条级，再从关系组里抹掉一个目标，上面应有 ≥7 条红）`);
 process.exit(mutate ? 0 : (red ? 1 : 0));

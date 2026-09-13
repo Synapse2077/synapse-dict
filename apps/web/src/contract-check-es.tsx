@@ -33,7 +33,8 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { SpanishEntryView, SENSE_FOLD_AT_ES as SENSE_FOLD_AT } from './App';
+import { SpanishEntryView, capAudios } from './App';
+import { ES_REGION_LABELS } from '@synapse-dict/dict-labels';
 
 const svc = getService('es') as unknown as {
   getEntry(w: string): unknown;
@@ -48,6 +49,8 @@ type EsEntry = {
   forms: Array<{ word: string; label: string }>;
   examples: Array<{ text: string; senseId: number | null }>;
   homographs: Array<{ word: string }>;
+  audios: Array<{ file: string; url: string | null; region: string | null;
+    speaker: string | null }>;
 };
 
 type Check = { name: string; hit: (e: EsEntry, html: string) => string | null };
@@ -74,12 +77,13 @@ const CHECKS: Check[] = [
   },
   {
     name: '🔴 未折叠的义项中文都必须出现在页面文字里',
-    // ⚠️ 只断言**首屏那一段**。组件默认 `showAllSenses=false`，只铺 `slice(0, SENSE_FOLD_AT)`
+    // ⚠️ **2026-09-12 起断言全部义项**：折叠已按用户要求去掉（观察态）。
+    //    原来这里只断言首屏那 8 条 —— 折叠规则改回来时，这一处要跟着改回去。
     //    ——「`mano` 的 26 条义项一屏铺不下」是有意的产品设计，折叠的仍可展开。
     //    第一版断言「每条义项」⇒ 报 535 处假红。**又一次拿自己的期望当判据**（A33）。
     hit: (e, html) => {
       const t = visibleText(html);
-      const miss = e.unifiedSenses.slice(0, SENSE_FOLD_AT)
+      const miss = e.unifiedSenses
         .filter((s) => s.title && !t.includes(s.title));
       return miss.length ? `${miss.length} 条中文没渲染，如「${miss[0].title.slice(0, 20)}」` : null;
     },
@@ -151,12 +155,47 @@ const CHECKS: Check[] = [
     hit: (e, html) => {
       const t = visibleText(html);
       const want: string[] = [];
-      for (const s of e.unifiedSenses.slice(0, SENSE_FOLD_AT)) {   // 折叠的义项不铺例句
+      for (const s of e.unifiedSenses) {   // 折叠已去掉，全部义项都铺例句
         for (const x of e.examples.filter((y) => y.senseId === s.id).slice(0, 3)) want.push(x.text);
       }
       for (const x of e.examples.filter((y) => !y.senseId).slice(0, 6)) want.push(x.text);
       const miss = want.filter((x) => x && !t.includes(x.slice(0, 24)));
       return miss.length ? `${miss.length} 条组件挑中的例句没渲染` : null;
+    },
+  },
+  {
+    // 🔴🔴 **2026-09-13 新增，因为这一排今天才第一次对用户可见。**
+    //    在此之前 es 的真人录音被 `SHOW_HUMAN_AUDIO` 挡着，库里 11,203 条
+    //    一条都渲染不出来 —— 而这道闸从 2026-08-20 建起就没有一条检查盯着它，
+    //    等于 `french.ts` 那次「39 万条录音 `FROM audio` 出现 0 次」的翻版：
+    //    **没人看见的东西，也没有闸在看**。开关一删，闸必须同时补上。
+    // ⚠️ 期望条数走展示层自己那份 `capAudios`（每地区 ≤2、总数 ≤6），
+    //    **不在这里另写一份限量规则** —— pt/de 两轮都栽在闸自算一份、限量一改就报假红。
+    // ⚠️ 判据查 `.audio-chip` 不查 `<audio>`：`HumanAudioRow` 的播放走 JS `new Audio()`，
+    //    HTML 里根本没有 `<audio>` 标签。
+    name: '🔴 有真人录音却没渲染 / 数量对不上',
+    hit: (e, html) => {
+      const want = capAudios(e.audios ?? []).length;
+      const got = (html.match(/class="audio-chip/g) || []).length;
+      return want > 0 && got !== want ? `可渲染录音 ${want} 条，页面上 ${got} 个播放按钮` : null;
+    },
+  },
+  {
+    // 🔴 2026-09-13：录音地区在库里是**英文/西文原名**（`Spain` / `Venezuela` / `Chiloé`），
+    //    映射不到 `ES_REGION_LABELS` 就原样印在中文词典页上。
+    //    （it 那边有同形状的一条：「录音地区不许把法语原文印出来」。）
+    // ⚠️ 判据不能写成「标签里不许出现拉丁字母」—— 无地区的录音**有意**退到录音人名
+    //    （`Marreromarco` 这种），那是源头给的事实，不是漏译。
+    //    ⇒ 白名单是：映射表的**译名** ∪ 本词条录音的**录音人名** ∪「未标注」。
+    // ⚠️ 同名按钮会带上 ` · 录音人` 后缀，比之前先劈掉。
+    name: '🔴 录音地区必须有中文标签（不许把原名印出来）',
+    hit: (e, html) => {
+      const zh = new Set(Object.values(ES_REGION_LABELS));
+      const speakers = new Set((e.audios ?? []).map((a) => (a.speaker || '').replace(/_/g, ' ')));
+      const shown = [...html.matchAll(/class="audio-region">([^<]*)</g)].map((m) => m[1]);
+      const bad = shown.map((x) => x.split(' · ')[0])
+        .filter((x) => x && x !== '未标注' && !zh.has(x) && !speakers.has(x));
+      return bad.length ? `录音地区没有中文标签：${[...new Set(bad)].join(', ')}` : null;
     },
   },
   {
@@ -170,7 +209,13 @@ const CHECKS: Check[] = [
         .replace(/<div class="ex-es"[\s\S]*?<\/div>/g, '')       // 例句原文
         .replace(/<div class="colloc-text"[\s\S]*?<\/div>/g, '');
       const t = visibleText(stripped);
-      const bad = ['undefined', '[object Object]', 'NaN'].filter((x) => t.includes(x));
+      // 🔴 2026-09-13：`NaN` 不能用 `includes` 查。取样面扩到「有录音的 9,709 个词形」后
+      //    `salitre` 当场报红 —— 它的中文详解里写着 **NaNO₂**（亚硝酸钠的化学式），
+      //    那是真内容。判据要的是 React 把一个 `NaN` 数值印出来，那种情况 `NaN` 是
+      //    **独立词**；夹在字母数字中间的一律不是。（`[[criteria-narrower-than-you-think]]`：
+      //    判据比它要描述的东西宽 —— 这一条今天已经是第二次了。）
+      const bad = ['undefined', '[object Object]'].filter((x) => t.includes(x));
+      if (/(?<![A-Za-z0-9])NaN(?![A-Za-z0-9])/.test(t)) bad.push('NaN');
       return bad.length ? `页面文字里出现 ${bad.join(', ')}` : null;
     },
   },
@@ -197,15 +242,21 @@ function targets(limit: number): string[] {
   const famC = q(`SELECT d.word FROM dict d WHERE d.phonetic_src='rule'
      AND d.definition IS NULL AND d.translation IS NULL AND d.is_lemma=1
      AND EXISTS(SELECT 1 FROM inflection i WHERE i.base_id=d.id) LIMIT 1200`);
+  // ④ 有真人录音的全部词形（9,709 个）—— 2026-09-13 解开展示后新增的必覆盖面。
+  //    ⚠️ 放进 `must` 而不是下面的 `set`：`set` 排在 `must` 之后，而变异验证只取
+  //    `words.slice(0, 4000)`，①②③ 就已经 5,599 个 ⇒ 录音那条变异会报「可试对象 0」，
+  //    也就是一条**永远通过**的假闸（上面 ①②③ 交错就是为了治这个，这里同理）。
+  const famD = q(`SELECT DISTINCT word FROM audio`);
   // 🔴 **三族轮转交错，不是首尾相接。** 第一版按 ①②③ 顺序拼，而 ①② 就有 4,399 个 ——
   //    `--limit 3000` 和变异验证的 `slice(0,4000)` 都取不到 ③，
   //    「补收词头的变形形区块」那条变异报「可试对象 0」。
   //    交错之后任何一个 `--limit` 都会同时覆盖三族。
   const must: string[] = [];
-  for (let i = 0; i < Math.max(famA.length, famB.length, famC.length); i += 1) {
+  for (let i = 0; i < Math.max(famA.length, famB.length, famC.length, famD.length); i += 1) {
     if (i < famA.length) must.push(famA[i]);
     if (i < famB.length) must.push(famB[i]);
     if (i < famC.length) must.push(famC[i]);
+    if (i < famD.length) must.push(famD[i]);
   }
 
   const set = new Set<string>();
@@ -284,6 +335,11 @@ function mutate(words: string[]): void {
     ['🔴 把伪原形塞回变位说明',
      (e) => { e.inflNotes = [`${BAD_BASES[0]} 的 过去分词`]; },
      (e) => e.baseForms.length > 0],
+    // ⚠️ 这条只能做成**数据**变异：库里的地区取值现在全都映射得到（2026-09-13 补完
+    //    `Chiloé` 之后），真实数据里已经没有能触发它的词 ⇒ 改 HTML 的话「可试对象 0」。
+    ['🔴 录音地区给一个映射表里没有的原名',
+     (e) => { if (e.audios[0]) { e.audios[0].region = 'Neverland'; e.audios[0].speaker = null; } },
+     (e) => capAudios(e.audios ?? []).length > 0],
   ];
 
   const htmlCases: HtmlCase[] = [
@@ -303,6 +359,8 @@ function mutate(words: string[]): void {
      (e) => !!e.phonetic],
     ['组件漏渲染例句', (h) => h.replace(/<div class="ex-es"[^>]*>[\s\S]*?<\/div>/g, ''),
      (e) => e.examples.length > 0],
+    ['🔴 组件漏渲染真人录音行', (h) => h.replace(/class="audio-chip/g, 'class="x-chip'),
+     (e) => capAudios(e.audios ?? []).length > 0],
   ];
 
   console.log('\n═══ 变异验证 ═══');

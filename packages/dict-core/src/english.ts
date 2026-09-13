@@ -62,6 +62,10 @@
 // ============================================================================
 
 import { DatabaseSync } from 'node:sqlite';
+// 词源号解析：与 de 共用一份（两门的 `sense` 都没有 `entry_id`，只能看 `src_ref` 的形状）。
+import { etymKeyOfSrcRef } from './etym.js';
+// 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts 的实测数字）。
+import { dropDuplicatedAtSenseLevel } from './relations.js';
 
 export type EnglishSearchItem = {
   id: number;
@@ -95,6 +99,16 @@ export type EnglishSense = {
   /** 中文的来源：model:def ／ template:form_of ／ ecdict-core ／ ecdict。
    *  展示层按它决定 `topic` 标签显不显示（两个来源的取值形状完全不同）。 */
   src: string | null;
+  /** 词源号（维基词典的 Etymology 1/2/3…）。老词典层那 276 万条没有 ⇒ null。
+   *
+   *  ⭐ 用户 2026-09-12 看 `gore` 问「为什么有两轮名词/动词」——
+   *  答案是它有**三个不同词源**（血/污物、刺戳、三角形地块），kaikki 按词源分块，
+   *  每块各有名词和动词。而展示层「相邻同词性合组」**跨过了词源边界**：
+   *  `gore` 词源①的动词（涂血于）与词源②的动词（用角刺戳）被并进同一个「动词」组。
+   *  实测 en **9,375 个词**中招，其中 `and`/`have`/`do`/`say`/`get`/`make`/`know`
+   *  这类 freq_rank<20000 的常用词有 **1,196 个**。
+   *  ⇒ 展示层据此断组，并在多词源时印出「词源 ①②③」。 */
+  etymKey: string | null;
   /** 语法/地区/语域/用法/学科 五桶标签，原样透出 */
   tags: { kind: string; value: string }[];
   relations: EnglishRelationGroup[];
@@ -214,7 +228,17 @@ export class EnglishDictService {
                 (SELECT text FROM sense_gloss WHERE sense_id = s.id AND lang='zh'
                   ORDER BY seq LIMIT 1) AS zh,
                 (SELECT src FROM sense_gloss WHERE sense_id = s.id AND lang='zh'
-                  ORDER BY seq LIMIT 1) AS src
+                  ORDER BY seq LIMIT 1) AS src,
+                -- 🔴 词源号（2026-09-12）。sense 表没有 entry_id（it/fr/pt 有，en/de 没有），
+                --    唯一的线索是 sense_src.src_ref：
+                --        en-edition:gore:noun:1:0#0
+                --        └─ src ─┘ └词┘ └pos┘ │ └seq┘
+                --                          词源号 ┘
+                --    实测一条 sense 恰好挂一条 sense_src（4,546,120 组全是 1:1），不会取错。
+                -- ⚠️ 这一段里**一个反引号都不能有** —— 整条 SQL 在 TS 模板字符串里，
+                --    反引号会当场把模板截断（第一版就是这么挂的）。拆解见
+                --    etymKeyOfSrcRef() 的注释。
+                (SELECT src_ref FROM sense_src WHERE sense_id = s.id LIMIT 1) AS srcRef
            FROM sense s WHERE s.word_id = ? ORDER BY s.rank`),
       tags: this.db.prepare(
         `SELECT t.sense_id, t.kind, t.value FROM sense_tag t
@@ -373,6 +397,7 @@ export class EnglishDictService {
     }
     return rows.map((r) => ({
       id: r.id, rank: r.rank, pos: r.pos, en: r.en, zh: r.zh, src: r.src,
+      etymKey: etymKeyOfSrcRef((r as { srcRef?: string | null }).srcRef),
       tags: tagBy.get(r.id) ?? [],
       relations: [...(relBy.get(r.id) ?? new Map())].map(([kind, targets]) => ({ kind, targets })),
       altOf: altBy.get(r.id) ?? [],
@@ -403,9 +428,16 @@ export class EnglishDictService {
         })),
       senses: this.sensesOf(row.id),
       relations: (() => {
+        // 🔴 `sense_id IS NULL` 这个过滤**不够**：同一条 (词, 类型, 目标) 在库里
+        //    可以有两行（一行带归属、一行不带），两级各取一行就印两遍。
+        //    实测 en 4,050 组，`-ette` 页上「-cule」出现 2 次。见 relations.ts。
+        const atSense = this.q.relBySense.all(row.id) as Array<{
+          kind: string; target: string }>;
+        const rows2 = dropDuplicatedAtSenseLevel(
+          this.q.relByEntry.all(row.id) as Array<{
+            kind: string; target: string; ok: number }>, atSense);
         const m = new Map<string, EnglishRelationTarget[]>();
-        for (const rr of this.q.relByEntry.all(row.id) as Array<{
-          kind: string; target: string; ok: number }>) {
+        for (const rr of rows2) {
           const a = m.get(rr.kind) ?? [];
           a.push({ word: rr.target, clickable: !!rr.ok });
           m.set(rr.kind, a);

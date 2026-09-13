@@ -50,6 +50,10 @@
 // ============================================================================
 
 import { DatabaseSync } from 'node:sqlite';
+// 词源号解析：与 en 共用一份（两门的 `sense` 都没有 `entry_id`）。
+import { etymKeyOfSrcRef } from './etym.js';
+// 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts 的实测数字）。
+import { dropDuplicatedAtSenseLevel } from './relations.js';
 
 export type GermanSearchItem = {
   id: number;
@@ -65,6 +69,10 @@ export type GermanRelationGroup = { kind: string; targets: GermanRelationTarget[
 export type GermanAltOf = { target: string; zh: string | null; clickable: boolean };
 
 export type GermanSense = {
+  /** 词源号（维基词典的 Etymology 1/2/3…）。没有就 null。
+   *  ⭐ 展示层据此断组：**词性相同且词源相同**才合并 —— 否则两个同形异源的词
+   *  会被并进同一个词性组（用户 2026-09-12 从 en 的 `gore` 问出来的）。 */
+  etymKey: string | null;
   id: number;
   zh: string | null;
   de: string | null;          // 德语原文释义（三语方针里的「本语言」那一支）
@@ -254,7 +262,19 @@ export class GermanDictService {
                (SELECT GROUP_CONCAT(text, char(10)) FROM
                   (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='de'
                     ORDER BY seq)) AS de,
-               (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='en' LIMIT 1) AS en
+               (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='en' LIMIT 1) AS en,
+               -- 🔴 词源号（2026-09-12）。de 的 sense **没有 entry_id**（it/fr/pt 有），
+               --    只能看 sense_src.src_ref 的形状：
+               --        kk-en:A:noun:1:0#0        4 个冒号 + # ⇒ 倒数第二段是词源号
+               --        kk-de:'n Abend:intj:0#0   3 个冒号    ⇒ 德语版不带词源号
+               --        kk-de-adj2:A#0            1 个冒号    ⇒ 同上
+               --    ⚠️ de 一条 sense 可以挂**多条** sense_src（en 是 1:1），
+               --       所以这里用 LIKE 先筛出带词源号的那一条；
+               --       权威的拆解仍然交给 etymKeyOfSrcRef()，LIKE 只是把范围缩小。
+               --    实测多词源词的义项覆盖 99.0%（4,327 / 4,370）。
+               --    ⚠️ 这一段里一个反引号都不能有：整条 SQL 在 TS 模板字符串里。
+               (SELECT src_ref FROM sense_src
+                 WHERE sense_id = s.id AND src_ref LIKE '%:%:%:%:%#%' LIMIT 1) AS srcRef
           FROM sense s WHERE s.word_id = ? ORDER BY s.rank`),
 
       tags: this.db.prepare(
@@ -324,6 +344,14 @@ export class GermanDictService {
 
       // ① 走 word_id，**不走 entry**（90.7% 的 entry_id 为空）。
       // ③ 变形与构词分开查，不是同一个列表。
+      // ⚠️ 下面两条**保留 LIMIT 60**。它们喂的是「词形还原」与「构词（这个词是谁派生来的）」，
+      //    不是用户 2026-09-12 点名的「词形变化」「构词（它派生出了谁）」那两处。
+      // 🔴 而且不能去：实测 haben 有 **24,354 条**「是谁的变形」
+      //    （德语完成时都以 haben 为助动词，每个动词的完成式都指回来），sein 4,593 条。
+      //    全铺出来会当场卡死页面 —— 那反而让人**看不成**，与「先全部展示好做判断」相反。
+      //    要放开得先给个数字。
+      // ⚠️⚠️ **注释一律写在模板串外面**：这一段第一版插在 SQL 里，里面的反引号
+      //    当场把 TS 模板字符串截断。今天第三次栽在这上面（PITFALLS 81）。
       inflOf: this.db.prepare(`
         SELECT DISTINCT i.base, i.label_zh,
                (SELECT 1 FROM dict d WHERE d.word = i.base) AS ok
@@ -342,18 +370,24 @@ export class GermanDictService {
       //    ⇒ 「同一个字段有几个读取路径，分区就得做几遍」——
       //      与 `[[fix-regression-and-gate]]` 第二种机制（换了读取路径）同源，
       //      只是这次是**同一次改动里的另一条路径**，不是隔天。
+      // ⚠️ **2026-09-12 临时去掉 LIMIT**（用户：「数字都不要，先全部展示，不做 limit，
+      //    我看了过后才好做判断」）。这是**观察态**，不是终态 ——
+      //    看完之后要重新定上限，届时**有截断就必须说总数**，不然读者以为就这么多。
+      //    实测上限：词形变化最多 790（`überlegen` 530、`am` 518），构词最多 40。
+      // ⚠️⚠️ **注释一律写在模板串外面。** 这一段第一版插在 SQL 里，`//` SQLite 不认，
+      //    `tsc` 全绿、一跑就 `SQL logic error`。今天第三次栽在这上面（PITFALLS 81）。
       forms: this.db.prepare(`
         SELECT DISTINCT d.word AS form, i.label_zh AS label
           FROM inflection i JOIN dict d ON d.id = i.word_id
          WHERE i.base_id = ? AND i.kind <> 'derivation'
-         ORDER BY i.label_zh, d.word LIMIT 200`),
+         ORDER BY i.label_zh, d.word`),
       // 反方向的构词：**谁是这个词派生出来的**（`stehen` → `stellen 使役派生`）。
       // 这是真信息，不该被上面那条一并挡掉 —— 它该去「构词」那一区。
       derivedForms: this.db.prepare(`
         SELECT DISTINCT d.word AS form, i.label_zh AS label
           FROM inflection i JOIN dict d ON d.id = i.word_id
          WHERE i.base_id = ? AND i.kind = 'derivation'
-         ORDER BY i.label_zh, d.word LIMIT 60`),
+         ORDER BY i.label_zh, d.word`),
 
       // ⚠️ 词条级只取**没有义项归属**的（763,001 条）。有归属的走 `relBySense`，
       //    否则同一条会在词条级和义项级各印一遍。
@@ -469,6 +503,7 @@ export class GermanDictService {
     }
     return rows.map((r) => ({
       id: r.id, zh: r.zh, de: r.de, en: r.en, pos: r.pos, gender: r.gender,
+      etymKey: etymKeyOfSrcRef((r as { srcRef?: string | null }).srcRef),
       ...(tagBy.get(r.id) ?? { regions: [], registers: [] }),
       relations: groupRelations(relBy.get(r.id) ?? new Map()),
       altOf: altBy.get(r.id) ?? [],
@@ -491,10 +526,15 @@ export class GermanDictService {
       // 坏 JSON 不该让整个词条页崩掉 —— 宁可少一个范式束，也不给读者一片白。
       try { nounVariants = JSON.parse(row.noun_variants) as NounVariant[]; } catch { /* 忽略 */ }
     }
+    // 🔴 `sense_id IS NULL` 这个过滤**不够**：同一条 (词, 类型, 目标) 在库里可以有两行
+    //    （一行带归属、一行不带），两级各取一行就印两遍。**de 是六门里最严重的一门**：
+    //    24,149 组，`Haus` 页上「Hausaltar」实测出现 2 次。见 relations.ts。
+    const relAtSense = this.q.relBySense.all(row.id) as Array<{
+      kind: string; target: string }>;
     const relMap = new Map<string, GermanRelationTarget[]>();
-    for (const r of this.q.rel.all(row.id) as Array<{
+    for (const r of dropDuplicatedAtSenseLevel(this.q.rel.all(row.id) as Array<{
       kind: string; target: string; ok: number | null;
-    }>) {
+    }>, relAtSense)) {
       const arr = relMap.get(r.kind) ?? [];
       arr.push({ word: r.target, clickable: !!r.ok });
       relMap.set(r.kind, arr);

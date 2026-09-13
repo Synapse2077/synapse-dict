@@ -31,6 +31,10 @@
 
 import { DatabaseSync } from 'node:sqlite';
 import { ptPartsOf } from '@synapse-dict/dict-labels';
+// 词源键：**带来源的不透明键**，理由见 etym.ts（两套编号不是同一个命名空间）。
+import { etymKeyOfEntry } from './etym.js';
+// 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts 的实测数字）。
+import { dropDuplicatedAtSenseLevel } from './relations.js';
 
 export type PortugueseSearchItem = {
   id: number;
@@ -42,6 +46,10 @@ export type PortugueseSearchItem = {
 };
 
 export type PortugueseSense = {
+  /** 词源号（维基词典的 Etymology 1/2/3…）。没有就 null。
+   *  ⭐ 展示层据此断组：**词性相同且词源相同**才合并 —— 否则两个同形异源的词
+   *  会被并进同一个词性组（用户 2026-09-12 从 en 的 `gore` 问出来的）。 */
+  etymKey: string | null;
   id: number;
   zh: string | null;        // 中文释义
   pt: string | null;        // 葡语原文定义（阶段 1.5a 收回来的）
@@ -104,20 +112,22 @@ export type PortugueseAltOf = { target: string; zh: string | null; clickable: bo
 export type PortugueseForm = { form: string; label: string | null };
 
 export type PortugueseRelationTarget = { word: string; clickable: boolean };
+// 🔴 2026-09-13 取消 `PT_REL_CAP = 12`，连 `total` 字段一起删（理由同 it/fr：
+//    en 早已定「`+N` 是看不到内容的死胡同」，pt 实测被藏 778 组 / 15,546 个目标 = 10.9%）。
+//    pt 的 `clickable` 本来就在 SQL 里算（`ok` 列），取消截断**零查询代价**。
 export type PortugueseRelationGroup = {
-  kind: string; total: number; targets: PortugueseRelationTarget[];
+  kind: string; targets: PortugueseRelationTarget[];
 };
 const PT_REL_ORDER = ['synonym', 'antonym', 'hypernym', 'hyponym',
                       'coordinate', 'holonym', 'meronym'];
-const PT_REL_CAP = 12;
 
-// ⭐ 词条级与义项级**共用这一份**分组/排序/截断（`[[fix-regression-and-gate]]`：
-//    判据只许一份 —— 两处各写一版，迟早排序或上限对不上）。
+// ⭐ 词条级与义项级**共用这一份**分组/排序（`[[fix-regression-and-gate]]`：
+//    判据只许一份 —— 两处各写一版，迟早排序对不上）。
 function groupRelations(
   m: Map<string, PortugueseRelationTarget[]>,
 ): PortugueseRelationGroup[] {
   return PT_REL_ORDER.filter((k) => m.has(k)).map((k) => ({
-    kind: k, total: m.get(k)!.length, targets: m.get(k)!.slice(0, PT_REL_CAP),
+    kind: k, targets: m.get(k)!,
   }));
 }
 
@@ -268,10 +278,19 @@ export class PortugueseDictService {
 
       senses: this.db.prepare(`
         SELECT s.id, s.pos, s.gender,
+             -- 🔴 词源号（2026-09-12）。用户看 en 的 gore 问「为什么有两轮名词/动词」——
+             --    那是三个不同词源的同形词，而展示层「相邻同词性合组」跨过了词源边界，
+             --    把两个不同源的同词性块并成一个。本门实测 827 个词中招。
+             --    ⚠️ 这一段里一个反引号都不能有：整条 SQL 在 TS 模板字符串里。
+               -- ⚠️ etym_no 是**裸编号**不是键；键由 etymKeyOfEntry() 拼上来源。
+             -- 🔴 注释不许写在列的后面：行尾逗号会被一起注释掉，
+             --    SQL 在运行时才炸，而 tsc 一声不吭（第一版就是这么过的）。
+             e.etym_no AS etymNoRaw, e.src AS etymSrc,
                (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='zh' LIMIT 1) AS zh,
                (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='pt' LIMIT 1) AS pt,
                (SELECT text FROM sense_gloss WHERE sense_id=s.id AND lang='en' LIMIT 1) AS en
           FROM sense s
+          LEFT JOIN entry e ON e.id = s.entry_id
          WHERE s.word_id = ? AND COALESCE(s.hidden,0)=0
          ORDER BY s.rank`),
 
@@ -493,6 +512,8 @@ export class PortugueseDictService {
     }
     return rows.map((r) => ({
       id: r.id, zh: r.zh, pt: r.pt, en: r.en, pos: r.pos, gender: r.gender,
+      etymKey: etymKeyOfEntry((r as { etymSrc?: string | null }).etymSrc,
+        (r as { etymNoRaw?: string | null }).etymNoRaw),
       ...(byId.get(r.id) ?? { regions: [], registers: [], topics: [] }),
       relations: groupRelations(relBy.get(r.id) ?? new Map()),
       altOf: altBy.get(r.id) ?? [],
@@ -519,9 +540,13 @@ export class PortugueseDictService {
       ?? readings.find((r) => r.region === null)?.ipa
       ?? null;
 
-    const relRows = this.q.rel.all(id) as Array<{
+    // ⚠️ pt 今天这种「两级重复」是 **0 组**，所以下面这一步在 pt 上不改变任何输出。
+    //    照样加：判据是结构性的，而 de(24,149)/it(9,173)/fr(7,153)/en(4,050) 都有 ——
+    //    「本门恰好没有」不是不设防的理由（`[[criteria-narrower-than-you-think]]`）。
+    const relAtSense = this.q.relBySense.all(id) as Array<{ kind: string; target: string }>;
+    const relRows = dropDuplicatedAtSenseLevel(this.q.rel.all(id) as Array<{
       kind: string; target: string; ok: number | null;
-    }>;
+    }>, relAtSense);
     // 🔴 **按 `(kind, target)` 去重** —— 外审 2026-08-30 逮到 `rotar` 的
     //    `girar`/`rotacionar` 印三遍、`bem → mal` 印七遍，全库 **14,386 组**。
     //    根因：数据层的去重键是 `(word_id, sense_id, kind, target)`，而

@@ -29,6 +29,10 @@ export const ES_REGION_LABELS: Record<string, string> = {
   Northern: '北部', Southern: '南部', Eastern: '东部', Western: '西部',
   Northeastern: '东北部', Northwestern: '西北部', Southeastern: '东南部',
   Southwestern: '西南部', Central: '中部',
+  // 🔴 2026-09-13 补：es 解开真人录音展示后，把 `audio.region` 的全部取值与这张表对了一遍，
+  //    只有 `Chiloé` 没有中文（1 条录音，`ig̲ey`，来源是 es 版自己标的 tag）。
+  //    映射不到就把西/英文原名印在中文词典上 —— 这一条现在由闸 `🔴 录音地区必须有中文标签` 盯着。
+  'Chiloé': '奇洛埃岛',
 };
 
 // 西语定冠词（按性别；共性 mf 两冠词）

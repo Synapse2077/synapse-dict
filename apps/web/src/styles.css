@@ -722,6 +722,26 @@ button.brand:focus-visible {
   margin-bottom: 0;
 }
 
+/* 角色：词源分隔（`词源 ①`）。2026-09-12。
+   只在一个词**真有多个词源**时出现（en 1.2% 的词）。比词性标题更"上一级"，
+   所以给一条上边框把两个词源在视觉上切开 —— 它们本来就是两个不同的词。
+   ⚠️ 第一个词源不画上边框：那条线会紧贴在「释义」小标题下面，像是标题的下划线。 */
+.etym-label {
+  margin: 14px 0 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.pos-group:first-child .etym-label {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
 .pos-group-label {
   font-size: 13px;
   font-weight: 600;

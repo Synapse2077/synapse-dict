@@ -9,6 +9,10 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+// 词源键：**带来源的不透明键**，理由见 etym.ts（两套编号不是同一个命名空间）。
+import { etymKeyOfEntry } from './etym.js';
+// 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts）。
+import { dropDuplicatedAtSenseLevel } from './relations.js';
 
 // 一条搜索结果**不是词头本身**时，说明它是从哪儿反查到的。2026-09-12。
 // 目前只有一种：`collocation`（搭配 / 固定短语）。
@@ -119,6 +123,9 @@ export type SpanishUnifiedSense = {
   rank: number;
   pos: string | null;
   gender: string | null;
+  /** 词源号（维基词典的 Etymology 1/2/3…）。`entry_id` 没填上的就是 null。
+   *  ⭐ 展示层据此断组：**词性相同且词源相同**才合并。 */
+  etymKey: string | null;
   title: string;               // 标题行：最短的那条中文
   detail: string | null;       // 副行：明显更长的那条中文（没有则 null）
   en: string | null;           // 英文对应词（溯源用）
@@ -548,9 +555,21 @@ export class SpanishDictService {
     // 一条 JOIN 会把两个 N 乘起来（`ojo` 25 条义项 × 释义 × 标签），
     // 分开取再在内存里拼，行数是加法而不是乘法。
     this.unifiedSenseQuery = this.db.prepare(`
-      SELECT s.id, s.rank, s.pos, s.gender, g.lang, g.kind, g.text
+      SELECT s.id, s.rank, s.pos, s.gender, g.lang, g.kind, g.text,
+             -- 🔴 词源号（2026-09-12）。用户看 en 的 gore 问「为什么有两轮名词/动词」——
+             --    那是三个不同词源的同形词，而展示层「相邻同词性合组」跨过了词源边界。
+             --    es 实测 705 个词中招（多词源的词 971 个，比例 72.6%，六门里最高）。
+             -- ⚠️ es 的 sense.entry_id 只填了 54.7%（it/fr/pt 是 99.5–100%）——
+             --    填不上的那批 etymKey 为 null，行为与改动前一模一样（照常合并）。
+             --    **不为这 45.3% 去编一个词源号**：宁可缺，不可错。
+             -- ⚠️ 这一段里一个反引号都不能有：整条 SQL 在 TS 模板字符串里。
+             -- ⚠️ etym_no 是**裸编号**不是键；键由 etymKeyOfEntry() 拼上来源。
+             -- 🔴 注释不许写在列的后面：行尾逗号会被一起注释掉，
+             --    SQL 在运行时才炸，而 tsc 一声不吭（第一版就是这么过的）。
+             e.etym_no AS etymNoRaw, e.src AS etymSrc
       FROM sense s
       JOIN sense_gloss g ON g.sense_id = s.id
+      LEFT JOIN entry e ON e.id = s.entry_id
       WHERE s.word_id = ?
       ORDER BY s.rank, g.seq
     `);
@@ -823,7 +842,7 @@ export class SpanishDictService {
   private buildUnified(wordId: number): SpanishUnifiedSense[] {
     const rows = this.unifiedSenseQuery.all(wordId) as Array<{
       id: number; rank: number; pos: string | null; gender: string | null;
-      lang: string; kind: string; text: string;
+      lang: string; kind: string; text: string; etymKey: string | null;
     }>;
     const tags = this.unifiedTagQuery.all(wordId) as Array<{
       sense_id: number; kind: string; value: string;
@@ -837,13 +856,15 @@ export class SpanishDictService {
 
     const order: number[] = [];
     const acc = new Map<number, {
-      rank: number; pos: string | null; gender: string | null;
+      rank: number; pos: string | null; gender: string | null; etymKey: string | null;
       zh: string[]; en: string[]; es: string[];
     }>();
     for (const r of rows) {
       let a = acc.get(r.id);
       if (!a) {
         acc.set(r.id, (a = { rank: r.rank, pos: r.pos, gender: r.gender,
+                             etymKey: etymKeyOfEntry((r as { etymSrc?: string | null }).etymSrc,
+        (r as { etymNoRaw?: string | null }).etymNoRaw),
                              zh: [], en: [], es: [] }));
         order.push(r.id);
       }
@@ -861,7 +882,7 @@ export class SpanishDictService {
       const longest = sorted[sorted.length - 1];
       const t = byTag.get(id) || {};
       out.push({
-        id, rank: a.rank, pos: a.pos, gender: a.gender,
+        id, rank: a.rank, pos: a.pos, gender: a.gender, etymKey: a.etymKey,
         title,
         detail: longest.length > title.length + 4 ? longest : null,
         en: a.en[0] ?? null,
@@ -955,6 +976,16 @@ export class SpanishDictService {
       return { senseId: r.sense_id, kind: r.kind, target: r.target,
                tags, linkable: r.linkable === 1 };
     });
+    // 🔴 去重：**已经在某条义项下印过的，词条级不许再印一遍**。
+    //    es 只有一条查询、由视图按 `senseId` 分流到两处，所以同一条
+    //    (类型, 目标) 若既有 `senseId=null` 的行、又有带归属的行，两处各印一次。
+    //    es 实测只有 44 组（六门里最少），但判据是结构性的 —— 见 relations.ts。
+    entry.relations = [
+      ...entry.relations.filter((r) => r.senseId !== null),
+      ...dropDuplicatedAtSenseLevel(
+        entry.relations.filter((r) => r.senseId === null),
+        entry.relations.filter((r) => r.senseId !== null)),
+    ];
     entry.collocations = (this.collocationQuery.all(row.id) as Array<{
       id: number; text: string; zh: string | null; src: string | null;
     }>).map((r) => ({ text: r.text, zh: r.zh, src: r.src }));
