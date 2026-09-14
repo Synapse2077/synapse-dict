@@ -143,24 +143,20 @@ const CHECKS: Check[] = [
     //       给两百多万条统一印「未标注词性」是加噪声不是加信息 ⇒ 前提里排除。
     name: '🔴 A7 无词性的组无标题地跟在别的组后面（词性会被读成蔓延的）',
     hit: (_e, h) => {
-      // ⚠️ **2026-09-12 放宽一次，理由必须写清楚，因为"为了让自己的新标记通过而
-      //    放宽闸"是这类改动最常见的样子。**
-      //    加了词源标题之后，`<div class="etym-label">词源 ①</div>` 插在
-      //    `<div class="pos-group">` 与词性标题**之间**，而这条正则要求两者紧挨
-      //    ⇒ 可选组永远匹配不上 ⇒ **65 个词全报"没有标题"**，而页面上标题好好印着
-      //    （`+1` 渲染出来是「词源 ① / 感叹词 / 词源 ② / 名词 …」）。
-      //    这是 `docs/PITFALLS.md` 48「改了版式，闸里写死的那份规则当场报假红」
-      //    —— 本轮第三次。
-      //    ⇒ 只允许中间出现 `etym-label`，**不是**改成"随便隔什么都行"：
-      //      判据要盯的仍然是「这一组自己有没有词性标题」。
-      //    检验它是不是在放水：放宽前 65 条红全是这个形状，放宽后**应当归零**
-      //    —— 真正的放水会让红的数字变小但不为零。
-      const groups = [...h.matchAll(
-        /<div class="pos-group">(?:<div class="etym-label"[^>]*>[^<]*<\/div>)?(?:<div class="pos-group-label[^"]*">([^<]*)<\/div>)?/g)];
-      if (groups.length <= 1) return null;
-      const bare = groups.filter((m) => m[1] === undefined);
+      // 🔴🔴 **2026-09-14 第二次被同一个形状咬，这次换判据，不再往正则里加豁免。**
+      //    历史：2026-09-12 词源标题插进 `pos-group` 与词性标题之间，正则要求两者紧挨
+      //    ⇒ 65 个词全报"没有标题"，当时的修法是在正则里加一个可选的 `etym-label`。
+      //    2026-09-14 词源**正文**又插进来一个 `etym-text` div ⇒ 同样的假红又来一遍
+      //    （`docs/PITFALLS.md` 48：改了版式，闸里写死的那份规则当场报假红）。
+      //    ⇒ 症结是**判据在描述"标记的排列顺序"，而它要描述的是"这一组有没有标题"**。
+      //      排列顺序会一直变，那件事不会。改成：按 `pos-group` 切块，
+      //      **块内有没有词性标题** —— 中间插多少东西都不影响。
+      //      （`[[criteria-from-meaning-not-form]]`：判据不许用形式代理。）
+      const chunks = h.split('<div class="pos-group">').slice(1);
+      if (chunks.length <= 1) return null;
+      const bare = chunks.filter((c) => !/<div class="pos-group-label/.test(c));
       return bare.length
-        ? `${groups.length} 组里有 ${bare.length} 组没有标题，读者会顺着上一组的词性读下去`
+        ? `${chunks.length} 组里有 ${bare.length} 组没有标题，读者会顺着上一组的词性读下去`
         : null;
     },
   },

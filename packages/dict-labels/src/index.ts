@@ -11,6 +11,7 @@
 // ============================================================================
 
 export * from './common.js';
+export * from './etym.js';
 export * from './es.js';
 export * from './it.js';
 export * from './fr.js';

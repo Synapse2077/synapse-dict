@@ -214,6 +214,20 @@ api.get('/entries/:word', route((req, res) => {
   res.json(entry);
 }));
 
+// 搭配详情页（2026-09-14）。用户：「搭配我希望也有详情页，请按照现有格式配置」。
+// ⚠️ `en` 没有这张表的数据（全库 0 条），`getCollocation` 也就不存在于它的服务上
+//    —— 这里不 `in` 判断就会是 `svc.getCollocation is not a function` 的 500。
+//    **能力判断按「这个服务有没有这件事」，不按语种码硬编码五门**：
+//    哪天 en 补了搭配层，这里一个字都不用改（`[[criteria-from-meaning-not-form]]`）。
+api.get('/collocations/:text', route((req, res) => {
+  const lang = pickLang(req);
+  const text = parseWord(req.params.text);
+  const svc = getService(lang) as { getCollocation?: (t: string) => unknown };
+  const detail = typeof svc.getCollocation === 'function' ? svc.getCollocation(text) : null;
+  if (!detail) throw notFound('collocation_not_found', `没有收录搭配「${text}」`, { lang, text });
+  res.json(detail);
+}));
+
 app.use('/api/v1', api);
 app.use('/api', api);          // 兼容旧客户端；新接口只加在 v1 上
 

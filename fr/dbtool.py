@@ -68,7 +68,9 @@ TRACK = ['ipa', 'ipa_src', 'pos', 'level',
 #
 # ⚠️ 现在 fr 库里只有 `dict` 一张表，下面这些**都还不存在** —— 快照会静默跳过不存在的表。
 #    先写进清单是有意的：等阶段 0/1 把表建出来，闸自动开始守，不用"记得回来加"。
-TRACK_TABLES = ['entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sense_relation',
+TRACK_TABLES = [
+                # 词源正文层（2026-09-14）。列进来闸才守得住。
+                'etymology','entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sense_relation',
                 'inflection',
                 'pronunciation', 'example', 'example_gloss',
                 'collocation', 'collocation_gloss', 'audio']

@@ -49,3 +49,8 @@ export function etymKeyOfEntry(
   if (etymNo === null || etymNo === undefined || etymNo === '') return null;
   return `${src ?? '?'}:${etymNo}`;
 }
+
+// ⚠️ 词源**正文**怎么截（`etymologyBrief` / `etymologyShape`）不在这个文件里，
+//    在 `@synapse-dict/dict-labels` 的 `etym.ts`。理由：那是**展示层取舍**，
+//    浏览器端的 App.tsx 要用，而本包依赖 `node:sqlite`，进不了浏览器。
+//    本文件只管**键怎么算**（数据层），两件事分属两层，别合并。

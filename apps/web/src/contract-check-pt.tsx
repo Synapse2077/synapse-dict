@@ -78,11 +78,18 @@ const CHECKS: Check[] = [
     },
   },
   {
+    // 🔴 2026-09-14 收窄：原来两边都是**全页计数**（`.sense-src` 条数 vs
+    //    `.sense-src-lang` 个数）。词源正文行 `.etym-text` 复用了同一个语种徽标
+    //    （同一个东西就该长同一个样），全页一数立刻多出几个 ⇒ `pala` 报
+    //    「19 条源语言行、23 个语种标签」。**判据用的是全页代理，而它要描述的是
+    //    「每一条源语言行自己有没有徽标」** —— 收窄成逐行查
+    //    （`[[criteria-from-meaning-not-form]]`；本轮第四次同一个形状）。
     name: '🔴 源语言行没有语种标签（fr 收尾单 C29 那个形状）',
     hit: (e, h) => {
-      const rows = count(h, /class="sense-src"/g);
-      const tags = count(h, /class="sense-src-lang"/g);
-      return rows !== tags ? `源语言行 ${rows} 条，语种标签 ${tags} 个` : null;
+      const rows = [...h.matchAll(/<div class="sense-src"[^>]*>([\s\S]*?)<\/div>/g)];
+      const bare = rows.filter((m) => !m[1].includes('class="sense-src-lang"'));
+      return bare.length
+        ? `${rows.length} 条源语言行里有 ${bare.length} 条没有语种标签` : null;
     },
   },
   {

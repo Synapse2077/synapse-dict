@@ -17,6 +17,7 @@ export * from './portuguese.js';
 export * from './german.js';
 export * from './etym.js';
 export * from './relations.js';
+export * from './collocation.js';
 
 type DictionaryRow = {
   id: number;

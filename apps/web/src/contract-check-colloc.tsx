@@ -46,7 +46,7 @@ import { getService } from '@synapse-dict/dict-core';
 import { SRC_LABELS } from '@synapse-dict/dict-labels';
 import {
   SpanishEntryView, ItalianEntryView, FrenchEntryView,
-  PortugueseEntryView, GermanEntryView,
+  PortugueseEntryView, GermanEntryView, CollocationView,
 } from './App';
 
 const mutate = process.argv.includes('--mutate');
@@ -70,9 +70,13 @@ type Svc = {
   raw?: unknown;
 };
 
+// ⚠️ 2026-09-14 起**必须带 `onColloc`**：不带的话 `CollocationSection` 退回纯文字
+//    （那是给闸/无回调场景留的降级路径），闸就测不到生产时真正渲染的那一版 ——
+//    「闸渲染的形状和用户看到的形状不是同一个」是最难发现的一类洞。
 function render(lang: Lang, entry: Entry): string {
   return renderToStaticMarkup(createElement(VIEWS[lang] as never, {
-    entry: entry as never, speakLocale: 'x', onWord: () => {}, speak: () => {},
+    entry: entry as never, speakLocale: 'x',
+    onWord: () => {}, speak: () => {}, onColloc: () => {},
   } as never));
 }
 
@@ -144,6 +148,18 @@ const CHECKS: Array<{
     },
   },
   {
+    // A5 **每一条搭配都得是可点的入口**（2026-09-14）。
+    //    用户：「搭配我希望也有详情页」——「有详情页」和「进得去」是两件事，
+    //    服务层把详情页做出来了、词条页上没给入口，读者照样到不了
+    //    （`[[it-display-layer-stage8]]`：接上展示层是独立一道闸）。
+    name: '🔴 搭配没有做成详情页入口',
+    hit: (e, html) => {
+      const got = (html.match(/class="colloc-text colloc-link"/g) || []).length;
+      return got !== e.collocations.length
+        ? `${e.collocations.length} 条搭配，只有 ${got} 条可点` : null;
+    },
+  },
+  {
     // A4 中文译文也必须逐条出来 —— 只印外文等于没印。
     name: '🔴 有中文译文没渲染出来',
     hit: (e, html) => {
@@ -177,6 +193,102 @@ const MUTS: Array<[string, (html: string, e: Entry) => string]> = [
     (h) => h.replace(/<div class="sense-src"[^>]*>[\s\S]*?<\/div>/g, '')],
   ['M6 抹掉中文译文',
     (h) => h.replace(/<span class="colloc-zh">[\s\S]*?<\/span>/g, '')],
+  ['M7 搭配不再是详情页入口（退回纯文字）',
+    (h) => h.replace(/class="colloc-text colloc-link"/g, 'class="colloc-text"')],
+];
+
+// ══ D 组：搭配**详情页**（2026-09-14）═══════════════════════════════════════
+//
+// 用户：「搭配我希望也有详情页，请按照现有格式配置」。
+// 上面 A 组守的是**词条页上那一段**，这一组守的是点进去之后那一页 ——
+// 两者是不同的组件（`CollocationSection` / `CollocationView`），
+// A 组全绿不能说明 D 组对（`[[correct-steps-can-compose-a-hole]]`）。
+type Detail = {
+  lang: string; text: string; headword: string | null;
+  zh: string | null; srcText: string | null;
+  owners: string[]; parts: { word: string; clickable: boolean }[];
+};
+type SvcD = Svc & { getCollocation?: (t: string) => Detail | null };
+
+const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/'/g, '&#x27;').replace(/"/g, '&quot;');
+
+function renderDetail(d: Detail): string {
+  return renderToStaticMarkup(createElement(CollocationView as never, {
+    detail: d as never, onWord: () => {},
+  } as never));
+}
+
+const DCHECKS: Array<{ name: string; hit: (d: Detail, html: string) => string | null }> = [
+  {
+    name: '🔴 D1 短语原文没出现在词头位置',
+    hit: (d, h) => (h.includes(`class="entry-word" lang="${d.lang}">${esc(d.text)}<`)
+      ? null : '词头不是这条短语'),
+  },
+  {
+    // 中文是这一页**唯一**的实质内容（五门 100% 有），丢了整页就是空壳。
+    name: '🔴 D2 中文释义没渲染出来',
+    hit: (d, h) => (!d.zh || h.includes(esc(d.zh)) ? null : `「${d.zh}」缺席`),
+  },
+  {
+    // 只有 it 那 303 条有。⚠️ 2026-09-12 刚因为服务层没 SELECT 它漏过一次。
+    name: '🔴 D3 原文释义有值却没渲染',
+    hit: (d, h) => (!d.srcText || h.includes(esc(d.srcText).slice(0, 24))
+      ? null : '原文释义缺席'),
+  },
+  {
+    // 🔴 `owners` 是数组：同一条短语可能挂在多个词条下，少印一个就是少一条路。
+    name: '🔴 D4 所属词条没有逐个渲染成链接',
+    hit: (d, h) => {
+      const got = (h.match(/class="rel-link"/g) || []).length;
+      const wantLinks = d.owners.length
+        + (d.parts.length > 1 ? d.parts.filter((x) => x.clickable).length : 0);
+      if (got !== wantLinks) return `该有 ${wantLinks} 个链接，页面上 ${got} 个`;
+      const miss = d.owners.filter((w) => !h.includes(`>${esc(w)}</a>`));
+      return miss.length ? `所属词条缺席：${miss.join('、')}` : null;
+    },
+  },
+  {
+    // 组成词**一个都不许少**（用户 2026-09-10：「你不要擅自折叠信息」）。
+    // ⚠️ 只有一个词的短语有意不渲染这一块 —— 那时它就是词头重印一遍。
+    name: '🔴 D5 组成词没有全部渲染出来',
+    hit: (d, h) => {
+      if (d.parts.length <= 1) {
+        return h.includes('>组成词<') ? '只有一个词却渲染了「组成词」块' : null;
+      }
+      const miss = d.parts.filter((x) => !h.includes(`>${esc(x.word)}</a>`)
+        && !h.includes(`class="rel-plain">${esc(x.word)}<`));
+      return miss.length ? `${miss.length} 个组成词缺席，例：${miss[0].word}` : null;
+    },
+  },
+];
+
+// 数据侧负控：`headword` 必须**恰好**在「短语本身是词头」时非空 ——
+// 它决定前端跳不跳真词条页，判反了要么把读者卡在降级页、要么把他扔进 404。
+function checkHeadwordFlag(lang: Lang, svc: SvcD, all: (s: string) => Array<Record<string, unknown>>): string[] {
+  const bad: string[] = [];
+  const probe = (sql: string, want: boolean) => {
+    for (const r of all(sql)) {
+      const d = svc.getCollocation!(String(r.t));
+      if (!d) { bad.push(`${lang}: 「${r.t}」getCollocation 返回 null`); continue; }
+      if (!!d.headword !== want) {
+        bad.push(`${lang}: 「${r.t}」headword=${d.headword} 但库里${want ? '有' : '没有'}这个词头`);
+      }
+    }
+  };
+  probe(`SELECT c.text AS t FROM collocation c
+          WHERE EXISTS (SELECT 1 FROM dict d WHERE d.word = c.text) LIMIT 25`, true);
+  probe(`SELECT c.text AS t FROM collocation c
+          WHERE NOT EXISTS (SELECT 1 FROM dict d WHERE d.word = c.text COLLATE NOCASE) LIMIT 25`, false);
+  return bad;
+}
+
+const DMUTS: Array<[string, (h: string) => string]> = [
+  ['N1 抹掉中文释义', (h) => h.replace(/<div class="sense-zh">[\s\S]*?<\/div>/g, '')],
+  ['N2 抹掉原文释义块', (h) => h.replace(/<div class="sense-src"[^>]*>[\s\S]*?<\/div>/g, '')],
+  ['N3 少渲染一个链接（所属词条或组成词）', (h) => h.replace(/class="rel-link"/, 'class="x"')],
+  ['N4 词头换成别的字', (h) => h.replace(/(class="entry-word"[^>]*>)[^<]*/, '$1XXX')],
+  ['N5 组成词只留第一个', (h) => h.replace(/(<h3>组成词<\/h3><div class="rel-row">.*?<\/span>).*?(<\/div>)/, '$1$2')],
 ];
 
 // ══ D 组：组件的**落点调用点** —— 服务层全对也救不了这一类 ═══════════════════
@@ -209,9 +321,54 @@ function checkSelectWordCallSites(): string[] {
   return bad;
 }
 
+/**
+ * 🔴🔴 **「首页」只许在什么都没选中时出现。** 2026-09-14。
+ *
+ * 搭配详情页上线当天用户就截图了：点开 `serenar los ánimos`，
+ * 搭配详情底下又挂了一整块欢迎页（「突触词典 / 试试这些词 hola escalera…」）。
+ * 根因：那条判据只问了 `selectedWord`，而右栏的落点已经有两种。
+ *
+ * ⇒ 判据**从源码里自己发现有几种落点**（所有 `const [selectedXxx, setXxx]`），
+ *   逐个要求出现在 `.empty-state` 的渲染条件里。将来加第三种落点，
+ *   忘了改这行就当场报红 —— 而不是等用户看见（`[[lesson-must-become-mechanism]]`）。
+ * ⚠️ 不写死 `['selectedWord','selectedColloc']`：写死的名单和它要描述的东西一样会过期，
+ *   那正是这条闸要防的病（`[[criteria-from-meaning-not-form]]`）。
+ */
+function checkEmptyStateGuard(): string[] {
+  const raw = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
+  const src = raw.replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const states = [...src.matchAll(/const \[(selected\w+), set\w+\]/g)].map((m) => m[1]);
+  if (states.length === 0) return ['🔴 一个 selected* 状态都没找到 —— 判据失效了'];
+  const at = src.indexOf('className="empty-state"');
+  if (at < 0) return ['🔴 找不到 .empty-state 的渲染点 —— 判据失效了'];
+  // 🔴 **取"包住它的那个 JSX 表达式"，不是"往前数 500 个字符"。**
+  //    第一版用定长窗口，而紧挨在上面的正是 `collocNotFound && selectedColloc` 那个错误块
+  //    ⇒ 窗口里本来就有 `selectedColloc` ⇒ **把 `!selectedColloc` 从判据里删掉，闸照样绿**。
+  //    负控当场证伪了它（`[[fix-regression-and-gate]]`：一条永远通过的检查等于没检查）。
+  //    ⇒ 从锚点往回找**深度为 0 的那个 `{`**，取到锚点为止，才正好是这一处的条件表达式。
+  let depth = 0;
+  let start = -1;
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const ch = src[i];
+    if (ch === '}') depth += 1;
+    else if (ch === '{') {
+      if (depth === 0) { start = i; break; }
+      depth -= 1;
+    }
+  }
+  if (start < 0) return ['🔴 找不到包住 .empty-state 的 JSX 表达式 —— 判据失效了'];
+  const guard = src.slice(start, at);
+  const miss = states.filter((x) => !guard.includes(x));
+  return miss.map((x) => `首页的渲染条件里没有 ${x} —— 选中它时欢迎页会跟详情叠在一起`);
+}
+
 // ══ 跑 ════════════════════════════════════════════════════════════════════
 const pages: Array<[string, Entry, string, 'llm' | 'kaikki' | 'mix']> = [];
 const bucket = new Map<string, number>();
+const details: Array<[string, Detail, string]> = [];
+const dbucket = new Map<string, number>();
+const headwordFails: string[] = [];
 const searchFails: string[] = [];
 const labelFails: string[] = [];
 
@@ -267,6 +424,30 @@ for (const lang of LANGS) {
     pages.push(row);
     bucket.set(`${lang} ${row[3]}`, (bucket.get(`${lang} ${row[3]}`) ?? 0) + 1);
   }
+
+  // ── D 组取样：**按形状取**（随机取会整类碰不到）──
+  //    ① 普通多词短语 ② 挂在多个词条下的 ③ 只有一个词的 ④ 有原文释义的（只有 it 有）
+  const svcD = svc as SvcD;
+  headwordFails.push(...checkHeadwordFlag(lang, svcD, all));
+  const shapes: Array<[string, string]> = [
+    ['普通', `SELECT c.text AS t FROM collocation c
+        WHERE instr(c.text,' ')>0
+          AND NOT EXISTS(SELECT 1 FROM dict d WHERE d.word=c.text COLLATE NOCASE) LIMIT 14`],
+    ['多所属', `SELECT text AS t FROM collocation
+        GROUP BY text HAVING COUNT(DISTINCT word_id)>1 LIMIT 8`],
+    ['单词', `SELECT c.text AS t FROM collocation c WHERE instr(c.text,' ')=0 LIMIT 6`],
+    ['有原文释义', `SELECT c.text AS t FROM collocation c JOIN collocation_gloss g
+        ON g.collocation_id=c.id AND g.lang='${lang}' LIMIT 6`],
+  ];
+  for (const [shape, sql] of shapes) {
+    for (const r of all(sql)) {
+      const d = svcD.getCollocation!(String(r.t));
+      // 🔴 本身是词头的走不到这一页（前端直接跳真词条），拿它当用例就是测了个不存在的路径。
+      if (!d || d.headword) continue;
+      details.push([`${lang} ${d.text}`, d, renderDetail(d)]);
+      dbucket.set(`${lang} ${shape}`, (dbucket.get(`${lang} ${shape}`) ?? 0) + 1);
+    }
+  }
 }
 
 console.log('═══ 契约闸（搭配层）：出处标记 + 反查搜索 ═══\n');
@@ -278,7 +459,9 @@ const siteFails = checkSelectWordCallSites();
 for (const [name, arr] of [['🔴 出处值没有中文名 / 没有出处', labelFails],
                            ['🔴 反查搜索不通', searchFails],
                            ['🔴 有 selectWord 调用点直接用了 .word（落点会是短语，右边必空白）',
-                            siteFails]] as const) {
+                            siteFails],
+                           ['🔴 首页的渲染条件漏了某种落点（欢迎页会跟详情叠在一起）',
+                            checkEmptyStateGuard()]] as const) {
   if (arr.length === 0) { console.log(`   ✅ ${name.replace('🔴 ', '')}`); continue; }
   red++;
   console.log(`   ${name}  ${arr.length} 条`);
@@ -305,8 +488,38 @@ for (const c of CHECKS) {
   console.log(`   ${c.name}  ${counts.get(c.name)} 条`);
   for (const x of arr) console.log(`        ${x}`);
 }
+// ── D 组报告：搭配详情页 ──
+console.log(`\n  搭配详情页取样 ${details.length} 条：\n`
+  + [...dbucket].map(([k, v]) => `    ${k.padEnd(16)} ${v}`).join('\n'));
+if (headwordFails.length === 0) {
+  console.log('   ✅ headword 标志与「短语是不是词头」一致');
+} else {
+  red++;
+  console.log(`   🔴 headword 标志判错  ${headwordFails.length} 条`);
+  for (const x of headwordFails.slice(0, 6)) console.log(`        ${x}`);
+}
+const dfails = new Map<string, string[]>();
+for (const [name, d, html] of details) {
+  for (const c of DCHECKS) {
+    const why = c.hit(d, html);
+    if (why) {
+      const a = dfails.get(c.name) ?? [];
+      if (a.length < 4) a.push(`${name}：${why}`);
+      dfails.set(c.name, a);
+    }
+  }
+}
+for (const c of DCHECKS) {
+  const arr = dfails.get(c.name);
+  if (!arr) { console.log(`   ✅ ${c.name.replace('🔴 ', '')}`); continue; }
+  red++;
+  console.log(`   ${c.name}`);
+  for (const x of arr) console.log(`        ${x}`);
+}
+
 console.log(red ? `\n🔴 ${red} 条红`
-  : `\n✅ 全部通过（${CHECKS.length + 3} 条断言，${pages.length} 个词）`);
+  : `\n✅ 全部通过（${CHECKS.length + DCHECKS.length + 5} 条断言，`
+    + `${pages.length} 个词 + ${details.length} 条搭配详情页）`);
 
 if (mutate) {
   console.log(`\n═══ 变异：${MUTS.length} 种缺陷各造一次 ═══\n`);
@@ -328,6 +541,29 @@ if (mutate) {
         + `（${hits} 次命中）`);
     }
   }
+  console.log(`\n═══ 变异（搭配详情页）：${DMUTS.length} 种缺陷各造一次 ═══\n`);
+  const dcovered = new Set<string>();
+  for (const [mname, f] of DMUTS) {
+    const got = new Set<string>();
+    let hits = 0;
+    for (const [, d, html] of details) {
+      let bad: string;
+      try { bad = f(html); } catch { continue; }
+      if (bad === html) continue;
+      for (const c of DCHECKS) if (c.hit(d, bad)) { got.add(c.name); hits++; }
+    }
+    if (got.size === 0) { dead++; console.log(`   🔴 ${mname}  —— 没有任何断言逮到它`); }
+    else {
+      for (const g of got) dcovered.add(g);
+      console.log(`   ✅ ${mname}  → ${[...got].map((x) => x.slice(2, 16)).join('／')}`
+        + `（${hits} 次命中）`);
+    }
+  }
+  for (const x of DCHECKS.map((c) => c.name).filter((y) => !dcovered.has(y))) {
+    dead++;
+    console.log(`   🔴 没有变异能打红：${x}`);
+  }
+
   const naked = CHECKS.map((c) => c.name).filter((x) => !covered.has(x));
   console.log(`\n   变异 ${MUTS.length - dead}/${MUTS.length} 有效`
     + ` ｜ 断言 ${CHECKS.length - naked.length}/${CHECKS.length} 有变异守着`);

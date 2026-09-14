@@ -28,6 +28,7 @@ import {
   EnglishEntryView, SpanishEntryView, ItalianEntryView,
   FrenchEntryView, PortugueseEntryView, GermanEntryView,
 } from './App';
+import { etymologyBrief } from '@synapse-dict/dict-labels';
 
 const mutate = process.argv.includes('--mutate');
 const PER = 24;
@@ -112,9 +113,47 @@ function headsExpected(senses: Sense[]): string[] {
   return out;
 }
 
+/**
+ * **页面上会印出几个词源块、每块属于哪一支** —— 按出场顺序，可重复。
+ *
+ * 🔴 不是「去重后的键列表」。第一版那么写，it 的 `o`/`peso`/`radio` 当场报
+ *    「3 支词源、页面上 4 条正文」——**同一支词源被别的支隔开后会再印一次标题**
+ *    （组件的 `etymHeadOf` 判的是「与上一组不同」，不是「以前没出现过」）。
+ *    ⇒ 判据必须与组件同一口径：走分组序列，每次 etym 变化就是一块。
+ * ⚠️ 分组规则与上面 `headsExpected` 同源，只是返回键而不是序号 ——
+ *    两处要一起改（这份闸本来就承认"独立算一遍"的代价，注释在 `sameEtymGroup` 上）。
+ */
+function etymBlocksOf(senses: Sense[]): string[] {
+  if (senses.length === 0) return [];
+  const groups: Array<{ pos: string | null; etym: string | null }> = [];
+  for (const s of senses) {
+    const etym = s.etymKey ?? null;
+    const last = groups[groups.length - 1];
+    if (last && last.pos === s.pos && sameEtymGroup(last.etym, etym)) {
+      if (last.etym === null) last.etym = etym;
+      continue;
+    }
+    groups.push({ pos: s.pos, etym });
+  }
+  const distinct = new Set(groups.map((g) => g.etym).filter((x) => x !== null));
+  if (distinct.size <= 1) return [];            // 单词源不印标题
+  const out: string[] = [];
+  groups.forEach((g, i) => {
+    if (g.etym !== null && (i === 0 || groups[i - 1].etym !== g.etym)) out.push(g.etym);
+  });
+  return out;
+}
+
+/** 不透明键 `<版>:<词源号>` 里的「版」。**从右边切** —— 版名本身可能含冒号。 */
+function editionOf(key: string): string {
+  return key.slice(0, key.lastIndexOf(':'));
+}
+
 const CHECKS: Array<{
   name: string;
-  hit: (senses: Sense[], h: string) => string | null;
+  // 🔴 2026-09-14 加上 `entry`：H 组要比「页面印的正文」与「库里那一支的正文」——
+  //    只有义项和 HTML 是比不出**配对对不对**的。
+  hit: (senses: Sense[], h: string, entry: Entry) => string | null;
 }> = [
   {
     // G1 一条判据同时守住四种缺陷：少印、多印、顺序错、跨词源合组。
@@ -197,6 +236,92 @@ const CHECKS: Array<{
       return bad.length ? `连着两个「${bad[0]}」，中间没有词源标题` : null;
     },
   },
+  {
+    // ══ H 组：词源**正文**（2026-09-14）═══════════════════════════════════
+    // G 组守的是「分块对不对」，H 组守的是「那一块底下说了什么」。
+    // 用户看 `serene` 问「这里的词源是什么意思？」—— 序号说了「它们不一样」，
+    // 说不出不一样在哪。`en/pipeline/ingest_etymology.py` 把正文抽进库之后补这一组。
+    //
+    // ⚠️ **判据按「这门接没接正文」走，不按语种码硬编码**：
+    //    `etymologyTexts` 不存在 ⇒ 这门还没接，跳过；哪天 es/it/fr/pt/de 接上了，
+    //    这三条自动开始守它们，一个字都不用改（`[[criteria-from-meaning-not-form]]`）。
+    name: '🔴 H1 该说话的词源标题底下一句话都没有',
+    hit: (senses, h, e) => {
+      const ed = (e as { etymologyEditions?: string[] }).etymologyEditions;
+      if (!ed) return null;                       // 这门还没接词源正文层
+      // 🔴 **不是每个标题都该有话说。** it/fr/pt 的义项来自 2–4 个维基版，
+      //    我们目前只抽了英文版那一支 —— **没抽过的版组件必须闭嘴**，
+      //    说「源头未给出」就是把"我们没做"说成"源头没有"。
+      //    ⇒ 期望条数 ＝ 词源支里**所属版已抽过**的那些，不是全部标题。
+      //    （fr 实测 40 个词里就有 7 个这样的块，判据不区分就会恒红。）
+      const want = etymBlocksOf(senses).filter((k) => ed.includes(editionOf(k))).length;
+      const notes = (h.match(/class="etym-text/g) || []).length;
+      return want !== notes ? `该有 ${want} 条正文/说明，页面上 ${notes} 条` : null;
+    },
+  },
+  {
+    // 🔴🔴 **这一条守的是「配对对不对」，不是「有没有」。**
+    //    词源号是**位置型**键，正文贴错一支 ⇒ 数量对得上、配对全错，且看着完全合理
+    //    （`[[primary-key-is-not-enough]]`：计数型闸对错配结构性失明）。
+    //    ⇒ 逐块比：页面上第 k 个词源块印的那句，必须等于**第 k 个词源键**在
+    //      `etymologyTexts` 里那份切出来的第一句。
+    name: '🔴 H2 词源正文贴到了别的词源支上',
+    hit: (senses, h, e) => {
+      const texts = (e as { etymologyTexts?: Record<string, string> }).etymologyTexts;
+      if (!texts) return null;
+      const ed = (e as { etymologyEditions?: string[] }).etymologyEditions ?? [];
+      const all = etymBlocksOf(senses);
+      if (all.length < 2) return null;         // 单词源不印标题，没什么可配的
+      // 只比**印得出来的那些**：没抽过的版不渲染任何块，把它算进去会整体错位。
+      const keys = all.filter((k) => ed.includes(editionOf(k)));
+      // ⚠️ **先把语种徽标整个元素剥掉，再剥标签。** 第一版直接 `replace(/<[^>]*>/g,'')`，
+      //    于是徽标里的文字 `EN` 粘在正文前面（`ENA representation of…`），
+      //    22 条真词条当场报红 —— **闸自己的 bug 长得和"贴错支"一模一样**。
+      //    （同一个文件里 `headsInHtml` 的圈号那次也是这样，注释就在上面。）
+      const shown = [...h.matchAll(
+        /class="etym-text(?: etym-text-none)?"[^>]*>([\s\S]*?)<\/div>/g)]
+        .map((m) => m[1]
+          .replace(/<span class="sense-src-lang">[^<]*<\/span>/g, '')
+          .replace(/<[^>]*>/g, ''));
+      if (shown.length !== keys.length) {
+        return `${keys.length} 支词源，页面上 ${shown.length} 条正文`;
+      }
+      const norm = (x: string) => x.replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').trim();
+      for (let k = 0; k < keys.length; k += 1) {
+        const want = etymologyBrief(texts[keys[k]]);
+        const got = norm(shown[k]);
+        if (!want) {
+          if (!got.includes('源头未给出')) {
+            return `第 ${k + 1} 支源头没正文，页面却印了「${got.slice(0, 30)}」`;
+          }
+          continue;
+        }
+        if (!got.startsWith(norm(want).slice(0, 40))) {
+          return `第 ${k + 1} 支（${keys[k]}）印的不是它自己的：页面「${got.slice(0, 36)}」`
+            + ` ≠ 库里「${norm(want).slice(0, 36)}」`;
+        }
+      }
+      return null;
+    },
+  },
+  {
+    // 负控：库里明明有正文，页面却说「源头未给出」—— 把「有」说成「没有」，
+    // 与 H1「留白」是一对：一个是不说话，一个是说错话。
+    name: '🔴 H3 库里有词源正文，页面却说源头没给',
+    hit: (senses, h, e) => {
+      const texts = (e as { etymologyTexts?: Record<string, string> }).etymologyTexts;
+      if (!texts) return null;
+      const ed = (e as { etymologyEditions?: string[] }).etymologyEditions ?? [];
+      const all = etymBlocksOf(senses);
+      if (all.length < 2) return null;
+      const keys = [...new Set(all.filter((k) => ed.includes(editionOf(k))))];
+      const have = keys.filter((k) => etymologyBrief(texts[k])).length;
+      const none = (h.match(/etym-text-none/g) || []).length;
+      return none > keys.length - have
+        ? `${keys.length} 支里库中 ${have} 支有正文，页面却有 ${none} 条「源头未给出」` : null;
+    },
+  },
 ];
 
 const MUTS: Array<[string, (h: string) => string]> = [
@@ -215,10 +340,21 @@ const MUTS: Array<[string, (h: string) => string]> = [
       '<div class="pos-group"><div class="etym-label">词源 ①</div>')],
   ['M6 把两块并成一块（跨词源合组的样子）',
     (h) => h.replace(/<\/div><div class="pos-group">(<div class="etym-label">[^<]*<\/div>)?/, '')],
+  // ── H 组的变异（2026-09-14）──
+  ['M7 词源正文整块没渲染', (h) => h.replace(/class="etym-text/g, 'class="x"')],
+  ['M8 正文贴错支（把第一块的正文复制到第二块）',
+    (h) => {
+      const m = [...h.matchAll(
+        /(<div class="etym-text(?: etym-text-none)?"[^>]*>)([\s\S]*?)(<\/div>)/g)];
+      return m.length > 1 ? h.replace(m[1][0], m[1][1] + m[0][2] + m[1][3]) : h;
+    }],
+  ['M9 有正文却印成「源头未给出」',
+    (h) => h.replace(/<div class="etym-text" [^>]*>[\s\S]*?<\/div>/,
+      '<div class="etym-text etym-text-none">源头未给出这一支的词源说明</div>')],
 ];
 
 // ── 取样：**两支都要**，否则断言是恒真的 ──
-const pages: Array<[string, Sense[], string, boolean]> = [];   // [词, 义项, html, 是否多词源]
+const pages: Array<[string, Sense[], string, boolean, Entry]> = [];  // [词, 义项, html, 多词源?, entry]
 const bucket = new Map<string, number>();
 for (const lang of LANGS) {
   const svc = getService(lang) as unknown as {
@@ -239,7 +375,7 @@ for (const lang of LANGS) {
       if (!e) continue;
       const senses = (e[SENSE_FIELD[lang]] ?? []) as Sense[];
       if (senses.length === 0) continue;
-      pages.push([`${lang} ${w}`, senses, render(lang, e), kind === '多词源']);
+      pages.push([`${lang} ${w}`, senses, render(lang, e), kind === '多词源', e]);
       n += 1;
     }
     bucket.set(`${lang} ${kind}`, n);
@@ -252,9 +388,9 @@ console.log(`  取样 ${pages.length} 个词：\n`
 
 const fails = new Map<string, string[]>();
 const counts = new Map<string, number>();
-for (const [w, senses, html] of pages) {
+for (const [w, senses, html, , entry] of pages) {
   for (const c of CHECKS) {
-    const why = c.hit(senses, html);
+    const why = c.hit(senses, html, entry);
     if (why) {
       const a = fails.get(c.name) ?? [];
       if (a.length < 4) a.push(`${w}：${why}`);
@@ -281,11 +417,11 @@ if (mutate) {
   for (const [name, f] of MUTS) {
     const got = new Set<string>();
     let hits = 0;
-    for (const [, senses, html] of pages) {
+    for (const [, senses, html, , entry] of pages) {
       let bad: string;
       try { bad = f(html); } catch { continue; }
       if (bad === html) continue;          // 这个词身上造不出这种缺陷，跳过
-      for (const c of CHECKS) if (c.hit(senses, bad)) { got.add(c.name); hits += 1; }
+      for (const c of CHECKS) if (c.hit(senses, bad, entry)) { got.add(c.name); hits += 1; }
     }
     if (got.size === 0) { dead += 1; console.log(`   🔴 ${name}  —— 没有任何断言逮到它`); }
     else {

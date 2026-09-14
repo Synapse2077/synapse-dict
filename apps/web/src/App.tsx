@@ -9,7 +9,8 @@ import {
   FR_REGION_CODE_LABELS, FR_PRON_CONTEXT_LABELS, FR_ARTICLE,
   PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE, ptInflHeading,
   DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel,
-  EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels } from '@synapse-dict/dict-labels';
+  EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels,
+  etymologyBrief } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
 
@@ -60,6 +61,15 @@ type EnEntry = {
   relations: { kind: string; targets: { word: string; clickable: boolean }[] }[];
   /** 🔴 **六成的词只有这个**（`legacy_gloss`）—— senses 空而本字段非空是正常形态 */
   legacy: { text: string; qual: string } | null;
+  /**
+   * 词源正文（2026-09-14）。键是 `EnSense.etymKey` 那把**不透明键**，值是**源头全文**。
+   * ⚠️ 服务层端的是全文，页面只印 `etymologyBrief()` 切出来的第一句 ——
+   *    全文永远在库里（用户 2026-09-14：线上只放 sqlite，要能看全部信息）。
+   * ⚠️ 可选：老词典层那批词一条词源都没有，这个字段会是空对象。
+   */
+  etymologyTexts?: Record<string, string>;
+  /** 我们抽过哪些维基版的词源正文。没抽过的版，组件必须闭嘴（见 `EtymologyNote`）。 */
+  etymologyEditions?: string[];
 };
 
 // Spanish entry (西语专属；数据源自 kaikki，经 es/build.py 产出扁平 dict 表)
@@ -103,6 +113,11 @@ type SpanishBase = {
   senses: SpanishSense[];
 };
 type SpanishEntry = {
+  /** 词源正文（2026-09-14）。键是义项的 `etymKey`，值是**源头原文全文**；
+   *  页面只印 `etymologyBrief()` 切的第一句。**没抽过的版查不到 ⇒ 不许说「源头未给出」**。 */
+  etymologyTexts?: Record<string, string>;
+  /** 我们抽过哪些维基版的词源正文。没抽过的版，组件必须闭嘴（见 `EtymologyNote`）。 */
+  etymologyEditions?: string[];
   lang: string;
   id: number;
   word: string;
@@ -224,6 +239,11 @@ type ItBase = {
   senses: ItSense[];
 };
 type ItEntry = {
+  /** 词源正文（2026-09-14）。键是义项的 `etymKey`，值是**源头原文全文**；
+   *  页面只印 `etymologyBrief()` 切的第一句。**没抽过的版查不到 ⇒ 不许说「源头未给出」**。 */
+  etymologyTexts?: Record<string, string>;
+  /** 我们抽过哪些维基版的词源正文。没抽过的版，组件必须闭嘴（见 `EtymologyNote`）。 */
+  etymologyEditions?: string[];
   lang: 'it';
   id: number;
   word: string;
@@ -313,6 +333,11 @@ type FrBase = {
   senses: FrSense[];
 };
 type FrEntry = {
+  /** 词源正文（2026-09-14）。键是义项的 `etymKey`，值是**源头原文全文**；
+   *  页面只印 `etymologyBrief()` 切的第一句。**没抽过的版查不到 ⇒ 不许说「源头未给出」**。 */
+  etymologyTexts?: Record<string, string>;
+  /** 我们抽过哪些维基版的词源正文。没抽过的版，组件必须闭嘴（见 `EtymologyNote`）。 */
+  etymologyEditions?: string[];
   lang: 'fr';
   id: number;
   word: string;
@@ -391,6 +416,21 @@ type PtForm = { form: string; label: string | null };
 type PtAltOf = { target: string; zh: string | null; clickable: boolean };
 type PtRelationTarget = { word: string; clickable: boolean };
 type PtRelationGroup = { kind: string; targets: PtRelationTarget[] };
+
+// 搭配详情页的载荷（2026-09-14）。
+// ⚠️ 这是 `packages/dict-core/src/collocation.ts` 里 `CollocationDetail` 的**前端副本** ——
+//    `dict-core` 依赖 `node:sqlite`，浏览器端引不进来，所以本文件里所有跨端类型
+//    都是抄一份（见 FrEntry / PtEntry 那两处同样的说明）。改一边记得改另一边；
+//    契约闸 `contract-check-colloc.tsx` 直接拿服务层的真数据喂这个组件，抄漂了当场就红。
+type CollocationDetail = {
+  lang: string;
+  text: string;
+  headword: string | null;
+  zh: string | null;
+  srcText: string | null;
+  owners: string[];
+  parts: { word: string; clickable: boolean }[];
+};
 type PtAudio = {
   url: string; region: string | null; regionSrc: string | null; speaker: string | null;
 };
@@ -411,6 +451,11 @@ type PtBase = {
   senses: PtSense[];
 };
 type PtEntry = {
+  /** 词源正文（2026-09-14）。键是义项的 `etymKey`，值是**源头原文全文**；
+   *  页面只印 `etymologyBrief()` 切的第一句。**没抽过的版查不到 ⇒ 不许说「源头未给出」**。 */
+  etymologyTexts?: Record<string, string>;
+  /** 我们抽过哪些维基版的词源正文。没抽过的版，组件必须闭嘴（见 `EtymologyNote`）。 */
+  etymologyEditions?: string[];
   lang: 'pt';
   id: number;
   word: string;
@@ -490,6 +535,11 @@ type DeBase = {
   senses: DeSense[];
 };
 type DeEntry = {
+  /** 词源正文（2026-09-14）。键是义项的 `etymKey`，值是**源头原文全文**；
+   *  页面只印 `etymologyBrief()` 切的第一句。**没抽过的版查不到 ⇒ 不许说「源头未给出」**。 */
+  etymologyTexts?: Record<string, string>;
+  /** 我们抽过哪些维基版的词源正文。没抽过的版，组件必须闭嘴（见 `EtymologyNote`）。 */
+  etymologyEditions?: string[];
   lang: 'de';
   id: number;
   word: string;
@@ -676,9 +726,17 @@ export function capAudios<T extends { url: string | null; region?: string | null
 //   是"没想到"还是"想过了不做"。
 // 🔴 契约闸里那几条「必须出现来源标记」的断言已**反向**改成「不许出现」
 //   —— `[[fix-regression-and-gate]]`：判据过期就改判据，留着恒红或删掉都是错的。
-function CollocationSection({ items, lang }: {
+// 🔴🔴 **2026-09-14：短语从死文字变成可点的入口。**
+//    用户：「搭配我希望也有详情页，请按照现有格式配置」。
+//    ⚠️ `onColloc` 是**可选**的：契约闸会单独渲染这些视图，不给这个回调；
+//       没给就退回原来的纯文字，而不是渲染一个点了会炸的按钮。
+//    ⚠️ 用 `<a href>` 而不是 `<button>`：与关系词/异体/变形形那些跳转保持同一种可点物，
+//       读者能中键新开、能看见地址。`.rel-link` 那条 CSS 是给 `<a>` 写的，
+//       套到 `<button>` 上会露出浏览器默认按钮外壳（2026-09-10 en 栽过，5 处）。
+function CollocationSection({ items, lang, onColloc }: {
   items: { text: string; zh: string | null; src: string | null; srcText?: string | null }[];
   lang: string;
+  onColloc?: (text: string) => void;
 }) {
   if (items.length === 0) return null;
   return (
@@ -693,7 +751,15 @@ function CollocationSection({ items, lang }: {
       <ul className="colloc-list">
         {items.map((c, i) => (
             <li className="colloc-item" key={`${c.text}-${i}`}>
-              <span className="colloc-text">{c.text}</span>
+              {onColloc
+                ? (
+                  <a
+                    className="colloc-text colloc-link"
+                    href={`#c/${encodeURIComponent(c.text)}`}
+                    onClick={(ev) => { ev.preventDefault(); onColloc(c.text); }}
+                  >{c.text}</a>
+                )
+                : <span className="colloc-text">{c.text}</span>}
               {c.zh && <span className="colloc-zh">{c.zh}</span>}
               {/* 🔴 2026-09-12：**有源的那一批比机器生成的多一层，而我们一直没显示。**
                   用户问「那非生成的那些有详情吗」才查出来：it 从 kaikki 子条目搬来的
@@ -710,6 +776,82 @@ function CollocationSection({ items, lang }: {
         ))}
       </ul>
     </section>
+  );
+}
+
+// ══ 搭配详情页 —— 五门共用同一个组件（en 没有搭配数据）════════════════════
+//
+// 用户 2026-09-14：「搭配我希望也有详情页，请按照现有格式配置」。
+// 在此之前搭配是词条页上一行死文字：2026-09-12 补了反查**搜得到**，
+// 但搜索结果那一行点下去跳的是**所属词条**，短语自己没有落点。
+//
+// ⚠️ **能放的只有这些，没有更多了** —— 这一层是模型写的，没有音标、没有义项、
+//    没有例句、没有词源。硬造一个"像词条页"的壳去填空位，就是拿排版冒充内容
+//    （`[[dict-framework-doc]]`：错比缺更伤权威）。⇒ 四块，缺的不占位。
+// ⚠️ 类名**全部复用现有的**（`entry-detail` / `entry-section` / `sense-zh` /
+//    `sense-src` / `rel-row` / `rel-item` / `rel-link`）——
+//    用户 2026-09-11：「内容安排可以不一样，但是字体样式应该要统一」；
+//    另起一套类名就是 de 那 16 个孤儿类名的长法。
+// ⚠️ **短语本身就是词头时根本走不到这里**：`App` 拿到 `headword` 直接改跳真词条页
+//    （用户 2026-09-14 定）。真词条有音标/义项/例句/关系，这一页在那种情况下没有价值。
+export function CollocationView({ detail, onWord }: {
+  detail: CollocationDetail; onWord: (w: string) => void;
+}) {
+  const link = (w: string) => (
+    <a
+      className="rel-link"
+      href={`#${encodeURIComponent(w)}`}
+      onClick={(ev) => { ev.preventDefault(); onWord(w); }}
+    >{w}</a>
+  );
+  return (
+    <article className="entry-detail">
+      <header className="entry-header">
+        <h2 className="entry-word" lang={detail.lang}>{detail.text}</h2>
+      </header>
+
+      {/* 释义。中文五门 100% 有；原文释义只有 it 那 303 条有，缺就不占位。 */}
+      {(detail.zh || detail.srcText) && (
+        <section className="entry-section">
+          <h3>释义</h3>
+          {detail.zh && <div className="sense-zh">{detail.zh}</div>}
+          {detail.srcText && (
+            <div className="sense-src" lang={detail.lang}>
+              <span className="sense-src-lang">{detail.lang.toUpperCase()}</span>
+              {detail.srcText}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* 🔴 `owners` 是数组不是单值：同一条短语可能挂在多个词条下（五门共 1,506 条）。
+          取第一条会让读者以为这个短语只跟一个词有关。 */}
+      {detail.owners.length > 0 && (
+        <section className="entry-section">
+          <h3>出现在这些词条的搭配中</h3>
+          <div className="rel-row">
+            {detail.owners.map((w) => (
+              <span className="rel-item" key={w}>{link(w)}</span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 组成词。⚠️ 只有一个词的短语不渲染这一块 —— 那时它就是词头本身重印一遍
+          （de 有 `preisverhandelbar` 这种单词条目）。 */}
+      {detail.parts.length > 1 && (
+        <section className="entry-section">
+          <h3>组成词</h3>
+          <div className="rel-row">
+            {detail.parts.map((p) => (
+              <span className="rel-item" key={p.word}>
+                {p.clickable ? link(p.word) : <span className="rel-plain">{p.word}</span>}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+    </article>
   );
 }
 
@@ -1007,6 +1149,10 @@ export default function App() {
   const [entry, setEntry] = useState<AnyEntry | null>(null);
   const [entryError, setEntryError] = useState<FetchError | null>(null);
   const [entryNotFound, setEntryNotFound] = useState(false);
+  // 搭配详情页（2026-09-14）。与 `selectedWord` **互斥**：右栏同时只显示一样东西。
+  const [selectedColloc, setSelectedColloc] = useState<string | null>(null);
+  const [colloc, setColloc] = useState<CollocationDetail | null>(null);
+  const [collocNotFound, setCollocNotFound] = useState(false);
   const [loading, setLoading] = useState(false);
   const [entryLoading, setEntryLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -1079,24 +1225,48 @@ export default function App() {
   }, [lang]);
 
   // Hash routing: read word from URL on mount
+  //
+  // 🔴 2026-09-14 加了第二种落点（搭配详情页），所以 hash 现在有两种形状：
+  //        #<词形>        —— 词条页（老形状，一个字没变）
+  //        #c/<短语>      —— 搭配详情页
+  //    ⚠️ 前缀用 `c/` 而不是 `c:`：`encodeURIComponent` 会把词形里的 `/` 编成 `%2F`，
+  //       所以裸斜杠**只可能**是我们自己写的分隔符，不会跟任何词形撞车；
+  //       而 `:` 不在编码表里，`#c:` 会跟真有冒号的词形（库里确实有）分不开。
+  const applyHash = useCallback((h: string) => {
+    if (!h) return;
+    if (h.startsWith('c/')) {
+      setSelectedColloc(decodeURIComponent(h.slice(2)));
+      setSelectedWord(null);
+    } else {
+      setSelectedWord(decodeURIComponent(h));
+      setSelectedColloc(null);
+    }
+  }, []);
+
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     if (hash) {
-      const word = decodeURIComponent(hash);
-      setSelectedWord(word);
-      setQuery(word);
+      applyHash(hash);
+      // 搜索框里放**读者能看懂的那一串**：词条页放词形，搭配页放短语。
+      setQuery(decodeURIComponent(hash.startsWith('c/') ? hash.slice(2) : hash));
     }
-    const onHashChange = () => {
-      const h = window.location.hash.slice(1);
-      if (h) setSelectedWord(decodeURIComponent(h));
-    };
+    const onHashChange = () => applyHash(window.location.hash.slice(1));
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
+  }, [applyHash]);
 
+  // ⚠️ 两个 select 都要把**对方**清掉：右栏同时只显示一样东西，
+  //    漏清的话会出现「点了搭配、右边还挂着上一个词条」这种两个都在的状态。
   const selectWord = useCallback((word: string) => {
     setSelectedWord(word);
+    setSelectedColloc(null);
     window.location.hash = encodeURIComponent(word);
+  }, []);
+
+  const selectColloc = useCallback((text: string) => {
+    setSelectedColloc(text);
+    setSelectedWord(null);
+    window.location.hash = `c/${encodeURIComponent(text)}`;
   }, []);
 
   // 🔴🔴 **一条搜索结果的「落点」和它的「字面」是两回事，只许有一个地方说这件事。**
@@ -1118,6 +1288,19 @@ export default function App() {
   //      （`[[it-display-layer-stage8]]` 的又一例）。
   const targetOf = useCallback(
     (item: SearchItem) => item.via?.word ?? item.word, []);
+
+  // 🔴🔴 **2026-09-14：搭配反查出来的行，落点改成搭配详情页本身。**
+  //    2026-09-12 那版让它跳**所属词条**（`targetOf`），因为短语不是词头、
+  //    `getEntry` 必然是 null —— 那是当时唯一能给的落点，但读者搜的是这条短语，
+  //    却被扔到另一个词的页面上，还得自己在搭配表里把它找回来。
+  //    现在短语有自己的页，直接去它自己那儿；「出现在 X 的搭配中」由那一页负责回答。
+  //    ⚠️ **5 个调用点全走这一个函数**（点击 / 输入 200ms 后自动选中 / ↑ / ↓ / Enter）——
+  //       `targetOf` 那次就是只改了点击那一处，而自动选中那条根本轮不到用户点，
+  //       右栏一开始就是空的（`docs/PITFALLS.md` 54）。
+  const openItem = useCallback((item: SearchItem) => {
+    if (item.via?.kind === 'collocation') selectColloc(item.word);
+    else selectWord(targetOf(item));
+  }, [selectColloc, selectWord, targetOf]);
 
   const pickExample = useCallback((word: string) => {
     setQuery(word);
@@ -1157,7 +1340,7 @@ export default function App() {
           const exactIndex = items.findIndex((i) => i.word === keyword);
           const pick = exactIndex >= 0 ? exactIndex : 0;
           setActiveIndex(pick);
-          selectWord(targetOf(items[pick]));
+          openItem(items[pick]);
         } else {
           setActiveIndex(0);
         }
@@ -1170,7 +1353,7 @@ export default function App() {
     }, 200);
 
     return () => window.clearTimeout(timer);
-  }, [query, lang, selectWord, targetOf, reloadKey]);
+  }, [query, lang, openItem, reloadKey]);
 
   // Load entry
   useEffect(() => {
@@ -1216,21 +1399,62 @@ export default function App() {
     return () => { cancelled = true; };
   }, [selectedWord, lang, reloadKey]);
 
+  // Load collocation（2026-09-14）
+  //
+  // 🔴 **短语本身就是词头时，这里直接改跳真词条页**（用户 2026-09-14 定）：
+  //    五门共 13,385 个短语是这样（fr 3,746 / it 3,179 / es 2,518 …）。
+  //    真词条有音标、义项、例句、关系；搭配页只有中文一行 —— 停在搭配页是**降级**。
+  //    ⚠️ 判断放在**服务端**（`headword` 字段），不在点击处：搜索结果、词条页里的
+  //       搭配、地址栏直接敲 `#c/…` 是三条路，写在点击处只能覆盖其中一条
+  //       （`[[lesson-must-become-mechanism]]`；`targetOf` 那次就是漏了 4 个调用点）。
+  useEffect(() => {
+    if (!selectedColloc) {
+      setColloc(null);
+      setCollocNotFound(false);
+      return undefined;
+    }
+    let cancelled = false;
+    async function loadColloc() {
+      try {
+        setEntryLoading(true);
+        setEntryError(null);
+        const response = await fetch(
+          `/api/collocations/${encodeURIComponent(selectedColloc!)}?lang=${lang}`);
+        if (response.status === 404) {
+          if (!cancelled) { setColloc(null); setCollocNotFound(true); }
+          return;
+        }
+        classifyResponse(response);
+        const data = await response.json() as CollocationDetail;
+        if (cancelled) return;
+        if (data.headword) { selectWord(data.headword); return; }
+        setColloc(data);
+        setCollocNotFound(false);
+      } catch (e) {
+        if (!cancelled) setEntryError(errorKind(e));
+      } finally {
+        if (!cancelled) setEntryLoading(false);
+      }
+    }
+    void loadColloc();
+    return () => { cancelled = true; };
+  }, [selectedColloc, lang, reloadKey, selectWord]);
+
   // Keyboard navigation
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       const next = Math.min(activeIndex + 1, results.length - 1);
       setActiveIndex(next);
-      if (results[next]) selectWord(targetOf(results[next]));
+      if (results[next]) openItem(results[next]);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       const prev = Math.max(activeIndex - 1, 0);
       setActiveIndex(prev);
-      if (results[prev]) selectWord(targetOf(results[prev]));
+      if (results[prev]) openItem(results[prev]);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (results[activeIndex]) selectWord(targetOf(results[activeIndex]));
+      if (results[activeIndex]) openItem(results[activeIndex]);
     }
   };
 
@@ -1245,6 +1469,13 @@ export default function App() {
     setQuery(word);
     selectWord(word);
   }, [selectWord]);
+
+  // 点词条页里的搭配。与 `goToWord` 一样也写搜索框 —— 读者得能看出自己在看什么，
+  // 而且左栏会立刻列出这条短语（2026-09-12 的反查），上下文不断。
+  const goToColloc = useCallback((text: string) => {
+    setQuery(text);
+    selectColloc(text);
+  }, [selectColloc]);
 
   // 回到首页（点 logo）。2026-09-12。
   //
@@ -1262,6 +1493,7 @@ export default function App() {
   const goHome = useCallback(() => {
     setQuery('');
     setSelectedWord(null);   // ← 「载入词条」那个效应据此清空右栏
+    setSelectedColloc(null); // ← 同上，搭配那个效应据此清空（漏了它点 logo 回不了首页）
     setActiveIndex(0);
     setSearchError(null);
     if (window.location.hash) {
@@ -1347,7 +1579,7 @@ export default function App() {
               key={`${item.id}-${item.word}`}
               // 🔴 落点是 `via.word`（词头），不是 `item.word`（短语本身）——
               //    短语不是词头，拿它去 getEntry 一定查不到，点了就是一片空白。
-              onClick={() => { setActiveIndex(i); selectWord(targetOf(item)); }}
+              onClick={() => { setActiveIndex(i); openItem(item); }}
               type="button"
             >
               <span className="result-word">{item.word}</span>
@@ -1393,32 +1625,41 @@ export default function App() {
         )}
 
         {entry && entry.lang === 'it' && (
-          <ItalianEntryView entry={entry as ItEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+          <ItalianEntryView entry={entry as ItEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
         {entry && entry.lang === 'fr' && (
-          <FrenchEntryView entry={entry as FrEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+          <FrenchEntryView entry={entry as FrEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
         {entry && entry.lang === 'pt' && (
-          <PortugueseEntryView entry={entry as PtEntry} onWord={goToWord} speak={speakWord} />
+          <PortugueseEntryView entry={entry as PtEntry} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
         {entry && entry.lang === 'de' && (
-          <GermanEntryView entry={entry as DeEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+          <GermanEntryView entry={entry as DeEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
         {entry && entry.lang !== 'en' && entry.lang !== 'it' && entry.lang !== 'fr' && entry.lang !== 'pt' && entry.lang !== 'de' && (
-          <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+          <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
-        {!entry && entryLoading && <div className="detail-loading">加载中…</div>}
+        {colloc && <CollocationView detail={colloc} onWord={goToWord} />}
 
-        {!entry && !entryLoading && entryError && (
+        {!entry && !colloc && entryLoading && <div className="detail-loading">加载中…</div>}
+
+        {!entry && !colloc && !entryLoading && entryError && (
           <div className="detail-error">
             <span className="hint-emoji">{entryError === 'rate' ? '🌊' : '😕'}</span>
             <p>{entryError === 'rate' ? '请求有点频繁，稍等一下再试～' : '词条加载失败，请稍后重试'}</p>
             <button className="retry-btn" onClick={retry} type="button">重试</button>
+          </div>
+        )}
+
+        {!colloc && !entryLoading && !entryError && collocNotFound && selectedColloc && (
+          <div className="detail-error">
+            <span className="hint-emoji">🔍</span>
+            <p>{`没有收录搭配「${selectedColloc}」`}</p>
           </div>
         )}
 
@@ -1429,7 +1670,19 @@ export default function App() {
           </div>
         )}
 
-        {!entry && !entryLoading && !entryError && !selectedWord && (
+        {/* 🔴🔴 **「首页」的判据是「什么都没选中」，不是「没选中词」。**
+            2026-09-14 搭配详情页上线当天就露馅：点开 `serenar los ánimos`，
+            搭配详情下面又挂了一整块欢迎页（用户：「这个样式乱了」）——
+            因为这条判据只问了 `selectedWord`，而右栏的落点已经有两种了。
+            ⚠️ `!colloc` 与 `!selectedColloc` 两个都要：前者挡"已经拿到数据"，
+               后者挡"正在加载"那一瞬 —— 少任何一个都会闪一下欢迎页。
+            ⚠️ 再加第三种落点时**必须回来加一条**。契约闸
+               `contract-check-colloc.tsx` 的 `checkEmptyStateGuard()` 会盯着这一行：
+               它把所有 `selected*` 状态从源码里读出来，逐个要求出现在这个判据里，
+               所以漏加会当场报红，而不是等用户截图
+               （`[[lesson-must-become-mechanism]]`）。 */}
+        {!entry && !colloc && !entryLoading && !entryError
+          && !selectedWord && !selectedColloc && (
           <div className="empty-state">
             <div className="empty-logo">突</div>
             <h1 className="empty-title">突触词典</h1>
@@ -1552,6 +1805,43 @@ function etymLabel(n: number): string {
  *    给它们统一印「词源 ①」是加噪声不是加信息 —— 与「唯一一组时不印词性标题」同一条判据。
  * 🔴 **只在词源**变化**时印**：同一个词源下的名词组、动词组不重复印。
  */
+/**
+ * 词源标题下面那一句正文。**六门共用**（en 2026-09-14 先接，其余五门随后）。
+ *
+ * 🔴 印的是 `etymologyBrief()` 切出来的**第一句 ＝ 派生链本身**，不是全文。
+ *    用户 2026-09-14 定：长出来的从来不是链，是链后面跟着的同源词表与考据讨论
+ *    （`cat` 3,167 字里 2,850 字在讲猫怎么随农业从近东传开）。
+ *    实测超 300 字的块：全文 13.1% → 只留第一句 **3.3%**，而派生信息一级不丢。
+ * 🔴 **全文在库里，不在这里**：`entry.etymologyTexts` 端的就是原文，
+ *    要改成印全文只是把这一行的 `etymologyBrief(t)` 换成 `t`。
+ * ⚠️ **源头没给正文的要照实说出来，不许留白。** 实测 20% 的词源块是这样
+ *    （`bat` 九支里源头只写了五支）。留白读者会以为页面坏了；
+ *    而让模型补一句「源自古英语」是造假（`[[dict-framework-doc]]`：错比缺更伤权威）。
+ */
+function EtymologyNote({ etymKey, texts, editions }: {
+  etymKey: string | null; texts?: Record<string, string>; editions?: string[];
+}) {
+  const text = etymKey ? texts?.[etymKey] : undefined;
+  const brief = etymologyBrief(text);
+  if (!brief) {
+    // 🔴🔴 **「源头没写」和「我们没抽」是两件事，绝不能说成同一件。**
+    //    it/fr/pt 的义项来自 2–4 个维基版（en/it/fr/pt/el/tr/zh-edition），
+    //    每版各有一套词源编号，而我们目前只抽了英文版那一支。
+    //    对没抽过的版说「源头未给出」＝ 把「我们没做」说成「源头没有」，
+    //    那是造假（`[[dict-framework-doc]]`：错比缺更伤权威）。
+    //    ⇒ 判据：这一支所属的**版**在不在「已抽过」名单里。
+    //      在 ⇒ 源头确实没写，照实说；不在 ⇒ **一个字都不说**。
+    const edition = etymKey ? etymKey.slice(0, etymKey.lastIndexOf(':')) : '';
+    if (!edition || !(editions ?? []).includes(edition)) return null;
+    return <div className="etym-text etym-text-none">源头未给出这一支的词源说明</div>;
+  }
+  return (
+    <div className="etym-text" lang="en">
+      <span className="sense-src-lang">EN</span>{brief}
+    </div>
+  );
+}
+
 function etymHeadOf(
   groups: { etym: string | null }[], i: number, order: Map<string, number>,
 ): string | null {
@@ -1705,7 +1995,16 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                    （kaikki 给了，建库时没收），编一句"源自古英语"是造假。
                    这一条已记账，要补得回源重抽。 */}
             {etymHeadOf(senseGroups, gi, enEtymOrder) && (
-              <div className="etym-label">{etymHeadOf(senseGroups, gi, enEtymOrder)}</div>
+              <>
+                <div className="etym-label">{etymHeadOf(senseGroups, gi, enEtymOrder)}</div>
+                {/* 🔴🔴 2026-09-14：正文接上了。原来这里的注释写着「只印词源**序号**，
+                    不印词源正文 —— 我们没存 `etymology_text`（kaikki 给了，建库时没收），
+                    编一句"源自古英语"是造假。这一条已记账，要补得回源重抽」。
+                    用户看 `serene` 问「这里的词源是什么意思？」⇒ 那笔账结了：
+                    `en/pipeline/ingest_etymology.py` 抽了 493,490 条 / 42 MB 落库。 */}
+                <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
+                    editions={entry.etymologyEditions} />
+              </>
             )}
             {/* 🔴 **无词性的组，只要它不是唯一的一组，就必须自己说出来。**
                 en 有 **223 万条**义项 `pos` 为空（老词典层只有 14.95% 带词性），
@@ -1932,8 +2231,9 @@ function SenseChips({ sense }: { sense: SpanishSense | SpanishUnifiedSense }) {
 //      「只断言首屏那一段」也要跟着改回去 —— 它们现在断言的是**全部义项**。
 
 
-export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
+export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }: {
   entry: SpanishEntry; speakLocale: string; onWord: (w: string) => void;
+  onColloc?: (text: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
   // 义项折叠（2026-08-11）。产品是**划词弹窗**，"字段轻快够用"是既定范围，
@@ -2133,7 +2433,12 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
               {etymHeadOf(esGroups, gi, esEtymOrder) && (
-                <div className="etym-label">{etymHeadOf(esGroups, gi, esEtymOrder)}</div>
+                <>
+                  <div className="etym-label">{etymHeadOf(esGroups, gi, esEtymOrder)}</div>
+                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
+                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
+                    editions={entry.etymologyEditions} />
+                </>
               )}
               {grp.pos && (
                 <div className="pos-group-label">{posLabel(grp.pos)}</div>
@@ -2310,7 +2615,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      <CollocationSection items={entry.collocations} lang="es" />
+      <CollocationSection items={entry.collocations} lang="es" onColloc={onColloc} />
     </article>
   );
 }
@@ -2458,8 +2763,9 @@ function ItRelationGroups({ groups, onWord }: {
   return <RelationGroups groups={groups} onWord={onWord} />;
 }
 
-export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
+export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }: {
   entry: ItEntry; speakLocale: string; onWord: (w: string) => void;
+  onColloc?: (text: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
   // 分组结果在两处用到（渲染、以及算词源序号），先算一次。
@@ -2595,7 +2901,12 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
               {etymHeadOf(itGroups, gi, itEtymOrder) && (
-                <div className="etym-label">{etymHeadOf(itGroups, gi, itEtymOrder)}</div>
+                <>
+                  <div className="etym-label">{etymHeadOf(itGroups, gi, itEtymOrder)}</div>
+                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
+                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
+                    editions={entry.etymologyEditions} />
+                </>
               )}
               {grp.pos && (
                 <div className="pos-group-label">
@@ -2738,7 +3049,7 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      <CollocationSection items={entry.collocations} lang="it" />
+      <CollocationSection items={entry.collocations} lang="it" onColloc={onColloc} />
 
       {/* 挂不上具体义项的例句（39.0% 挂上了，其余在这里成块）。
           🔴 不硬塞进第一条义项 —— 那等于替源头做了一个它没做的判断，
@@ -2914,8 +3225,9 @@ function FrText({ text: raw }: { text: string }) {
   );
 }
 
-export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
+export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }: {
   entry: FrEntry; speakLocale: string; onWord: (w: string) => void;
+  onColloc?: (text: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
   const posParts = entry.pos ? entry.pos.split('/') : [];
@@ -3081,7 +3393,12 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
               {etymHeadOf(frGroups, gi, frEtymOrder) && (
-                <div className="etym-label">{etymHeadOf(frGroups, gi, frEtymOrder)}</div>
+                <>
+                  <div className="etym-label">{etymHeadOf(frGroups, gi, frEtymOrder)}</div>
+                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
+                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
+                    editions={entry.etymologyEditions} />
+                </>
               )}
               {grp.pos && (
                 <div className="pos-group-label">
@@ -3220,7 +3537,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      <CollocationSection items={entry.collocations} lang="fr" />
+      <CollocationSection items={entry.collocations} lang="fr" onColloc={onColloc} />
 
       {/* 没挂上义项的例句（22.6%，见 docs/FR_PLAN.md 阶段 5 补记）。
           🔴 仍要显示，只是归不到某条义项下 —— 它们挂不上是**我们挂载失败或义项缺口**，
@@ -3372,7 +3689,8 @@ function ptCleanRef(raw: string | null): string | null {
   return s.length >= 2 ? s : null;     // 剩不到两个字符的（`.`、`,`）不展示
 }
 
-export function PortugueseEntryView({ entry, onWord, speak }: {
+export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
+  onColloc?: (text: string) => void;
   entry: PtEntry; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
@@ -3474,7 +3792,12 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
               {etymHeadOf(ptGroups, gi, ptEtymOrder) && (
-                <div className="etym-label">{etymHeadOf(ptGroups, gi, ptEtymOrder)}</div>
+                <>
+                  <div className="etym-label">{etymHeadOf(ptGroups, gi, ptEtymOrder)}</div>
+                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
+                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
+                    editions={entry.etymologyEditions} />
+                </>
               )}
               {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
               <ol className="sense-list">
@@ -3580,7 +3903,7 @@ export function PortugueseEntryView({ entry, onWord, speak }: {
         </section>
       )}
 
-      <CollocationSection items={entry.collocations} lang="pt" />
+      <CollocationSection items={entry.collocations} lang="pt" onColloc={onColloc} />
 
       {/* 🔴 真人录音。fr 那轮的头号事故就在这里：库里 39 万条 URL，
           而 `french.ts` 里 `FROM audio` 出现 **0 次** —— 一个用户都看不见。
@@ -3714,8 +4037,9 @@ function groupDeSenses(senses: DeSense[]): {
   return groups;
 }
 
-export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
+export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }: {
   entry: DeEntry; speakLocale: string; onWord: (w: string) => void;
+  onColloc?: (text: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
   // 分组结果在两处用到（渲染、以及算词源序号），先算一次。
@@ -3854,7 +4178,12 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
               {etymHeadOf(deGroups, gi, deEtymOrder) && (
-                <div className="etym-label">{etymHeadOf(deGroups, gi, deEtymOrder)}</div>
+                <>
+                  <div className="etym-label">{etymHeadOf(deGroups, gi, deEtymOrder)}</div>
+                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
+                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
+                    editions={entry.etymologyEditions} />
+                </>
               )}
               {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
               <ol className="sense-list">
@@ -4150,7 +4479,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak }: {
         </section>
       )}
 
-      <CollocationSection items={entry.collocations} lang="de" />
+      <CollocationSection items={entry.collocations} lang="de" onColloc={onColloc} />
     </article>
   );
 }

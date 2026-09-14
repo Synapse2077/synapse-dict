@@ -91,6 +91,9 @@ DICT_FORBIDDEN = ('ipa', 'phonetic', 'phonetic_uk', 'phonetic_us',
 #    ⇒ 出版层各表行数一并进快照：**没在 expect 里显式声明的表，行数必须零变化。**
 TRACK_TABLES = ['entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sense_relation',
                 'inflection',
+                # 词源正文层（2026-09-14）。列进来闸才守得住 —— 不在清单里的表
+                # 增删多少行都不会被发现，那正是这张清单存在的理由。
+                'etymology',
                 'pronunciation', 'pronunciation_entry', 'example', 'example_gloss',
                 'collocation', 'collocation_gloss', 'audio',
                 'search_prefix', 'search_prefix_meta', 'field_src',

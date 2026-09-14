@@ -149,6 +149,16 @@ export type EnglishRulers = {
 };
 
 export type EnglishEntry = {
+  /**
+   * 我们**抽过哪些维基版**的词源正文（2026-09-14）。
+   * 🔴 展示层靠它分清两件完全不同的事：
+   *     这一版抽过、源头确实没写  ⇒ 照实说「源头未给出」
+   *     这一版**我们还没抽**      ⇒ **闭嘴**，一个字都不说
+   *    把后者说成前者，就是把「我们没做」说成「源头没有」——造假，比缺更伤权威。
+   * ⚠️ it/fr/pt 的义项来自 2–4 个维基版，而 `paths.KK` 只是英文版切片 ⇒
+   *    这个数组现在只有一项，等别的版也抽了才会变长。
+   */
+  etymologyEditions: string[];
   /** App.tsx 按这个字段分派视图；缺了它前端会落到西语视图上 */
   lang: 'en';
   id: number;
@@ -170,6 +180,17 @@ export type EnglishEntry = {
    * `senses` 为空而本字段非空是**正常形态**，不是缺陷。
    */
   legacy: { text: string; qual: string } | null;
+  /**
+   * 词源正文（2026-09-14）。键是 `EnglishSense.etymKey` 那个**不透明键**，
+   * 值是**源头原文全文**（含那棵 "Etymology tree"）。
+   *
+   * 🔴 这里给全文，不给切好的第一句。用户 2026-09-14：「线上不会放 dump，只会放
+   *    sqlite……我想看全部信息的时候能否查看」⇒ 数据层永远端全的，
+   *    「只印第一句」是展示层拿 `etymologyBrief()` 自己切的，改判据不用回源。
+   * ⚠️ 用 etymKey 当键而不是裸编号：`etymKeyOfSrcRef` 的注释说得很清楚，
+   *    两个来源的编号不是同一个命名空间，裸数字会把两个不同的词并成一个。
+   */
+  etymologyTexts: Record<string, string>;
 };
 
 const HEAD = `id, word, pos, is_lemma, collins, oxford, exam_tag, bnc, freq_rank, freq_zipf`;
@@ -187,9 +208,15 @@ export class EnglishDictService {
   /** 阶段 9 预计算缓存；表不存在时为 null ⇒ 全部走实时查询 */
   private readonly cached: ReturnType<DatabaseSync['prepare']> | null;
 
+  private readonly etymEditions: string[];
+
   constructor(databasePath: string) {
     this.db = new DatabaseSync(databasePath, { readOnly: true });
     this.q = {
+      // 词源正文（2026-09-14）。一个词的全部词源支，一次取完。
+      // ⚠️ `etym_no` 是 TEXT（源头没编号时记 "0"），别拿它当数字比较。
+      etymology: this.db.prepare(
+        `SELECT edition, etym_no, text FROM etymology WHERE word_id = ? ORDER BY etym_no`),
       stats: this.db.prepare(
         `SELECT (SELECT COUNT(*) FROM dict) AS words,
                 (SELECT COUNT(*) FROM sense) AS senses,
@@ -316,6 +343,16 @@ export class EnglishDictService {
       legacy: this.db.prepare(
         `SELECT text, qual FROM legacy_gloss WHERE word_id = ? AND published = 1`),
     };
+
+    // 抽过哪些版 —— **构造时算一次**（六门共 4–6 行的小表，不必每开一个词条页查一遍）。
+    // ⚠️ 表可能还不存在（这门还没跑 `scripts/ingest_etymology.py`）⇒ 兜到空数组，
+    //    空数组的意思是「一版都没抽」，展示层对所有词源块一律闭嘴 —— 那是对的。
+    this.etymEditions = (() => {
+      try {
+        return (this.db.prepare('SELECT DISTINCT edition FROM etymology').all() as Array<{
+          edition: string }>).map((x) => x.edition);
+      } catch { return []; }
+    })();
     // 🔴 缓存表可能不存在（阶段 9 未跑 / 旧库）⇒ 准备语句要容错，**不是致命错**
     let cached: ReturnType<DatabaseSync['prepare']> | null = null;
     try {
@@ -450,6 +487,20 @@ export class EnglishDictService {
           base: i.base, label: i.label, kind: i.kind, clickable: !!i.ok,
         })),
       legacy: legacy ?? null,
+      // 词源正文（2026-09-14）。键用 `etymKeyOfSrcRef` 拼出来的同一把**不透明键**，
+      // 这样视图拿 `sense.etymKey` 就能直接查，不必去解析那个键的内部结构。
+      // ⚠️ `en-edition` 这个前缀不是硬写的，是从本词条自己的义项里取的 ——
+      //    硬写就会在源头多出一层（`kk-en` 之类）时一声不吭地全查不到
+      //    （`[[criteria-narrower-than-you-think]]`：de 那次桥只认 `de-edition`）。
+      // 键 ＝ `${edition}:${etym_no}`，与 `etymKeyOfSrcRef` 拼出来的那把**逐字一致**。
+      // 🔴 `edition` 是入库时就按**展示层会用的那个前缀**写进去的
+      //    （`scripts/ingest_etymology.py`），所以这里不需要再从义项里推 ——
+      //    第一版在这里推前缀，多一处会漂开的判据。
+      etymologyEditions: this.etymEditions,
+      etymologyTexts: Object.fromEntries(
+        (this.q.etymology.all(row.id) as Array<{
+          edition: string; etym_no: string; text: string }>)
+          .map((r2) => [`${r2.edition}:${r2.etym_no}`, r2.text])),
     };
   }
 

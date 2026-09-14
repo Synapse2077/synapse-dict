@@ -83,7 +83,9 @@ TRACK = ['ipa_br', 'ipa_br_src', 'ipa_pt', 'ipa_pt_src', 'pos', 'level',
 # ⚠️ `pronunciation_entry` 写在这里**不代表决定要建**（`PT_PLAN` §四.3 还没定，
 #    it 建了、es 有意不建、fr 没建）。列进清单只有一个效果：**万一建了，闸立刻开始守**。
 #    要不要建，由那一节的实测决定，不由这张清单决定。
-TRACK_TABLES = ['entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sense_relation',
+TRACK_TABLES = [
+                # 词源正文层（2026-09-14）。列进来闸才守得住。
+                'etymology','entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sense_relation',
                 'inflection',
                 'pronunciation', 'pronunciation_entry', 'example', 'example_gloss',
                 'collocation', 'collocation_gloss', 'audio']

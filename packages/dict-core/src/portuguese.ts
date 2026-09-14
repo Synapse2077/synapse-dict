@@ -34,6 +34,7 @@ import { ptPartsOf } from '@synapse-dict/dict-labels';
 // 词源键：**带来源的不透明键**，理由见 etym.ts（两套编号不是同一个命名空间）。
 import { etymKeyOfEntry } from './etym.js';
 // 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts 的实测数字）。
+import { collocationParts, looseForms, type CollocationDetail } from './collocation.js';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
 
 export type PortugueseSearchItem = {
@@ -149,6 +150,25 @@ export type PortugueseBase = {
 };
 
 export type PortugueseEntry = {
+  /**
+   * 我们**抽过哪些维基版**的词源正文（2026-09-14）。
+   * 🔴 展示层靠它分清两件完全不同的事：
+   *     这一版抽过、源头确实没写  ⇒ 照实说「源头未给出」
+   *     这一版**我们还没抽**      ⇒ **闭嘴**，一个字都不说
+   *    把后者说成前者，就是把「我们没做」说成「源头没有」——造假，比缺更伤权威。
+   * ⚠️ it/fr/pt 的义项来自 2–4 个维基版，而 `paths.KK` 只是英文版切片 ⇒
+   *    这个数组现在只有一项，等别的版也抽了才会变长。
+   */
+  etymologyEditions: string[];
+  /**
+   * 词源正文（2026-09-14）。键是义项上那把**不透明** `etymKey`，值是**源头原文全文**。
+   * 🔴 端全文，不端切好的第一句：用户 2026-09-14「线上只放 sqlite，我想看全部信息时能查看」
+   *    ⇒ 数据层永远给全的，「只印第一句」是展示层拿 `etymologyBrief()` 自己切的。
+   * ⚠️ 键 ＝ `${edition}:${etym_no}`，`edition` 入库时就按展示层会用的前缀写好了。
+   * ⚠️ 只有**已抽过的版**会出现在这里。没抽过的版查不到 ⇒ 展示层必须闭嘴，
+   *    不许说「源头未给出」（那是把"我们没做"说成"源头没有"）。
+   */
+  etymologyTexts: Record<string, string>;
   lang: 'pt';
   id: number;
   word: string;
@@ -214,10 +234,61 @@ export class PortugueseDictService {
   private readonly db: DatabaseSync;
   private readonly q: Record<string, ReturnType<DatabaseSync['prepare']>>;
 
+  private readonly collocDetailQuery;
+
+  private readonly collocWordQuery;
+
+  private readonly etymologyQuery;
+
+  private readonly etymEditions: string[];
+
   constructor(databasePath: string) {
+
     this.databasePath = databasePath;
     this.db = new DatabaseSync(databasePath);
     this.db.exec('PRAGMA query_only = ON');
+
+    // ══ 搭配详情页（2026-09-14）════════════════════════════════════════════
+    // 🔴 `COLLATE NOCASE` 走 `idx_col_text_nocase`；**别写成 BINARY 比较**
+    //    —— NOCASE 索引上做 BINARY 比较是静默全表扫（`[[query-perf-collation-traps]]`）。
+    // 🔴 一条短语可能挂在多个词条下 ⇒ 这里**不加 LIMIT 1**，由调用方合并。
+    this.collocDetailQuery = this.db.prepare(`
+      SELECT c.text AS text, d.word AS owner,
+             (SELECT text FROM collocation_gloss
+               WHERE collocation_id = c.id AND lang = 'zh') AS zh,
+             -- 本语言原文释义：只有 it 那 303 条有，其余四门这一列恒 null。
+             -- ⚠️ 照查不误 —— 少查一列的代价是「唯一有人写过释义的那批永远看不到」，
+             --    2026-09-12 已经因为服务层没 SELECT 它而漏过一次。
+             (SELECT text FROM collocation_gloss
+               WHERE collocation_id = c.id AND lang = 'pt') AS srcText
+      FROM collocation c JOIN dict d ON d.id = c.word_id
+      WHERE c.text = ? COLLATE NOCASE
+      ORDER BY d.word
+    `);
+
+    // 词形存在性：判「短语本身是不是词头」与「组成词点不点得动」共用这一条。
+    // 🔴 **两个占位符就要传两个参数。** it 那边同形状的 `existsQuery` 声明了两个、
+    //    调用处只传了一个，node:sqlite 不报错、缺的按 NULL 绑定 ⇒
+    //    `word_norm = NULL` 恒不成立，归一列回退**从来没跑过**（2026-09-13 才发现）。
+    this.collocWordQuery = this.db.prepare(`
+      SELECT word FROM dict WHERE word = ? OR word_norm = ? LIMIT 1
+    `);
+
+    // 词源正文（2026-09-14）。`edition` 入库时就按展示层的 etymKey 前缀写好，
+    // 这里直接拼键，不再从义项里推前缀（多一处判据就多一处会漂开的地方）。
+    this.etymologyQuery = this.db.prepare(`
+      SELECT edition, etym_no, text FROM etymology WHERE word_id = ? ORDER BY etym_no
+    `);
+
+    // 抽过哪些版 —— **构造时算一次**（六门共 4–6 行的小表，不必每开一个词条页查一遍）。
+    // ⚠️ 表可能还不存在（这门还没跑 `scripts/ingest_etymology.py`）⇒ 兜到空数组，
+    //    空数组的意思是「一版都没抽」，展示层对所有词源块一律闭嘴 —— 那是对的。
+    this.etymEditions = (() => {
+      try {
+        return (this.db.prepare('SELECT DISTINCT edition FROM etymology').all() as Array<{
+          edition: string }>).map((x) => x.edition);
+      } catch { return []; }
+    })();
 
     const HEAD = `id, word, ipa_br, ipa_pt, pos, is_lemma, vconj, transitivity,
                   pronominal, pp, pp_short, gender, plural, feminine, comparative,
@@ -595,6 +666,12 @@ export class PortugueseDictService {
 
     const entry: PortugueseEntry = {
       lang: 'pt', id, word: w,
+      etymologyEditions: this.etymEditions,
+      // 键 ＝ `${edition}:${etym_no}`，与 `etymKeyOfEntry()` 拼出来的那把逐字一致。
+      etymologyTexts: Object.fromEntries(
+        (this.etymologyQuery.all(id) as Array<{
+          edition: string; etym_no: string; text: string }>)
+          .map((x) => [`${x.edition}:${x.etym_no}`, x.text])),
       ipaBr: pick('pt-BR') ?? normalizePtIpa(row.ipa_br as string | null),
       ipaPt: pick('pt-PT') ?? normalizePtIpa(row.ipa_pt as string | null),
       pos: row.pos as string | null,
@@ -659,6 +736,48 @@ export class PortugueseDictService {
       });
     }
     return entry;
+  }
+
+  /**
+   * 搭配详情页（2026-09-14）。用户：「搭配我希望也有详情页，请按照现有格式配置」。
+   *
+   * 在此之前搭配只是词条页上一行死文字：2026-09-12 补了反查**搜得到**，但点不开，
+   * 而搜索结果那一行点下去跳的是**所属词条**（`item.via.word`），不是短语自己。
+   *
+   * 🔴 `text` 用 `COLLATE NOCASE` 找、然后**一律改用库里那一版的写法**往下走：
+   *    读者可能从地址栏敲进来大小写不同的一版，后面 `owners` / `parts` / 词头判断
+   *    全是精确匹配，拿读者那一版去查会零零散散地落空。
+   * 🔴 同一条短语可能挂在**多个词条**下（本门实测有几百条），所以 `owners` 是数组
+   *    不是单值 —— 取第一条的老写法会让读者以为这个短语只跟一个词有关。
+   */
+  getCollocation(text: string): CollocationDetail | null {
+    const rows = this.collocDetailQuery.all(text) as Array<{
+      text: string; owner: string; zh: string | null; srcText: string | null;
+    }>;
+    if (rows.length === 0) return null;
+    const canonical = rows[0].text;
+    // 词头判断：短语本身就是词条时，前端直接跳真词条页（用户 2026-09-14 定）。
+    const head = this.collocWordQuery.get(canonical, canonical) as { word: string } | undefined;
+    return {
+      lang: 'pt',
+      text: canonical,
+      headword: head ? head.word : null,
+      // 多条行里挑第一条有值的：同一短语挂在两个词条下时，两行的译文是同一份，
+      // 但**不保证两边都填了**（译文是按 collocation.id 落的，不是按 text）。
+      zh: rows.map((r) => r.zh).find((x) => x) ?? null,
+      srcText: rows.map((r) => r.srcText).find((x) => x) ?? null,
+      owners: [...new Set(rows.map((r) => r.owner))],
+      // 🔴 逐个候选写法去查，**第一个查得到的就用它**（`looseForms`：先原样、
+      //    再剥首尾标点）。查得到的一律回填**库里那一版的写法** ——
+      //    源头短语里 `Chile.` 带句点，词条是 `Chile`，链接文字得是后者。
+      parts: collocationParts(canonical).map((w) => {
+        for (const cand of looseForms(w)) {
+          const hit = this.collocWordQuery.get(cand, cand) as { word: string } | undefined;
+          if (hit) return { word: hit.word, clickable: true };
+        }
+        return { word: w, clickable: false };
+      }),
+    };
   }
 
   close() {

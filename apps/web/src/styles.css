@@ -736,6 +736,25 @@ button.brand:focus-visible {
   color: var(--text-secondary);
 }
 
+/* 词源标题下面那一句正文（2026-09-14）。
+   ⚠️ 字号刻意比义项中文小一档、颜色退到次级 —— 它是**背景信息**，
+      不该跟释义抢视线；但也不能小到看不清（用户 2026-09-11：字体样式要统一，
+      这里沿用 `.sense-src` 那一档）。 */
+.etym-text {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  margin: 2px 0 8px;
+  padding-left: 9px;
+  border-left: 2px solid var(--border);
+}
+
+/* 源头没给正文的那 20%：照实说出来，不留白（留白读者会以为页面坏了）。 */
+.etym-text-none {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
 .pos-group:first-child .etym-label {
   margin-top: 0;
   padding-top: 0;
@@ -1007,6 +1026,23 @@ button.brand:focus-visible {
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
+}
+
+/* 搭配短语做成详情页入口（2026-09-14）。
+   ⚠️ 只加"可点"这一层，**字号字重继承 `.colloc-text`** —— 同一个东西不该因为
+      变得可点就换个样子（用户 2026-09-11：「字体样式应该要统一」）。
+   ⚠️ `.rel-link` 那条规则不能直接套：它带自己的字号与颜色，套上去搭配行的
+      短语会比旁边的中文还小一号。 */
+.colloc-link {
+  color: inherit;
+  text-decoration: underline dotted var(--text-tertiary);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.colloc-link:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
 }
 
 .colloc-zh {
