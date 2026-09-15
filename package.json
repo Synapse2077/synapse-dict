@@ -16,7 +16,10 @@
     "dev:web": "npm run dev --workspace @synapse-dict/web",
     "build": "npm run typecheck && npm run build --workspace @synapse-dict/web",
     "typecheck": "npm run typecheck --workspace @synapse-dict/api && npm run typecheck --workspace @synapse-dict/web",
-    "start": "tsx apps/api/src/index.ts"
+    "start": "tsx apps/api/src/index.ts",
+    "gate:fr-tags": "tsx scripts/contract/fr_tag_tables.ts",
+    "gate:tags": "tsx scripts/contract/tag_coverage_all.ts",
+    "gate:en-chips": "tsx scripts/contract/en_sense_chips.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

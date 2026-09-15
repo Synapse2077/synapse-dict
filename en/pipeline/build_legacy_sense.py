@@ -158,10 +158,29 @@ def parse(text):
 
 
 def bucket(mark):
+    """方括号标记归桶。查不到的落 `topic`（学科标记是开放集，枚举不完）。
+
+    🔴 2026-09-15 补的守卫：**ECDICT 的标记全是中文短码**（`计` `医` `化` `军`…），
+       3,239 种 65.3 万条无一例外。所以凡是拉丁字母的，都是 `MARK_RE`
+       从释义正文里误抠出来的残片，不是学科标记：
+
+           benzfuro  「苯并呋喃并[2,3-f]喹啉」  ← `[2,3-f]` 是化学名的一部分
+           to get laid 「[inf！]性交」          ← 源头自己的排版残渣
+           stack dump 「[WIN,NT]堆栈转储」      ← 平台标注，不是学科
+
+       58 种 174 条。量很小，但**「学科」这一桶将来要印在读者眼前**
+       （2026-09-15 解开 kaikki topic 的展示），印出 `[P-]` 就是错不是缺
+       （`[[dict-framework-doc]]`：错比缺更伤权威）。
+    ⚠️ 判据是「有没有汉字」不是「长不长得像 slug」：第一版我按后者写，
+       把 kaikki 的 `pesäpallo`（芬兰棒球）当成噪声误伤了 ——
+       `[[criteria-narrower-than-you-think]]`，又一次判据比要描述的东西宽。
+    """
     if mark in MARK_REGION:
         return "region"
     if mark in MARK_REGISTER:
         return "register"
+    if not dbtool.has_han(mark):
+        return None                      # 调用方据此整条丢掉并记账
     return "topic"
 
 
@@ -203,7 +222,11 @@ def collect(con):
             if pos_raw in POS_AS_TAG:
                 tg.append(POS_AS_TAG[pos_raw])
             for mk in marks:
-                tg.append((bucket(mk), mk))
+                kind = bucket(mk)
+                if kind is None:
+                    stat["丢弃·非中文方括号残片"] += 1
+                    continue
+                tg.append((kind, mk))
             tags.append(tg)
             srcs.append((wid, "%s:%d:%d" % (SRC, wid, rank), gloss,
                          json.dumps({"pos_raw": pos_raw, "marks": marks},

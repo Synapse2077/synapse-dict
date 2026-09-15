@@ -66,6 +66,17 @@ export const FR_ARTICLE: Record<string, string> = { m: 'le', f: 'la', mf: 'le/la
 //  ⭐ 值一律映射到**已有的规范键**（英文），中文只从 `TOPIC_LABELS` /
 //     `FR_REGION_LABELS` / `REGISTER_LABELS` 取 —— 在这里再写一份中文
 //     就是让同一个概念有两个译名慢慢漂开（`[[refactor-mindset-code-quality]]`）。
+//
+//  ═══ 🔴 谁在读这四张表：**Python，不是 TS** ═══
+//  `fr/pipeline/ingest_fr_tags.py` 把本文件当**文本**解析（它的 `table()` / `skip_set()`），
+//  所以全仓库没有一处 `import { FR_TAG_TOPIC }`，`index.ts` 也不导出它们。
+//  ⚠️ 2026-09-15 我查标签覆盖率时按 TS 的 import 图判断，把这四张表认成了死代码，
+//     差一点提议删掉 —— **判据（import 图）比它要描述的东西（有没有人用）窄**，
+//     又一次 `[[criteria-narrower-than-you-think]]`。
+//  ⇒ 装了一道会响的闸：`scripts/contract/fr_tag_tables.ts`
+//     （`npm run gate:fr-tags`）。它按**和 Python 同一条路**把表抠出来，
+//     一是证明这些表还在被人读，二是验那条「值必须映射得出中文」的纪律 ——
+//     规范键拼错不会报错，只会让那批 tag **静默地不上页面**。
 // ══════════════════════════════════════════════════════════════════════════
 
 /** 法文版 tag → 领域（`sense_tag.kind='topic'`，中文查 `TOPIC_LABELS`） */

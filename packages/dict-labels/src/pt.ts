@@ -15,6 +15,16 @@ export const PT_REGION_LABELS: Record<string, string> = {
   'East-Timor': '东帝汶', Galicia: '加利西亚', Azores: '亚速尔', Madeira: '马德拉',
   Northern: '北部', Southern: '南部', Central: '中部', regional: '地区性',
   dialectal: '方言', 'Old-Portuguese': '古葡语',
+  // ── 2026-09-15：六门覆盖率一次量全，pt 的 region 还漏 17 种 / 192 条 ──
+  //    头一名 `Northeast-Brazil`(125) 与已有的 `Northeastern-Brazil` 是同一个地方的
+  //    两种写法 —— 收敛到同一个中文，靠调用方按映射后的文字去重。
+  'Northeast-Brazil': '巴西东北', Iberian: '伊比利亚',
+  'Guinea-Bissau': '几内亚比绍', Africa: '非洲', 'South-Africa': '南非',
+  India: '印度', Indonesia: '印度尼西亚', 'Sri-Lanka': '斯里兰卡',
+  Iranian: '伊朗', Nordic: '北欧',
+  US: '美国', UK: '英国', Canada: '加拿大', Argentina: '阿根廷',
+  Australia: '澳大利亚',
+  North: '北部', Northwestern: '西北部',
 };
 
 // 葡语冠词（逐义项性别用）：o 阳 / a 阴。

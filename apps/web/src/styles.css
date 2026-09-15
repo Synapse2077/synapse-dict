@@ -486,6 +486,18 @@ button.brand:focus-visible {
   border: 1px solid var(--border);
 }
 
+/* 学科标签（en 义项徽标）。2026-09-15 解开展示 —— 在此之前 en 的英文 topic
+   77 万条一直藏着，只有 ECDICT 的中文短码（计/医/化）露头。
+   🔴 与语域/地区徽标（`.badge.tag`，灰实心）走**不同的轴**：绿描边。
+      沿用 2026-08-12 给 `.sense-chip.top` 定下的同一条规矩 ——
+      「实心/描边 + 色相，两条轴都要不同」，只靠色相在小胶囊上不够稳。 */
+.badge.tag.topic {
+  background: transparent;
+  color: var(--topic);
+  border-color: color-mix(in srgb, var(--topic) 45%, transparent);
+  font-weight: 500;
+}
+
 /* ---- Phonetics ---- */
 .phonetic-row {
   display: flex;
@@ -946,6 +958,19 @@ button.brand:focus-visible {
   background: transparent;
   color: var(--topic);
   border-color: color-mix(in srgb, var(--topic) 45%, transparent);
+  font-weight: 500;
+}
+
+/* 逐义项语法标签（及物 / 不及物 / 自反 / 无人称 …）。it 2026-09-15 才接上页面 ——
+   数据在库里躺了一个月，`App.tsx` 里零个 `.grammar` 引用。
+   🔴 与语域 chip（`.lex`，灰实心）走**不同的轴**：这里是描边空心。
+      同一条义项上「及物」和「口语」经常并排，两个都灰实心会糊成一条；
+      与学科 chip（`.top`，绿描边）靠色相分开 —— 沿用 2026-08-12 定下的
+      「实心/描边 + 色相，两条轴都要不同」那条规矩。 */
+.sense-chip.gram {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border-strong);
   font-weight: 500;
 }
 

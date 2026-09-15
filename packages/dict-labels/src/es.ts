@@ -33,6 +33,36 @@ export const ES_REGION_LABELS: Record<string, string> = {
   //    只有 `Chiloé` 没有中文（1 条录音，`ig̲ey`，来源是 es 版自己标的 tag）。
   //    映射不到就把西/英文原名印在中文词典上 —— 这一条现在由闸 `🔴 录音地区必须有中文标签` 盯着。
   'Chiloé': '奇洛埃岛',
+  // ── 🔴 2026-09-15：六门标签覆盖率一次量全，es 的 region 还漏 58 种 / 1,114 条 ──
+  //    全是**西班牙的省**与**墨西哥/南美的州**，源头（西语版 kaikki）标得很细。
+  // 西班牙的省 / 自治区
+  Salamanca: '萨拉曼卡', 'León': '莱昂', Murcia: '穆尔西亚', Cantabria: '坎塔布里亚',
+  Navarra: '纳瓦拉', 'Ribera-Navarra': '纳瓦拉河谷', 'Álava': '阿拉瓦',
+  Extremadura: '埃斯特雷马杜拉', 'Basque-Country': '巴斯克地区', Vizcaya: '比斯开',
+  Castile: '卡斯蒂利亚', Zamora: '萨莫拉', Burgos: '布尔戈斯', Palencia: '帕伦西亚',
+  Soria: '索里亚', 'La-Rioja': '拉里奥哈', Rioja: '里奥哈',
+  'Cádiz': '加的斯', 'Córdoba': '科尔多瓦', Huelva: '韦尔瓦', 'Almería': '阿尔梅里亚',
+  Ceuta: '休达', 'Balearic-Islands': '巴利阿里群岛',
+  // 🔴 源头写的是 `Grenada`（加勒比国家格林纳达的拼法），但样本全是
+  //    `mala follá`（格拉纳达人自嘲的招牌说法）、且与 `Almería` 同现
+  //    ⇒ 指的是**西班牙的格拉纳达省**。按它实际指的地方给中文，不按拼写。
+  Grenada: '格拉纳达',
+  Guadalajara: '瓜达拉哈拉',
+  // 墨西哥的州
+  'Yucatán': '尤卡坦', Hidalgo: '伊达尔戈', 'Mexico-City': '墨西哥城',
+  'Michoacán': '米却肯', Chiapas: '恰帕斯', Veracruz: '韦拉克鲁斯',
+  Campeche: '坎佩切', Sinaloa: '锡那罗亚', Chihuahua: '奇瓦瓦',
+  'Nuevo-León': '新莱昂', Oaxaca: '瓦哈卡', 'San-Luis-Potosí': '圣路易斯波托西',
+  Guanajuato: '瓜纳华托', Jalisco: '哈利斯科', Sonora: '索诺拉',
+  'Querétaro': '克雷塔罗', Tlaxcala: '特拉斯卡拉', Zacatecas: '萨卡特卡斯',
+  'Lower-California': '下加利福尼亚', 'Central-Mexico': '墨西哥中部',
+  'New-Mexico': '新墨西哥',
+  // 南美 / 其他
+  'South-Cone': '南锥体', 'Southern-Chile': '智利南部', 'Northern-Chile': '智利北部',
+  'Central-Chile': '智利中部', 'Northern-Argentina': '阿根廷北部',
+  'La-Rioja-Argentina': '阿根廷拉里奥哈', Chubut: '丘布特',
+  Antioquia: '安蒂奥基亚', Zulia: '苏利亚',
+  Brazil: '巴西', Portugal: '葡萄牙', Europe: '欧洲',
 };
 
 // 西语定冠词（按性别；共性 mf 两冠词）

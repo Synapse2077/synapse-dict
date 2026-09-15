@@ -73,7 +73,8 @@ GRAMMAR = {
     "with-definite-article", "no-present-participle", "collective", "personal",
     "imperative", "third-person", "second-person", "first-person",
     # 词类
-    "particle", "pronoun", "letter", "morpheme", "onomatopoeic", "diminutive",
+    # ⚠️ `particle` **不在这个集合里**，它的桶取决于义项内容，见 `bucket_of()`。
+    "pronoun", "letter", "morpheme", "onomatopoeic", "diminutive",
     "agent", "contraction", "abbreviation", "initialism", "acronym",
     # ── 补：格 / 语态 / 配价 / 缺陷范式 ──
     "interrogative", "nominative", "objective", "conjunctive", "passive",
@@ -109,7 +110,12 @@ REGISTER = {
     "nonstandard", "standard", "proscribed", "neologism", "nonce-word",
     "mildly", "excessive", "Internet", "Polari", "jargon", "technical",
     # ── 补：时代层 / 网络变体 / 亲疏 ──
-    "Modern", "Early", "Leet", "familiar",
+    # 🔴 2026-09-15 补 `Late`/`Middle`：源头把「Early Modern English」「Late Modern
+    #    English」拆成两个 tag（`ablatitious` 的 tags 是 `['Late','Modern','obsolete']`），
+    #    第一版只收了 `Early`+`Modern`，`Late`(10) 和 `Middle`(10) 落进了 drop-ledger
+    #    —— 又一次「只补闸报出来的那一个，不看兄弟项」。
+    #    ⚠️ 这两个值**要等下次重跑本脚本才会进库**；现库里还没有。
+    "Modern", "Early", "Late", "Middle", "Leet", "familiar",
 }
 
 USAGE = {
@@ -134,7 +140,20 @@ BUCKETS = [("grammar", GRAMMAR), ("region", REGION), ("register", REGISTER),
            ("usage", USAGE), ("topic", TOPIC_TAG)]
 
 
-def bucket_of(tag):
+def bucket_of(tag, se):
+    """归桶。🔴 `se` 是**这一条义项**，因为有的 tag 光看拼写归不准。
+
+    `particle` 是唯一一个：227 条里 **225 条带 `topics=['physics']`**，
+    说的是「粒子」（`blue` 夸克的蓝色荷、`positron` 正电子），不是「小品词」；
+    剩下 2 条（`venitive`、`-ahh`）才是真的语法小品词。
+    第一版把它整个塞进 `GRAMMAR`，于是 225 条物理词条在页面上印「小品词」。
+    ⇒ 判据必须问「这条义项是不是物理学的」，不能问「这个 tag 长什么样」
+      （`[[criteria-from-meaning-not-form]]`）。已落库的 225 条由
+      `scripts/fix_en_particle_bucket.py` 定点改判过（本脚本不重跑，
+      重跑会撤销建库后「专名标记传播」那一轮的修复）。
+    """
+    if tag == "particle":
+        return "topic" if "physics" in (se.get("topics") or ()) else "grammar"
     for kind, s in BUCKETS:
         if tag in s:
             return kind
@@ -179,7 +198,7 @@ def collect():
                 if is_source_error(t):
                     stat["source_error"] += 1
                     continue
-                kind = bucket_of(t)
+                kind = bucket_of(t, se)
                 if kind is None:
                     dropped[t] += 1
                     continue

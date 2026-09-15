@@ -150,6 +150,28 @@ KEEP_PLAIN = 2              # 普通（非 keep）备份只留最近这么多个
 #    （2026-08-21 在 es 上已经诊断过一次，当时的修法是"把 keep 计入条数"——治标）。
 # ⇒ keep 计入字节，超了按**稀疏度**淘汰（见 `_thin`），首尾永不删。
 MAX_BACKUP_BYTES = 8 * 1024 ** 3
+# 完结之后预算收紧：留下的正好是最老那个（整轮重构之前，不可再生）和最新那个（回滚上一步）。
+# 🔴 2026-09-14 补。在此之前 fr 根本没有这个常量 —— 而 `FR_PLAN.md` 里
+#    `✅ fr 完结（2026-08-28）` 已经写了半个月，**没有任何代码读它**，
+#    fr 一直按未完结的 8 GB 宽预算在跑。en/pt/de 早就有这套机制，fr 漏了。
+#    这类「一门做对了、其余照旧错着，而每门自己的闸全绿」只能靠跨语种的闸逮，
+#    见 `scripts/test_backup_policy_gate.py`（就是它点名 fr 的）。
+DONE_BACKUP_BYTES = 1.5 * 1024 ** 3
+
+# 判据是**计划表里那一行**，不是手工开关 —— 那是「写着已修」和「真的修了」的老毛病。
+PLAN_DOC = paths.ROOT / "docs" / "FR_PLAN.md"
+
+
+def _language_is_done():
+    """本语种是否已在计划表里标注完结。读不到文件一律按**未完结**（预算宽松）——
+    删数据的默认值必须偏保守。
+
+    ⚠️ 正则里的语种代码是**硬编码**的，复制到别的语种必须跟着改，
+       否则它会安静地永远匹配不上（跨语种闸会查这一条）。"""
+    try:
+        return bool(re.search(r"^#+\s*✅\s*fr\s*完结", PLAN_DOC.read_text("utf-8"), re.M))
+    except OSError:
+        return False
 
 
 def _thin(items, when, budget, floor=2):
@@ -261,7 +283,8 @@ def prune_backups(verbose=True, dry=False):
 
     # ③ 总字节封顶（**keep 也计入**），超了按稀疏度抽稀。
     #    先砍普通的（更不值钱），还超再抽稀 keep。
-    budget = MAX_BACKUP_BYTES
+    done = _language_is_done()
+    budget = DONE_BACKUP_BYTES if done else MAX_BACKUP_BYTES
     used = sum(p.stat().st_size for p in exempt)
     plain, cut = _thin(plain, when, max(budget - used, 0), floor=0) if plain else ([], [])
     drop += cut

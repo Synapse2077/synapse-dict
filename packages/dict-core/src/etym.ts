@@ -36,9 +36,20 @@ export function etymKeyOfSrcRef(ref: string | null | undefined): string | null {
   const hash = ref.indexOf('#');
   if (hash < 0) return null;               // 没有 `#` ⇒ 不是 kaikki 那一族
   const parts = ref.slice(0, hash).split(':');
-  if (parts.length < 5) return null;       // 少于 5 段 ⇒ 这一族不带编号
-  const n = parts[parts.length - 2];
-  if (!/^\d+$/.test(n)) return null;
+  // 🔴 **两种形状，靠「从右数连续的纯数字段」区分，不靠段数、更不靠前缀**：
+  //      en/de 的英文版切片  `前缀:词:pos:词源号:seq`   ⇒ 尾随数字 **2** 段，号在 [-2]
+  //      de 的德语版         `前缀:词:pos:seq`         ⇒ 尾随数字 **1** 段，号在 [-1]
+  //    词形自己可能含冒号（`en-edition:4:20:noun:0:0`）也可能以数字结尾，
+  //    但 `pos` 段**永不是纯数字**（实测 de 全量 0 例），所以这个游标不会越界。
+  //    ⚠️ 原来写死 `parts.length >= 5`，于是 de 的德语版 171,313 条 **全部返回 null**
+  //       —— 词源正文就算灌进库也显示不出来（2026-09-15 修）。
+  //    ⚠️ **不许改成按前缀判**（`kk-de` 之类）：那种写死迟早过期，
+  //       这个仓库已有现成的账（`[[criteria-narrower-than-you-think]]`）。
+  let trail = 0;
+  for (let i = parts.length - 1; i >= 0 && /^\d+$/.test(parts[i]); i -= 1) trail += 1;
+  if (trail !== 1 && trail !== 2) return null;   // 0 段 ⇒ 这一族不带编号
+  if (parts.length < trail + 2) return null;     // 连 `前缀:pos:号` 都凑不齐
+  const n = parts[parts.length - trail];         // trail=2 → [-2]；trail=1 → [-1]
   return `${parts[0]}:${n}`;               // 来源 + 编号，**不透明**
 }
 

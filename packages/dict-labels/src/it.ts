@@ -27,6 +27,24 @@ export const IT_REGION_LABELS: Record<string, string> = {
   regional: '地区性', dialectal: '方言', 'Ancient-Rome': '古罗马', Roman: '罗马',
 };
 
+/**
+ * 逐义项语法标签（`sense_tag.kind='grammar'`，只在动词词条上渲染）。
+ *
+ * 🔴 2026-09-15：这 18,818 条**一直没上过页面** —— 数据收了、`ItalianSense.grammar`
+ *    也算出来了，`App.tsx` 里却零个 `.grammar` 引用。六门覆盖率量下来它是
+ *    唯一一类「不是翻译缺口、是根本没接上」的：同样的信息在 en 的页面上
+ *    是「及物 / 不及物」徽标。
+ * ⚠️ `transitive`/`intransitive` 只在**词头徽标说不清的时候**才印（见 `ItSenseChips`）：
+ *    词条整体就是及物的，每条义项再重复一遍「及物」是噪声不是信息；
+ *    而 1,508 个词的义项里及物与不及物并存，词头那个「及物/不及物」
+ *    恰恰不告诉读者**哪一条**是哪个。
+ */
+export const IT_GRAMMAR_LABELS: Record<string, string> = {
+  transitive: '及物', intransitive: '不及物', ambitransitive: '及物/不及物',
+  ditransitive: '双宾', pronominal: '代动词', reflexive: '自反',
+  impersonal: '无人称', copulative: '系动词',
+};
+
 export const IT_ARTICLE: Record<string, string> = { m: 'il', f: 'la', mf: 'il/la' };
 
 // ============================================================================

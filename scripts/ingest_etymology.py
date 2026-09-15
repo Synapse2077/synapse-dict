@@ -31,6 +31,7 @@ it/fr/pt 的义项来自多个维基版（en/it/fr/pt/el/tr/zh-edition），每�
     python3 scripts/ingest_etymology.py --lang es --run
 """
 import argparse
+import collections
 import gzip
 import importlib
 import json
@@ -64,6 +65,10 @@ EDITION_DUMP = {
     "fr-edition": "frwiktionary.jsonl.gz",
     "pt-edition": "ptwiktionary.jsonl.gz",
     "zh-edition": "zhwiktionary.jsonl.gz",
+    # 🔴 de 的本版前缀是 `kk-de`，**不是 `de-edition`** —— 与 `EN_PREFIX` 里
+    #    de 记 `kk-en` 同源（建库那几轮各自定的字符串）。写成 `de-edition`
+    #    会一条都对不上，而且一声不吭。2026-09-15 补，此前 de 本版整个没抽。
+    "kk-de": "dewiktionary.jsonl.gz",
 }
 # dump 是**多语种整包**，要按 lang_code 筛出目标语言那一部分。
 LANG_CODE = {"it": "it", "fr": "fr", "pt": "pt", "es": "es", "de": "de", "en": "en"}
@@ -117,11 +122,32 @@ def word_src_of(ref):
 
 
 def num_of_ref(ref):
-    """`src_ref` 里的词源号（只有五段式才有）。en/de 走这条；其余四门用 `entry.etym_no`。"""
+    """`src_ref` 里的词源号。en/de 走这条；其余四门用 `entry.etym_no`。
+
+    🔴 **两种形状，靠「从右数连续的纯数字段」区分，不靠段数、更不靠前缀**
+       （与 `packages/dict-core/src/etym.ts` 的 `etymKeyOfSrcRef` 是同一条规则，
+        两边必须一致，否则灌进库的键和页面查的键对不上、且一声不吭）：
+
+        前缀:词:pos:词源号:seq   尾随数字 2 段 ⇒ 号在 [-2]   en / de 的英文版切片
+        前缀:词:pos:seq         尾随数字 1 段 ⇒ 号在 [-1]   de 的德语版
+
+    ⚠️ 原来写死 `len(parts) >= 5`，于是 de 的德语版 171,313 条全部返回 None，
+       `db_keys` 把它们整批跳过 —— 表现为「de 本版没有词源」，
+       而真相是**我们没抽**（2026-09-15 修）。
+    ⚠️ `pos` 段**永不是纯数字**（de 全量实测 0 例），所以游标不会越界。
+    """
     if not ref:
         return None
     parts = ref.split("#", 1)[0].split(":")
-    return parts[-2] if len(parts) >= 5 and parts[-2].isdigit() else None
+    trail = 0
+    for p in reversed(parts):
+        if p.isdigit():
+            trail += 1
+        else:
+            break
+    if trail not in (1, 2) or len(parts) < trail + 2:
+        return None
+    return parts[-trail]
 
 
 def db_keys(con):
@@ -205,14 +231,27 @@ def scan(dump, watch):
 def scan_edition(dump, lang_code):
     """扫**语言自己那一版**的 dump，只收「恰好一条词源正文」的记录。
 
-    返回 `{源头词形: 正文}`，外加统计（多条的、没有的）。
+    返回 `{源头词形: 正文}`，外加统计（多条的、没有的、同词冲突丢弃的）。
     🔴 只收恰好一条：我们的 `etym_no` 对这些版一律是 `"0"`，多条时对不上号。
+
+    🔴🔴 **「多条」有两种形状，第一版只守住了一种**（2026-09-14 验收查出来的）：
+      ① 一个条目里 `etymology_texts` 有 2 条以上  → 整词跳过（原来就有）
+      ② **同一个词有多个条目，各自 1 条，内容却不同** → 原来「取最长的那份」
+    ②' 的注释写着「名/动各一**会给同一段话**」—— 这个假设不成立。
+       法语版 dump 按词性拆条目，`sur` 的形容词条（古法兰克语 *sûr「酸」）
+       和介词条（拉丁 super「在…上」）是**两支完全不同的词源**，
+       按字符串长度挑 ＝ 抛硬币。实测 fr 1,526 个词中招，其中 148 个 zipf≥4.0，
+       `sur`(6.8) / `tu`(6.5) 手工核对**挑错了那一支**，且会渲染上页面。
+    ⇒ ② 与 ① 归一处理：**内容不同就整词丢弃**。同一个判据不许两条路径只守一条
+       （`[[correct-steps-can-compose-a-hole]]`）。宁可缺，不许猜。
+    ⚠️ it/pt/zh 版实测冲突数为 0（那几版 dump 不按词性拆条目），本改动只影响 fr。
     ⚠️ **不按「会印词源标题的词」过滤**。第一版传了 `watch` 进来做筛选，于是
        只有多词源的词拿得到正文，单词源的一条都没有 —— 而口径是**收全**
        （任何一个词都查得到词源，不只是同形异源那批）。干跑时表现为
        「落库 2,934 行」而本版明明有 16,548 支，差额被我当成"源头没写"报了出去。
     """
     got, many, none = {}, 0, 0
+    conflict = set()          # 同词多条记录、内容互不相同 ⇒ 整词丢弃（见 docstring ②）
     t0 = time.time()
     with gzip.open(dump, "rt", encoding="utf-8") as f:
         for i, line in enumerate(f):
@@ -232,10 +271,83 @@ def scan_edition(dump, lang_code):
                 many += 1
             else:
                 t = (et[0] or "").strip()
-                # 同一个词多条记录（名/动各一）会给同一段话；取最长的那份
-                if t and len(t) > len(got.get(w, "")):
+                if not t:
+                    continue
+                prev = got.get(w)
+                if prev is None:
                     got[w] = t
-    return got, many, none
+                elif prev != t:
+                    # 🔴 同一个词的另一个条目给了**不同**的词源 ⇒ 无从判断哪支对应哪个义项组
+                    conflict.add(w)
+    # 冲突的整词丢弃（不是留一个）。丢多少由调用方打印出来，**不许静默**。
+    for w in conflict:
+        got.pop(w, None)
+    return got, many, none, len(conflict)
+
+
+def scan_edition_seq(dump, lang_code):
+    """扫本语种版 dump，按 **(词形, pos) 在 dump 里的出现顺序** 给条目编号，
+    返回 `{(词形, seq): 正文}`。给 **de 的德语版**用。
+
+    ═══ 为什么 de 和 it/fr/pt 不是一回事 ═══
+    it/fr/pt 的本版 `src_ref` 是三段式、`etym_no` 一律 `"0"`（源头没编号）；
+    **de 的是 `kk-de:词:pos:seq#义项下标`**，那个数字不是词源号，是
+    `de/pipeline/ingest_de_senses.py` 里 `seq_of[(word, pos_raw)]` 这个计数器 ——
+    「这是该 (词,pos) 在 dump 里的第几个条目」。而**每个条目自带
+    `etymology_texts`** ⇒ 对齐反而是精确的，不像 it/fr 那样要靠「恰好一条」。
+
+    🔴 **这是位置型键，必须验过才能用。** 建库当时的 `targets` 是「一条义项都没有的
+       词」，那个状态已经不存在、无法重建。验法：`src_ref` 里带着 pos 和义项下标，
+       而 `sense_src.text` 存着释义原文 ⇒ 拿 `senses[下标].glosses[0]` 逐条比。
+       2026-09-15 实测：抽 3,000 条**释义逐字节一致 3,000 条（100%）**、
+       seq 越界 0 条 ⇒ 按原始 (词,pos) 枚举与建库当时等价。
+       （另有 96 行 0.06% 的 (词,pos) 在 dump 里找不到 —— `clean_head` 改写过，收不到。）
+
+    ⚠️ 同一个词的不同 pos 各自从 0 起数 ⇒ **(词, seq) 会跨 pos 碰撞**（实测 509 个词、
+       0.3%）。这里与 `scan_edition` 同一口径：**内容不同就整词丢弃**，不挑不猜。
+       （不把 pos 塞进键：那要连带动 `etymKeyOfSrcRef`、`db_keys` 的数字断言和
+        `etym_no` 在六门里的语义，为 0.3% 铺这么大的面不划算。）
+    """
+    got, none, many = {}, 0, 0
+    conflict = set()
+    seq_of = collections.Counter()
+    seq_max = {}              # 词形 → 该词形见过的最大 seq（供闸①查越界，见 main）
+    t0 = time.time()
+    with gzip.open(dump, "rt", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if i % 1000000 == 0 and i:
+                print("   %s 行 / %ds / 已收 %s"
+                      % (format(i, ","), time.time() - t0, format(len(got), ",")), flush=True)
+            o = json.loads(line)
+            if (o.get("lang_code") or "") != lang_code:
+                continue
+            w = o.get("word")
+            if not w:
+                continue
+            pos = o.get("pos") or "unknown"
+            seq = seq_of[(w, pos)]
+            seq_of[(w, pos)] += 1
+            if seq > seq_max.get(w, -1):
+                seq_max[w] = seq
+            et = o.get("etymology_texts") or []
+            if len(et) == 0:
+                none += 1
+                continue
+            if len(et) > 1:
+                many += 1
+                continue
+            t = (et[0] or "").strip()
+            if not t:
+                continue
+            k = (w, str(seq))
+            prev = got.get(k)
+            if prev is None:
+                got[k] = t
+            elif prev != t:
+                conflict.add(k)          # 跨 pos 撞了同一个 (词,seq) 且内容不同
+    for k in conflict:
+        got.pop(k, None)
+    return got, many, none, len(conflict), seq_max
 
 
 def main():
@@ -243,6 +355,10 @@ def main():
     ap.add_argument("--lang", required=True, choices=LANGS)
     ap.add_argument("--edition", help="非英文版，如 it-edition；不给就抽英文版那一支")
     ap.add_argument("--run", action="store_true")
+    # 🔴 重跑用：先把**这一版**已有的行删干净再插。判据变了就必须能重跑，
+    #    否则「发现抽错了」等于「永远改不了」。只删本版，别版一行不碰。
+    ap.add_argument("--replace", action="store_true",
+                    help="先删掉本版已有的行再写（重跑用）")
     a = ap.parse_args()
     paths, dbtool = load(a.lang)
     prefix = a.edition or EN_PREFIX[a.lang]
@@ -283,13 +399,32 @@ def main():
             con.close()
             return 1
         print("═══ 扫 dump：%s（lang_code=%s）═══" % (dumpf.name, LANG_CODE[a.lang]), flush=True)
-        byword, many, none = scan_edition(dumpf, LANG_CODE[a.lang])
+        # 🔴 **两种口径，判据取自库里这一版的号，不写死语种**：
+        #      号全是 "0"  ⇒ 源头本来就没编号（it/fr/pt/zh）→ 只收「恰好一条」的词
+        #      号有 0 以外 ⇒ 那是 **seq**（de：该 (词,pos) 的第几个 dump 条目）
+        #                    → 按 (词,pos) 出现顺序枚举，逐条目对齐
+        #    写死 `if lang == "de"` 迟早过期（`[[criteria-narrower-than-you-think]]`）。
+        nums = {no for _, _, _, no in mine}
+        by_seq = nums - {"0"} != set()
+        print("   本版在库里的号取值 %s ⇒ 走 **%s** 口径"
+              % (sorted(nums)[:6], "逐条目(seq)" if by_seq else "恰好一条"))
+        seq_max = None
+        if by_seq:
+            byword, many, none, dropped, seq_max = scan_edition_seq(dumpf, LANG_CODE[a.lang])
+            got = dict(byword)                       # 键已经是 (词形, seq)
+        else:
+            byword, many, none, dropped = scan_edition(dumpf, LANG_CODE[a.lang])
+            got = {(w, "0"): t for w, t in byword.items()}
         print("   恰好一条词源的 %s 条｜源头给了多条（对不上号，跳过）%s｜源头没有 %s"
               % (format(len(byword), ","), format(many, ","), format(none, ",")))
-        # 🔴 这些版我们的 `etym_no` 一律是 `"0"` ⇒ 只认 0 号那一支，别的一律不碰。
-        got = {(w, "0"): t for w, t in byword.items()}
+        # 🔴 同键多条记录、内容互不相同 ⇒ 整个丢弃。**必须打出来**：
+        #    这一类原来是「按字符串长度静默二选一」，fr 有 1,526 个词中招
+        #    （`sur`/`tu` 挑错了那一支）。静默丢弃和静默挑错一样不可接受。
+        print("   同键多条记录**内容不同**、整键丢弃 %s（宁可缺，不许猜）"
+              % format(dropped, ","))
         seen, conflict = None, 0
     else:
+        seq_max = None
         print("═══ 扫 dump：%s ═══" % paths.KK.name, flush=True)
         got, seen, conflict = scan(paths.KK, watch)
         print("   (词, 词源号) 去重后 %s 条｜同键内容不一致 %s 处（留了长的那份）"
@@ -305,14 +440,38 @@ def main():
         # 🔴 非英文版**没有编号可对**，对齐闸换成另一条同等强度的：
         #    我们对这些版记的必须**只有 `0` 一支**。哪天建库改成给它们编号了，
         #    这里会当场红 —— 而那时 `(w, "0")` 那个写法就已经在错配了。
-        odd = sorted({no for _, _, _, no in mine if no != "0"})
-        print("   本版在库里的词源号取值：%s" % (sorted({no for _, _, _, no in mine})))
-        if odd:
-            print("   🔴 出现了 `0` 以外的编号 %s —— 建库口径变了，`(w,\"0\")` 的假设不再成立。"
-                  % odd)
-            con.close()
-            return 1
-        bad = []
+        print("   本版在库里的词源号取值：%s" % (sorted({no for _, _, _, no in mine})[:8]))
+        if seq_max is not None:
+            # ── seq 口径（de）：**号必须落在 dump 真实存在的条目上** ──
+            # 这是位置型键，强度等价于英文版的「编号被 dump 原样覆盖」：
+            # 建库当时按 (词,pos) 出现顺序编号，若我这遍枚举与当时不同步，
+            # 必然出现「库里的 seq 比 dump 里该词的条目数还大」。
+            # ⚠️ 离线另验过一条更强的（不放进热路径，太吃内存）：`src_ref` 里带义项下标，
+            #    拿 `senses[下标].glosses[0]` 与 `sense_src.text` 逐条比 ——
+            #    2026-09-15 抽 3,000 条**释义逐字节一致 3,000 条（100%）**。
+            oob = [(w, n) for _, _, w, n in mine
+                   if w in seq_max and int(n) > seq_max[w]]
+            miss = sorted({w for _, _, w, _ in mine if w not in seq_max})
+            print("   seq 越界（库里的号大于 dump 该词的条目数）%s"
+                  % format(len(oob), ","))
+            print("   dump 里找不到这个词形 %s（clean_head 改写过，收不到）"
+                  % format(len(miss), ","))
+            if oob:
+                for w, n in oob[:8]:
+                    print("      · %s  库 seq=%s ｜ dump 最大 %s" % (w, n, seq_max[w]))
+                print("   🔴 出现越界 —— 我这遍枚举与建库当时不同步，配对不可信，不许落库。")
+                con.close()
+                return 1
+            bad = []
+        else:
+            # ── 全 0 口径（it/fr/pt/zh）：我们对这些版记的必须**只有 `0` 一支** ──
+            odd = sorted({no for _, _, _, no in mine if no != "0"})
+            if odd:
+                print("   🔴 出现了 `0` 以外的编号 %s —— 建库口径变了，`(w,\"0\")` 的假设不再成立。"
+                      % odd)
+                con.close()
+                return 1
+            bad = []
     else:
         bad = sorted(w for w, v in want.items() if w in seen and not v <= seen[w])
         print("   英文版有份的源头词形 %s｜对不齐 %s（%.3f%%）"
@@ -372,12 +531,22 @@ def main():
         print("\n(干跑。加 --run 才写库)")
         return 0
 
+    old_n = 0
+    if a.replace and "etymology" in have:
+        con2 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+        old_n = con2.execute("SELECT COUNT(*) FROM etymology WHERE edition=?",
+                             (prefix,)).fetchone()[0]
+        con2.close()
+        print("   重跑模式：本版已有 %s 行，将先删后插（净变化 %+d）"
+              % (format(old_n, ","), len(rows) - old_n))
     with dbtool.session("ingest-etymology-%s" % (a.edition or a.lang),
-                        expect={"#etymology": len(rows)}) as s:
+                        expect={"#etymology": len(rows) - old_n}) as s:
         if "etymology" not in have:
             s.execute(DDL)
             for i in IDX:
                 s.execute(i)
+        if old_n:
+            s.execute("DELETE FROM etymology WHERE edition='%s'" % prefix)
         s.executemany(
             "INSERT INTO etymology (word_id, edition, etym_no, text, src) VALUES (?,?,?,?,?)",
             rows)

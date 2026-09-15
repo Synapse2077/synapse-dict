@@ -337,15 +337,25 @@ export class GermanDictService {
                -- 🔴 词源号（2026-09-12）。de 的 sense **没有 entry_id**（it/fr/pt 有），
                --    只能看 sense_src.src_ref 的形状：
                --        kk-en:A:noun:1:0#0        4 个冒号 + # ⇒ 倒数第二段是词源号
-               --        kk-de:'n Abend:intj:0#0   3 个冒号    ⇒ 德语版不带词源号
-               --        kk-de-adj2:A#0            1 个冒号    ⇒ 同上
+               --        kk-de:'n Abend:intj:0#0   3 个冒号    ⇒ 倒数第一段是 seq（见下）
+               --        kk-de-adj2:A#0            1 个冒号    ⇒ 不带号，拿不到键
                --    ⚠️ de 一条 sense 可以挂**多条** sense_src（en 是 1:1），
-               --       所以这里用 LIKE 先筛出带词源号的那一条；
+               --       所以这里用 LIKE 先筛出带号的那一条；
                --       权威的拆解仍然交给 etymKeyOfSrcRef()，LIKE 只是把范围缩小。
-               --    实测多词源词的义项覆盖 99.0%（4,327 / 4,370）。
                --    ⚠️ 这一段里一个反引号都不能有：整条 SQL 在 TS 模板字符串里。
+               --
+               -- 🔴 2026-09-15：原来这里写死 3 个冒号的一律不要，注释理由是
+               --    德语版不带词源号。**那句话当天是对的，现在不是** —— 德语版的
+               --    第 4 段是 seq（该 (词,pos) 在 dump 里的第几个条目），
+               --    scripts/ingest_etymology.py 已按它灌了 105,266 条词源。
+               --    这是同一个 5 段假设写在两处，只改 etymKeyOfSrcRef 那一处不够
+               --    （端到端闸当场逮到：数据层有 kk-de:0，义项侧却只给 kk-en:0）。
+               -- ⇒ LIKE 放宽到 3 个冒号，**ORDER BY 让 5 段式优先** ——
+               --    现有拿得到 5 段式的义项一个不变（零回归），
+               --    原本拿不到键的 135,192 个义项才落到德语版那一支。
                (SELECT src_ref FROM sense_src
-                 WHERE sense_id = s.id AND src_ref LIKE '%:%:%:%:%#%' LIMIT 1) AS srcRef
+                 WHERE sense_id = s.id AND src_ref LIKE '%:%:%:%#%'
+                 ORDER BY (src_ref LIKE '%:%:%:%:%#%') DESC LIMIT 1) AS srcRef
           FROM sense s WHERE s.word_id = ? ORDER BY s.rank`),
 
       tags: this.db.prepare(

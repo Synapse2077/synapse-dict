@@ -3,13 +3,13 @@ import {
   GENDER_LABELS, POS_LABELS, REGISTER_LABELS, NUMBER_LABELS, TOPIC_LABELS,
   REL_LABELS, EXCHANGE_LABELS, TRANS_LABELS,
   ES_REGION_LABELS, ES_ARTICLE, ES_CONJ_LABELS,
-  IT_REGION_LABELS, IT_ARTICLE, IT_AUX_LABELS, IT_CONJ_LABELS, IT_NUMBER_NOTE_LABELS,
+  IT_REGION_LABELS, IT_GRAMMAR_LABELS, IT_ARTICLE, IT_AUX_LABELS, IT_CONJ_LABELS, IT_NUMBER_NOTE_LABELS,
   itAudioRegion,
   FR_AUX_LABELS, FR_VGROUP_LABELS, FR_ADJPOS_LABELS, FR_REGION_LABELS,
   FR_REGION_CODE_LABELS, FR_PRON_CONTEXT_LABELS, FR_ARTICLE,
   PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE, ptInflHeading,
   DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel,
-  EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels,
+  EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels, enSenseTopics,
   etymologyBrief } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
@@ -207,6 +207,12 @@ type ItSense = {
   gender: string | null;   // 逐义项性别 m/f（双性名词 il radio 半径 vs la radio 收音机）
   regions: string[];
   registers: string[];
+  /** 逐义项语法标签（及物/不及物/自反…），**只在动词词条上有值**。
+   *  🔴 2026-09-15 补进这个类型 —— 服务层 `ItalianSense.grammar` 一直在算、
+   *     API 一直在发，而 web 侧的这份镜像类型里**压根没这个字段**，
+   *     于是 18,818 条及物性标签没有任何一处能读到它。
+   *     `[[it-display-layer-stage8]]`：三层数据全绿，接上展示层才看得见。 */
+  grammar: string[];
   examples: ItExample[];   // 挂在这条义项上的例句（阶段 8 接上）
   entryId: number | null;  // 这条义项属于哪个词条（同词形多词条时用来分组）
 };
@@ -2030,7 +2036,25 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                      —— 藏掉它等于把 68 万条已经有的学科信息扔了。
                  🔴 判据用**来源**不用「是不是中文」：后者是形式代理，
                    源头哪天给了中文 slug 就会误判。 */
-              const chips = s.tags.filter((t) => t.kind !== 'topic' || s.src === 'ecdict');
+              /* 🔴 **按映射后的文字去重**，不按 (kind,value) 去重。
+                   同一个概念在库里有两种写法（kaikki 的 `US` / ECDICT 的 `美国`，
+                   kaikki 自己也会同时给 `UK`+`British`+`Britain`），
+                   `en.ts` 2026-09-15 把它们全收敛到同一个中文 ——
+                   不在这里去重，读者就会看见「美 美」「英 英 英」。
+                   ⚠️ 去重的对象是**印出来的字**：`Early`+`Modern` 映成两个不同的
+                      词（早期/现代英语），该留两个就留两个。 */
+              const topicVals = s.tags.filter((t) => t.kind === 'topic').map((t) => t.value);
+              const topics = s.src === 'ecdict'
+                ? topicVals                       // ECDICT 的是中文短码（计/医/化），单层，自解释
+                : enSenseTopics(topicVals);       // kaikki 的是英文 slug 链：折祖先 + 查中文
+              const byText = new Map<string, boolean>();   // 印出来的字 → 是不是学科标签
+              for (const t of topics) if (!byText.has(t)) byText.set(t, true);
+              for (const t of s.tags) {
+                if (t.kind === 'topic') continue;
+                const zh = enLabel(t.kind, t.value);
+                if (!byText.has(zh)) byText.set(zh, false);
+              }
+              const chips = [...byText].map(([text, topic]) => ({ text, topic }));
               return (
               <li className="sense-item" key={s.id}>
                 {/* 🔴 徽标**跟在中文后面同一行**，与 es/it/fr/pt/de 一致
@@ -2047,8 +2071,8 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                     {s.zh}
                     {chips.length > 0 && (
                       <span className="sense-chips">
-                        {chips.map((t, i) => (
-                          <span className="badge tag" key={i}>{enLabel(t.kind, t.value)}</span>
+                        {chips.map((c, i) => (
+                          <span className={c.topic ? 'badge tag topic' : 'badge tag'} key={i}>{c.text}</span>
                         ))}
                       </span>
                     )}
@@ -2207,6 +2231,30 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
   );
 }
 
+/**
+ * 徽标去重 —— **按印出来的字去重，不按源标签去重**。
+ *
+ * 🔴 2026-09-15：给五门补全 region/register 映射时，源头对同一个地方的多种写法
+ *    被收敛到了同一个中文（de `Southern-Germany`/`southern-Germany`/`southern` → 德国南部，
+ *    pt `Northeast-Brazil`/`Northeastern-Brazil` → 巴西东北，es `Rioja`/`La-Rioja` 相邻）。
+ *    不去重，读者就会看见「德国南部 德国南部」。
+ * ⚠️ 判重发生在**投影之后**（读者看到的那一串），不在键上 —— 这与读音行按音标串
+ *    判重是同一个形状（`french.ts` 里那段注释）。
+ *
+ * 这段逻辑 2026-08-27 就在 `FrSenseChips` 里写过一遍（法文版的 `pejorative` 与
+ * 英语版的 `derogatory` 同为「贬义」，`cervelle` 印出「…贬义 转喻 贬义」）。
+ * 另五门一直没跟上 —— `[[decision-not-propagated-across-editions]]`：
+ * **一门做对了其余照旧错着，而每门自己的闸全绿**。⇒ 抽成一份，五门共用。
+ */
+function dedupeChips<T extends { cls: string; text: string }>(chips: T[]): T[] {
+  const seen = new Set<string>();
+  return chips.filter((c) => {
+    if (seen.has(c.text)) return false;
+    seen.add(c.text);
+    return true;
+  });
+}
+
 function SenseChips({ sense }: { sense: SpanishSense | SpanishUnifiedSense }) {
   const chips: { cls: string; text: string }[] = [];
   if (sense.gender) chips.push({ cls: `g g-${sense.gender}`, text: GENDER_LABELS[sense.gender] || sense.gender });
@@ -2214,10 +2262,11 @@ function SenseChips({ sense }: { sense: SpanishSense | SpanishUnifiedSense }) {
   for (const r of sense.regions) chips.push({ cls: 'reg', text: ES_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
   for (const n of sense.numbers) chips.push({ cls: 'num', text: NUMBER_LABELS[n] || n });
-  if (chips.length === 0) return null;
+  const shown = dedupeChips(chips);
+  if (shown.length === 0) return null;
   return (
     <span className="sense-chips">
-      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+      {shown.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
     </span>
   );
 }
@@ -2626,17 +2675,35 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
 // 自包含，不复用西语的 SpanishEntryView。
 // ============================================================================
 
-function ItSenseChips({ sense, dualGender }: { sense: ItSense; dualGender?: boolean }) {
+function ItSenseChips({ sense, dualGender, entryTrans, entryPronominal }: {
+  sense: ItSense; dualGender?: boolean;
+  entryTrans?: string | null; entryPronominal?: boolean;
+}) {
   const chips: { cls: string; text: string }[] = [];
   // 仅双性名词逐义项标性别（il 半径 / la 收音机），单性词与词头徽标重复故略
   if (dualGender && sense.gender)
     chips.push({ cls: `g g-${sense.gender}`, text: `${IT_ARTICLE[sense.gender] || ''} ${GENDER_LABELS[sense.gender] || ''}` });
+  /* 🔴 2026-09-15 把 `sense.grammar` 接上页面 —— 18,818 条及物性标签收了一个月
+       没渲染过（`[[it-display-layer-stage8]]`：数据层全绿不等于读者看得见）。
+     ⚠️ 与词头徽标**互补而不重复**：
+       · `transitive`/`intransitive`：词头已经说死是 t 或 i 的词，逐条再印一遍是噪声；
+         只在词头说「及物/不及物」（ti，1,508 个词）或压根没说（transitivity 为空）
+         时才印 —— 那正是读者分不出哪条是哪条的情形。
+       · `pronominal`：词头已有「代动词」徽标的词同理略过。
+       · 其余五种（双宾/自反/无人称/系动词/ambitransitive）词头从来不说，一律印。 */
+  const headSaysTrans = entryTrans === 't' || entryTrans === 'i';
+  for (const g of sense.grammar) {
+    if (headSaysTrans && (g === 'transitive' || g === 'intransitive')) continue;
+    if (entryPronominal && g === 'pronominal') continue;
+    chips.push({ cls: 'gram', text: IT_GRAMMAR_LABELS[g] || g });
+  }
   for (const r of sense.regions) chips.push({ cls: 'reg', text: IT_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
-  if (chips.length === 0) return null;
+  const shown = dedupeChips(chips);
+  if (shown.length === 0) return null;
   return (
     <span className="sense-chips">
-      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+      {shown.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
     </span>
   );
 }
@@ -2936,7 +3003,12 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }
                   <li className="sense-item" key={i}>
                     <div className="sense-zh">
                       {s.zh || <span className="sense-missing">（待补）</span>}
-                      <ItSenseChips sense={s} dualGender={entry.gender === 'mf'} />
+                      <ItSenseChips
+                        sense={s}
+                        dualGender={entry.gender === 'mf'}
+                        entryTrans={entry.transitivity}
+                        entryPronominal={entry.pronominal}
+                      />
                     </div>
                     {/* 🔴 2026-08-16 补上 `s.it`（用户问「怎么没见过 en 和 it 同时出现」时发现的）。
                         阶段 1.5–3 往库里导了 89,531 条**意语原文释义**，接口也一直在返回，
@@ -3090,22 +3162,12 @@ function FrSenseChips({ sense, dualGender }: { sense: FrSense; dualGender?: bool
   for (const t of sense.topics) chips.push({ cls: 'top', text: TOPIC_LABELS[t] || t });
   for (const r of sense.regions) chips.push({ cls: 'reg', text: FR_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
-  // 🔴 2026-08-27（族 C 第二段）：按**渲染出来的中文**判重，不按键判重。
-  //    收了法文版标签之后，同一条义项会同时带上英语版的 `derogatory` 和
-  //    法文版的 `pejorative` —— 两个不同的键、**同一个中文「贬义」**，
-  //    `cervelle` 于是印出「…贬义 转喻 贬义」。
-  //    ⚠️ 判重必须发生在**投影之后**（读者看到的那一串），
-  //       这与读音行按音标串判重是同一个形状（`french.ts` 里那段注释）。
-  const seenText = new Set<string>();
-  const uniq = chips.filter((c) => {
-    if (seenText.has(c.text)) return false;
-    seenText.add(c.text);
-    return true;
-  });
-  if (uniq.length === 0) return null;
+  // 🔴 按**渲染出来的中文**判重（原因见 `dedupeChips`，这里是它的出处）。
+  const shown = dedupeChips(chips);
+  if (shown.length === 0) return null;
   return (
     <span className="sense-chips">
-      {uniq.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+      {shown.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
     </span>
   );
 }
@@ -3603,10 +3665,11 @@ function PtSenseChips({ sense, dualGender }: { sense: PtSense; dualGender?: bool
     chips.push({ cls: `g g-${sense.gender}`, text: `${PT_ARTICLE[sense.gender] || ''} ${GENDER_LABELS[sense.gender] || ''}` });
   for (const r of sense.regions) chips.push({ cls: 'reg', text: PT_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
-  if (chips.length === 0) return null;
+  const shown = dedupeChips(chips);
+  if (shown.length === 0) return null;
   return (
     <span className="sense-chips">
-      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+      {shown.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
     </span>
   );
 }
@@ -3989,10 +4052,11 @@ function DeSenseChips({ sense }: { sense: DeSense }) {
   const chips: { cls: string; text: string }[] = [];
   for (const r of sense.regions) chips.push({ cls: 'reg', text: DE_REGION_LABELS[r] || r });
   for (const r of sense.registers) chips.push({ cls: 'lex', text: REGISTER_LABELS[r] || r });
-  if (chips.length === 0) return null;
+  const shown = dedupeChips(chips);
+  if (shown.length === 0) return null;
   return (
     <span className="sense-chips">
-      {chips.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+      {shown.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
     </span>
   );
 }

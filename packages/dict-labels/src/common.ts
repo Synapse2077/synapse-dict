@@ -107,6 +107,29 @@ export const REGISTER_LABELS: Record<string, string> = {
   latinism: '拉丁借词', germanism: '德语借词', hispanism: '西语借词',
   italianism: '意语借词', litotes: '曲言', 'traditional-spelling': '传统拼写',
   acronym: '首字母缩略', rural: '乡村用语',
+  // 🔴 2026-09-15：六门标签覆盖率一次量全（`scripts/contract/tag_coverage_all.ts`），
+  //    这张共享表还漏着 de 21 种 / pt 5 种 / it 2 种 / es 1 种。补的逻辑同上一轮：
+  //    **对着各语种建库脚本的 REGISTERS 集合写**，不是只补量到的那几个。
+  // ⚠️ de 的 `build.py` 把「语用/年代/文化传统」全归进 REGISTERS（它没有 usage 桶），
+  //    所以 `often`/`Roman`/`Medieval` 这类会以语域标签的身份出现 —— 照它的桶给名字，
+  //    不在展示层替 de 重新分桶（`[[multilang-decoupling-essence]]`：按语种解耦）。
+  often: '常', now: '今', originally: '原义', chiefly: '主要',
+  standard: '标准语', colloquially: '口语', technical: '专业',
+  modern: '现代', Medieval: '中世纪', Roman: '古罗马',
+  'Ancient-Rome': '古罗马', 'Greco-Roman': '希腊罗马',
+  Early: '早期', Late: '晚期',
+  'nonce-word': '临时造词', retronym: '回溯新词', 'strict-sense': '严格义',
+  'non-scientific': '非学术义', metaphoric: '比喻', exaggerated: '夸张',
+  polite: '礼貌', impolite: '不礼貌', 'term-of-address': '称呼语',
+  taboo: '禁忌语', hypercorrect: '矫枉过正', academic: '学术',
+  affective: '情感用语', solemn: '庄重', affected: '做作', elevated: '高雅',
+  'eye-dialect': '方言拼写', 'World-War-II': '二战',
+  // ⚠️ 这三个是 de 的 dump 里各 **1 条**的标签，看样本仍判不准它在修饰什么
+  //    （`Hartlot`「硬钎料」的 `hard`、`anthropisch` 的 `natural`、
+  //     `Sonderangebot`「特价」的 `special`）——像是源头把多词标注拆碎的残片。
+  //    给一个不加戏的直译先把裸英文挡住，**并记在这儿等回源**：
+  //    `[[dont-say-source-lacks-what-we-skipped]]`，判不准就说判不准，别装成已知。
+  hard: '硬', natural: '自然', special: '特别',
 };
 
 // 关系条目上的标签 → 中文。2026-08-21。
@@ -135,6 +158,12 @@ export function relTagLabel(tag: string): string {
 // 数属性 → 中文（对应 build.py NUMBER）。
 export const NUMBER_LABELS: Record<string, string> = {
   uncountable: '不可数', 'plural-only': '仅复数', invariable: '单复同形', collective: '集合',
+  // 2026-09-15 对着 de `build.py` 的 `NUMBER_NOTE` 集合补全（es 的 `in-plural` 304 条
+  //   本来会把英文原样印出来）。同一集合五门共用，补完谁都不再漏。
+  countable: '可数', 'singular-only': '仅单数', 'in-plural': '用于复数',
+  'plural-normally': '通常用复数', 'no-plural': '无复数形式',
+  'singulare-tantum': '仅单数', 'plurale-tantum': '仅复数',
+  'usually-uncountable': '多作不可数',
 };
 
 // 学科领域 → 中文。库里 402 种取值 / 20,647 条标签 / 18,763 条义项，这里**全部覆盖**。
@@ -290,6 +319,93 @@ export const TOPIC_LABELS: Record<string, string> = {
   society: '社会', family: '家庭', funerals: '丧葬', prison: '监狱',
   advertising: '广告', trademarks: '商标', postal: '邮政', safety: '安全', 'board-sports': '板类运动',
   islands: '岛屿', rivers: '河流', toponymy: '地名学', ethnonymy: '族名学', anthroponymy: '人名学',
+
+  // ══ 🔴 2026-09-15：en 的 kaikki topic 解开展示，一次把落点上的洞补完 ══
+  //    在此之前 en 的英文 topic **有意不显示**（77 万条），因为「上千种取值没有映射表」。
+  //    真按落点量过之后是另一回事（`[[measure-landing-not-source]]`）：
+  //      · 这张共享表**已经覆盖 en 的 40.7 万条**（es/fr 那两轮翻的，值域是共用的）；
+  //      · kaikki 的 topic 是**一条链**，折掉祖先之后（见 `topic-tree.ts`）
+  //        真正到达读者的只剩 1.4 万条没中文 —— 不是「上千种」。
+  //    ⇒ 补的就是这 315 种。判不准的逐条回库看过样本再定词。
+  //    ⚠️ 同一个概念的多种写法（`naval`/`navy`/`Navy`、`paleography`/`palaeography`、
+  //       `fortification`/`fortifications`、源头的错拼 `palentology`/`mineralology`）
+  //       一律映到同一个中文，靠调用方按**映射后的文字**去重。
+  hobbies: '业余爱好', cricket: '板球', Greek: '希腊', rhetoric: '修辞', communications: '通信', topology: '拓扑学',
+  BDSM: 'BDSM', sumo: '相扑', "ice-hockey": '冰球', particle: '粒子', arts: '艺术', Roman: '罗马',
+  Japanese: '日本', manufacturing: '制造业', "set-theory": '集合论', "horse-racing": '赛马',
+  "Ancient-Rome": '古罗马', crafts: '手工艺', "human-sciences": '人文社科', naval: '海军', property: '物权法',
+  Norse: '北欧', publishing: '出版', "signal-processing": '信号处理', Jewish: '犹太', manner: '方式副词',
+  paganism: '异教', metalworking: '金属加工', curling: '冰壶', snowboarding: '单板滑雪',
+  cryptocurrencies: '加密货币', Mormonism: '摩门教', "cellular-automata": '元胞自动机', skateboarding: '滑板',
+  roofing: '屋面工程', Marxism: '马克思主义', surveying: '测绘', birdwatching: '观鸟', Chinese: '中国',
+  Germanic: '日耳曼', shipbuilding: '造船', "Indo-European-studies": '印欧语研究', "game-theory": '博弈论',
+  aerospace: '航空航天', phytopathology: '植物病理学', Egyptian: '埃及', trading: '交易',
+  "underwater-diving": '潜水', glassblowing: '玻璃吹制', sociolinguistics: '社会语言学', acting: '表演',
+  demoscene: 'demoscene', computational: '计算语言学', bingo: '宾果', authorship: '著作', dice: '骰子',
+  "fluid-dynamics": '流体力学', Jainism: '耆那教', juggling: '杂耍', "stock-market": '股市',
+  "order-theory": '序理论', "civil-engineering": '土木工程', Wicca: '威卡教', "World-War-I": '一战',
+  "seduction-community": '搭讪圈', Scientology: '山达基', ufology: '飞碟学', Shinto: '神道教', Navy: '海军',
+  epistemology: '认识论', machining: '机械加工', softball: '垒球', shipping: '航运', backgammon: '双陆棋',
+  "hip-hop": '嘻哈', combinatorics: '组合数学', robotics: '机器人学', cartomancy: '纸牌占卜', Quakerism: '贵格会',
+  "space-science": '空间科学', demography: '人口学', "patent-law": '专利法', occult: '神秘学',
+  Rastafari: '拉斯塔法里', audio: '音响', demographics: '人口统计', Sikhism: '锡克教', homeopathy: '顺势疗法',
+  skating: '滑冰', Protestantism: '新教', histology: '组织学', Unix: 'Unix', lacrosse: '长曲棍球',
+  "web-design": '网页设计', plumbing: '管道工程', "textual-criticism": '校勘学', gynaecology: '妇科',
+  "information-theory": '信息论', gastroenterology: '消化内科', mysticism: '神秘主义', palaeography: '古文字学',
+  paleography: '古文字学', etymology: '词源学', radiology: '放射医学', creationism: '神创论',
+  probability: '概率论', mahjong: '麻将', telegraphy: '电报', "software-compilation": '编译',
+  "algebraic-topology": '代数拓扑', blackjack: '二十一点', smoking: '烟草', roguelikes: 'Roguelike',
+  darts: '飞镖', Latin: '拉丁', academia: '学术界', fortification: '筑城', shogi: '将棋', phrenology: '颅相学',
+  calligraphy: '书法', IRC: 'IRC', aerodynamics: '空气动力学', "ball-games": '球类',
+  "systems-theory": '系统论', money: '货币', graffiti: '涂鸦', squash: '壁球',
+  "stock-ticker-symbol": '股票代码', socialism: '社会主义', fortifications: '筑城', navy: '海军',
+  pulmonology: '呼吸内科', electrochemistry: '电化学', "classical-studies": '古典学',
+  "measure-theory": '测度论', phenomenology: '现象学', "Rubik's-Cube": '魔方', circus: '马戏',
+  netball: '无挡板篮球', nanotechnology: '纳米技术', "entertainment-industry": '娱乐业',
+  "letterpress-typography": '活版印刷', Scrabble: '拼字游戏', dyeing: '染色', caving: '洞穴探险',
+  prostitution: '性交易', "Chinese-cuisine": '中餐', ethnography: '民族志', ballistics: '弹道学',
+  dominoes: '多米诺骨牌', musicology: '音乐学', Hebrew: '希伯来', "travel-industry": '旅游业',
+  ropemaking: '制绳', bryology: '苔藓学', campanology: '钟铃学', duration: '时段', vexillology: '旗帜学',
+  "Eastern-Christianity": '东方基督教', language: '语言', acrobatics: '杂技', cheerleading: '啦啦操',
+  beer: '啤酒', conchology: '贝壳学', drafting: '制图', hydrodynamics: '流体动力学', videography: '摄像',
+  engraving: '雕版', "racquet-sports": '拍类运动', bioinformatics: '生物信息学', phycology: '藻类学',
+  nematology: '线虫学', xiangqi: '象棋', "radio-communications": '无线电通信',
+  "information-technology": '信息技术', skydiving: '跳伞', tarot: '塔罗', nephrology: '肾内科',
+  "quantum-field-theory": '量子场论', "temporal-location": '时点', "Western-Christianity": '西方基督教',
+  Sufism: '苏非派', capitalism: '资本主义', neurobiology: '神经生物学', planets: '行星', editing: '编辑',
+  conservation: '自然保护', spinning: '纺纱', sociopolitics: '社会政治', Linux: 'Linux',
+  Ornithology: '鸟类学', "aerial-freestyle": '自由式滑雪空中技巧', "speech-therapy": '言语治疗',
+  bibliography: '目录学', dressage: '盛装舞步', ontology: '本体论', paintball: '彩弹射击',
+  "rock-paper-scissors": '石头剪刀布', parachuting: '跳伞', horseracing: '赛马', radiography: '放射成像',
+  Kantianism: '康德主义', acarology: '蜱螨学', "visual-art": '视觉艺术', ironworking: '铁工', fisheries: '渔业',
+  planktology: '浮游生物学', parasitology: '寄生虫学', dialectology: '方言学', guitar: '吉他',
+  naturism: '裸体主义', neurotoxicology: '神经毒理学', CAD: 'CAD', DVD: 'DVD', andrology: '男科',
+  bowmaking: '制弓', uranography: '星图学', paleogeography: '古地理学', quarrying: '采石',
+  "stock-exchange": '证券交易所', dressmaking: '女装裁制', chromatography: '色谱法',
+  "parliamentary-procedure": '议事规则', scholarly: '学术出版', NASA: 'NASA', Windows: 'Windows',
+  neurophysiology: '神经生理学', "visual-arts": '视觉艺术', astrocartography: '星位占星', pesäpallo: '芬兰棒球',
+  paleobiology: '古生物学', quilting: '绗缝', scientific: '科技用语', existentialism: '存在主义',
+  gerontology: '老年学', psycholinguistics: '心理语言学', information: '信息', pharmaceuticals: '药品',
+  demonology: '恶魔学', "analytic-number-theory": '解析数论', paleoanthropology: '古人类学',
+  palentology: '古生物学', papercraft: '纸艺', "space-sciences": '空间科学', ballooning: '热气球',
+  behavior: '行为', immunochemistry: '免疫化学', lithography: '平版印刷', sociobiology: '社会生物学',
+  histopathology: '组织病理学', piledriving: '打桩', finances: '财务', retailing: '零售',
+  mineralology: '矿物学', city: '城市', telephone: '电话', stenography: '速记',
+  "wireless-telegraphy": '无线电报', "country-dancing": '乡村舞', court: '法庭', microeconomics: '微观经济学',
+  weapon: '武器', hawking: '放鹰狩猎', feudalism: '封建制', "pocket-billiards": '落袋台球',
+  stratigraphy: '地层学', manosphere: '男性圈', psychopathology: '精神病理学', spiritualism: '唯灵论',
+  states: '状态', modelling: '模型制作', trains: '铁道', Buddhist: '佛教', CSS: 'CSS',
+  "Indian-Chinese-cuisine": '印式中餐', "Indian-cookery": '印度菜', Lisp: 'Lisp',
+  "alpine-skiing": '高山滑雪', bone: '骨骼', angelology: '天使学', "historical-ethnography": '历史民族志',
+  "art-history": '艺术史', iconography: '图像学', smithwork: '锻工', sailmaking: '制帆',
+  astrogeology: '天体地质学', "brick-making": '制砖', "radio-technology": '无线电技术', "sugar-making": '制糖',
+  "tin-plate-manufacture": '马口铁制造', jewellery: '珠宝', cryptocurrency: '加密货币', cards: '纸牌',
+  "in-technical-contexts": '术语用法', cigars: '雪茄', climate: '气候', seasons: '季节',
+  codicology: '古籍版本学', colleges: '高校', scriptwriting: '编剧', talking: '言谈',
+  "computer-sciences": '计算机科学', "historical-demography": '历史人口学', "sheepdog-trials": '牧羊犬赛',
+  "economic-liberalism": '经济自由主义', lubricants: '润滑剂', "sewage-treatment": '污水处理',
+  equitation: '马术', "gem-cutting": '宝石切割', veganism: '纯素主义', region: '地域', mammology: '哺乳动物学',
+  "printing-technology": '印刷技术', traumatology: '创伤学', pneumology: '呼吸病学',
 };
 
 // 词汇关系的中文名。`derived` 是「派生词/习语」（`pie` → `a contrapié`），
