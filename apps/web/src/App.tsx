@@ -10,7 +10,10 @@ import {
   PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE, ptInflHeading,
   DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel,
   EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels, enSenseTopics,
-  etymologyBrief } from '@synapse-dict/dict-labels';
+  etymologyBrief,
+  JA_POS_LABELS, JA_KANJI_GRADE_LABELS, JA_RELATION_LABELS, jaPitchType,
+  jaVclassLabel,
+} from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
 
@@ -582,7 +585,50 @@ type DeEntry = {
   freqZipf: number | null;
 };
 
-type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry | DeEntry;
+// ── 日语（2026-09-16，阶段 8）──
+// 🔴 这是**第一门形态与前六门不同构**的语言，三个字段是别处没有的：
+//    `readings[].kana/romaji/pitchPos` —— 假名读音、罗马字、重音核位置
+//    `kanjiGrade`                       —— 常用/教育/人名用/表外（单字条目才有）
+//    `seeAlso`                          —— 🔴 **与 `altOf` 分开**：同音索引页
+//       （`いぬ → 犬 狗 戌 率寝 寝ぬ 去ぬ`）在数据层被有意降级成「同音词」，
+//       就是为了不断言它们是异体字。印成「异体写法」＝替数据层做一个它拒绝做的断言。
+type JaReading = {
+  kana: string | null; kanaHist: string | null; romaji: string | null;
+  ipa: string | null; notation: string | null;
+  pitchMark: string | null; pitchPos: number | null; mora: number | null;
+  pos: string | null; src: string | null;
+};
+type JaSense = {
+  id: number; etymKey: string | null;
+  zh: string | null; ja: string | null; en: string | null; pos: string | null;
+  relations: Array<{ kind: string; targets: Array<{ word: string; clickable: boolean }> }>;
+};
+type JaExample = {
+  senseId: number | null; text: string; zh: string | null; en: string | null;
+  roman: string | null; ruby: Array<[string, string]>;
+  ref: string | null; bold: Array<[number, number]>;
+};
+type JaPointer = { target: string; zh: string | null; clickable: boolean };
+type JaEntry = {
+  lang: 'ja'; id: number; word: string; pos: string | null;
+  kanjiGrade: string | null; vclass: string | null;
+  freqZipf: number | null; isLemma: boolean;
+  readings: JaReading[];
+  senses: JaSense[];
+  examples: JaExample[];
+  inflections: Array<{ base: string; label: string | null; clickable: boolean }>;
+  relations: Array<{ kind: string; targets: Array<{ word: string; clickable: boolean }> }>;
+  altOf: JaPointer[];
+  seeAlso: JaPointer[];
+  audio: Array<{ url: string; file: string; speaker: string | null; kind: string }>;
+  bases: Array<{ word: string; label: string | null; clickable: boolean }>;
+};
+
+// 🔴 加新语种时**这一行必须跟着改**。忘了改的症状不是编译失败，而是
+//    `entry as JaEntry` 报「两个类型没有足够重叠」—— 这次 tsc 逮到了；
+//    但如果新类型恰好与某个旧类型形状接近，它会**静默通过**并在运行时读到 undefined。
+//    ⇒ `scripts/contract/service_api.ts` 那道闸盯的是服务层，这里盯的是展示层。
+type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry | DeEntry | JaEntry;
 
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
@@ -643,10 +689,19 @@ function parseTags(raw: string | null): string[] {
 
 // --- Spanish display helpers ---
 
-// 词性短码 → 中文（支持 "n/v" 这种聚合，逐段映射后再拼），全站统一显示。
-function posLabel(raw: string | null): string {
+// 词性短码 → 中文（支持 "n/v" 这种聚合，逐段映射后再拼）。
+//
+// 🔴 **2026-09-16 加 `lang` 参数。** 在此之前全站共用一张 `POS_LABELS`，
+//    对拉丁六门够用（词性体系彼此接近），**日语一接上就不够了**：
+//      · `kanji`/`kana`/`romaji` 三个词类六门全无，查不到 ⇒ 直接印英文码
+//      · `part` 在全局表是「小品词」（意语的 sì/no），而日语的 `particle` 是
+//        **助词**（は/が/を/に）—— **同一个码，两门语言不是一个东西**。
+//        改全局表会把意语一起改坏 ⇒ 必须是**按语种的覆盖层**，不是往全局表加。
+// ⚠️ `lang` 省略时行为与从前**完全一致**（只查全局表），所以六门的调用点不用动。
+function posLabel(raw: string | null, lang?: string): string {
   if (!raw) return '';
-  return raw.split('/').map((p) => POS_LABELS[p] || p).join('/');
+  const over = lang === 'ja' ? JA_POS_LABELS : null;
+  return raw.split('/').map((p) => over?.[p] || POS_LABELS[p] || p).join('/');
 }
 
 // 真人录音。音频托管在 Wikimedia Commons，我们只存 URL、在线播，**不下载字节**。
@@ -1646,8 +1701,26 @@ export default function App() {
           <GermanEntryView entry={entry as DeEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
-        {entry && entry.lang !== 'en' && entry.lang !== 'it' && entry.lang !== 'fr' && entry.lang !== 'pt' && entry.lang !== 'de' && (
-          <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
+        {entry && entry.lang === 'ja' && (
+          <JapaneseEntryView entry={entry as JaEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+        )}
+
+        {/* 🔴 **兜底只给 es，不再是「其余全部」。**
+            2026-09-16 之前这一行写的是 `lang !== 'en' && !== 'it' && …` ——
+            **任何未接线的新语种都会落进西语视图**，而且看上去还能用：
+            词头、义项、例句都是共有字段，渲染得出来，
+            日语特有的假名/声调/字种等级则**静默消失**。
+            `[[it-display-layer-stage8]]`：**兜底越体面，缺陷越难发现**。
+            ⇒ 改成白名单：认识的走自己的视图，不认识的**明说没接**。 */}
+        {entry && !['en', 'it', 'fr', 'pt', 'de', 'ja'].includes(entry.lang) && (
+          entry.lang === 'es'
+            ? <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
+            : (
+              <div className="detail-error">
+                <span className="hint-emoji">🧩</span>
+                <p>「{entry.lang}」的展示层还没接上 —— 数据可能在库里，但这一版读不出来。</p>
+              </div>
+            )
         )}
 
         {colloc && <CollocationView detail={colloc} onWord={goToWord} />}
@@ -4544,6 +4617,260 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
       )}
 
       <CollocationSection items={entry.collocations} lang="de" onColloc={onColloc} />
+    </article>
+  );
+}
+
+// ============================================================================
+// 日语词条视图。2026-09-16（阶段 8）。
+//
+// 🔴 这一门要展示的东西与前六门差别最大，四处**别处没有**：
+//   ① **假名读音**是一等公民（同形异读靠它分：`辛い` からい/つらい）
+//   ② **声调**：存的是「重音核位置」，型（平板/头高/中高/尾高）由它 + 拍数算出来
+//      —— 库里**不存型**，存一个可推导的列就是留一个会和核位置打架的冗余列
+//   ③ **字种等级**（常用/教育/人名用/表外）—— 单字条目才有
+//   ④ **振假名**：例句里 `ruby` 是 [[汉字, 读音], …]，用 <ruby> 标签渲染
+//
+// ⚠️ **「异体写法」和「同音词」必须分开印。** 见 `JaEntry` 类型上的注释。
+// ============================================================================
+
+/** 把例句正文按 `ruby` 渲染成带振假名的 <ruby>。
+ *
+ * 🔴 `ruby` 给的是「哪个汉字读什么」，**不保证按出现顺序、也不保证只出现一次**
+ *    （`日本語` 那条 14 组里 `語` 出现三次）。⇒ 逐字扫，用过的读音按顺序消费，
+ *    对不上就原样印 —— **宁可少一个振假名，也不许把读音贴到别的字上。**
+ */
+function JaRuby({ text, ruby }: { text: string; ruby: Array<[string, string]> }) {
+  if (!ruby.length) return <>{text}</>;
+  const queue = new Map<string, string[]>();
+  for (const [k, r] of ruby) {
+    const a = queue.get(k);
+    if (a) a.push(r); else queue.set(k, [r]);
+  }
+  const out: React.ReactNode[] = [];
+  let buf = '';
+  [...text].forEach((ch, i) => {
+    const q = queue.get(ch);
+    if (q && q.length) {
+      if (buf) { out.push(buf); buf = ''; }
+      out.push(<ruby key={i}>{ch}<rt>{q.shift()}</rt></ruby>);
+    } else {
+      buf += ch;
+    }
+  });
+  if (buf) out.push(buf);
+  return <>{out}</>;
+}
+
+/** 一行读音：假名 · 罗马字 · 声调 · IPA。 */
+function JaReadingRow({ r }: { r: JaReading }) {
+  const type = jaPitchType(r.pitchPos, r.mora ?? 0);
+  return (
+    <div className="ja-reading">
+      {r.kana && <span className="ja-kana">{r.kana}</span>}
+      {r.romaji && <span className="ja-romaji">{r.romaji}</span>}
+      {r.kanaHist && (
+        <span className="ja-kana-hist" title="历史假名遣">（旧 {r.kanaHist}）</span>
+      )}
+      {r.pitchMark && (
+        <span className="ja-pitch" title={`重音核位置 ${r.pitchPos ?? '未定'}`}>
+          {r.pitchMark}
+          {/* ⚠️ 推不准时 `pitchPos` 是 null ⇒ **只印标记不印型**。
+              印一个猜出来的型比不印更坏：读者没法分辨哪个是源头说的。 */}
+          {type && <em className="ja-pitch-type">{type}</em>}
+        </span>
+      )}
+      {r.ipa && <span className="ipa">/{r.ipa}/</span>}
+    </div>
+  );
+}
+
+function JaPointerList({ title, items, hint, onWord }: {
+  title: string; items: JaPointer[]; hint?: string; onWord: (w: string) => void;
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="ja-pointers">
+      <span className="ja-pointer-title" title={hint}>{title}</span>
+      {items.map((p) => (
+        <span key={p.target} className="ja-pointer">
+          {p.clickable
+            ? <button type="button" className="link-word" onClick={() => onWord(p.target)}>{p.target}</button>
+            : <span className="dead-word">{p.target}</span>}
+          {p.zh && <span className="ja-pointer-zh">{p.zh}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
+  entry: JaEntry; speakLocale: string; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
+}) {
+  // 按「词性 + 词源号」断组 —— 与前六门同一条规矩：
+  // 词性相同**且**词源相同才合并，否则同形异源会被并进一组。
+  const groups: Array<{ key: string; pos: string | null; senses: JaSense[] }> = [];
+  for (const s of entry.senses) {
+    const key = `${s.pos ?? ''}|${s.etymKey ?? ''}`;
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.senses.push(s);
+    else groups.push({ key, pos: s.pos, senses: [s] });
+  }
+  const bySense = new Map<number, JaExample[]>();
+  const entryLevel: JaExample[] = [];
+  for (const x of entry.examples) {
+    if (x.senseId === null) entryLevel.push(x);
+    else {
+      const a = bySense.get(x.senseId);
+      if (a) a.push(x); else bySense.set(x.senseId, [x]);
+    }
+  }
+
+  const playable: PlayableAudio[] = entry.audio.map((a) => ({
+    file: a.file, url: a.url, speaker: a.speaker, region: null, regionSrc: null,
+  }));
+
+  const renderExamples = (xs: JaExample[]) => (
+    <ul className="example-list">
+      {xs.map((x, i) => (
+        <li key={i}>
+          <div className="example-text"><JaRuby text={x.text} ruby={x.ruby} /></div>
+          {x.roman && <div className="example-roman">{x.roman}</div>}
+          {/* 🔴 中文优先、英文兜底 —— 但**两个都印不出来时不印空行**。
+              中文版白送了 8,586 条译文，英文版 20,632 条。 */}
+          {(x.zh || x.en) && <div className="example-zh">{x.zh ?? x.en}</div>}
+          {x.ref && <div className="example-ref">{x.ref}</div>}
+        </li>
+      ))}
+    </ul>
+  );
+
+  return (
+    <article className="entry ja-entry">
+      <header className="entry-head">
+        <h2 className="headword">
+          {entry.word}
+          <button type="button" className="speak-btn"
+            onClick={() => speak(entry.word, speakLocale)} aria-label="朗读">🔊</button>
+        </h2>
+        {entry.pos && <span className="badge pos">{posLabel(entry.pos, 'ja')}</span>}
+        {entry.kanjiGrade && (
+          <span className="badge grade">
+            {JA_KANJI_GRADE_LABELS[entry.kanjiGrade] ?? entry.kanjiGrade}
+          </span>
+        )}
+        {/* 🔴 活用类印在**词头旁边**，不印在每一行变形上 —— 它是词元的属性。
+            阶段 2 的处置正是「别让每行变形都拖着『サ行変格』」。 */}
+        {entry.vclass && (
+          <span className="badge vclass">{jaVclassLabel(entry.vclass)}</span>
+        )}
+      </header>
+
+      {entry.readings.length > 0 && (
+        <section className="ja-readings">
+          {entry.readings.map((r, i) => <JaReadingRow key={i} r={r} />)}
+        </section>
+      )}
+
+      {playable.length > 0 && (
+        <HumanAudioRow audios={playable} word={entry.word}
+          fallback={() => speak(entry.word, speakLocale)} regionLabel={(x) => x} />
+      )}
+
+      {/* 🔴 两个指针块**分开印，措辞跟着判据走**。 */}
+      <JaPointerList title="异体写法" items={entry.altOf} onWord={onWord}
+        hint="源头把这个词形标为另一个词的不同写法" />
+      <JaPointerList title="同音词" items={entry.seeAlso} onWord={onWord}
+        hint="这几个词读音相同 —— 源头只说了这个，没说它们是异体字" />
+
+      {entry.bases.length > 0 && (
+        <div className="ja-bases">
+          <span className="ja-pointer-title">这是以下词的活用形</span>
+          {entry.bases.map((b) => (
+            <span key={b.word} className="ja-pointer">
+              {b.clickable
+                ? <button type="button" className="link-word" onClick={() => onWord(b.word)}>{b.word}</button>
+                : <span className="dead-word">{b.word}</span>}
+              {b.label && <span className="ja-pointer-zh">{b.label}</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {groups.map((g, gi) => (
+        <section key={gi} className="pos-group">
+          {g.pos && <div className="pos-group-label">{posLabel(g.pos, 'ja')}</div>}
+          <ol className="sense-list">
+            {g.senses.map((s) => (
+              <li key={s.id} className="sense">
+                {/* 三语：中文 → 日语原文 → 英文。`[[gloss-three-languages]]` */}
+                {s.zh && <div className="sense-zh">{s.zh}</div>}
+                {s.ja && <div className="sense-native">{s.ja}</div>}
+                {/* ⚠️ 中文没有时英文才顶上来当主释义 —— 有中文时英文是**补充**不是替代 */}
+                {s.en && <div className={s.zh ? 'sense-en' : 'sense-zh'}>{s.en}</div>}
+                {s.relations.map((r) => (
+                  <div key={r.kind} className="sense-rel">
+                    <span className="rel-kind">
+                      {JA_RELATION_LABELS[r.kind] ?? relTagLabel(r.kind)}
+                    </span>
+                    {r.targets.map((t) => (
+                      <span key={t.word} className="rel-target">
+                        {t.clickable
+                          ? <button type="button" className="link-word" onClick={() => onWord(t.word)}>{t.word}</button>
+                          : <span className="dead-word">{t.word}</span>}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+                {bySense.has(s.id) && renderExamples(bySense.get(s.id)!)}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ))}
+
+      {entryLevel.length > 0 && (
+        <section className="entry-examples">
+          <h3>例句</h3>
+          {renderExamples(entryLevel)}
+        </section>
+      )}
+
+      {entry.relations.length > 0 && (
+        <section className="entry-relations">
+          {entry.relations.map((r) => (
+            <div key={r.kind} className="sense-rel">
+              <span className="rel-kind">
+                {JA_RELATION_LABELS[r.kind] ?? relTagLabel(r.kind)}
+              </span>
+              {r.targets.map((t) => (
+                <span key={t.word} className="rel-target">
+                  {t.clickable
+                    ? <button type="button" className="link-word" onClick={() => onWord(t.word)}>{t.word}</button>
+                    : <span className="dead-word">{t.word}</span>}
+                </span>
+              ))}
+            </div>
+          ))}
+        </section>
+      )}
+
+      {entry.inflections.length > 0 && (
+        <section className="inflection-section">
+          <h3>活用</h3>
+          <ul className="inflection-list">
+            {entry.inflections.map((f, i) => (
+              <li key={i}>
+                {f.clickable
+                  ? <button type="button" className="link-word" onClick={() => onWord(f.base)}>{f.base}</button>
+                  : <span className="dead-word">{f.base}</span>}
+                {f.label && <span className="infl-label">{f.label}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </article>
   );
 }

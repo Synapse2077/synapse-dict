@@ -7,7 +7,7 @@
 //
 // 分文件原则沿用既有事实，不新定政策：
 //   common —— 确实被多门语言共用的（`TRANS_LABELS` 有 4 门在用）
-//   es/it/fr/pt/de —— 各语种专属，互不引用（见「按语种解耦」铁律）
+//   es/it/fr/pt/de/ja —— 各语种专属，互不引用（见「按语种解耦」铁律）
 // ============================================================================
 
 export * from './common.js';
@@ -19,3 +19,4 @@ export * from './fr.js';
 export * from './pt.js';
 export * from './de.js';
 export * from './en.js';
+export * from './ja.js';

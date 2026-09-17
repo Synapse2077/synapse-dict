@@ -19,7 +19,9 @@
     "start": "tsx apps/api/src/index.ts",
     "gate:fr-tags": "tsx scripts/contract/fr_tag_tables.ts",
     "gate:tags": "tsx scripts/contract/tag_coverage_all.ts",
-    "gate:en-chips": "tsx scripts/contract/en_sense_chips.ts"
+    "gate:en-chips": "tsx scripts/contract/en_sense_chips.ts",
+    "gate:service-api": "tsx scripts/contract/service_api.ts",
+    "gate:ja-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-ja.tsx"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

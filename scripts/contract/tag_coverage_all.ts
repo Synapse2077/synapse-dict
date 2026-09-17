@@ -33,7 +33,28 @@ const REGION_BY_LANG: Record<string, Record<string, string>> = {
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 const CJK = /[一-鿿]/;
+const KANA = /[぀-ヿ]/;
 const LANGS = ['en', 'fr', 'es', 'it', 'pt', 'de'];
+
+/**
+ * 「这个取值本身就已经是中文了吗」——**判据必须按语种分**。
+ *
+ * 🔴 2026-09-15 日语调研逮到：本闸原来一律用 `CJK.test(value)`，
+ *    对前六门成立（拉丁字母语言的标签里出现汉字 ⇒ 只可能是我们自己写的中文），
+ *    **对日语恒真**：`漢字` `表外` `旧字体` 这些**日文原词**全部计入「已覆盖」，
+ *    覆盖率报 100% 而页面印的是日文。一条永远通过的检查等于没有检查。
+ *
+ * ⚠️ 纯汉字串在字形上**分不出中日**（`漢字` 既是日文也是中文）。
+ *    所以这里不靠字形，靠**来源**：日语版给的标签一律不算「已是中文」，
+ *    必须显式映射才算覆盖 —— 与 `App.tsx` 那条「topic 桶按来源分不按是不是中文分」
+ *    同一条判据（`[[criteria-from-meaning-not-form]]`）。
+ *    含假名的更直接：**带假名 ⇒ 一定不是中文**，这是个单向可靠的判据。
+ */
+function alreadyChinese(lang: string, value: string): boolean {
+  if (KANA.test(value)) return false;              // 带假名 ⇒ 一定不是中文
+  if (lang === 'ja') return false;                 // 纯汉字分不出中日 ⇒ 按来源判，日语一律要显式映射
+  return CJK.test(value);
+}
 
 /** 允许静默吞掉的 topic 条数上限。⚠️ 这是**当前实测值 +2%**，不是拍的：
  *  2026-09-15 把 315 种补完之后实测是 **0** ⇒ 预算就定 0，多一个都红。
@@ -100,7 +121,7 @@ for (const lang of LANGS) {
     const s = byKind.get(r.kind) ?? { mapped: 0, zh: 0, raw: 0, tot: 0, ok: 0 };
     s.tot += r.n;
     if (label(lang, r.kind, r.value) !== r.value) { s.mapped += 1; s.ok += r.n; }
-    else if (CJK.test(r.value)) { s.zh += 1; s.ok += r.n; }
+    else if (alreadyChinese(lang, r.value)) { s.zh += 1; s.ok += r.n; }
     else { s.raw += 1; (gaps[`${lang}/${r.kind}`] ??= []).push([r.value, r.n]); }
     byKind.set(r.kind, s);
   }

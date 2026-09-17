@@ -207,6 +207,41 @@ def _all(pairs):
     return (not bad), ("缺：" + "、".join(bad[:4]) if bad else "齐")
 
 
+# ══════════════════════════════════════════════════════════════════
+# P7 —— **「有意不做」的行必须写清什么会推翻它**（PLAYBOOK §7.5）。2026-09-16 补。
+#
+# 🔴🔴 起因是 ja 阶段 6 的真事故：账上写着「三版并集只有 206 个词形有 mp3_url，
+#    **别排工**」。事实对、结论错 —— 那句话把「dump 里没有」等同于「拿不到」。
+#    Commons 分类里有约 1,500 个日语发音文件，实际收到 1,038 条 / 953 个词形。
+#    **我引用了那条结论三次都没回源核**，最后是用户问出来的。
+#
+# ⚠️ **闸天然管不到这一类**：P1 核的是「声明做了的，交付物在不在」；
+#    声明**不做**的行没有交付物，于是它一写下去就成了永久前提。
+#
+# 🔴 判据不看 ⚪ 符号（形式代理，且在 pt/de/fr 的计划表里 ⚪ 是「不是缺陷/已解决」，
+#    按符号判会误报 37 行），只看**状态格里有没有「有意不做」**。
+#    也不问「有没有数字」—— ja 阶段 6 原来是有数字的（206），有数字照样烂掉。
+NEGATIVE = "有意不做"
+FALSIFIER = ("推翻它需要", "什么会推翻", "重新评估的条件", "重新开工的条件")
+
+
+def p7(text):
+    bad = []
+    for ln in stage_region(text or "").splitlines():
+        if not ln.startswith("|"):
+            continue
+        cells = ln.split("|")
+        # 🔴 只在**状态格**（第 3 格）里找，不在整行找 —— ja 那边第一版搜整行，
+        #    详情散文里提一句「有意不做的两件事」就误报。
+        if len(cells) < 4 or NEGATIVE not in cells[3]:
+            continue
+        if not any(k in ln for k in FALSIFIER):
+            bad.append(("P7", "阶段 %s 标着有意不做，但**没写什么会推翻它** —— "
+                              "否定结论不写推翻条件就是永久前提（PLAYBOOK §7.5）"
+                        % cells[1].strip().strip("*").strip()))
+    return bad
+
+
 # ══════════════════ 检查 ══════════════════
 
 def run(verbose=True, plan_text=None, tabs=None):
@@ -216,6 +251,7 @@ def run(verbose=True, plan_text=None, tabs=None):
         PLAN.read_text("utf-8") if PLAN.exists() else None)
     tabs = _tables() if tabs is None else tabs
     lines = []
+    red += p7(text)
 
     # ── P1 计划表在，且阶段表读得出来
     if text is None:

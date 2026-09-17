@@ -10,6 +10,7 @@ import { FrenchDictService } from './french.js';
 import { PortugueseDictService } from './portuguese.js';
 import { GermanDictService } from './german.js';
 import { EnglishDictService } from './english.js';
+import { JapaneseDictService } from './japanese.js';
 export * from './italian.js';
 export * from './spanish.js';
 export * from './french.js';
@@ -365,6 +366,7 @@ export const LANGUAGES: LanguageMeta[] = [
   { code: 'fr', label: 'Français', name: '法语', speak: 'fr-FR' },
   { code: 'pt', label: 'Português', name: '葡萄牙语', speak: 'pt-BR' },
   { code: 'de', label: 'Deutsch', name: '德语', speak: 'de-DE' },
+  { code: 'ja', label: '日本語', name: '日语', speak: 'ja-JP' },
   // 后续：no(Norsk/nb-NO)
 ];
 
@@ -419,7 +421,7 @@ const MAIN_TABLE: Record<string, string> = {
   //    ⇒ en 现在与其余五门同构，这张表其实已经可以退化成常量，
   //      但**保留它**：加语言时它仍是唯一的登记处。
   en: 'dict',
-  es: 'dict', it: 'dict', fr: 'dict', pt: 'dict', de: 'dict',
+  es: 'dict', it: 'dict', fr: 'dict', pt: 'dict', de: 'dict', ja: 'dict',
 };
 
 export function probeLanguages(): LanguageProbe[] {
@@ -457,7 +459,7 @@ export function ttsDirFor(code: string): string {
 
 type AnyService = DictionaryService | SpanishDictService | ItalianDictService
   | FrenchDictService | PortugueseDictService | GermanDictService
-  | EnglishDictService;
+  | EnglishDictService | JapaneseDictService;
 const serviceCache = new Map<string, AnyService>();
 
 export function getService(code: string): AnyService {
@@ -470,6 +472,7 @@ export function getService(code: string): AnyService {
     else if (lang === 'fr') svc = new FrenchDictService(dbPathFor('fr'));   // 法语专属服务
     else if (lang === 'pt') svc = new PortugueseDictService(dbPathFor('pt')); // 葡语专属服务
     else if (lang === 'de') svc = new GermanDictService(dbPathFor('de'));   // 德语专属服务
+    else if (lang === 'ja') svc = new JapaneseDictService(dbPathFor('ja')); // 日语专属服务
     else svc = new EnglishDictService(dbPathFor('en'));                     // 英语（含未知回退）
     serviceCache.set(lang, svc);
   }

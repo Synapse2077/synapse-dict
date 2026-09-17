@@ -418,10 +418,50 @@ def p3(con):
     return bad
 
 
+# ══════════════════════════════════════════════════════════════════
+# P7 —— **「有意不做」的行必须写清什么会推翻它**（PLAYBOOK §7.5）。2026-09-16 补。
+#
+# 🔴🔴 起因是 ja 阶段 6 的真事故：账上写着「三版并集只有 206 个词形有 mp3_url，
+#    **别排工**」。事实对、结论错 —— 那句话把「dump 里没有」等同于「拿不到」。
+#    日语版维基词典只是不在词条里嵌音频，Commons 分类里有约 1,500 个文件，
+#    实际收到 1,038 条 / 953 个词形。**我引用了那条结论三次都没回源核**，
+#    最后是用户问出来的。
+#
+# ⚠️ **闸天然管不到这一类**：P1 核的是「声明做了的，交付物在不在」。
+#    声明**不做**的行没有交付物，于是它一写下去就成了永久前提。
+#
+# 🔴 判据**不看 ⚪ 这个符号** —— 那是形式代理，而且在各语种之间不成立：
+#    `⚪` 在 pt/de/fr 的计划表里是「**不是缺陷 / 已解决**」（pt 的图例写着），
+#    按符号判会在 37 行上误报。判据要问**状态列在说什么**。
+# 🔴 也不问「有没有数字」—— ja 阶段 6 原来**是有数字的**（206），有数字照样烂掉。
+#    缺的是"什么会让这个数字不再成立"。
+NEGATIVE = "有意不做"
+FALSIFIER = ("推翻它需要", "什么会推翻", "重新评估的条件", "重新开工的条件")
+
+
+def p7():
+    s = PLAN.read_text(encoding="utf-8")
+    i = s.index('## 二、阶段表')
+    tbl = s[i:s.index("\n## ", i + 4)]
+    bad = []
+    for m in ROW.finditer(tbl):
+        num, title, state = m.group(1), m.group(2), m.group(3)
+        nl = tbl.find("\n", m.end())
+        row = tbl[m.start():nl if nl > 0 else len(tbl)]
+        # 「有意不做」必须在**状态列**里，不是整行 —— 否则详情散文提一句就误报。
+        if NEGATIVE not in state:
+            continue
+        if not any(k in row for k in FALSIFIER):
+            bad.append(("P7", "阶段 %s「%s」标着有意不做，但**没写什么会推翻它** —— "
+                              "否定结论不写推翻条件就是永久前提（PLAYBOOK §7.5，"
+                              "ja 阶段 6 正是这么烂掉的）" % (num, title.strip()[:24])))
+    return bad
+
+
 def report(verbose=True):
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     try:
-        red = p1(con) + p2() + p3(con)
+        red = p1(con) + p2() + p3(con) + p7()
     finally:
         con.close()
     if verbose:
