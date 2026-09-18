@@ -39,15 +39,21 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
 import {
   EnglishEntryView, SpanishEntryView, ItalianEntryView,
-  FrenchEntryView, PortugueseEntryView, GermanEntryView,
+  FrenchEntryView, PortugueseEntryView, GermanEntryView, JapaneseEntryView,
 } from './App';
 
 const mutate = process.argv.includes('--mutate');
-type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de';
-const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de'];
+// 🔴 2026-09-17 加 ja。**这是第三张忘了登记日语的表**（另两张：`render-dump.tsx`
+//    的 `View` 分支、`css-audit.ts` 的 `VIEWS`）。三张表都是"加语言时要来加一行"，
+//    三张都漏了，而**三道闸全绿** —— 因为它们查的是"登记了的那几门对不对"，
+//    没有一条查"是不是所有门都登记了"（`[[lesson-must-become-mechanism]]`）。
+//    ⇒ `css-audit.ts` 已经补上了"源码里有几个视图，表里就得有几行"的自检。
+type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de' | 'ja';
+const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja'];
 const VIEW: Record<Lang, unknown> = {
   en: EnglishEntryView, es: SpanishEntryView, it: ItalianEntryView,
   fr: FrenchEntryView, pt: PortugueseEntryView, de: GermanEntryView,
+  ja: JapaneseEntryView,
 };
 
 /** 规范序列。角色 → 六门各自认得出它的类名（任一命中即可）。 */
@@ -57,7 +63,10 @@ const CANON: Array<[string, RegExp]> = [
   ['原文定义', /class="sense-src"/],
   ['异体', /class="sense-altof"/],
   ['关系', /class="(rel-row|sense-relations|sense-rels|rel-group)"/],
-  ['例句', /class="(sense-example|example-item)"/],
+  // ⚠️ ja 的义项内例句用的是共用的 `.example-list`（`<ul>` 容器），
+  //    正文那一层是 `.example-text` —— 两个名字都要认，否则日语的例句块
+  //    在本闸眼里根本不存在，序列永远"合规"。
+  ['例句', /class="(sense-example|example-item|example-text)"/],
 ];
 const ROLES = CANON.map(([n]) => n);
 
@@ -102,6 +111,9 @@ const SEEDS: Record<Lang, string[]> = {
   fr: ['chien', 'maison', 'courir', 'main', 'banque', 'temps', 'pied', 'jour'],
   pt: ['cão', 'casa', 'correr', 'mão', 'banco', 'luz', 'tempo', 'pé'],
   de: ['Hund', 'Haus', 'laufen', 'Hand', 'Bank', 'Licht', 'Zeit', 'Fuß'],
+  // 日语挑的是**块数多**的：`猫`/`桜` 关系怪物、`食べる`/`行く` 活用怪物、
+  // `時間` 例句最多、`心`/`水`/`山` 义项多。
+  ja: ['猫', '桜', '食べる', '行く', '時間', '心', '水', '山'],
 };
 
 const pages: Array<[string, string[]]> = [];     // [词, 角色序列]

@@ -94,6 +94,10 @@ TRACK = [
     'pos', 'level', 'freq_zipf',
     # 关系层与变形层的关键列
     'sense_relation.target', 'inflection.base_id', 'inflection.label_zh',
+    # 活用形的转写。2026-09-18：英文版把它和词形写在**同一个单元格**里
+    #   （`食べれます [taberemasu]`），阶段 2 原样收进了 `dict.word`。
+    #   拆出来之后列进来，闸才守得住"下次重跑有没有又糊回去"。
+    'inflection.romaji',
     # 例句的日语一等字段（阶段 5a 加的两列）
     'example.roman', 'example.ruby', 'example.src_translation',
 ]
@@ -103,7 +107,12 @@ TRACK_TABLES = [
                 'etymology','entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sense_relation',
                 'inflection',
                 'pronunciation', 'pronunciation_entry', 'example', 'example_gloss',
-                'collocation', 'collocation_gloss', 'audio']
+                'collocation', 'collocation_gloss', 'audio',
+                # 汉字音訓読み层（阶段 4c，2026-09-18）。**日语独有**，另六门没有这张表。
+                #   建出来的第一件事就是列进来 —— `entry.kana` 那一层守不住它：
+                #   汉字的读音是**一组带分类的**（呉音/漢音/唐音/訓/古訓/名乗り），
+                #   而 `entry.kana` 是单值列，装不下也分不出类。
+                'kanji_reading']
 
 
 def _cols(conn, table=None):

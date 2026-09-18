@@ -555,6 +555,49 @@ DONE = {
               "FROM sense_gloss WHERE lang='de' GROUP BY 1,2 HAVING COUNT(*)>1)",
               "同一义项挂了逐字相同的德语释义"),
     ),
+    # C45：fr/it/es/pt 版释义译成中文补空白页（付费，2.29 元）。
+    # 🔴 判据盯的是**这一批特有的两个缺陷**（切片实测出来的），不是泛泛「行数够不够」。
+    "C45": _both(
+        _zero("SELECT CASE WHEN (SELECT COUNT(*) FROM sense_gloss "
+              "WHERE src='model:foreign-def') >= 5000 THEN 0 ELSE 1 END",
+              "外语释义译出来的那一层为空或明显偏小"),
+        # ① 源语言漏进中文（`Hebert → 法语姓氏`）。切片第一轮 2.0%，拆掉 payload 的
+        #    `lang` 字段后归零 ⇒ 这里锁死：再出现就是那个字段被人加回去了。
+        _zero("SELECT COUNT(*) FROM sense_gloss WHERE src='model:foreign-def' "
+              "  AND (text LIKE '%法语姓%' OR text LIKE '%西班牙语姓%' "
+              "    OR text LIKE '%意大利语姓%' OR text LIKE '%葡萄牙语姓%')",
+              "源语言漏进中文（payload 的 lang 字段被加回去了？）"),
+        # ② 证据层必须留着源语言原文 —— 这一批**没有德语原文可对照**，
+        #    证据层是将来唯一能翻案的依据，丢了就再也查不回来。
+        _zero("SELECT COUNT(*) FROM sense s JOIN sense_gloss g ON g.sense_id=s.id "
+              "  LEFT JOIN sense_src x ON x.sense_id=s.id "
+              " WHERE g.src='model:foreign-def' AND x.sense_id IS NULL",
+              "出版层有中文、证据层没有源语言原文（翻案就没依据了）"),
+    ),
+    # C44：中文版释义补空白页。四条判据，**都是「真做了才成立」的数据事实**。
+    # 🔴 一条都不许写成行数阈值以外的东西 —— 字面量闸禁止写死具体条数，
+    #    所以这里用**存在性**和**必须为 0 的残渣**，不用「等于 31,985」。
+    "C44": _both(
+        _zero("SELECT CASE WHEN (SELECT COUNT(*) FROM sense_src "
+              "WHERE src_ref LIKE 'kk-zh:%') >= 20000 THEN 0 ELSE 1 END",
+              "中文版补的那一层为空或明显偏小（重跑建库没把它带回来？）"),
+        # 用户报的那一条：句末标点重复的空壳并掉了，好页面还在。
+        _zero("SELECT COUNT(*) FROM dict b JOIN dict g ON g.word = rtrim(b.word,'.!?') "
+              "WHERE b.word <> g.word "
+              "  AND NOT EXISTS(SELECT 1 FROM sense s WHERE s.word_id=b.id) "
+              "  AND NOT EXISTS(SELECT 1 FROM inflection i WHERE i.word_id=b.id) "
+              "  AND COALESCE(b.exchange,'')='' "
+              "  AND EXISTS(SELECT 1 FROM sense s WHERE s.word_id=g.id)",
+              "又出现「去掉句末标点就是一个好页面」的空壳（搜索会把两个都递出来）"),
+        # 🔴 性别必须在 `dict` 上。写进 `sense.gender` 不报错，而 de 的展示层
+        #    只读 `dict.gender` ⇒ 数据在库里、读者看不见（第一版正是这么错的）。
+        _zero("SELECT COUNT(*) FROM sense s JOIN sense_src x ON x.sense_id=s.id "
+              "WHERE x.src_ref LIKE 'kk-zh:%' AND s.gender IS NOT NULL",
+              "中文版那批的性别又落回 sense.gender（展示层不读那一列）"),
+        _zero("SELECT CASE WHEN (SELECT COUNT(*) FROM dict "
+              "WHERE gender_src='zh-edition') >= 15000 THEN 0 ELSE 1 END",
+              "dict.gender 上来自中文版的性别没了"),
+    ),
     # C38：外审残单一次清。五族各一条判据，**都是「真做了才成立」的数据事实**。
     "C38": _both(
         _zero("SELECT COUNT(*) FROM sense_gloss g WHERE g.lang='zh' "

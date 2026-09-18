@@ -50,6 +50,8 @@ from fill_freq import _same                           # noqa: E402
 from backfill_kana import PURE_KANA                   # noqa: E402
 from build import norm_ja                             # noqa: E402
 from intake_edition_words import SECTION              # noqa: E402
+# 阶段 4c 汉字音訓読み层 —— 判据 import 生成侧那一份，闸里不重写
+from build_kanji_reading import KIND as KR_KIND, split_okuri   # noqa: E402
 sys.path.insert(0, str(HERE.parent / "fixes"))
 from fix_gloss_residue import ONLY_BRACKET            # noqa: E402
 
@@ -58,17 +60,22 @@ f = lambda n: format(n, ",")
 # v3 的十四张表。少一张就是被 DROP 重建了。
 TABLES = ("entry", "sense_src", "sense", "sense_gloss", "sense_tag", "sense_relation",
           "pronunciation", "inflection", "example", "example_gloss", "collocation",
-          "collocation_gloss", "audio", "field_src")
+          "collocation_gloss", "audio", "field_src",
+          # 阶段 4c（2026-09-18）：汉字音訓読み层，日语独有
+          "kanji_reading")
 
 
 # ══════════════════════════════════════════════════════════════════
 # 允许的非零基线：`断言名 → (期望值, 理由)`。**锁数字不锁名字。**
 ACCEPT = {
     "A1 义项没有中文": (
-        3_202,   # 2026-09-16 从 3,213 收紧：`fix_gloss_residue` 删掉 31 条
+        3_139,   # 2026-09-18 从 3,202 收紧：3b 那批多层 gloss 的中文回填
+                 # （`translate_hier_gloss` → `fix_hierarchical_gloss --load`）
+                 # 又补上 63 条。**闸报「⬇ 该收紧」报了两轮我才来改** ——
+                 # 不收紧的代价是这 63 条哪天掉回去它一声不响。
+                 # 2026-09-16 从 3,213 → 3,202：`fix_gloss_residue` 删掉 31 条
                  # 「整条只是【异写列表】」的义项，其中 11 条本来就没中文。
-                 # **是闸自己报「⬇ 该收紧」我才来改的**，不是我记得。
-        "3,213 / 296,580 ＝ 1.08%。两批付费翻译（1.5b 英译中、3b 日译中）跑完之后的残余，"
+        "3,139 / 296,549 ＝ 1.06%。两批付费翻译（1.5b 英译中、3b 日译中）跑完之后的残余，"
         "其中绝大多数是控制组 E0「模型判定给不出」那一类 —— **是缺不是错**，"
         "读者看到的是没有中文，不是看到错的中文（`docs/FRAMEWORK.md`：错比缺更伤权威）。"),
     "B4 词元没有假名读音（读者口径）": (
@@ -235,6 +242,43 @@ def build(con):
         " WHERE e.kana IS NOT NULL")
         if PURE_KANA.match(w) and norm_ja(k) != norm_ja(w))))
 
+    # ── K 汉字音訓読み层（阶段 4c，2026-09-18）──
+    # 🔴 这一层是补一条**写滑了的判据**才有的：JA_PLAN §二.4 从「汉字没有**单一**读音」
+    #    推到了「不用补」，而汉字有的是一组**分类**读音，日语版写了我们没抽
+    #    （`[[dont-say-source-lacks-what-we-skipped]]`）。闸盯着它别再掉回去。
+    # 🔴🔴 **表不在就跳过整组，别抛异常。** M27（DROP 掉这张表）第一版让 build()
+    #    当场崩溃 —— 而 L1「表被 DROP 掉了」明明已经算出来了，却因为下面这句
+    #    抛异常而永远打不到屏幕上。**崩溃比报红危险**：它看起来像环境问题，
+    #    而不是「有人把一层数据删了」。分工是 L1 管「在不在」、K 组管「对不对」，
+    #    K 组崩溃等于把 L1 的话也堵死了（`[[correct-steps-can-compose-a-hole]]`）。
+    kr = list(con.execute("SELECT kana, kana_stem, okurigana, kind, subkind,"
+                          " is_joyo, entry_id FROM kanji_reading")
+              ) if "kanji_reading" in have else []
+    # K1/K2 值域 —— **值域从生成侧的 KIND 表算**，不在闸里手抄一份
+    a(("K", "K1 音训读的 kind 越界", sum(
+        1 for r in kr if r[3] not in {k for k, _ in KR_KIND.values()})))
+    a(("K", "K2 音训读的 subkind 越界", sum(
+        1 for r in kr if r[4] is not None
+        and r[4] not in {s for _, s in KR_KIND.values() if s})))
+    # 🔴 K3 是**可逆性回核（100%，非抽样）**，不是计数：拿存下来的 `kana` 重跑
+    #    生成侧的 `split_okuri`，和存下来的 stem/okuri 逐条比。计数型判据对
+    #    「拆错了但条数对」结构性失明（`[[primary-key-is-not-enough]]`）。
+    a(("K", "K3 送假名拆分与生成侧对不上（可逆性回核）", sum(
+        1 for r in kr if split_okuri(r[0]) != (r[1], r[2]))))
+    # K4 跨字段矛盾：细分必须属于它那个大类
+    a(("K", "K4 subkind 不属于它的 kind", sum(
+        1 for r in kr if r[4] is not None and KR_KIND.get(r[4], (None,))[0] != r[3])))
+    a(("K", "K5 名乗り被并进訓読み", sum(
+        1 for r in kr if r[3] == "kun" and r[4] == "nanori")))
+    # K6 挂载：必须挂在 `character` 条目上，挂到词条目上等于把「字的读音」
+    #    说成「词的读音」——那正是这一层要区分的东西
+    a(("K", "K6 音训读挂到了非 character 条目", q(
+        "SELECT COUNT(*) FROM kanji_reading k JOIN entry e ON e.id=k.entry_id"
+        " WHERE e.pos_raw<>'character'") if "kanji_reading" in have else 0))
+    a(("K", "K7 音训读孤儿（word_id 不在 dict）", q(
+        "SELECT COUNT(*) FROM kanji_reading k LEFT JOIN dict d"
+        " ON d.id=k.word_id WHERE d.id IS NULL") if "kanji_reading" in have else 0))
+
     # ── C 变形层 ──
     a(("C", "C1 变形悬空原形（base_id 为空）", q(
         "SELECT COUNT(*) FROM inflection WHERE base_id IS NULL")))
@@ -288,6 +332,37 @@ def build(con):
     a(("F", "F4 关系目标是英文释义不是词", sum(
         1 for (t,) in con.execute("SELECT DISTINCT target FROM sense_relation")
         if clean_target(t) != t or (not JA.search(t) and " " in t))))
+
+    # ── 🔴 2026-09-17 关系层清洗（`ja/fixes/fix_relation_kind_and_targets.py`）──
+    #    判据 import 自修复侧那一份 —— 自己重写一条会和它慢慢长歪
+    #    （`[[etymology-layer-acceptance]]`：同一个假设写在两处，只改一处三层全绿）。
+    from fixes.fix_relation_kind_and_targets import clean as _rel_clean
+    a(("F", "F5 关系目标还带残渣（振假名括号/英文标签/罗马字回显/冒号）", sum(
+        1 for (t,) in con.execute("SELECT DISTINCT target FROM sense_relation")
+        if _rel_clean(t) != t)))
+    # 🔴🔴 F6/F7 **必须成对看**，单看任何一条都会反过来：
+    #    ja 版 `proverbs` 装的是「熟語」不是谚语（实测目标 ≤4 字 94.9%），
+    #    已归位到 `derived`；而 en 版那 384 条是**真谚语**（逐条读过）。
+    #    只查 F6 的话，「把两版一起删光」会显示成修得很干净 ——
+    #    与 `fix_traditional_to_simplified` 的 A5/A6 同一个形状。
+    a(("F", "F6 ja 版的「熟語」又被当成谚语收进来了", q(
+        "SELECT COUNT(*) FROM sense_relation WHERE kind='proverb' AND src='ja-edition'")))
+    # 🔴 **这一条不问数量，只问在不在。** 第一版写的是 `384 - count`，
+    #    被字面量闸当场打红（`test_no_literal_counts.py`）—— 它是对的：
+    #    384 是**这一版 dump 的数**，换一份 dump 它就过期，而过期的断言会一直绿。
+    #    F7 要守的不是「还是 384 条」，是「**别整批消失**」⇒ 判据写成存在性。
+    a(("F", "F7 en 版的真谚语整批没了（只问在不在，不问几条）",
+       0 if q("SELECT COUNT(*) FROM sense_relation"
+              " WHERE kind='proverb' AND src='en-edition'") else 1))
+    # 🔴 F8/F9 成对：转写从词形里拆出来之后，**两边都要守**。
+    #    只查 F8 的话，「把转写整列丢掉」同样让 F8 全绿 —— 而那是把源头给的事实扔了
+    #    （`[[dont-say-source-lacks-what-we-skipped]]`）。
+    from fixes.fix_inflection_form_romaji import SHAPE as _form_shape
+    a(("F", "F8 词形字面里又长回了 [罗马字]（英文版活用表的单元格格式）", sum(
+        1 for (w,) in con.execute("SELECT word FROM dict WHERE word LIKE '% [%]'")
+        if _form_shape.match(w))))
+    a(("F", "F9 拆出来的转写整列没了（只问在不在，不问几条）",
+       0 if q("SELECT COUNT(*) FROM inflection WHERE romaji IS NOT NULL") else 1))
 
     # ── G 频次 ──
     from wordfreq import tokenize
@@ -394,6 +469,59 @@ def _unprotect(con):
 
 
 MUT = [
+    # ── K 汉字音訓読み层（阶段 4c）。每条变异重演一个**真实的**失效形状 ──
+    ("M20", "K1 源头出了新分类标记，生成侧收了、值域没跟着改",
+     ["UPDATE kanji_reading SET kind='onyomi' WHERE id IN"
+      " (SELECT id FROM kanji_reading WHERE kind='on' LIMIT 4)"],
+     "K1 音训读的 kind 越界"),
+    ("M21", "K2 subkind 冒出 KIND 表里没有的值",
+     ["UPDATE kanji_reading SET subkind='so-on' WHERE id IN"
+      " (SELECT id FROM kanji_reading WHERE subkind='go-on' LIMIT 4)"],
+     "K2 音训读的 subkind 越界"),
+    # 🔴 M22 是这组里最重要的一条：**「顺手把连字符剥了」**。
+    #    `い-きる` 的连字符标着「`生` 只读 `い`」，剥掉就等于说整个 `いきる` 都是字音。
+    #    条数一条不少 ⇒ 计数型判据全绿，只有可逆性回核逮得到。
+    ("M22", "🔴 K3 重跑时把送假名连字符剥了（条数不变，计数闸全绿）",
+     ["UPDATE kanji_reading SET kana_stem=REPLACE(kana,'-',''), okurigana=NULL"
+      " WHERE okurigana IS NOT NULL"],
+     "K3 送假名拆分与生成侧对不上（可逆性回核）"),
+    ("M23", "K4 细分挂到了别的大类下（音読み底下挂古訓）",
+     ["UPDATE kanji_reading SET subkind='ko-kun' WHERE id IN"
+      " (SELECT id FROM kanji_reading WHERE kind='on' LIMIT 3)"],
+     "K4 subkind 不属于它的 kind"),
+    ("M24", "🔴 K5 名乗り被并进訓読み（文件头明令不许并）",
+     ["UPDATE kanji_reading SET kind='kun', subkind='nanori' WHERE kind='nanori'"],
+     "K5 名乗り被并进訓読み"),
+    ("M25", "K6 挂到词条目上（把「字的读音」说成「词的读音」）",
+     ["UPDATE kanji_reading SET entry_id=(SELECT id FROM entry WHERE pos_raw='noun'"
+      " LIMIT 1) WHERE id IN (SELECT id FROM kanji_reading LIMIT 3)"],
+     "K6 音训读挂到了非 character 条目"),
+    ("M26", "K7 word_id 悬空（收词重排 id 之后没重连）",
+     ["UPDATE kanji_reading SET word_id=99999999 WHERE id IN"
+      " (SELECT id FROM kanji_reading LIMIT 3)"],
+     "K7 音训读孤儿（word_id 不在 dict）"),
+    ("M27", "🔴 L1 整张 kanji_reading 表被 DROP 重建（另七条全部失去分母）",
+     ["DROP TABLE kanji_reading"],
+     "L1 v3 的表被 DROP 掉了"),
+
+    ("M14", "F5 关系目标的振假名括号回潮",
+     ["UPDATE sense_relation SET target='桜蔭(おういん)会(かい)' WHERE id IN"
+      " (SELECT id FROM sense_relation WHERE kind='derived' LIMIT 3)"],
+     "F5 关系目标还带残渣（振假名括号/英文标签/罗马字回显/冒号）"),
+    ("M15", "F6 ja 版熟語又被挂成 proverb",
+     ["UPDATE sense_relation SET kind='proverb' WHERE id IN"
+      " (SELECT id FROM sense_relation WHERE src='ja-edition' AND kind='derived' LIMIT 5)"],
+     "F6 ja 版的「熟語」又被当成谚语收进来了"),
+    ("M16", "🔴 F7 把两版 proverb 一起删光（只看 F6 会显示成「修干净了」）",
+     ["DELETE FROM sense_relation WHERE kind='proverb'"],
+     "F7 en 版的真谚语整批没了（只问在不在，不问几条）"),
+    ("M17", "F8 词形字面里又长回了 [罗马字]",
+     ["UPDATE dict SET word=word||' [mut]' WHERE id IN"
+      " (SELECT word_id FROM inflection WHERE romaji IS NOT NULL LIMIT 3)"],
+     "F8 词形字面里又长回了 [罗马字]（英文版活用表的单元格格式）"),
+    ("M18", "🔴 F9 把转写整列丢掉（只看 F8 会显示成「洗干净了」）",
+     ["UPDATE inflection SET romaji=NULL"],
+     "F9 拆出来的转写整列没了（只问在不在，不问几条）"),
     ("M1", "F3 同音索引页混进异表记",
      ["INSERT INTO sense_relation(word_id,sense_id,kind,target,hidden,src,src_ref)"
       " SELECT word_id,NULL,'alt_of',target||'㋿',0,'mut','mut:'||id"

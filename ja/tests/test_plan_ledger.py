@@ -191,6 +191,31 @@ COVERAGE = [
     #    ⚠️ 顺序不能反：先补数据、再放宽判据。反过来就是
     #       `[[proxy-metric-gets-optimized]]`——为了让指标好看而动指标。
     #       实测轨迹可查：补完词 93.9%（闸红了），建完关系 98.3%。
+    # 阶段 4c（2026-09-18）。🔴 **分母是「常用汉字」不是「全部汉字」** ——
+    #   全库 15,492 个 character 条目里 11,339 是**表外字**，读者基本不查，
+    #   拿全库当分母算出来是 10.1%，那个数既不反映读者体验也不会因回归而动
+    #   （`[[measure-landing-not-source]]` 的分母版本）。
+    #   ⚠️ 上限就在 53.5% 附近：缺的 956 个常用字里 **953 个日语版根本没有条目**
+    #   （逐字验过，不是抽样），`評` 那 2 条源头没给分类标记、属 `entry.kana` 那一层。
+    #   **源头没写 ≠ 我们没抽**（`[[dont-say-source-lacks-what-we-skipped]]`）⇒
+    #   这个数涨不上去是正常的，**掉下来才是回归**。
+    ("常用汉字的音訓読み覆盖率", 50.0,
+     "SELECT 100.0*COUNT(DISTINCT CASE WHEN EXISTS("
+     "  SELECT 1 FROM kanji_reading k WHERE k.entry_id=e.id) THEN e.id END)"
+     "/COUNT(DISTINCT e.id) FROM entry e"
+     " WHERE e.pos_raw='character' AND e.kanji_grade='常用'",
+     "阶段 4c 的落点，实测 53.5%。这一层是补一条写滑了的判据才有的："
+     "JA_PLAN §二.4 从「汉字没有**单一**读音」推到了「不用补」，"
+     "而汉字有的是一组**分类**读音（呉音/漢音/唐音/訓/古訓/名乗り），日语版写了我们没抽"),
+    # 阶段 1d（2026-09-18）。⚠️ 8.3% 看着低，但**上限就在这儿**：源头带非结构性
+    #   标签的义项本来就只有这么多，而 ja/zh 两版的 `sense_src.sense_id` 全是 NULL、
+    #   挂不回去（见阶段 1d 那行）。⇒ 这个数涨不上去是正常的，**掉下来才是回归**。
+    #   🔴 它与词元数挂钩：阶段 3a 那种收词会**稀释分母**，而行数闸对此结构性失明
+    #      （60,469 行一条没少，覆盖率却掉了）。
+    ("义项标签覆盖率", 5.0,
+     "SELECT 100.0*COUNT(DISTINCT sense_id)/(SELECT COUNT(*) FROM sense) FROM sense_tag",
+     "阶段 1d 的落点，实测 8.3%。这张表建好之后**空了整整一个项目** —— "
+     "行数闸问「我写了多少」，0 行也是一致的，逮到它的是逐张表数了一遍"),
     ("**不是**空白页的词形占比", 95.0,
      "SELECT 100.0*(SELECT COUNT(*) FROM dict d WHERE EXISTS("
      "  SELECT 1 FROM sense s WHERE s.word_id=d.id) OR EXISTS("
@@ -505,6 +530,35 @@ def m_cov_kana():
     ], lambda: any(c == "P6" and "读音覆盖" in w for c, w in check_brief()))
 
 
+def m_cov_kanji_reading():
+    """🔴 P6 阶段 4c：**常用汉字的音训读没了，表外字的还在**。
+
+    ⚠️ 这条变异要证的不是「删了会红」，是**分母选对了**。
+       全库 15,492 个 `character` 条目里 11,339 是表外字 ⇒ 按全库分母算，
+       删掉常用字这 1,115 条只把覆盖率从 10.1% 压到 ≈2.6%，一个宽松下限
+       照样接得住；按**常用汉字**分母算会直接掉到 0%。
+       读者查的是常用字，判据的分母就得是常用字
+       （`[[measure-landing-not-source]]` 的分母版本）。
+    """
+    return _with_db([
+        "DELETE FROM kanji_reading WHERE entry_id IN"
+        " (SELECT id FROM entry WHERE pos_raw='character' AND kanji_grade='常用')",
+    ], lambda: any(c == "P6" and "音訓読み" in w for c, w in check_brief()))
+
+
+def m_cov_sense_tags():
+    """🔴 P6 阶段 1d：**收词稀释**，行数闸对此结构性失明。
+
+    ⚠️ 变异打在**分母**上（插 20 万条新义项、一条标签都没有），不是删标签 ——
+       删标签谁都逮得到；阶段 3a 真实发生过的形状是"后面又插进来一批没有的"，
+       那时 `sense_tag` 一行没少，行数闸全绿。
+    """
+    return _with_db([
+        "INSERT INTO sense(word_id, rank, pos, hidden) "
+        "SELECT word_id, rank + 900000, pos, 0 FROM sense LIMIT 200000",
+    ], lambda: any(c == "P6" and "义项标签覆盖" in w for c, w in check_brief()))
+
+
 def m_stage7():
     """阶段 7 声明✅ 而回归闸文件不存在 —— **真的把文件挪走**。
 
@@ -624,6 +678,9 @@ MUTATIONS = [
     ("M2", "阶段 4b 声明✅ 而收词那批的读音没补", m_stage4b),
     ("M3", "🔴 P6：中文释义被删掉一半", m_cov_zh),
     ("M4", "🔴🔴 P6：新收 20 万词元、一个读音都没有（阶段 3a 的真形状）", m_cov_kana),
+    ("M4c", "🔴 P6：常用汉字的音训读没了（表外字还在 —— 验分母选对没有）",
+     m_cov_kanji_reading),
+    ("M1d", "🔴 P6：收词稀释了义项标签覆盖率（行数闸对此失明）", m_cov_sense_tags),
     ("M5", "阶段 7 声明✅ 而回归闸文件不存在", m_stage7),
     ("M6", "阶段 8 声明✅ 而展示层没有 japanese.ts", m_stage8),
     ("M7", "带字母后缀的阶段号 5a 要被认出来", m_suffix),

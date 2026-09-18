@@ -87,6 +87,12 @@ export const REGISTER_LABELS: Record<string, string> = {
   //    会把生标签（`World-War-I`）直接印在义项旁边。
   //    是渲染后契约闸逮到的 —— 数据层闸看不见「标签映射不全」这类缺陷。
   //    ⚠️ 这是共享表，补条目只会让别的语种也不再漏生标签，不改变已有行为。
+  // 🔴 2026-09-18（ja 阶段 1d）补：`ethnic` en 那门 790 条也在用、`Anglicism`
+  //    与已有的 `Leet`/`verlan` 同族（借用来源），都是**跨语种通用**的概念 ⇒ 进共享表。
+  //    ⚠️ 同一轮里 ja 的 `Classical`/`honorific`/`humble`/`polite` **没有**进这张表：
+  //       它们在日语上指的是敬语三分体系与文語，与这里的通用义不是一回事 ⇒
+  //       走 `ja.ts` 的 `JA_REGISTER_LABELS` 覆盖层（`part`「小品词 vs 助词」同款）。
+  ethnic: '族群', Anglicism: '英语借词',
   Ancient: '古代', Middle: '中古', 'Middle-Ages': '中世纪', 'World-War-I': '一战',
   excessive: '过度', mildly: '轻度', vernacular: '本土说法',
   // 🔴 2026-08-27（fr 族 C 第二段）：法文版 `tags` 分桶后映射到的规范键。
@@ -179,6 +185,15 @@ export const NUMBER_LABELS: Record<string, string> = {
 //    单复数（`meat`/`meats`、`social-science`/`social-sciences`）、
 //    大小写（`Freemasonry`/`freemasonry`）。
 export const TOPIC_LABELS: Record<string, string> = {
+  // 🔴 2026-09-18（ja 阶段 1d）补：ja 的 topic 448 种里这 11 种查不到中文。
+  //    全是**跨语种通用**的领域名 ⇒ 进共享表，别的语种也跟着不再静默少印。
+  //    ⚠️ `buddhism` 小写那条是源头大小写不一致（`Buddhism` 已有），一并收 ——
+  //       归一化交给映射表比在建库侧改源头值安全（改了就对不回源头）。
+  'physical-sciences': '自然科学', 'board-games': '棋盘游戏', ideology: '意识形态',
+  'mechanical-engineering': '机械工程', 'Shingon-Buddhism': '真言宗',
+  'medical-terminology': '医学术语', 'Tendai-or-Kegon-Buddhism': '天台宗·华严宗',
+  buddhism: '佛教', 'electrical-device': '电器', 'performing-arts': '表演艺术',
+  prefectures: '行政区划',
   medicine: '医学', anatomy: '解剖学', nautical: '航海', botany: '植物学',
   'organic-chemistry': '有机化学', 'organic chemistry': '有机化学', music: '音乐',
   biochemistry: '生物化学', architecture: '建筑', chemistry: '化学', cities: '城市',

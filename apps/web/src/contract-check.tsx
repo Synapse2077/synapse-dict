@@ -31,9 +31,9 @@
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { getService, type ItalianEntry } from '@synapse-dict/dict-core';
+import { getService, probeLanguages, LANGUAGES, type ItalianEntry } from '@synapse-dict/dict-core';
 import { POS_LABELS, REL_LABELS, itAudioRegion } from '@synapse-dict/dict-labels';
-import { ItalianEntryView, groupItSenses, getInitialLang, readingBelongsTo } from './App';
+import { ItalianEntryView, groupItSenses, getInitialLang, readingBelongsTo, EXAMPLES } from './App';
 
 // 🔴 走 `getService('it')` —— 与 API **同一条代码路径、同一个数据目录推算逻辑**。
 //    第一版直接 `new ItalianDictService()` 少传路径，报 ERR_INVALID_ARG_TYPE。
@@ -556,18 +556,107 @@ function langGuard(): number {
   return bad;
 }
 
+/**
+ * 欢迎页推荐词守卫 —— 和 `langGuard()` 一样，**不按词条循环**：
+ * 它问的不是"某个词渲染对不对"，而是「换到这门语言，首页端出来的是不是这门语言的词」。
+ *
+ * 🔴 由来：日语上线九个阶段、数据层全绿、`contract-check-ja.tsx` 十六条断言全绿，
+ *    而欢迎页上列着 serene / ephemeral / resilience —— 六个英文词。
+ *    `App.tsx` 的取用处当时写的是 `EXAMPLES[lang] || EXAMPLES.en`：
+ *    **缺一门语言不报错、不空白，而是体面地端出英语。**
+ *    与 `[[it-display-layer-stage8]]` 的 `|| g.kind` 同一个形状。
+ *
+ * 两条断言，缺一不可：
+ *   ① `LANGUAGES` 里每个码都有自己的一行 —— 加语言时漏填这里会当场红，
+ *      而不是等用户截图（`[[lesson-must-become-mechanism]]`）。
+ *   ② 那一行里的词**在该语种库里真查得到** —— 判据是"点进去有东西"，
+ *      不是"字符串非空"。写死一个拼错的词照样能过①，却给用户一个"查不到"。
+ *      （`[[criteria-from-meaning-not-form]]`：判据不许用形式代理。）
+ *
+ * ⚠️ ② 只对**库可用**的语种查。库没装的语种跳过 ①②之外不额外放宽 ——
+ *    ① 是纯源码断言，跟库在不在无关，所以缺库也照查。
+ */
+function examplesGuard(): number {
+  let bad = 0;
+  const ok = new Map(probeLanguages().map((l) => [l.code, l.ok]));
+  for (const l of LANGUAGES) {
+    const words = EXAMPLES[l.code];
+    if (!words || words.length === 0) {
+      bad += 1;
+      console.log(`   \u{1F534} ${l.code.padEnd(3)} ${l.name.padEnd(6)} 没有自己的推荐词 —— 欢迎页会空着`);
+      continue;
+    }
+    if (!ok.get(l.code)) {
+      console.log(`   \u26A0\uFE0F  ${l.code.padEnd(3)} ${l.name.padEnd(6)} 有 ${words.length} 个推荐词；库不可用，跳过"查得到"这条`);
+      continue;
+    }
+    const svc = getService(l.code) as unknown as { getEntry(w: string): unknown };
+    const miss = words.filter((w) => !svc.getEntry(w));
+    if (miss.length) {
+      bad += 1;
+      console.log(`   \u{1F534} ${l.code.padEnd(3)} ${l.name.padEnd(6)} 推荐词查不到：${miss.join('、')}`);
+    } else {
+      console.log(`   \u2705 ${l.code.padEnd(3)} ${l.name.padEnd(6)} ${words.length} 个推荐词都查得到：${words.join('、')}`);
+    }
+  }
+  return bad;
+}
+
+/**
+ * 变异验证：把闸自己打翻一次，确认它真的会红。
+ * `[[lesson-must-become-mechanism]]` —— 没被证明能红的闸不算闸。
+ */
+function examplesMutations(): void {
+  const cases: [string, () => () => void][] = [
+    ['整门语言漏填推荐词', () => {
+      const keep = EXAMPLES.ja;
+      delete EXAMPLES.ja;
+      return () => { EXAMPLES.ja = keep; };
+    }],
+    ['推荐词拼错/库里查不到', () => {
+      const keep = EXAMPLES.ja;
+      EXAMPLES.ja = ['猫', '這個詞庫裡沒有'];
+      return () => { EXAMPLES.ja = keep; };
+    }],
+    ['端出别的语种的词（旧的 || EXAMPLES.en 行为）', () => {
+      const keep = EXAMPLES.ja;
+      EXAMPLES.ja = EXAMPLES.en;
+      return () => { EXAMPLES.ja = keep; };
+    }],
+  ];
+  let caught = 0;
+  const silence = console.log;
+  for (const [name, apply] of cases) {
+    const undo = apply();
+    console.log = () => {};
+    const red = examplesGuard() > 0;
+    console.log = silence;
+    undo();
+    caught += red ? 1 : 0;
+    console.log(`   ${red ? '\u2705' : '\u{1F534}'} [推荐词] ${name.padEnd(36)} ${red ? '闸红了（对）' : '闸没红 —— 这条闸是假的'}`);
+  }
+  console.log(`\n   推荐词变异验证 ${caught}/${cases.length}`);
+  if (caught !== cases.length) process.exit(1);
+}
+
 const argv = process.argv.slice(2);
 const limit = argv.includes('--limit') ? Number(argv[argv.indexOf('--limit') + 1]) : 0;
 const words = targets(limit);
 if (argv.includes('--lang')) {
   console.log('\n═══ 语种码守卫 ═══');
-  process.exit(langGuard() === 0 ? 0 : 1);
+  const a = langGuard();
+  console.log('\n═══ 欢迎页推荐词守卫 ═══');
+  process.exit(a + examplesGuard() === 0 ? 0 : 1);
 } else if (argv.includes('--mutate')) {
   mutate(words);
+  console.log('\n═══ 推荐词守卫的变异验证 ═══');
+  examplesMutations();
 } else {
   console.log('\n═══ 语种码守卫 ═══');
   const langBad = langGuard();
-  const bad = run(words) + langBad;
+  console.log('\n═══ 欢迎页推荐词守卫 ═══');
+  const exBad = examplesGuard();
+  const bad = run(words) + langBad + exBad;
   console.log(`\n   ${bad === 0 ? '✅ 全部通过' : `🔴 共 ${bad} 处不符`}`);
   process.exit(bad === 0 ? 0 : 1);
 }

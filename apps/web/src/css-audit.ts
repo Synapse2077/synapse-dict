@@ -41,10 +41,29 @@ const defined = new Set(
 );
 
 // 六个视图各自的范围：按 `export function XxxEntryView` 切段，方便把孤儿归到语种
+// 🔴 2026-09-17 加 ja。**它漏登记了整整九个阶段**，而本闸照样报绿 ——
+//    因为分段是「从这个视图的定义处到下一个视图」，最后一个视图的段一直延伸到文件尾，
+//    于是 `JapaneseEntryView` 的类名被算进了 **de 的账上**。
+//    ⭐ 结果是：缺陷**逮到了**（33 个孤儿），但**归错了语种**。
+//      这比漏掉更阴险一点 —— 报告上写着「de 有 33 个孤儿」，我会去翻德语视图。
+//    ⚠️ 与上面那条 `shared` 注释是同一个形状（`[[correct-steps-can-compose-a-hole]]`）：
+//      分段逻辑本身没错，错在**这张表和 `App.tsx` 里实际有几个视图之间没有闸**。
+//    ⇒ 下面加了一条自检：本文件里 `export function *EntryView` 有几个，这张表就得有几行。
 const VIEWS: Array<[string, string]> = [
   ['en', 'EnglishEntryView'], ['es', 'SpanishEntryView'], ['it', 'ItalianEntryView'],
   ['fr', 'FrenchEntryView'], ['pt', 'PortugueseEntryView'], ['de', 'GermanEntryView'],
+  ['ja', 'JapaneseEntryView'],
 ];
+
+// 🔴 登记表与源码对账：漏登记一个视图，本闸会把它的类名算到别人头上。
+const declared = new Set(VIEWS.map(([, fn]) => fn));
+const inSource = [...app.matchAll(/export function (\w+EntryView)\b/g)].map((m) => m[1]);
+const unlisted = inSource.filter((fn) => !declared.has(fn));
+if (unlisted.length) {
+  console.log(`\n🔴 App.tsx 里有没登记进 VIEWS 的视图：${unlisted.join(', ')}`
+    + '\n   —— 它们的类名会被算到上一个视图的账上，报告会指错语种。');
+  process.exit(1);
+}
 const marks = VIEWS
   .map(([lang, fn]) => ({ lang, at: app.indexOf(`export function ${fn}`) }))
   .filter((x) => x.at >= 0)
@@ -125,5 +144,5 @@ for (const x of naked) console.log(`      ${x}`);
 
 const total = bad + naked.length;
 console.log(total ? `\n🔴 ${bad} 个孤儿类名 ／ ${naked.length} 处裸包装`
-  : '\n✅ 六门：0 孤儿类名、0 裸包装');
+  : `\n✅ ${VIEWS.length} 门：0 孤儿类名、0 裸包装`);
 process.exit(total ? 1 : 0);

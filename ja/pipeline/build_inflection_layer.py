@@ -49,6 +49,25 @@ JUNK_FORM = {"-", "—", "*", "", "…"}
 #    （`尾籠` 的「敬体否定」给成 `birō de wa arimasen`），占收进来的 20.3%。
 #    判据不是形式代理：**日语的活用形按定义写成假名或汉字**，纯拉丁串不是日语词形。
 JA_SCRIPT = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
+# 🔴 英文版把**词形和转写写在同一个单元格**里：`'食べれます [taberemasu]'`。
+#    原样收下去，方括号那截就长进 `dict.word` —— 词头印成「食べれます [taberemasu]」、
+#    TTS 连着括号一起念、搜裸词形还匹配不上。日语版不带转写，全部 3,721 个受影响词形
+#    都来自英文版。2026-09-18 拆开：词形归词形，转写进 `inflection.romaji`。
+#    （落库那批由 `ja/fixes/fix_inflection_form_romaji.py` 洗过；这里是生成侧，
+#     不改的话下次重跑原样长回来 —— `[[replay-scripts-undo-fixes]]`。）
+FORM_ROMAJI = re.compile(r"^(.+?) \[([^\[\]]+)\]$")
+
+
+def split_romaji(form):
+    """`'食べれます [taberemasu]'` → `('食べれます', 'taberemasu')`；没括号原样返回。
+
+    ⚠️ 判据要求**整串结尾是一个方括号组**且括号内不含方括号，括号内还不许有日文
+    字符 —— 后者挡的是「词形本身带方括号」那种假阳性（实测 0 条，但判据不能靠"当前没有"）。
+    """
+    m = FORM_ROMAJI.match(form)
+    if not m or JA_SCRIPT.search(m.group(2)):
+        return form, None
+    return m.group(1), m.group(2)
 
 
 def _assert_ja():
@@ -83,7 +102,7 @@ def scan():
                 if not (tg & MORPH):
                     stat["跳过·异表记等（归关系层）"] += 1
                     continue
-                fm = (f.get("form") or "").strip()
+                fm, rom = split_romaji((f.get("form") or "").strip())
                 if fm in JUNK_FORM or fm == base:
                     stat["跳过·空/占位/与词头同形"] += 1
                     continue
@@ -96,7 +115,7 @@ def scan():
                     continue
                 rows.append((fm, base, pos, zh,
                              json.dumps(sorted(tg), ensure_ascii=False), src,
-                             "%s:%s:%s#%d" % (src, base, pos, i)))
+                             "%s:%s:%s#%d" % (src, base, pos, i), rom))
                 stat["收·%s" % src] += 1
     return rows, stat
 
@@ -129,16 +148,17 @@ def main():
         return
 
     with dbtool.session("ja-inflection-layer", expect={
-            "__rows__": len(new), "pos": 0, "#inflection": len(rows)}) as s:
+            "__rows__": len(new), "pos": 0, "#inflection": len(rows),
+            "inflection.romaji": sum(1 for r in rows if r[7])}) as s:
         s.executemany("INSERT INTO dict (word, word_norm, is_lemma) VALUES (?,?,0)",
                       [(w, norm_ja(w)) for w in new])
         con2 = s.conn if hasattr(s, "conn") else None
         wid = {w: i for i, w in s.execute("SELECT id, word FROM dict")}
         s.executemany(
-            "INSERT INTO inflection (word_id, kind, base, base_id, label_zh, tags, src, src_ref)"
-            " VALUES (?,'inflection',?,?,?,?,?,?)",
-            [(wid[fm], base, wid.get(base), zh, tags, src, ref)
-             for fm, base, pos, zh, tags, src, ref in rows])
+            "INSERT INTO inflection (word_id, kind, base, base_id, label_zh, tags,"
+            " src, src_ref, romaji) VALUES (?,'inflection',?,?,?,?,?,?,?)",
+            [(wid[fm], base, wid.get(base), zh, tags, src, ref, rom)
+             for fm, base, pos, zh, tags, src, ref, rom in rows])
 
 
 if __name__ == "__main__":

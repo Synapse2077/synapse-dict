@@ -43,6 +43,7 @@ import sqlite3
 
 import dbtool
 import paths
+from gloss_levels import split_levels
 from pipeline.build import norm_ja
 # 🔴 词性映射**只许一份** —— 2026-09-16 之前这个文件里另有一张更短的表，
 #    于是 3a 收的词落了原始码（`proverb`/`adnominal`/`symbol`/`syllable`/`abbrev`…），
@@ -118,9 +119,12 @@ def real_senses(o):
         tg = s.get("tags") or []
         if s.get("form_of") or s.get("alt_of") or any(t in POINTER for t in tg):
             continue
-        g = [x for x in (s.get("glosses") or []) if x and x.strip()]
-        if g:
-            out.append((g[0].strip(), tg))
+        # 🔴 2026-09-17：原来是 `g[0]`，与 `build_entry_layer` 犯的是同一个错
+        #    —— `glosses` 是层级数组，第 0 层是伞形。ja 版有 2,093 条、
+        #    zh 版 579 条是多层的。判据统一走 `gloss_levels.split_levels`。
+        _umb, spec = split_levels(s.get("glosses"))
+        if spec:
+            out.append((spec, tg))
     return out
 
 

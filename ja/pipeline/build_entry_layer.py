@@ -46,6 +46,7 @@ import unicodedata
 
 import dbtool
 import paths
+from gloss_levels import split_levels
 from pipeline.build import NOT_A_WORD, norm_ja, is_pointer_sense
 
 KANA_ONLY = re.compile(r"^[ぁ-ゖァ-ヺー%]+$")
@@ -153,9 +154,15 @@ def grade_of(o):
     return None
 
 
-def scan(word_id):
-    entries, srcs = [], []
-    stat = collections.Counter()
+def iter_kk():
+    """遍历英文版切片，产出 `(词条 JSON, 词形, pos_raw, etym, seq, src_ref)`。
+
+    🔴 **`src_ref` 的构造只许有这一个出处。** `seq` 是 `(词形, pos_raw, etym)` 上的
+       运行计数器 —— 它**依赖遍历顺序**，任何想按 `src_ref` 回查源头的脚本
+       （比如 `fixes/fix_hierarchical_gloss.py`）都必须走同一个循环，不能反解析字符串。
+    ⚠️ 我反解析过一版：`ref.split(':')` 在词形本身带冒号时就崩，
+       1,866 条只对上 1,091 条，而**对不上的那 775 条不会报错，只会静默漏修**。
+    """
     seen = collections.Counter()
     for line in open(paths.KK, encoding="utf-8"):
         o = json.loads(line)
@@ -164,16 +171,22 @@ def scan(word_id):
         w = o.get("word") or ""
         if not w.strip():
             continue
-        wid = word_id.get(w)
-        if wid is None:
-            stat["词形不在 dict（不该发生）"] += 1
-            continue
         praw = o.get("pos") or "unknown"
         etym = str(o.get("etymology_number") or "0")
         key = (w, praw, etym)
         seq = seen[key]
         seen[key] += 1
-        ref = "kk-ja:%s:%s:%s:%d" % (w, praw, etym, seq)
+        yield o, w, praw, etym, seq, "kk-ja:%s:%s:%s:%d" % (w, praw, etym, seq)
+
+
+def scan(word_id):
+    entries, srcs = [], []
+    stat = collections.Counter()
+    for o, w, praw, etym, seq, ref in iter_kk():
+        wid = word_id.get(w)
+        if wid is None:
+            stat["词形不在 dict（不该发生）"] += 1
+            continue
         kana, ksrc = reading_of(o)
         # `%` 是源头标的**形态边界**（`ジー%ディー%ピー`，26 条）。罗马字的连字符靠它推，
         # 但我们**存源头的罗马字不自己推** ⇒ 它在读音列里只会妨碍精确匹配，剥掉。
@@ -186,11 +199,18 @@ def scan(word_id):
         if kana:
             stat["有读音·" + ksrc] += 1
         for i, se in enumerate(o.get("senses") or []):
-            gs = [g for g in (se.get("glosses") or []) if g]
-            if not gs:
+            # 🔴🔴 2026-09-17：原来写的是 `gs[0]` —— **伞形留下、具体释义整条丢掉**。
+            #    `glosses` 是层级数组不是一条释义，见 `gloss_levels.py` 的文件头。
+            #    `ある` 因此变成同一句话印 7 遍、`長谷川` 的 40 条河流全成了「长谷川」。
+            #    ⚠️ 证据层存**具体释义**；伞形进出版层的 `sense_gloss(kind='umbrella')`
+            #       —— 它是给读者当小标题用的，不是另一条证据。
+            umbrella, spec = split_levels(se.get("glosses"))
+            if not spec:
                 stat["义项无 gloss（不入证据层）"] += 1
                 continue
-            srcs.append((wid, None, "en-edition", "%s#%d" % (ref, i), "en", gs[0],
+            if umbrella:
+                stat["多层 gloss（伞形＋具体）"] += 1
+            srcs.append((wid, None, "en-edition", "%s#%d" % (ref, i), "en", spec,
                          json.dumps(se.get("tags") or [], ensure_ascii=False) or None))
             stat["sense_src"] += 1
             if is_pointer_sense(se):

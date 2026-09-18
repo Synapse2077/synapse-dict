@@ -130,7 +130,10 @@ DDL = [
          desc_en  TEXT,
          tags     TEXT,
          src      TEXT NOT NULL,          -- 🔴 活用表在**日语版**：英文版只给 7.0% 的动词
-         src_ref  TEXT NOT NULL
+         src_ref  TEXT NOT NULL,
+         romaji   TEXT                    -- 🔴 英文版把词形和转写写在**同一个单元格**里
+                                          --   （`食べれます [taberemasu]`）。转写归这一列，
+                                          --   `dict.word` 只放裸词形；日语版不给转写 ⇒ 多为 NULL
        )""",
     # ── 读音层（阶段 4 填）──────────────────────────────────────────────
     """CREATE TABLE pronunciation (

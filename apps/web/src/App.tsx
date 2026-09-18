@@ -11,8 +11,10 @@ import {
   DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel,
   EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels, enSenseTopics,
   etymologyBrief,
-  JA_POS_LABELS, JA_KANJI_GRADE_LABELS, JA_RELATION_LABELS, jaPitchType,
-  jaVclassLabel,
+  JA_POS_LABELS, JA_KANJI_GRADE_LABELS, JA_RELATION_LABELS, JA_RELATION_SECTION, jaPitchType,
+  JA_KANJI_READING_KIND, JA_KANJI_READING_SUBKIND, JA_KANJI_READING_ORDER,
+  JA_REGISTER_LABELS, JA_REGION_LABELS, JA_GRAMMAR_LABELS, JA_USAGE_LABELS,
+  jaVclassLabel, mostSpecificTopics,
 } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
@@ -599,8 +601,14 @@ type JaReading = {
   pos: string | null; src: string | null;
 };
 type JaSense = {
-  id: number; etymKey: string | null;
+  // ⚠️ 这里是 `packages/dict-core/src/japanese.ts` 的 `JapaneseSense` 的**手抄副本**。
+  //    加字段时两处都要改 —— `kana` 这次就是只加了那边、这边 `tsc` 当场报了
+  //    `Property 'kana' does not exist`。**手抄的类型没有闸，靠 tsc 兜住。**
+  id: number; etymKey: string | null; kana: string | null; umbrella: string | null;
   zh: string | null; ja: string | null; en: string | null; pos: string | null;
+  // 义项标签（阶段 1d）。五个桶分开，各有各的画法。
+  topics: string[]; registers: string[]; regions: string[];
+  grammar: string[]; usage: string[];
   relations: Array<{ kind: string; targets: Array<{ word: string; clickable: boolean }> }>;
 };
 type JaExample = {
@@ -608,12 +616,18 @@ type JaExample = {
   roman: string | null; ruby: Array<[string, string]>;
   ref: string | null; bold: Array<[number, number]>;
 };
+// 汉字音訓読み（阶段 4c）。⚠️ 同样是 `japanese.ts` 的**手抄副本**，见 `JaSense` 那条注释。
+type JaKanjiReading = {
+  kana: string; kanaStem: string; okurigana: string | null;
+  kind: string; subkind: string | null; isJoyo: boolean;
+};
 type JaPointer = { target: string; zh: string | null; clickable: boolean };
 type JaEntry = {
   lang: 'ja'; id: number; word: string; pos: string | null;
   kanjiGrade: string | null; vclass: string | null;
   freqZipf: number | null; isLemma: boolean;
   readings: JaReading[];
+  kanjiReadings: JaKanjiReading[];
   senses: JaSense[];
   examples: JaExample[];
   inflections: Array<{ base: string; label: string | null; clickable: boolean }>;
@@ -621,7 +635,9 @@ type JaEntry = {
   altOf: JaPointer[];
   seeAlso: JaPointer[];
   audio: Array<{ url: string; file: string; speaker: string | null; kind: string }>;
-  bases: Array<{ word: string; label: string | null; clickable: boolean }>;
+  // ⚠️ `labels` 是**复数**：`食べられます` 对 `食べる` 同时是被动敬体和可能敬体。
+  //    服务层原来 `MIN(label_zh)` 只留一个，9.0% 的组合被静默压掉了。
+  bases: Array<{ word: string; labels: string[]; romaji: string | null; clickable: boolean }>;
 };
 
 // 🔴 加新语种时**这一行必须跟着改**。忘了改的症状不是编译失败，而是
@@ -633,13 +649,36 @@ type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry | DeEntry |
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
 
-const EXAMPLES: Record<string, string[]> = {
+/**
+ * 欢迎页的「试试这些词」。**每门已注册的语言都必须在这里有一行。**
+ *
+ * 🔴 2026-09-17：日语上线之后这张表没跟着加，欢迎页照旧列着
+ *    serene / ephemeral / resilience —— 六个英文词摆在日语词典的首页上，
+ *    是用户截图问出来的。缺陷本身一行就能补，问题在于**它凭什么能活到用户手上**：
+ *    取用处写的是 `EXAMPLES[lang] || EXAMPLES.en`，缺一门语言不报错、不空白，
+ *    而是体面地端出另一门语言的词 —— 与 `[[it-display-layer-stage8]]` 里
+ *    `|| g.kind` 把缺失的中文名伪装成英文内容**是同一个形状**：
+ *    **兜底越体面，缺陷越难发现。**
+ *
+ * ⇒ 两处一起改：取用处不再回退到英语（见下方 `EXAMPLES[lang] ?? []`），
+ *   并且 `contract-check.tsx` 的 `examplesGuard()` 盯死两件事 ——
+ *   ① `LANGUAGES` 里每个码都有自己的一行；
+ *   ② 这一行里的词**在该语种库里真查得到**（判据是「点进去有东西」，
+ *      不是「字符串非空」，`[[criteria-from-meaning-not-form]]`）。
+ *
+ * 挑词的口径：能代表这门语言、且**词条页确实有料**。
+ * 日语那六个各带一类本语种特有字段 ——
+ *   猫（录音 2 条 / 声调 néꜜkò）、桜（さくら・おう 两读）、食べる（一段活用 70 形）、
+ *   痛い（形容词活用 36 形 + 振假名例句）、勉強（サ変 `vclass`）、時間（15 条带振假名例句）。
+ */
+export const EXAMPLES: Record<string, string[]> = {
   en: ['serene', 'ephemeral', 'resilience', 'curious', 'nuance', 'vivid'],
   es: ['hola', 'escalera', 'hablar', 'corazón', 'mariposa', 'rápido'],
   it: ['ciao', 'mangiare', 'braccio', 'bello', 'andare', 'città'],
   fr: ['bonjour', 'manger', 'journal', 'beau', 'aller', 'heureux'],
   pt: ['olá', 'falar', 'livro', 'bonito', 'pão', 'saudade'],
   de: ['Haus', 'gehen', 'ankommen', 'gut', 'Frau', 'schön'],
+  ja: ['猫', '桜', '食べる', '痛い', '勉強', '時間'],
 };
 
 // --- English parsing helpers ---
@@ -1772,7 +1811,8 @@ export default function App() {
             </p>
             <div className="example-label">试试这些词</div>
             <div className="example-chips">
-              {(EXAMPLES[lang] || EXAMPLES.en).map((w) => (
+              {/* 🔴 不回退到别的语种：缺了就什么都不显示，让缺陷看得见。见 EXAMPLES 的注释。 */}
+              {(EXAMPLES[lang] ?? []).map((w) => (
                 <button className="example-chip" key={w} onClick={() => pickExample(w)} type="button">
                   {w}
                 </button>
@@ -4662,11 +4702,116 @@ function JaRuby({ text, ruby }: { text: string; ruby: Array<[string, string]> })
   return <>{out}</>;
 }
 
-/** 一行读音：假名 · 罗马字 · 声调 · IPA。 */
-function JaReadingRow({ r }: { r: JaReading }) {
+/** 义项标签片（`sense_tag`，阶段 1d）。五个桶走五种颜色，与 it/de 同一套
+ * `.sense-chip` 画法。
+ *
+ * 🔴 **与词头徽标互补，不重复** —— 判据是量出来的，不是照 it 那门抄的：
+ *    · `suru`「する动词」：379 条里 **295 条（77.8%）**词头已经印了サ変活用类，
+ *      那两处说的是同一件事 ⇒ 词头说了就不再印。
+ *    · `transitive`/`intransitive`：703 条里 389 条词头有 `vclass`，但 **`vclass`
+ *      说的是「怎么活用」（五段/一段），不说「带不带宾语」** —— 两件事 ⇒ 一律印。
+ *      ⚠️ 这一条与 it 那门相反（意语词头直接标 t/i），照抄会把日语最有用的
+ *         及物性标签整批吞掉。
+ * 🔴 `topic` 要先过 `mostSpecificTopics()`：kaikki 的 topic 是一条链
+ *    （`将棋` 挂着 board-games/games/hobbies/lifestyle 四层），只印最具体的那个。
+ *    查不到中文名的**不印**（印 `phytopathology` 比不印更坏）——实测静默吞掉 0 条。
+ */
+function JaSenseChips({ s, vclass }: { s: JaSense; vclass: string | null }) {
+  const chips: Array<{ cls: string; text: string }> = [];
+  const headSaysSuru = !!vclass && vclass.startsWith('sa-');
+  for (const t of mostSpecificTopics(s.topics)) {
+    const zh = TOPIC_LABELS[t];
+    if (zh) chips.push({ cls: 'top', text: zh });
+  }
+  for (const g of s.grammar) {
+    if (headSaysSuru && g === 'suru') continue;
+    chips.push({ cls: 'gram', text: JA_GRAMMAR_LABELS[g] || g });
+  }
+  for (const r of s.regions) chips.push({ cls: 'reg', text: JA_REGION_LABELS[r] || r });
+  for (const r of s.registers) {
+    chips.push({ cls: 'lex', text: JA_REGISTER_LABELS[r] || REGISTER_LABELS[r] || r });
+  }
+  for (const u of s.usage) chips.push({ cls: 'use', text: JA_USAGE_LABELS[u] || u });
+  const shown = dedupeChips(chips);
+  if (shown.length === 0) return null;
+  return (
+    <span className="sense-chips">
+      {shown.map((c, i) => <span className={`sense-chip ${c.cls}`} key={i}>{c.text}</span>)}
+    </span>
+  );
+}
+
+/** 汉字的音訓読み区（阶段 4c）。只有汉字条目有。
+ *
+ * 🔴 **分区按 `kind` 做，不按 `subkind` 摊平。** 读者第一眼要的是「音读还是训读」
+ *    这个二分；呉音/漢音/唐音是第二眼的事，做成每条后面的小标注。摊成七八个
+ *    并列的筐，等于把主次颠倒过来。
+ * 🔴 **送假名用 `-` 后半段、印成浅色**：`あお-い` 里只有 `あお` 是这个字的读音。
+ *    一律同色印出来读者分不出哪段属于这个字 —— 而那正是这一层要回答的问题。
+ * ⚠️ 朗读按钮读的是 `kanaStem`（字音）不是整串：`い-きる` 读 `い`。
+ *    读整串等于把送假名也念成字音的一部分。
+ */
+function JaKanjiReadings({ items, speak }: {
+  items: JaKanjiReading[]; speak: (w: string) => void;
+}) {
+  if (items.length === 0) return null;
+  const groups = JA_KANJI_READING_ORDER
+    .map((k) => [k, items.filter((r) => r.kind === k)] as const)
+    .filter(([, rows]) => rows.length > 0);
+  // 🔴 值域之外的 kind 不许静默消失 —— 数据层将来多一档，这里要看得见它漏了。
+  //    （`[[it-display-layer-stage8]]`：兜底越体面缺陷越难发现。）
+  const extra = items.filter((r) => !JA_KANJI_READING_ORDER.includes(r.kind));
+  if (extra.length > 0) groups.push(['?', extra] as const);
+  return (
+    <section className="ja-kanji-readings">
+      <h3 title="这个**字**怎么念 —— 与上面「这个词怎么念」是两件事">字音</h3>
+      {groups.map(([kind, rows]) => (
+        <div className="ja-kr-group" key={kind}>
+          <span className="ja-kr-kind">{JA_KANJI_READING_KIND[kind] ?? kind}</span>
+          <div className="ja-kr-items">
+            {rows.map((r, i) => (
+              <button className="ja-kr" key={`${r.kana}-${i}`} type="button"
+                title={`播放发音（合成音）：${r.kanaStem}`}
+                onClick={() => speak(r.kanaStem)}>
+                <span className="ja-kr-stem">{r.kanaStem}</span>
+                {r.okurigana && <span className="ja-kr-okuri">{r.okurigana}</span>}
+                {r.subkind && (
+                  <span className="ja-kr-sub">
+                    {JA_KANJI_READING_SUBKIND[r.subkind] ?? r.subkind}
+                  </span>
+                )}
+                {r.isJoyo && <span className="ja-kr-joyo" title="常用汉字表内的读音">常</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/** 一行读音：朗读 · 假名 · 罗马字 · 声调 · IPA。
+ *
+ * 🔴 **读的是这一行的假名，不是词头。** 多读音的词（`猫`＝ねこ/ねこま）上，
+ *    拿词头去合成永远只能得到一个读音；拿假名去合成，两行按出各自的音。
+ * ⚠️ 归不了位的声调行 `kana` 是 null（见 `japanese.ts` 里的归属规则）——
+ *    那种行**不给按钮**，因为不知道该读什么。宁可少一个按钮，也不读错。
+ */
+function JaReadingRow({ r, speak }: {
+  r: JaReading; speak: (w: string) => void;
+}) {
   const type = jaPitchType(r.pitchPos, r.mora ?? 0);
   return (
     <div className="ja-reading">
+      {/* 🔴 这个按钮**永远是浏览器合成音**（真人录音在下面单独一行，带「真人发音」标签）。
+          标题里写明档次，否则读者听到机器音会以为「这词典的真人发音真难听」——
+          es 视图的 `tierHint` 早就这么做了，日语漏了。 */}
+      {r.kana && (
+        <button className="ja-speak" type="button" title={`播放发音（合成音）：${r.kana}`}
+          aria-label={`播放合成发音 ${r.kana}`} onClick={() => speak(r.kana!)}>
+          <SpeakerIcon />
+        </button>
+      )}
       {r.kana && <span className="ja-kana">{r.kana}</span>}
       {r.romaji && <span className="ja-romaji">{r.romaji}</span>}
       {r.kanaHist && (
@@ -4680,7 +4825,13 @@ function JaReadingRow({ r }: { r: JaReading }) {
           {type && <em className="ja-pitch-type">{type}</em>}
         </span>
       )}
-      {r.ipa && <span className="ipa">/{r.ipa}/</span>}
+      {/* 🔴 定界符由 `notation` 决定，不许写死：日语 99.98% 是窄式，
+             给窄式套音位斜杠 `/…/` 是记法错误（另外四门视图早就这么判了）。 */}
+      {r.ipa && (
+        <span className="ipa">
+          {r.notation === 'narrow' ? `[${r.ipa}]` : `/${r.ipa}/`}
+        </span>
+      )}
     </div>
   );
 }
@@ -4695,9 +4846,114 @@ function JaPointerList({ title, items, hint, onWord }: {
       {items.map((p) => (
         <span key={p.target} className="ja-pointer">
           {p.clickable
-            ? <button type="button" className="link-word" onClick={() => onWord(p.target)}>{p.target}</button>
-            : <span className="dead-word">{p.target}</span>}
+            ? <a className="rel-link" href={`#${encodeURIComponent(p.target)}`}
+                        onClick={(e) => { e.preventDefault(); onWord(p.target); }}>{p.target}</a>
+            : <span className="rel-plain">{p.target}</span>}
           {p.zh && <span className="ja-pointer-zh">{p.zh}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 把活用表压紧。2026-09-17。
+ *
+ * 🔴 `食べる` 的活用表有 **70 行**，平铺出来比整页释义还长 —— 用户说"乱糟糟"时
+ *    页面上最长的一坨就是它。但**一条都不能删**（活用表是日语词典的核心资产），
+ *    所以压的是**重复**，不是内容：
+ *
+ *    ① 同形同标签的完全重复行去掉（`食べます 敬体` 源头给了两遍）
+ *    ② 同一个标签下的**汉字形与假名形并成一行**：`食べ／たべ 未然形`
+ *       —— 文语活用每个形都给两种写法，占掉整张表的一半行数
+ *
+ * ⚠️ 判据是「**相邻**且标签相同」，不是「标签相同」：源头按活用表的行序给，
+ *    相邻即同一格；跨行合并会把 `可能过去 食べられた` 和 `使役过去 食べさせた` 这种
+ *    不同格的形并到一起。
+ * 🔴 **不按语法把口语/文语分区** —— 那需要判断每个标签属于哪一档，而 `tags`
+ *    里没有这个信息（`["stem","irrealis"]` 文语口语都用）。编一个分法出来
+ *    等于在页面上做一个数据层没有的断言（`[[dont-gate-facts-on-my-uncertainty]]`）。
+ *    已记账。
+ */
+export function packJaInflections(xs: Array<{ base: string; label: string | null; clickable: boolean }>) {
+  const out: Array<{ forms: Array<{ word: string; clickable: boolean }>; label: string | null }> = [];
+  const seen = new Set<string>();
+  for (const x of xs) {
+    const key = `${x.base}\u0000${x.label ?? ''}`;
+    if (seen.has(key)) continue;       // ① 完全重复
+    seen.add(key);
+    const last = out[out.length - 1];
+    if (last && last.label === x.label) last.forms.push({ word: x.base, clickable: x.clickable });
+    else out.push({ forms: [{ word: x.base, clickable: x.clickable }], label: x.label });
+  }
+  return out;
+}
+
+/**
+ * 把一组义项按**伞形标题**再分一层。2026-09-17。
+ *
+ * 🔴 kaikki 的 glosses 是层级数组，第 0 层是伞形、最后一层才是这条义项说的话。
+ *    建库时只收了第 0 层（见 `ja/fixes/fix_hierarchical_gloss.py`），于是
+ *    `長谷川` 的 40 条不同河流全变成 40 行「长谷川」。数据修好之后页面要把它们
+ *    收回一个小标题下 —— 否则 40 行具体释义平铺，读者照样看不出它们是兄弟。
+ *
+ * ⚠️ 判据是「**相邻**且伞形相同」，不是「伞形相同」：义项顺序是源头的编排，
+ *    跨行合并会把中间隔着别的义项的两条拉到一起，改变阅读顺序。
+ * ⚠️ 没有伞形的义项各自成组（`umbrella: null`）—— 绝大多数义项属于这一类。
+ */
+export function groupJaByUmbrella(senses: JaSense[]) {
+  const out: Array<{ umbrella: string | null; senses: JaSense[] }> = [];
+  for (const s of senses) {
+    const last = out[out.length - 1];
+    if (last && last.umbrella && last.umbrella === s.umbrella) last.senses.push(s);
+    else out.push({ umbrella: s.umbrella, senses: [s] });
+  }
+  return out;
+}
+
+/**
+ * 把义项级关系与词条级关系**按分区**汇到一起。2026-09-17。
+ *
+ * 🔴 改这件事的起因：`猫` 页上「派生词」那一坨出现了**三次** —— 三条义项各带一份，
+ *    内容九成重复。前六门的版面语言里关系是**页尾一个区**（it 的「相关词」、
+ *    de 的「语义关系」＋「构词」），日语这门是唯一把它印在每条义项里面的。
+ *
+ * ⇒ 构词类（`derived`）一律上浮到词条级的「构词」区；语义类留在义项里
+ *   （源头把它挂在义项下是有信息的：`痛い` 第 2 义的近义词是 `痛々しい`，
+ *   第 3 义是 `素晴らしい`，合并就丢了这个区分），同时在页尾汇总一份。
+ * ⚠️ 汇总时**按目标去重**：同一个词在多条义项下重复出现只算一次。
+ */
+export function collectJaRelations(
+  entryLevel: Array<{ kind: string; targets: Array<{ word: string; clickable: boolean }> }>,
+  senseLevel: Array<{ kind: string; targets: Array<{ word: string; clickable: boolean }> }>,
+  section: 'word-formation' | 'semantic',
+) {
+  const by = new Map<string, Map<string, { word: string; clickable: boolean }>>();
+  for (const g of [...senseLevel, ...entryLevel]) {
+    if (JA_RELATION_SECTION[g.kind] !== section) continue;
+    let m = by.get(g.kind);
+    if (!m) { m = new Map(); by.set(g.kind, m); }
+    for (const t of g.targets) if (!m.has(t.word)) m.set(t.word, t);
+  }
+  return [...by.entries()].map(([kind, m]) => ({ kind, targets: [...m.values()] }));
+}
+
+/** 一行关系：中文类别名 + 一排可点的目标。语义区与构词区共用。 */
+function JaRelationRow({ group, onWord }: {
+  group: { kind: string; targets: Array<{ word: string; clickable: boolean }> };
+  onWord: (w: string) => void;
+}) {
+  return (
+    <div className="rel-row">
+      <span className="rel-kind">
+        {JA_RELATION_LABELS[group.kind] ?? relTagLabel(group.kind)}
+      </span>
+      {group.targets.map((t) => (
+        <span key={t.word} className="rel-item">
+          {t.clickable
+            ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                        onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
+            : <span className="rel-plain">{t.word}</span>}
         </span>
       ))}
     </div>
@@ -4710,13 +4966,21 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
 }) {
   // 按「词性 + 词源号」断组 —— 与前六门同一条规矩：
   // 词性相同**且**词源相同才合并，否则同形异源会被并进一组。
-  const groups: Array<{ key: string; pos: string | null; senses: JaSense[] }> = [];
+  const groups: Array<{ key: string; pos: string | null; kana: string | null; senses: JaSense[] }> = [];
   for (const s of entry.senses) {
     const key = `${s.pos ?? ''}|${s.etymKey ?? ''}`;
     const last = groups[groups.length - 1];
     if (last && last.key === key) last.senses.push(s);
-    else groups.push({ key, pos: s.pos, senses: [s] });
+    else groups.push({ key, pos: s.pos, kana: s.kana, senses: [s] });
   }
+  // 🔴 **一个词形有多个读音时，每组要标出它是哪个读音。**
+  //    `猫` 有三组（汉字 ／ 名词 ねこ ／ 名词 ねこま），三组的中英文释义几乎一样
+  //    —— 不标读音，页面上就是「名词 猫 a cat」印三遍，读者只能当成重复。
+  //    `馬` 更狠：うま/むま/んま/ば 四个读音，四组都写着「马 horse」。
+  // ⚠️ **只在真有 ≥2 个不同读音时才标** —— 单读音词（`痛い`）标上去是噪音，
+  //    而且会让读者以为这里在做什么区分。判据是事实（有几个读音），不是"保险起见都标"。
+  const groupKana = new Set(groups.map((g) => g.kana).filter(Boolean));
+  const showKana = groupKana.size >= 2;
   const bySense = new Map<number, JaExample[]>();
   const entryLevel: JaExample[] = [];
   for (const x of entry.examples) {
@@ -4731,10 +4995,95 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
     file: a.file, url: a.url, speaker: a.speaker, region: null, regionSrc: null,
   }));
 
+  // 关系分两区汇总（义项级的构词类上浮、按目标去重），活用表压紧。
+  const senseRels = entry.senses.flatMap((x) => x.relations);
+  // 🔴 **同一页里同一个 (类别, 目标) 只印一次。** `contract-check-layout.tsx` 的
+  //    「没有一个目标被印两遍」是另外六门早已满足的契约，日语接进去当场红三个词：
+  //    `猫` 的「相关词 猫も杓子も…」印两遍、`桜` 的「近义词 桜木」两遍、`山` 三条。
+  //    根子是那几条义项本身是跨版重复的（`猫` 有三条 "a cat"，见 JA_PLAN 欠账），
+  //    但**在数据修好之前，页面上不该把同一件事说两遍**。
+  // ⚠️ 只在**渲染**时去重，留在第一次出现的那条义项下 —— 不动数据，
+  //    因为「哪条义项有这个近义词」是源头给的事实（`痛い` 各义项的近义词确实不同）。
+  const shownRel = new Set<string>();
+  const dedupeRels = (gs: typeof senseRels) => gs
+    .map((g) => ({
+      kind: g.kind,
+      targets: g.targets.filter((t) => {
+        const k = `${g.kind}\u0000${t.word}`;
+        if (shownRel.has(k)) return false;
+        shownRel.add(k);
+        return true;
+      }),
+    }))
+    .filter((g) => g.targets.length > 0);
+  // 🔴 **语义区只收词条级，不把义项级的再汇一遍。** 第一版汇了，结果 `猫` 的
+  //    「相关词」在页面上出现两次（义项里一次、页尾一次，内容一字不差）——
+  //    我为了"不遗漏"而汇总，做出来的是重复。义项级的语义关系已经印在它该在的地方了。
+  //    构词类相反：它**必须**汇（义项里已经不印了，见下面的 filter）。
+  const semantic = collectJaRelations(entry.relations, [], 'semantic');
+  const wordFormation = collectJaRelations(entry.relations, senseRels, 'word-formation');
+  const inflRows = packJaInflections(entry.inflections);
+
+  const renderSense = (s: JaSense) => (
+              <li key={s.id} className="sense-item">
+                {/* 三语：中文 → 英文 → 日语原文。`[[gloss-three-languages]]`
+                    🔴 2026-09-17 两处对齐另外六门（用户：「前面是否和其他语言一样加一个 en 标识」）：
+                    ① **英文行补上 `EN` 标识**。原来日语原文那行挂着 `JA` 徽标、英文行却是个
+                       裸的 `.sense-en` —— 同一个角色两种画法，而 it/de 的两行都走
+                       `.sense-src` + `.sense-src-lang`。不标的代价不只是不统一：
+                       中文和英文都是一句话时，读者看不出第二行是原文还是补充说明。
+                    ② **顺序改成 EN 在 JA 之前**，与 it/de 一致（它们是 中文 → EN → 本语言）。
+                       ⚠️ 这个顺序只对 **19,352 条（6.5%）两者都有的义项**可见，其余看不出差别。
+                    ⚠️ **没有中文时英文仍旧顶上来当主释义**（1,830 条 / 0.6%）——
+                       那一行要 16px 主色，不能缩成带徽标的补充行，否则这批义项整个"没有释义"。 */}
+                <JaSenseChips s={s} vclass={entry.vclass} />
+                {s.zh && <div className="sense-zh">{s.zh}</div>}
+                {s.en && (s.zh ? (
+                  <div className="sense-src" lang="en">
+                    <span className="sense-src-lang">EN</span>{s.en}
+                  </div>
+                ) : <div className="sense-zh">{s.en}</div>)}
+                {s.ja && (
+                  <div className="sense-src" lang="ja">
+                    <span className="sense-src-lang">JA</span>{s.ja}
+                  </div>
+                )}
+                {/* 🔴 义项里**只留语义关系**。构词类（派生词）上浮到页尾的「构词」区 ——
+                    `猫` 的三条义项原来各带一份几乎相同的派生词表，一页印三遍。
+                    语义关系不上浮，因为"哪条义项的近义词"本身是信息：
+                    `痛い` 第 2 义近义 `痛々しい`、第 3 义近义 `素晴らしい`。 */}
+                {dedupeRels(s.relations.filter(
+                  (r) => JA_RELATION_SECTION[r.kind] !== 'word-formation')).map((r) => (
+                  <div key={r.kind} className="rel-row">
+                    <span className="rel-kind">
+                      {JA_RELATION_LABELS[r.kind] ?? relTagLabel(r.kind)}
+                    </span>
+                    {r.targets.map((t) => (
+                      <span key={t.word} className="rel-item">
+                        {t.clickable
+                          ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                        onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
+                          : <span className="rel-plain">{t.word}</span>}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+                {bySense.has(s.id) && renderExamples(bySense.get(s.id)!)}
+              </li>
+  );
+
   const renderExamples = (xs: JaExample[]) => (
     <ul className="example-list">
       {xs.map((x, i) => (
-        <li key={i}>
+        // 🔴 2026-09-17：原来是个**没有 class 的裸 `<li>`**，于是例句块没有左竖线、
+        //    没有缩进、没有上下留白 —— 释义和例句的五行齐刷刷贴在一起，
+        //    读者分不出哪行是释义、哪行是例句（用户原话：「这四行应该怎样展示合理呢」）。
+        //    `.example-item` 是共用角色表里「单条例句」那一份声明（`.sense-example`
+        //    的别名），it/de/pt 的例句一直挂着它，只有日语漏了。
+        // ⚠️ `css-audit` 抓不到这一类：它查的是「用了的 class 有没有规则」，
+        //    **一个 class 都不写反而在它的视野外** —— 与「空标签」同族的盲区。
+        //    ⇒ 契约闸补了一条盯它。
+        <li className="example-item" key={i}>
           <div className="example-text"><JaRuby text={x.text} ruby={x.ruby} /></div>
           {x.roman && <div className="example-roman">{x.roman}</div>}
           {/* 🔴 中文优先、英文兜底 —— 但**两个都印不出来时不印空行**。
@@ -4746,14 +5095,54 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
     </ul>
   );
 
+  // 🔴 **义项区先渲染成变量再放进 return。** `dedupeRels` 是有状态的：
+  //    它把印过的 (类别,目标) 记进 `shownRel`，后面两个词条级分区靠它跳过重复。
+  //    留在 JSX 里就等于依赖「表达式按源码顺序求值」这条**看不见的约束** ——
+  //    成立归成立，但挪一行就静默出错。提成语句之后，顺序是语句顺序，明明白白。
+  const senseSections = groups.length > 0 ? (
+        <section className="entry-section">
+          <h3>释义</h3>
+          {groups.map((g, gi) => (
+            <div key={gi} className="pos-group">
+              {(g.pos || (showKana && g.kana)) && (
+                <div className="pos-group-label">
+                  {g.pos && posLabel(g.pos, 'ja')}
+                  {showKana && g.kana && (
+                    <span className="pos-group-kana" title="这一组义项属于这个读音">{g.kana}</span>
+                  )}
+                </div>
+              )}
+          <ol className="sense-list">
+            {groupJaByUmbrella(g.senses).map((grp, ui) => (grp.umbrella ? (
+              /* 伞形组：小标题 ＋ 底下的兄弟义项。`長谷川` 的 40 条河流走这条分支。 */
+              <li key={`u${ui}`} className="sense-item ja-umbrella-group">
+                <div className="ja-umbrella">{grp.umbrella}</div>
+                <ol className="sense-list ja-umbrella-children">
+                  {grp.senses.map(renderSense)}
+                </ol>
+              </li>
+            ) : grp.senses.map(renderSense)))}
+          </ol>
+            </div>
+          ))}
+        </section>
+  ) : null;
+  const semanticShown = dedupeRels(semantic);
+  // 活用形页的转写。源头（英文版活用表）把它和词形写在同一个单元格里，
+  // 阶段 2 拆开存进 `inflection.romaji` ⇒ 这里是它唯一的展示落点。
+  const formRomaji = entry.bases.map((b) => b.romaji).find(Boolean) ?? null;
+  const formationShown = dedupeRels(wordFormation);
   return (
-    <article className="entry ja-entry">
-      <header className="entry-head">
-        <h2 className="headword">
-          {entry.word}
-          <button type="button" className="speak-btn"
-            onClick={() => speak(entry.word, speakLocale)} aria-label="朗读">🔊</button>
-        </h2>
+    <article className="entry-detail ja-entry">
+      <header className="entry-header">
+        {/* 🔴 2026-09-17：朗读按钮**从词头旁边挪走**。
+            另外六门没有一门把它贴在词头右边 —— 它们一律挂在**读音**上
+            （`.phonetic-row` 里那个 `/ipa/ 🔈` 药丸）。词头是"这个词长什么样"，
+            发音是"它怎么念"，是两件事。
+            ⭐ 日语挪过去还多拿一样东西：**一个词形可能有多个读音**
+            （`猫`＝ねこ/ねこま、`桜`＝さくら/おう），挂在词头上时只能读词形、
+            TTS 永远给第一个读音；挂到读音行上就能**逐行读那一行的假名**。 */}
+        <h2 className="entry-word">{entry.word}</h2>
         {entry.pos && <span className="badge pos">{posLabel(entry.pos, 'ja')}</span>}
         {entry.kanjiGrade && (
           <span className="badge grade">
@@ -4767,11 +5156,35 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
         )}
       </header>
 
-      {entry.readings.length > 0 && (
+      {entry.readings.length > 0 ? (
         <section className="ja-readings">
-          {entry.readings.map((r, i) => <JaReadingRow key={i} r={r} />)}
+          {entry.readings.map((r, i) => (
+            <JaReadingRow key={i} r={r} speak={(w) => speak(w, speakLocale)} />
+          ))}
         </section>
+      ) : (
+        /* 🔴 没有任何读音行时**仍要有一个朗读入口** —— 18.5% 的词元没有假名，
+           把按钮整个挂到读音行上就等于这些页面再也读不出声。照六门的
+           `.phonetic-row` 形状给一个药丸。
+           🔴 2026-09-18：药丸里印**转写**，有转写才不印词形。
+              活用形页（`食べれます`）原来这里印的是 `entry.word` ——
+              和正上方的词头一字不差，读者看到的是同一个词印了两遍，
+              而那一行本该回答的是"它怎么念"。没有转写时才退回印词形。 */
+        <div className="phonetic-row">
+          <button className="phonetic-btn" type="button"
+            title={`播放发音（合成音）：${entry.word}`}
+            onClick={() => speak(entry.word, speakLocale)}>
+            <span className="phonetic-value">{formRomaji ?? entry.word}</span>
+            <SpeakerIcon />
+          </button>
+        </div>
       )}
+
+      {/* 🔴 位置在读音区**之后**：读音行回答「这个**词**怎么念」，
+          字音区回答「这个**字**怎么念」。放到词头旁边会和词性/字种等级挤成一排，
+          而它有 4–27 条，不是一个徽标的量。 */}
+      <JaKanjiReadings items={entry.kanjiReadings}
+        speak={(w) => speak(w, speakLocale)} />
 
       {playable.length > 0 && (
         <HumanAudioRow audios={playable} word={entry.word}
@@ -4784,88 +5197,78 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
       <JaPointerList title="同音词" items={entry.seeAlso} onWord={onWord}
         hint="这几个词读音相同 —— 源头只说了这个，没说它们是异体字" />
 
+      {/* 🔴 2026-09-18 重做。原来印成一行「这是以下词的活用形 食べる 可能敬体」——
+          三个毛病：① 小标题是个句子，而旁边两个指针块（异体写法／同音词）是名词标签，
+          三块并排时语气打架；② 方向印反了 —— 本页**是**活用形，列出来的是它的**原形**；
+          ③ 原形与语法标签之间只有 4px，`食べる可能敬体` 黏成一坨，读者读不出断句。
+          ⇒ 标签换成名词「原形」，每个原形独占一项，语法标签做成小片，可以有多个。 */}
       {entry.bases.length > 0 && (
         <div className="ja-bases">
-          <span className="ja-pointer-title">这是以下词的活用形</span>
+          <span className="ja-pointer-title"
+            title="本页这个词形，是下面这些词的活用形">原形</span>
           {entry.bases.map((b) => (
-            <span key={b.word} className="ja-pointer">
+            <span key={b.word} className="ja-base">
               {b.clickable
-                ? <button type="button" className="link-word" onClick={() => onWord(b.word)}>{b.word}</button>
-                : <span className="dead-word">{b.word}</span>}
-              {b.label && <span className="ja-pointer-zh">{b.label}</span>}
+                ? <a className="rel-link" href={`#${encodeURIComponent(b.word)}`}
+                        onClick={(e) => { e.preventDefault(); onWord(b.word); }}>{b.word}</a>
+                : <span className="rel-plain">{b.word}</span>}
+              {b.labels.map((l) => (
+                <span key={l} className="ja-base-label">{l}</span>
+              ))}
             </span>
           ))}
         </div>
       )}
 
-      {groups.map((g, gi) => (
-        <section key={gi} className="pos-group">
-          {g.pos && <div className="pos-group-label">{posLabel(g.pos, 'ja')}</div>}
-          <ol className="sense-list">
-            {g.senses.map((s) => (
-              <li key={s.id} className="sense">
-                {/* 三语：中文 → 日语原文 → 英文。`[[gloss-three-languages]]` */}
-                {s.zh && <div className="sense-zh">{s.zh}</div>}
-                {s.ja && <div className="sense-native">{s.ja}</div>}
-                {/* ⚠️ 中文没有时英文才顶上来当主释义 —— 有中文时英文是**补充**不是替代 */}
-                {s.en && <div className={s.zh ? 'sense-en' : 'sense-zh'}>{s.en}</div>}
-                {s.relations.map((r) => (
-                  <div key={r.kind} className="sense-rel">
-                    <span className="rel-kind">
-                      {JA_RELATION_LABELS[r.kind] ?? relTagLabel(r.kind)}
-                    </span>
-                    {r.targets.map((t) => (
-                      <span key={t.word} className="rel-target">
-                        {t.clickable
-                          ? <button type="button" className="link-word" onClick={() => onWord(t.word)}>{t.word}</button>
-                          : <span className="dead-word">{t.word}</span>}
-                      </span>
-                    ))}
-                  </div>
-                ))}
-                {bySense.has(s.id) && renderExamples(bySense.get(s.id)!)}
-              </li>
-            ))}
-          </ol>
-        </section>
-      ))}
+      {/* 🔴 2026-09-17：加 `<h3>释义</h3>` 这道分区标题。
+          日语这门原来是七门里**唯一**没有它的 —— 词性分组直接顶着读音行铺下来，
+          读者分不出"这是释义区"还是"上面那些行的延续"。
+          前六门的版面语言是：释义 / 例句 / 语义关系 / 构词 / 变位形式，
+          每一区一个 `<h3>`。日语照这个骨架对齐。 */}
+      {senseSections}
 
       {entryLevel.length > 0 && (
-        <section className="entry-examples">
+        <section className="entry-section">
           <h3>例句</h3>
           {renderExamples(entryLevel)}
         </section>
       )}
 
-      {entry.relations.length > 0 && (
-        <section className="entry-relations">
-          {entry.relations.map((r) => (
-            <div key={r.kind} className="sense-rel">
-              <span className="rel-kind">
-                {JA_RELATION_LABELS[r.kind] ?? relTagLabel(r.kind)}
-              </span>
-              {r.targets.map((t) => (
-                <span key={t.word} className="rel-target">
-                  {t.clickable
-                    ? <button type="button" className="link-word" onClick={() => onWord(t.word)}>{t.word}</button>
-                    : <span className="dead-word">{t.word}</span>}
-                </span>
-              ))}
-            </div>
-          ))}
+      {/* 语义关系与构词**分两区**，照 de 那轮外审两家一致的结论（`DE_PLAN` 收尾单 C13）。
+          日语上差距更大：`桜` 有 160 个派生词、8 个近义词、1 个上位词 ——
+          混在一区里，读者要的那 9 条直接被 160 条淹掉。 */}
+      {/* ⚠️ 词条级两区也过同一个去重器：义项里已经印过的目标不再重复印。 */}
+      {semanticShown.length > 0 && (
+        <section className="entry-section">
+          <h3>语义关系</h3>
+          {semanticShown.map((r) => <JaRelationRow key={r.kind} group={r} onWord={onWord} />)}
         </section>
       )}
 
-      {entry.inflections.length > 0 && (
-        <section className="inflection-section">
+      {formationShown.length > 0 && (
+        <section className="entry-section">
+          <h3>构词</h3>
+          {formationShown.map((r) => <JaRelationRow key={r.kind} group={r} onWord={onWord} />)}
+        </section>
+      )}
+
+      {inflRows.length > 0 && (
+        <section className="entry-section">
           <h3>活用</h3>
-          <ul className="inflection-list">
-            {entry.inflections.map((f, i) => (
+          <ul className="form-list inflection-list">
+            {inflRows.map((row, i) => (
               <li key={i}>
-                {f.clickable
-                  ? <button type="button" className="link-word" onClick={() => onWord(f.base)}>{f.base}</button>
-                  : <span className="dead-word">{f.base}</span>}
-                {f.label && <span className="infl-label">{f.label}</span>}
+                {/* 同一格的汉字形与假名形并排（`食べ／たべ`），不再各占一行 */}
+                {row.forms.map((fm, fi) => (
+                  <span className="infl-form" key={fm.word}>
+                    {fi > 0 && <span className="infl-sep">／</span>}
+                    {fm.clickable
+                      ? <a className="rel-link" href={`#${encodeURIComponent(fm.word)}`}
+                        onClick={(e) => { e.preventDefault(); onWord(fm.word); }}>{fm.word}</a>
+                      : <span className="rel-plain">{fm.word}</span>}
+                  </span>
+                ))}
+                {row.label && <span className="infl-label">{row.label}</span>}
               </li>
             ))}
           </ul>

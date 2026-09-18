@@ -21,7 +21,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
 import { ItalianEntryView, SpanishEntryView, FrenchEntryView, PortugueseEntryView,
-         GermanEntryView, EnglishEntryView } from './App';
+         GermanEntryView, EnglishEntryView, JapaneseEntryView } from './App';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
@@ -51,14 +51,19 @@ const words = fileArg
 //      `[[refactor-mindset-code-quality]]`：**动手前先找有没有现成的**。
 //    ⭐ 加上之后第一次渲染就照出两个缺陷：`panther[Panthera`（wikitext 残渣）
 //      与 `oneself` 的中文到不了读者（展示层判据问的是"有没有义项"而非"有没有中文"）。
+// 🔴 2026-09-17 加 ja（界面那一轮）。**上面那条注释的第四次实例** ——
+//    日语做完九个阶段、契约闸十六条全绿，而用户看页面说「乱糟糟」。
+//    导出器不支持 ja 时，我只能对着 JSON 猜版面，而**版面问题只在渲染之后才存在**。
 const View = lang === 'en' ? EnglishEntryView
   : lang === 'es' ? SpanishEntryView
   : lang === 'fr' ? FrenchEntryView
   : lang === 'pt' ? PortugueseEntryView
+  : lang === 'ja' ? JapaneseEntryView
   : lang === 'de' ? GermanEntryView : ItalianEntryView;
 const locale = lang === 'en' ? 'en-US'
   : lang === 'es' ? 'es-MX' : lang === 'fr' ? 'fr-FR'
-  : lang === 'pt' ? 'pt-BR' : lang === 'de' ? 'de-DE' : 'it-IT';
+  : lang === 'pt' ? 'pt-BR' : lang === 'ja' ? 'ja-JP'
+  : lang === 'de' ? 'de-DE' : 'it-IT';
 const svc = getService(lang) as unknown as { getEntry(w: string): unknown };
 
 /**

@@ -1,4 +1,4 @@
-/** 闸：六门标签映射覆盖率 —— **量落点**，调页面真正在用的那张表。2026-09-15 改成闸。
+/** 闸：七门标签映射覆盖率 —— **量落点**，调页面真正在用的那张表。2026-09-15 改成闸。
  *
  * 原来只是个报数脚本。这一轮（en 三桶 + de/es/pt 地区 + it 语法接上页面）
  * 全部补齐之后，把它改成**会响的东西**：`[[lesson-must-become-mechanism]]`
@@ -23,18 +23,20 @@ import { IT_REGION_LABELS, IT_GRAMMAR_LABELS } from '../../packages/dict-labels/
 import { FR_REGION_LABELS } from '../../packages/dict-labels/src/fr.js';
 import { PT_REGION_LABELS } from '../../packages/dict-labels/src/pt.js';
 import { DE_REGION_LABELS } from '../../packages/dict-labels/src/de.js';
+import { JA_REGION_LABELS, JA_GRAMMAR_LABELS, JA_USAGE_LABELS,
+         JA_REGISTER_LABELS } from '../../packages/dict-labels/src/ja.js';
 
 // 🔴 **每门的 region 走它自己那张表**（App.tsx:2214/2634/3091/3604/3990）。
 //    我 2026-09-15 第一版拿 value 当兜底，于是五门 region 全报 0% —— 没量到真落点。
 const REGION_BY_LANG: Record<string, Record<string, string>> = {
   es: ES_REGION_LABELS, it: IT_REGION_LABELS, fr: FR_REGION_LABELS,
-  pt: PT_REGION_LABELS, de: DE_REGION_LABELS,
+  pt: PT_REGION_LABELS, de: DE_REGION_LABELS, ja: JA_REGION_LABELS,
 };
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 const CJK = /[一-鿿]/;
 const KANA = /[぀-ヿ]/;
-const LANGS = ['en', 'fr', 'es', 'it', 'pt', 'de'];
+const LANGS = ['en', 'fr', 'es', 'it', 'pt', 'de', 'ja'];
 
 /**
  * 「这个取值本身就已经是中文了吗」——**判据必须按语种分**。
@@ -64,10 +66,19 @@ const TOPIC_DROP_BUDGET: Record<string, number> = { en: 0 };
 function label(lang: string, kind: string, value: string): string {
   if (lang === 'en') return enLabel(kind, value);
   if (kind === 'topic') return TOPIC_LABELS[value] ?? value;
-  if (kind === 'register') return REGISTER_LABELS[value] ?? value;
+  // 🔴 ja 的 register 要**先查覆盖层**：全局表把 `honorific` 译「敬称」、
+  //    `polite` 译「礼貌」，而日语那三个是敬语三分的语法范畴（尊敬/谦让/丁宁）。
+  //    只查全局表的话这里报"已覆盖"，页面上印的却是错的译名。
+  if (kind === 'register') {
+    if (lang === 'ja') return JA_REGISTER_LABELS[value] ?? REGISTER_LABELS[value] ?? value;
+    return REGISTER_LABELS[value] ?? value;
+  }
   if (kind === 'region') return REGION_BY_LANG[lang]?.[value] ?? value;
   if (kind === 'number') return NUMBER_LABELS[value] ?? value;
   if (kind === 'grammar' && lang === 'it') return IT_GRAMMAR_LABELS[value] ?? value;
+  if (kind === 'grammar' && lang === 'ja') return JA_GRAMMAR_LABELS[value] ?? value;
+  // `usage` 桶 ja 独有（拟声拟态词那批），2026-09-18 新增
+  if (kind === 'usage' && lang === 'ja') return JA_USAGE_LABELS[value] ?? value;
   return value;
 }
 
@@ -120,7 +131,16 @@ for (const lang of LANGS) {
   for (const r of rows) {
     const s = byKind.get(r.kind) ?? { mapped: 0, zh: 0, raw: 0, tot: 0, ok: 0 };
     s.tot += r.n;
-    if (label(lang, r.kind, r.value) !== r.value) { s.mapped += 1; s.ok += r.n; }
+    // 🔴 「已覆盖」＝**在映射表里登记过**，不是「译名与原码不同」。
+    //    2026-09-18（ja 接入）逮到：`BDSM`/`NASA` 的中文名就是英文缩写本身 ——
+    //    中文里就这么写，**不译才是对的**，而旧判据把它们算成"裸英文"。
+    //    共享表里这样的有 11 个（demoscene/Unix/IRC/Linux/CAD/DVD/Windows/CSS/Lisp…），
+    //    en 379 条实例、ja 12 条。旧判据拿「译名不同」当「读者看得懂」的代理
+    //    （`[[criteria-from-meaning-not-form]]`），代价是显示上诬告 11 个正确条目，
+    //    而下一个人会去"补"它们 —— 补不出来，因为它们本来就该是英文。
+    //    ⚠️ 写成**或**关系：只会把已登记的从 raw 挪到 mapped，不会反向，别门只变准不变红。
+    if (label(lang, r.kind, r.value) !== r.value
+        || (r.kind === 'topic' && r.value in TOPIC_LABELS)) { s.mapped += 1; s.ok += r.n; }
     else if (alreadyChinese(lang, r.value)) { s.zh += 1; s.ok += r.n; }
     else { s.raw += 1; (gaps[`${lang}/${r.kind}`] ??= []).push([r.value, r.n]); }
     byKind.set(r.kind, s);
@@ -157,5 +177,5 @@ if (bad.length) {
     }
   }
 }
-console.log(red ? `\n🔴 ${red} 处不合格` : '\n✅ 六门标签映射全部到位');
+console.log(red ? `\n🔴 ${red} 处不合格` : '\n✅ 七门标签映射全部到位');
 process.exit(red ? 1 : 0);

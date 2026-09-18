@@ -974,6 +974,19 @@ button.brand:focus-visible {
   font-weight: 500;
 }
 
+/* 用法/修辞标签（惯用 / 比喻 / 拟声词 / 广义 …）。**ja 是第一门用这个桶的**
+   （`sense_tag.kind='usage'`，2,763 条）。
+   🔴 前面四种 chip 已经占掉了「灰实心(.lex)／star 实心(.reg)／绿描边(.top)／
+      灰描边(.gram)」，这一种必须在**两条轴上**都与它们不同 ⇒ 蓝**实心浅底**。
+   ⚠️ 用 `--accent` 蓝在别的语种上会和阳性 chip（`.g-m`）撞色（2026-08-12 那条），
+      但**日语没有性**，`.g-*` 在日语页面上不可能出现 ⇒ 这里安全。
+      🔴 真要给别的语种开这个桶，得先换色，别照抄。 */
+.sense-chip.use {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  border-color: transparent;
+}
+
 /* ---- Inflection → lemma notes ---- */
 .infl-notes {
   margin: 0 0 14px;
@@ -1749,4 +1762,368 @@ button.rel-link {
 
 .sense-altof .alt-of {
   font-size: 12.5px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   日语（2026-09-17）
+
+   🔴🔴 **这一节原本整个不存在。** 阶段 8 把 `JapaneseEntryView` 写出来、
+   十六条展示层契约断言全绿、数据九个阶段全绿 —— 而 `css-audit.ts` 一跑，
+   日语视图用到的类名里 **33 个在本文件里一条规则都没有**。
+   也就是说日语页面是**裸 HTML**：没有间距、没有层级、没有颜色。
+   用户的原话是「乱糟糟」，字面意义上的准确。
+
+   ⇒ 这是 PITFALLS I3「自造类名 ＝ 页面没样式，而且探针看不见它」**最大的一次实例**
+     （上一次纪录是 de 的 16 个）。同一个坑，第三次。
+   ⇒ 两步修：① 有共用角色的一律改用共用名字（`entry-detail`/`entry-word`/
+     `sense-item`/`rel-row`/`rel-item`/`rel-link`/`rel-plain`/`sense-src`/`form-list`），
+     33 → 23；② 剩下 23 个是**日语真正独有的角色**（假名/罗马字/声调/振假名/指针块），
+     在这里给它们一份声明。
+   🔴 顺带把可点词从 `<button className="link-word">` 换成 `<a className="rel-link">`
+     —— 与另外六门一致。理由见本文件 `.rel-link` 那条注释：那条规则是给 `<a>` 写的，
+     套在 `<button>` 上会露出浏览器默认按钮外壳（en 栽过一次）。
+
+   ⚠️ 遵守本文件的总规矩：**同一个视觉角色只许有一份声明**。下面只声明日语独有的角色，
+     凡是别的语言已经有的（例句正文/译文/出处、关系行、义项中文/英文），一律挂成别名。
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ---- 读音行：假名 · 罗马字 · 声调 · IPA ----
+   一个词可能有多个读音（`猫`＝ねこ/ねこま、`桜`＝さくら/おう），每个读音一行。 */
+.ja-readings {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ja-reading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+/* 假名读音是日语词条页的第一信息 —— 汉字词头单看形不知道怎么念。
+   ⚠️ 字号比词头小、比正文大，且**用衬线以外的字体**：假名与汉字混排时
+      系统 UI 字体的假名字形更清晰。 */
+.ja-kana {
+  font-size: 15px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.ja-romaji {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.ja-kana-hist {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ── 汉字音訓読み区（阶段 4c，2026-09-18）──────────────────────────────
+   🔴 与上面的 `.ja-readings` **视觉上必须分得开**：那是「这个词怎么念」，
+      这里是「这个字怎么念」。同一个页面上两块都是假名，不给分区标签
+      读者会当成一堆并列的读音 —— 而 `青` 的 あお（词）和 ショウ（字·呉音）
+      根本不是一回事。⇒ 给小标题 + 每组左侧固定宽度的类别标签。
+   ⚠️ 一个字最多 27 条（`生`），所以是 wrap 的 flex 不是一行。 */
+.ja-kanji-readings {
+  margin-top: 10px;
+}
+
+.ja-kanji-readings h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  margin: 0 0 4px;
+}
+
+.ja-kr-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+/* 固定宽度 —— 音读/训读/名乗 三行的读音要左对齐成一列，
+   否则两字和三字的标签会把每行的起点推到不同位置。 */
+.ja-kr-kind {
+  flex: 0 0 auto;
+  min-width: 2.8em;
+  font-size: 11.5px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ja-kr-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.ja-kr {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.22));
+  background: var(--surface-soft);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.ja-kr:hover {
+  border-color: var(--accent);
+}
+
+/* 🔴 字音与送假名**必须分色**：`あお-い` 里只有 `あお` 是这个字的读音。
+   同色印出来读者分不出断点，而那正是这一层要回答的问题。
+   连字符不印 —— 用颜色和字重表达断点比印一个 ASCII 符号干净。 */
+.ja-kr-stem {
+  font-weight: 500;
+}
+
+.ja-kr-okuri {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.ja-kr-sub {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+/* 常用汉字表内的读音。**只印一个字**：它是正交标记，抢不过读音本身。 */
+.ja-kr-joyo {
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: var(--accent);
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 2px;
+  opacity: 0.75;
+}
+
+/* 声调标记 `[néꜜkò]` ＋ 声调型。`ꜜ` 是下降符，必须与前后字母同基线，
+   所以整块用等宽族，避免比例字体把它挤歪。 */
+.ja-pitch {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  background: var(--surface-soft);
+  border-radius: 3px;
+  padding: 0 5px;
+}
+
+/* 🔴 推不准时只印标记不印型（见 `JaReadingRow`），所以这个 `<em>` 经常不在 —— 
+   样式不能依赖它存在。 */
+.ja-pitch-type {
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+/* 每个读音行前面那个朗读按钮。
+   🔴 2026-09-17：原来是词头右边一个裸 `🔊` emoji（`.speak-btn`），用户指出不合适 ——
+      另外六门没有一门这么放，它们一律把发音挂在**读音**上。挪过来之后：
+      ① 多读音的词每行各有一个按钮，读的是该行的假名（`ねこ` / `ねこま` 真的不同音）；
+      ② 图标换成全站共用的 `SpeakerIcon`，不再用 emoji —— emoji 的字形和大小随系统变。
+   ⚠️ 尺寸固定 22px 且 `flex-shrink: 0`：多行时这一列要**对齐**，
+      否则假名长短不一会把按钮推得参差。 */
+.ja-speak {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.ja-speak:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* 图标本身跟着按钮缩一档 —— `.phonetic-speaker` 的默认是给 44px 药丸用的。 */
+.ja-speak .phonetic-speaker { width: 12px; height: 12px; }
+
+/* ---- 指针块：异体写法 / 同音词 / 这是以下词的活用形 ----
+   🔴 三个块**措辞不同、样式相同** —— 措辞跟着判据走（`see_also` 不断言同一性），
+      但它们在版面上是同一个角色：「你可能想找的是这些」。 */
+.ja-pointers,
+.ja-bases {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 13px;
+}
+
+.ja-pointer-title {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.ja-pointer { margin-right: 4px; }
+
+/* 原形指针块：原形与语法标签之间要看得出断句。
+   🔴 原来靠 `.ja-pointer-zh` 的 4px margin 分隔 —— `食べる可能敬体` 黏成一坨。
+   一个词形对同一原形可以有多个语法标签（`食べられます` ＝ 被动敬体 + 可能敬体），
+   所以标签做成可重复的小片，不是一句话。 */
+.ja-base {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-right: 4px;
+}
+
+.ja-base-label {
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.ja-pointer-zh {
+  margin-left: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ---- 活用表 ----
+   一行 ＝ 一格。同格的汉字形与假名形并排（`痛かろ ／ いたかろ`）。 */
+.inflection-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+}
+
+.inflection-list li {
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.infl-form { white-space: nowrap; }
+
+.infl-sep {
+  margin: 0 3px;
+  color: var(--text-tertiary);
+}
+
+.infl-label {
+  margin-left: 5px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ---- 例句 ----
+   正文/罗马字/译文/出处四层，字号与颜色逐层降一档，读者一眼看出主次。
+   ⚠️ `.example-zh` 与 `.example-ref` 已在上面的角色表里，这里只补日语独有的两个。 */
+.example-text {
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+
+/* 罗马字转写 —— 日语独有的一层，给不认假名的读者。比正文低一档、斜体，
+   与 `.ja-romaji` 同一个视觉语言。 */
+.example-roman {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  margin-top: 1px;
+}
+
+/* 振假名。`ruby-position: over` 不是默认值的地方（部分 WebKit）会贴到下面去。
+   ⚠️ 行高要留够，否则注音会顶到上一行 —— `.example-text` 的 1.8 就是为它留的。 */
+.ja-entry ruby { ruby-position: over; }
+
+.ja-entry rt {
+  font-size: 0.55em;
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+/* ---- 日语独有的徽标 ---- */
+/* 汉字等级（常用/教育/人名用/表外）—— 用中性底色，它是分类不是褒贬。 */
+.badge.grade {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+}
+
+/* 活用类（五段/一段/サ変/カ変）—— 动词的本质属性，与 it 的「变位类」同一个角色。 */
+.badge.vclass {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+
+/* 日语原文释义的语言标 —— 与 en/es/it/fr/de 那几条同一个形状。 */
+.sense-src[lang='ja'] .sense-src-lang {
+  background: color-mix(in srgb, #d1495b 14%, transparent);
+  color: #d1495b;
+}
+
+/* 裸 IPA（不在 `.phonetic-btn` 框里的那种）。 */
+.ja-reading .ipa {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+/* 词性分组标题里的读音（`名词 ねこ`）。只在一个词形有 ≥2 个读音时出现。
+   🔴 它是**这一组义项属于哪个读音**的答案 —— 没有它，`猫`/`馬`/`国` 的多组义项
+      在页面上就是同一句中文印三四遍，读者只能当成重复（用户正是这么报的）。 */
+.pos-group-kana {
+  margin-left: 7px;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 伞形组：一个小标题 ＋ 底下的兄弟义项。
+   🔴 它存在的理由见 `ja/fixes/fix_hierarchical_gloss.py` —— kaikki 的 glosses 是
+      层级数组，建库时只收了伞形那一层，`長谷川` 的 40 条不同河流全变成 40 行「长谷川」。
+      修好之后 40 条具体释义回来了，要有一个标题把它们收住，否则只是把一种乱换成另一种。 */
+.ja-umbrella-group { list-style: none; }
+
+.ja-umbrella {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  padding: 2px 0;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 4px;
+}
+
+/* 兄弟义项缩进一档，视觉上从属于上面那个小标题。 */
+.ja-umbrella-children {
+  margin: 0 0 4px 14px;
+  padding: 0;
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
 }
