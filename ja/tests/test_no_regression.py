@@ -52,8 +52,13 @@ from build import norm_ja                             # noqa: E402
 from intake_edition_words import SECTION              # noqa: E402
 # 阶段 4c 汉字音訓読み层 —— 判据 import 生成侧那一份，闸里不重写
 from build_kanji_reading import KIND as KR_KIND, split_okuri   # noqa: E402
+# 阶段 2 活用表结构（2026-09-19）—— 判据 import 生成侧那一份
+from infl_table import SPLIT as IT_SPLIT, column_tags as it_column_tags  # noqa: E402
+from infl_table import mark_ranuki as it_mark_ranuki  # noqa: E402
 sys.path.insert(0, str(HERE.parent / "fixes"))
 from fix_gloss_residue import ONLY_BRACKET            # noqa: E402
+# 专名分类（2026-09-18）—— 判据 import 生成侧那一份
+from fix_propername_gloss import classify as pn_classify, HAS_CAT as PN_HAS_CAT  # noqa: E402
 
 f = lambda n: format(n, ",")
 
@@ -89,20 +94,24 @@ ACCEPT = {
         "🔴 阶段 4b 之前这个数是 140,105（覆盖 39.8%）—— 那是阶段 3a 收词之后"
         "**没人重跑读音层**造成的，账的闸 P6 现在按覆盖率盯着它。"),
     "C1 变形悬空原形（base_id 为空）": (
-        995,     # 🔴 2026-09-16 从 988 上调 7：`fixes/recover_pointer_senses.py` 从
+        863,     # 🔴 2026-09-19 收紧 995 → 863：修活用表结构那轮补回了普通体各列，
+                 #    新插的 4,351 个词形里有一批正好是原来悬空的原形。
+                 #    **是闸自己报「⬇ 该收紧」我才来改的** —— 不改就等于默许它
+                 #    下次涨回 995 而一声不吭。
+                 # 🔴 2026-09-16 曾从 988 上调 7：`fixes/recover_pointer_senses.py` 从
                  #    英文版指针正文里补了 375 条活用（`見た` ← `見る 过去`），
                  #    其中 7 条的原形连三版都没有独立条目。
-                 #    **上调基线必须写清多出来的是什么**，否则它就是个掩盖回归的开关。
-        "988 / 567,717 ＝ 0.17%。`base` 文本都在，只是原形词头连三版都没有独立条目。"
+        "863 / 573,105 ＝ 0.15%。`base` 文本都在，只是原形词头连三版都没有独立条目。"
         "🔴 阶段 2 建完变形层时这个数是 **221,135**，阶段 3a 收词后重连了 220,147 行。"
         "**pt 正是栽在这个顺序上**（变形层建在收词之前 ⇒ 46.2% 空白页）。"
         "⚠️ 展示层查变形**必须走 `inflection.word_id`，别走 `base_id`**。"),
     "C3 空白页词形（无义项、无变形、无指针）": (
-        9_765,   # 🔴 2026-09-16 二次收紧 12,206 → 9,765：`recover_pointer_senses.py`
+        9_763,   # 🔴 2026-09-19 三次收紧 9,765 → 9,763（修活用表结构，普通体各列回来了）。
+                 # 🔴 2026-09-16 二次收紧 12,206 → 9,765：`recover_pointer_senses.py`
                  #    把英文版指针正文里的 3,812 条关系 + 375 条活用落了库。
                  #    **是闸自己报「⬇ 该收紧」我才来改的** —— 不改就等于
                  #    默许它下次涨回 12,206 而一声不吭。
-        "12,248 / 710,264 ＝ 1.72%（对照 pt 那轮 46.2%、fr 1.8%）。"
+        "9,763 / 714,173 ＝ 1.37%（对照 pt 那轮 46.2%、fr 1.8%）。"
         "主要是阶段 2 收进来的变形词形里，原形不在库、自己也没有义项的那批。"),
     "D2 有声调标记但推不出重音核": (
         11,      # 实测 11（阶段 4 当时记的 12 里有 1 条后来被去重掉了）
@@ -279,6 +288,42 @@ def build(con):
         "SELECT COUNT(*) FROM kanji_reading k LEFT JOIN dict d"
         " ON d.id=k.word_id WHERE d.id IS NULL") if "kanji_reading" in have else 0))
 
+    # ── A8 专名义项的中文必须带分类（2026-09-18）──
+    # 🔴 用户看 `桜` 的页面发现的：rank 9/10/11 英文分别是 `a female given name`／
+    #    `a placename`／`a surname`，**中文全印「樱」** —— 三件不同的事长得一模一样。
+    #    修的时候是 10,496 条。判据 `classify` import 生成侧那一份，
+    #    源头将来多一种模板（`a nickname`…）它会跟着变。
+    # ⚠️ 基线 1 是 `下の名前`：那个词的**词义本身**就是「名（相对于姓）」，
+    #    英文的 `given name` 在那条上是释义不是分类标记 ⇒ **有意不改**。
+    #    ⚠️ 它的中文含「名」，所以其实不会落进这条断言 —— 基线写 0。
+    a(("A", "A8 专名义项的中文丢了分类（女性名/姓氏/地名分不出）", sum(
+        1 for en, zh in con.execute(
+            "SELECT ge.text, gz.text FROM sense s"
+            " JOIN sense_gloss ge ON ge.sense_id=s.id AND ge.lang='en' AND ge.kind<>'umbrella'"
+            " JOIN sense_gloss gz ON gz.sense_id=s.id AND gz.lang='zh' AND gz.kind<>'umbrella'"
+            " WHERE ge.text LIKE '%name%'")
+        if pn_classify(en) and not PN_HAS_CAT.search(zh))))
+
+    # ── J 证据层→出版层的认领（2026-09-18 回填 ja/zh 两版）──
+    # 🔴 **J1 是这一族里唯一非计数的那条**：悬空引用 = 认领指向一条已经被删掉的义项。
+    #    回填 ja/zh 时的写后回核逮到全库有 1 条（en-edition 的历史遗留，
+    #    `kk-ja:和:character:2:0#0`，文本是 wikitext 残渣）—— 它躺了整整一个项目，
+    #    因为**此前没有任何一条断言问过「认领指向的义项还在不在」**。
+    #    义项清洗（`fix_gloss_residue` 那类）会删 `sense`，删了不清引用就又是一条。
+    a(("J", "J1 认领指向已删除的义项（悬空引用）", q(
+        "SELECT COUNT(*) FROM sense_src x LEFT JOIN sense s ON s.id=x.sense_id"
+        " WHERE x.sense_id IS NOT NULL AND s.id IS NULL")))
+    # 🔴 J2 是**错配**那一面：认领得上不代表配对对（`[[primary-key-is-not-enough]]`）。
+    #    证据行与它认领的义项必须属于同一个词形 —— 跨词认领是灾难性的错配。
+    a(("J", "J2 认领到了别的词的义项", q(
+        "SELECT COUNT(*) FROM sense_src x JOIN sense s ON s.id=x.sense_id"
+        " WHERE s.word_id <> x.word_id")))
+    # ⚠️ J3 锁的是**这一层没有整批消失**。ja/zh 回填之前这两版全是 NULL，
+    #    那种状态下 J1/J2 恒为 0 —— 两条都绿，而桥根本不存在。
+    a(("J", "J3 ja/zh 两版的认领整批没了（只问在不在，不问几条）", q(
+        "SELECT COUNT(*)=0 FROM sense_src WHERE src IN ('ja-edition','zh-edition')"
+        " AND sense_id IS NOT NULL")))
+
     # ── C 变形层 ──
     a(("C", "C1 变形悬空原形（base_id 为空）", q(
         "SELECT COUNT(*) FROM inflection WHERE base_id IS NULL")))
@@ -291,6 +336,85 @@ def build(con):
         "  SELECT 1 FROM inflection i WHERE i.word_id=d.id) AND NOT EXISTS("
         "  SELECT 1 FROM sense_relation r WHERE r.word_id=d.id"
         "   AND r.kind IN ('alt_of','see_also'))")))
+
+    # ── I 活用表的**表结构**（2026-09-19）──
+    # 🔴 起因：用户拿 `食べる` 的成品页去外审，模型挑出「`食べましょう` 不是敬体命令形」。
+    #    回源查下来不是孤例，是 wiktextract 解析维基 `ja-conj` 模板时**行列两个方向的
+    #    表头识别失败**，我们扁平遍历 `forms` 看不见表，把源头的错原样印上了页面。
+    #    判据与验证见 `pipeline/infl_table` 文件头；这里的断言全部 import 那一份。
+    # 🔴 `tags` 解析不了时**返回哨兵而不是抛异常** —— 闸崩掉等于这一整族断言
+    #    一条都没跑，而调用方只看见一个堆栈。M27（DROP TABLE 让闸崩掉、L1 没机会报）
+    #    是同一个形状，这里提前把它堵上：坏的 tags 由 I0 报出来。
+    def _tags(x):
+        try:
+            return json.loads(x or "[]")
+        except ValueError:
+            return None
+    infl = [(w, b, lab, _tags(tg), ref) for w, b, lab, tg, ref in con.execute(
+        "SELECT d.word, i.base, i.label_zh, i.tags, i.src_ref"
+        " FROM inflection i JOIN dict d ON d.id=i.word_id")]
+    a(("I", "I0 inflection.tags 不是合法 JSON", sum(1 for x in infl if x[3] is None)))
+    infl = [x for x in infl if x[3] is not None]
+    # 🔴 **现代活用表那批**单列出来：`it_column_tags` 是只在这张表的格子上验过的
+    #    （3,748 个格子，唯一分歧就是源头丢的 `past`）。把它用到全表会误伤 ——
+    #    第一版 I2 就是全表跑的，报出 767 条，其中 645 条根本不是活用表的行：
+    #    `きたなかった`（形容词过去）撞上后缀 `なかった` 被读成「否定过去」、
+    #    `明らかだ` 的だ被读成「过去」。**判据只在它被验过的域里有效**
+    #    （`[[criteria-narrower-than-you-think]]`）。
+    modern = [x for x in infl if ":ja-conj-ex#" in x[4]]
+
+    # 🔴 I1 是这一族里最该有的一条：修之前 `desiderative` 这个 tag 在库里的
+    #    **真阳性是 0** —— 480 行全是进行体（`食べています` 印成「愿望敬体」），
+    #    而真正的愿望形（`食べたい`）带着源头的报错标记被整行丢掉了。
+    #    判据 import 生成侧的「什么才算愿望形」，源头哪天改了它跟着改。
+    a(("I", "I1 印着「愿望」的其实是进行体", sum(
+        1 for w, _b, _l, tg, _r in infl
+        if "desiderative" in tg and not IT_SPLIT["desiderative"][0](w))))
+
+    # 🔴 I2 逮的是**读者在页面上看见两行印着同一个说明**：修之前 `食べます` 与
+    #    `食べました` 的 tag 集完全相同（源头丢了 `past` 这一维），108 个词无一幸免。
+    #    ⚠️ 判据不能是「同一原形下有重名的说明」—— `書け`／`かけ` 是同一个形的
+    #    汉字与假名两种写法，本来就该同名（页面用 ／ 合并）。真判据是
+    #    **说明相同但形态上并不相同**：拿生成侧的列读取器重算，不一致就是没区分开。
+    seen = {}
+    dupe = 0
+    for w, b, lab, _tg, _r in modern:
+        k = (b, lab)
+        c0 = frozenset(it_column_tags(w))
+        if k in seen and seen[k] != c0:
+            dupe += 1
+        seen.setdefault(k, c0)
+    a(("I", "I2 同一原形下两个形态不同的词形印着同一个说明", dupe))
+
+    # ⚠️ I3/I4 锁的是**这两层没有整批消失**（只问在不在，不问几条 —— 同 J3）。
+    #    修之前普通体那几列是 0 行，那种状态下 I1/I2 也能全绿。
+    a(("I", "I3 现代活用表的普通体整批没了（`食べない` 那几列）", q(
+        "SELECT COUNT(*)=0 FROM inflection"
+        " WHERE src_ref LIKE '%:ja-conj-ex#%' AND tags='[\"negative\"]'")))
+    a(("I", "I4 文語形的 `bungo` 标记整批没了（又混进现代活用里印）", q(
+        "SELECT COUNT(*)=0 FROM inflection"
+        " WHERE src_ref LIKE '%:ja-conj-bungo#%' AND tags LIKE '%bungo%'")))
+    # 🔴 I5：文語表里**已然形+ば**（`食ぶれば`，順接確定条件）被源头标成了 `causative`，
+    #    页面上印「使役」。同一块里有已然形词干可以把它和未然形+ば 分开。
+    a(("I", "I5 文語的「～ば」又被印成使役", sum(
+        1 for w, _b, _l, tg, r in infl
+        if "causative" in tg and "bungo" in tg and w.endswith("ば"))))
+    # 🔴 I6 是**可逆性回核**，不是另写一遍判据：把库里的 tag 集抹掉 `ra-nuki`
+    #    重跑生成侧的 `mark_ranuki`，标出来的必须和库里的**逐条一致**。
+    #    ⚠️ 第一版我在闸里按记忆重写了一遍判据（「同原形下有られ对照」），
+    #    生成侧收窄成派生关系之后它就开始误报 16 条 —— 本文件头那条
+    #    「判据一律 import 生成侧、绝不在闸里重写」，我自己违反了一次。
+    #    `食べれる` 与 `食べられる` 并列印着，不标出来读者会当成两套都规范的可能形。
+    redo = [(w, b, {x for x in tg if x != "ra-nuki"}) for w, b, _l, tg, _r in infl]
+    it_mark_ranuki(redo)
+    a(("I", "I6 ら抜き标注与生成侧对不上（可逆性回核）", sum(
+        1 for (w, b, again), (_w, _b, _l, tg, _r) in zip(redo, infl)
+        if ("ra-nuki" in again) != ("ra-nuki" in tg))))
+    # 🔴 I7：`src_ref` 是这张表与 dump 之间唯一的认领凭据，原来的格式少了
+    #    「同 (词,词性) 的第几条」，5,155 组撞在一起（`[[primary-key-is-not-enough]]`）。
+    a(("I", "I7 src_ref 不唯一（认领凭据撞车）", q(
+        "SELECT COUNT(*) FROM (SELECT src_ref FROM inflection"
+        " GROUP BY src_ref HAVING COUNT(*)>1)")))
 
     # ── D 声调 ──
     a(("D", "D1 重音核超出拍数范围", q(
@@ -504,6 +628,22 @@ MUT = [
      ["DROP TABLE kanji_reading"],
      "L1 v3 的表被 DROP 掉了"),
 
+    ("M31", "🔴 A8 专名义项的中文被压回只剩译名（用户在 `桜` 页上看见的那个）",
+     ["UPDATE sense_gloss SET text=REPLACE(REPLACE(REPLACE(text,'（女性名）',''),"
+      "'（姓氏）',''),'（地名）','') WHERE lang='zh' AND (text LIKE '%（女性名）'"
+      " OR text LIKE '%（姓氏）' OR text LIKE '%（地名）')"],
+     "A8 专名义项的中文丢了分类（女性名/姓氏/地名分不出）"),
+    ("M28", "🔴 J1 清洗删掉义项、认领引用没跟着清（悬空）",
+     ["DELETE FROM sense WHERE id IN (SELECT sense_id FROM sense_src"
+      " WHERE sense_id IS NOT NULL LIMIT 3)"],
+     "J1 认领指向已删除的义项（悬空引用）"),
+    ("M29", "🔴 J2 认领错配到别的词（计数型闸对此结构性失明）",
+     ["UPDATE sense_src SET sense_id=(SELECT id FROM sense WHERE word_id<>sense_src.word_id"
+      " LIMIT 1) WHERE id IN (SELECT id FROM sense_src WHERE sense_id IS NOT NULL LIMIT 3)"],
+     "J2 认领到了别的词的义项"),
+    ("M30", "🔴 J3 ja/zh 的认领整批被清回 NULL（回到回填之前，J1/J2 恒绿）",
+     ["UPDATE sense_src SET sense_id=NULL WHERE src IN ('ja-edition','zh-edition')"],
+     "J3 ja/zh 两版的认领整批没了（只问在不在，不问几条）"),
     ("M14", "F5 关系目标的振假名括号回潮",
      ["UPDATE sense_relation SET target='桜蔭(おういん)会(かい)' WHERE id IN"
       " (SELECT id FROM sense_relation WHERE kind='derived' LIMIT 3)"],
@@ -569,6 +709,45 @@ MUT = [
     ("M8", "H3 混进合成音",
      ["UPDATE audio SET kind='tts-tool' WHERE id IN (SELECT id FROM audio LIMIT 2)"],
      "H3 录音 kind 不是 human（本版不产合成音）"),
+    # ── 活用表结构（2026-09-19）。每一条都对应一个**真发生过**的症状 ──
+    # ⚠️ I0 本身就是**从一次崩溃里长出来的**：M35 第一版的 REPLACE 留下了 `["adverbial", ]`，
+    #    闸直接抛 JSONDecodeError —— 整族断言一条都没跑，调用方只看见一个堆栈。
+    #    这条变异锁住「坏数据要报红，不要崩」。
+    ("M39", "🔴 I0 tags 变成非法 JSON（闸要报红，不许崩掉整族断言）",
+     ["UPDATE inflection SET tags='[\"adverbial\", ]' WHERE id IN"
+      " (SELECT id FROM inflection ORDER BY id LIMIT 3)"],
+     "I0 inflection.tags 不是合法 JSON"),
+    ("M32", "🔴 I1 进行体又被标回 desiderative（`食べています` 印「愿望敬体」）",
+     ["UPDATE inflection SET tags=REPLACE(tags,'progressive','desiderative'),"
+      " label_zh=REPLACE(label_zh,'进行体','愿望') WHERE tags LIKE '%progressive%'"],
+     "I1 印着「愿望」的其实是进行体"),
+    ("M33", "🔴 I2 列方向又丢了 past（`食べます` 与 `食べました` 同印「敬体」）",
+     ["UPDATE inflection SET label_zh='敬体' WHERE label_zh='敬体过去'"],
+     "I2 同一原形下两个形态不同的词形印着同一个说明"),
+    ("M34", "🔴 I3 普通体那几列又被当成源头报错整行丢掉",
+     ["DELETE FROM inflection WHERE src_ref LIKE '%:ja-conj-ex#%'"
+      " AND tags='[\"negative\"]'"],
+     "I3 现代活用表的普通体整批没了（`食べない` 那几列）"),
+    # ⚠️ 三个 REPLACE 缺一不可：tags 是排序后的 JSON 数组，`bungo` 可能在头、
+    #    在尾、或独占一条（`["adverbial", "bungo"]` 里它在尾）。第一版只写了
+    #    「在头」和「独占」，尾部那种留下 `["adverbial", ]` —— **非法 JSON，闸直接崩**
+    #    而不是报红。变异本身也要能跑通，否则它测不出任何东西。
+    ("M35", "🔴 I4 文語表的分隔符又被丢掉（文語形混进现代活用里印）",
+     ["UPDATE inflection SET tags=REPLACE(REPLACE(REPLACE(tags,', \"bungo\"',''),"
+      "'\"bungo\", ',''),'\"bungo\"','') WHERE tags LIKE '%bungo%'"],
+     "I4 文語形的 `bungo` 标记整批没了（又混进现代活用里印）"),
+    ("M36", "I5 文語的已然形+ば 又被印成使役",
+     ["UPDATE inflection SET tags='[\"bungo\", \"causative\"]', label_zh='文語使役'"
+      " WHERE src_ref LIKE '%:ja-conj-bungo#%' AND label_zh='文語已然形条件形'"],
+     "I5 文語的「～ば」又被印成使役"),
+    ("M37", "I6 ら抜き标注被整批抹掉（与规范可能形并列印着）",
+     ["UPDATE inflection SET tags=REPLACE(REPLACE(tags,', \"ra-nuki\"',''),"
+      "'\"ra-nuki\", ','') WHERE tags LIKE '%ra-nuki%'"],
+     "I6 ら抜き标注与生成侧对不上（可逆性回核）"),
+    ("M38", "🔴 I7 src_ref 又撞车（认领凭据不唯一，删旧行时会误伤别的条目）",
+     ["UPDATE inflection SET src_ref=(SELECT src_ref FROM inflection ORDER BY id LIMIT 1)"
+      " WHERE id=(SELECT id FROM inflection ORDER BY id LIMIT 1 OFFSET 1)"],
+     "I7 src_ref 不唯一（认领凭据撞车）"),
 ]
 
 

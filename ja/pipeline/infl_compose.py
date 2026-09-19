@@ -25,6 +25,10 @@ import re
 
 # 🔴 次序＝贴着词干由内往外。改这个列表就是改语义。
 ORDER = [
+    # ⓪⁻ 语体（文語/口語）—— 放在最前，先告诉读者「这是哪一套语法」
+    #    2026-09-19 补：源头用 `ja-conj-bungo` 模板把文語表单独分了块，我们原来**把这个
+    #    分隔符整个丢了**，864 个词的文語形混进现代活用里印（70 个词两套并排）。
+    "bungo",
     # ⓪ 同形歧义的提示 —— 放最前
     "possibly",
     # ① 语态/态（最贴词干）
@@ -35,6 +39,9 @@ ORDER = [
     # （`[[refactor-mindset-code-quality]]`：同一文件里两张重复映射表已经发生过）。
     "nominalized",
     # ② 体
+    # 🔴 `progressive` 是 2026-09-19 新建的 tag，不是源头给的：源头把进行体组
+    #    整组标成了 `desiderative`（`食べています` 印成「愿望敬体」）。
+    "progressive",
     "perfect", "perfective", "imperfective", "completive",
     # ③ 敬体/简体
     "formal", "polite", "honorific", "humble", "informal", "archaic",
@@ -44,10 +51,14 @@ ORDER = [
     "past",
     # ⑥ 活用形名（最外层，说明它在句中怎么用）
     "irrealis", "continuative", "terminative", "attributive",
-    "hypothetical", "conditional", "imperative", "volitional",
+    "hypothetical", "conditional", "realis-conditional", "imperative", "volitional",
     "adverbial", "realis", "conjunctive", "contrastive", "-tari",
     "evidential", "noun-from-verb", "stem",
     "emphatic", "topicalized", "plural",
+    # ⑦ 限定语 —— 源头写在**格子里**的（`short form: 食べさす`），加括号挂在最后。
+    #    放最后是为了让主干先读完：「可能敬体（ら抜き）」而不是「可能ら抜き敬体」。
+    "standard", "colloquial", "written", "spoken", "short-form", "contraction",
+    "request", "nasai", "prohibitive", "ra-nuki",
 ]
 
 TAG_ZH = {
@@ -76,6 +87,22 @@ TAG_ZH = {
     "evidential": "样态形",          # あおそうだ「看起来蓝」
     "noun-from-verb": "体言化",      # 保護すること
     "stem": "词干",
+    # ── 2026-09-19 补：修表结构时新建的 tag（源头没有或标错了）──
+    "bungo": "文語",                 # 文語（古典语法）那一套，与现代活用分开
+    "progressive": "进行体",         # ている：源头整组标成了 `desiderative`
+    # 已然形+ば＝順接確定条件（「因为…」），与未然形+ば 的仮定条件不是一回事。
+    # 源头把它标成了 `causative`。
+    "realis-conditional": "已然形条件形",
+    # 括号里的是**限定语**，源头写在格子里：`short form: 食べさす`
+    "standard": "（标准）", "colloquial": "（口语）",
+    "written": "（书面）", "spoken": "（口头）",
+    "short-form": "（短缩）", "contraction": "（缩约）",
+    "ra-nuki": "（ら抜き）",         # 食べれる：口语里省掉「ら」的可能形，非规范书面
+    # 命令形那一组，源头把四件事打成同一个 `imperative`。不区分的话
+    # `食べないでください`（礼貌请求）与 `食べるな`（禁止）会同印「否定命令形」。
+    "request": "（请求）",           # 〜てください
+    "nasai": "（なさい）",           # 〜なさい：语气缓和的命令
+    "prohibitive": "（禁止）",       # 〜な
 }
 
 # 源头自己的抽取报错 —— 不是词形属性，整行丢弃并记账
@@ -127,6 +154,20 @@ if __name__ == "__main__":
         (["imperative", "stem"], "命令形"),
         (["error-unrecognized-form"], None),
         (["kanji"], None),
+        # ── 2026-09-19：这八条就是「表结构四个缺陷已修」在拼装层的判据 ──
+        # 用户在 `食べる` 页上看见的那四行，修好之后应该印成这样：
+        (["volitional", "polite"], "敬体意志形"),            # 食べましょう（曾印「敬体命令形」）
+        (["causative", "passive", "polite"], "使役被动敬体"),  # 食べさせられます（曾印「敬体条件形」）
+        (["progressive", "polite"], "进行体敬体"),            # 食べています（曾印「愿望敬体」）
+        (["bungo", "realis-conditional"], "文語已然形条件形"),  # 食ぶれば（曾印「使役」）
+        (["polite", "past"], "敬体过去"),                    # 食べました（曾与食べます同印「敬体」）
+        (["potential", "ra-nuki", "polite"], "可能敬体（ら抜き）"),
+        (["bungo", "stem", "terminative"], "文語终止形"),
+        (["progressive", "contraction"], "进行体（缩约）"),
+        # 命令形那一组的四件事必须分得开（否则 `食べないでください` 与 `食べるな` 同名）
+        (["imperative", "negative", "request"], "否定命令形（请求）"),
+        (["imperative", "negative", "prohibitive"], "否定命令形（禁止）"),
+        (["imperative", "nasai"], "命令形（なさい）"),
     ]
     ok = True
     for tg, want in CASES:

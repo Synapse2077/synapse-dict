@@ -94,6 +94,9 @@ TRACK = [
     'pos', 'level', 'freq_zipf',
     # 关系层与变形层的关键列
     'sense_relation.target', 'inflection.base_id', 'inflection.label_zh',
+    # 证据层→出版层的认领。2026-09-18 回填 ja/zh 两版之后这一列才**三版都有意义**
+    #   （此前只有 en-edition 非空，ja/zh 全是 NULL）⇒ 列进来，被清空或改动时闸会响。
+    'sense_src.sense_id',
     # 活用形的转写。2026-09-18：英文版把它和词形写在**同一个单元格**里
     #   （`食べれます [taberemasu]`），阶段 2 原样收进了 `dict.word`。
     #   拆出来之后列进来，闸才守得住"下次重跑有没有又糊回去"。

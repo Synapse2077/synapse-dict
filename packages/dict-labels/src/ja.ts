@@ -160,6 +160,10 @@ export const JA_REGION_LABELS: Record<string, string> = {
  *    后者是语言学术语，读者要的是"这个字不能单说"。
  */
 export const JA_GRAMMAR_LABELS: Record<string, string> = {
+  // ja/zh 两版带进来的（2026-09-18，阶段 1f）：
+  //   `place` 这条义项**是个地名**（`境`＝茨城县猿岛郡的町）—— 词义类型，与 `name` 同族
+  //   `initialism` 首字母缩写（`AED`／`JD`＝女子大生），与 `abbreviation` 同族
+  place: '地名', initialism: '首字母缩写',
   morpheme: '构词成分', suru: 'する动词', 'in-compounds': '用于复合词',
   intransitive: '自动词', transitive: '他动词',
   attributive: '连体形', predicative: '述语', conjunctive: '连用形',

@@ -189,6 +189,18 @@ export const TOPIC_LABELS: Record<string, string> = {
   //    全是**跨语种通用**的领域名 ⇒ 进共享表，别的语种也跟着不再静默少印。
   //    ⚠️ `buddhism` 小写那条是源头大小写不一致（`Buddhism` 已有），一并收 ——
   //       归一化交给映射表比在建库侧改源头值安全（改了就对不回源头）。
+  // 🔴 2026-09-18（ja 阶段 1f，ja/zh 两版接进来）补：宗教/思想领域 + 修辞学。
+  //    `Christian` 106 条是 ja 版的大户（`天`「神がいる場所」/`祝福`/`クリスマス`）。
+  //    ⚠️ `rhetoric` 共享 REGISTER 里已有「修辞」（当**语域**用），这里是**领域**
+  //       （`メタファー`「隠喩」/`オノマトペ`）—— 同一个码两种用法，两张表各有一条，
+  //       靠 `kind` 分开，不会打架。
+  // ja/zh 两版还带来两个领域：`capital-city` 30 条（首都）、`lexicology` 1 条。
+  'capital-city': '首都', lexicology: '词汇学',
+  //    ⚠️ `Jainism`/`Sikhism` **本表下方早就有**（那段用双引号格式，我第一版没查到就
+  //       又写了一遍）—— **tsc 的 TS1117 当场逮到重复键**。JS 对象字面量后者胜出，
+  //       两条值恰好一样所以行为没变，但它是一条随时会分叉的隐患。
+  Christian: '基督教', Protestant: '新教', Biblical: '圣经',
+  Tao: '道教', Nazism: '纳粹主义', Confucianism: '儒学',
   'physical-sciences': '自然科学', 'board-games': '棋盘游戏', ideology: '意识形态',
   'mechanical-engineering': '机械工程', 'Shingon-Buddhism': '真言宗',
   'medical-terminology': '医学术语', 'Tendai-or-Kegon-Buddhism': '天台宗·华严宗',

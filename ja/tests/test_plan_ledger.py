@@ -216,6 +216,23 @@ COVERAGE = [
      "SELECT 100.0*COUNT(DISTINCT sense_id)/(SELECT COUNT(*) FROM sense) FROM sense_tag",
      "阶段 1d 的落点，实测 8.3%。这张表建好之后**空了整整一个项目** —— "
      "行数闸问「我写了多少」，0 行也是一致的，逮到它的是逐张表数了一遍"),
+    # 阶段 2 修表结构（2026-09-19）。🔴 **分母是「带现代活用表的动词」不是全部动词** ——
+    #   英文版只给 108 个词完整的 `ja-conj-ex` 表，而它们正好是读者最常查的
+    #   （`食べる`/`書く`/`見る`/`する`/`来る`）。
+    #   ⚠️ 这一条盯的是**普通体那几列还在不在**：修之前它们被当成源头抽取报错
+    #   整行丢掉，`食べる` 页上有「食べます」没有「食べない」，而**行数闸全绿**
+    #   （少收的那 10.3% 从来没被计入过分母）。
+    #   🔴 计数型断言（回归闸 I3）问「有没有」，0 也可能是一致的；这条问「占比」，
+    #   源头哪天多给 100 张表而只修好一半，它会掉下来。
+    ("带现代活用表的动词里有普通体的占比", 90.0,
+     "SELECT 100.0*COUNT(DISTINCT CASE WHEN p.base IS NOT NULL THEN t.base END)"
+     "/COUNT(DISTINCT t.base) FROM"
+     " (SELECT DISTINCT base FROM inflection WHERE src_ref LIKE '%:ja-conj-ex#%') t"
+     " LEFT JOIN (SELECT DISTINCT base FROM inflection"
+     "   WHERE src_ref LIKE '%:ja-conj-ex#%' AND tags='[\"negative\"]') p"
+     " ON p.base=t.base",
+     "阶段 2 修表结构的落点。修之前是 0% —— 源头认不出的格子打 "
+     "`error-unrecognized-form`，我们整行丢弃，丢的正好是普通体那几列"),
     ("**不是**空白页的词形占比", 95.0,
      "SELECT 100.0*(SELECT COUNT(*) FROM dict d WHERE EXISTS("
      "  SELECT 1 FROM sense s WHERE s.word_id=d.id) OR EXISTS("
@@ -553,10 +570,30 @@ def m_cov_sense_tags():
        删标签谁都逮得到；阶段 3a 真实发生过的形状是"后面又插进来一批没有的"，
        那时 `sense_tag` 一行没少，行数闸全绿。
     """
+    # 🔴 2026-09-19 修：原来写的是 `LIMIT 200000`，**稀释量根本够不到下限** ——
+    #    35,181 / (296,549 + 200,000) ＝ 7.08%，下限是 5.0%，永远逮不到。
+    #    这条变异从写下来那天起就没跑过 `--mutate`，于是那道 P6 闸一直是假的：
+    #    **一条逮不住蓄意破坏的闸，本身就是个没响过的警报器。**
+    #    现在插两轮（各一份全量拷贝）⇒ 35,181 / 889,647 ＝ 3.95%，跌破下限。
     return _with_db([
         "INSERT INTO sense(word_id, rank, pos, hidden) "
-        "SELECT word_id, rank + 900000, pos, 0 FROM sense LIMIT 200000",
+        "SELECT word_id, rank + 900000, pos, 0 FROM sense",
+        "INSERT INTO sense(word_id, rank, pos, hidden) "
+        "SELECT word_id, rank + 1900000, pos, 0 FROM sense WHERE rank < 900000",
     ], lambda: any(c == "P6" and "义项标签覆盖" in w for c, w in check_brief()))
+
+
+def m_cov_plain_forms():
+    """🔴 P6 阶段 2：**普通体那几列又被当成源头抽取报错整行丢掉**。
+
+    ⚠️ 变异删的是**普通体**（`tags='["negative"]'`），不是随便删几行 ——
+       这正是修之前的状态：`食べる` 页上有「食べます」没有「食べない」，
+       而整张表 56 万行**一行都不少**，行数闸全绿。
+    """
+    return _with_db([
+        "DELETE FROM inflection WHERE src_ref LIKE '%:ja-conj-ex#%'"
+        " AND tags='[\"negative\"]'",
+    ], lambda: any(c == "P6" and "普通体" in w for c, w in check_brief()))
 
 
 def m_stage7():
@@ -681,6 +718,8 @@ MUTATIONS = [
     ("M4c", "🔴 P6：常用汉字的音训读没了（表外字还在 —— 验分母选对没有）",
      m_cov_kanji_reading),
     ("M1d", "🔴 P6：收词稀释了义项标签覆盖率（行数闸对此失明）", m_cov_sense_tags),
+    ("M2b", "🔴 P6：普通体那几列又被整批丢掉（56 万行一行不少，行数闸全绿）",
+     m_cov_plain_forms),
     ("M5", "阶段 7 声明✅ 而回归闸文件不存在", m_stage7),
     ("M6", "阶段 8 声明✅ 而展示层没有 japanese.ts", m_stage8),
     ("M7", "带字母后缀的阶段号 5a 要被认出来", m_suffix),
