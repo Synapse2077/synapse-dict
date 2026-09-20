@@ -25,7 +25,22 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LANGS = ("en", "es", "it", "fr", "pt", "de")
+LANGS = ("en", "es", "it", "fr", "pt", "de", "ja")
+
+
+def _discover():
+    """仓库里**实际存在**的语种目录（有自己 `dbtool.py` 的就算一门）。
+
+    🔴🔴 **这条自检是给下一门语言准备的。** 2026-09-20 加 ja 时发现：
+       ja 做完了整整一轮，而这张 `LANGS` 名单里**根本没有它** ——
+       闸打印「六门全部一致 ✅」，而第七门从来没被检查过。
+       这与欠账 12 记的是同一个形状（`render-dump` 的 `View` 分支／`css-audit` 的 `VIEWS`／
+       `contract-check-layout` 的 `LANGS`，**日语三张登记表一张都没登记**，而三道闸全绿）：
+       **闸查的是「登记了的那几门对不对」，没有一条查「是不是所有门都登记了」。**
+    ⇒ 名单从磁盘推，对不上就红。加语种时**不需要记得改这里**，忘了它会自己响。
+    """
+    return {d.name for d in ROOT.iterdir()
+            if d.is_dir() and len(d.name) == 2 and (d / "dbtool.py").exists()}
 DONE_RX = re.compile(r"^#+\s*✅\s*(\w+)\s*完结", re.M)
 
 
@@ -79,6 +94,14 @@ def main():
     print(f"  {'语种':<5}{'计划表':>8}{'实际生效':>10}{'生效预算':>10}   备注")
     print("  " + "─" * 62)
     bad = []
+    found = _discover()
+    missing, stale = sorted(found - set(LANGS)), sorted(set(LANGS) - found)
+    if missing or stale:
+        print("  🔴 LANGS 名单与磁盘对不上：漏登记 %s ｜名单里有但磁盘没有 %s"
+              % (missing or "无", stale or "无"))
+        print("     ⇒ 新语种没进名单时，这道闸会对它**结构性失明**（见 `_discover` 的注释）")
+        return 1
+
     for lang in LANGS:
         declared, effective, budget, note = probe(lang)
         b = f"{budget / 1024 ** 3:.1f}G" if budget else "-"
@@ -90,7 +113,7 @@ def main():
               f"{'✅' if ok else '❌'} {note}")
     print()
     if not bad:
-        print("■ ✅ 六门全部一致")
+        print("■ ✅ %d 门全部一致" % len(LANGS))
         return 0
     for lang, declared, effective, note in bad:
         if declared and not effective:

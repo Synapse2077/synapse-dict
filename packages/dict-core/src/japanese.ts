@@ -35,6 +35,7 @@
 //    不是数据缺失。展示层此时只印标记，不印型。
 // ============================================================================
 import { DatabaseSync } from 'node:sqlite';
+import { etymKeyOfEntry } from './etym.js';
 
 export type JapaneseSearchItem = {
   id: number;
@@ -133,6 +134,12 @@ export type JapaneseEntry = {
   vclass: string | null;
   freqZipf: number | null;
   isLemma: boolean;
+  /** 词源正文全文，键＝`${edition}:${etym_no}`。**服务层端全文**，
+   *  页面只印 `etymologyBrief()` 切的第一句 —— 改「印几句」不该回头重抽数据。 */
+  etymologyTexts: Record<string, string>;
+  /** 抽过哪些维基版。**没抽过的版，组件必须闭嘴**：把「我们没抽」
+   *  说成「源头没写」是造假，比缺更伤权威。 */
+  etymologyEditions: string[];
   readings: JapaneseReading[];
   // 🔴 与 `readings` 分开的理由见 `JapaneseKanjiReading`：一个是**词**怎么念，
   //    一个是**字**怎么念。只有汉字条目有，普通词恒为空数组。
@@ -256,6 +263,10 @@ export class JapaneseDictService {
   private readonly q: Record<string, ReturnType<DatabaseSync['prepare']>>;
 
   /** 预计算表在不在、按多大的 TOPN 建的。**构造时探一次**，别每次查询都试。 */
+  /** 抽过哪些维基版的词源正文。**没抽过的版，展示层必须闭嘴** ——
+   *  把「我们没抽」说成「源头没写」就是造假（见 `ingest_etymology.py` 文件头）。 */
+  private readonly etymEditions: string[];
+
   private readonly hasCache: boolean;
 
   private readonly cacheTopN: number;
@@ -266,6 +277,16 @@ export class JapaneseDictService {
     this.db.exec('PRAGMA query_only = ON');
 
     this.q = {
+      // ══ 词源正文（2026-09-20）══════════════════════════════════════════
+      // 🔴 这一层在 ja 上**整个缺席过**：`scripts/ingest_etymology.py` 2026-09-14
+      //    就有，而 ja 09-15 开建却没被加进它的语种名单 —— 库里没有 `etymology` 表，
+      //    而「阶段表全 ✅」对**没列进阶段表的层**结构性失明。
+      // 🔴 服务层端**全文**，页面只印 `etymologyBrief()` 切出来的第一句：
+      //    改「印几句」是展示层的事，不该回头重抽数据。
+      etymology: this.db.prepare(`
+        SELECT edition, etym_no, text FROM etymology WHERE word_id = ? ORDER BY etym_no
+      `),
+
       stats: this.db.prepare(`
         SELECT (SELECT COUNT(*) FROM dict)                  AS total,
                (SELECT SUM(is_lemma) FROM dict)             AS lemmas,
@@ -336,7 +357,7 @@ export class JapaneseDictService {
       // ⚠️ 子查询不写 ORDER BY，跟的是主键 `(sense_id, lang, kind, seq)` 的顺序 ⇒
       //    `definition` 排在 `equivalent` 前面。这是 9-16 版就有的行为，别动。
       senses: this.db.prepare(`
-        SELECT s.id, s.pos, e.etym_no AS etymKey, e.kana AS kana,
+        SELECT s.id, s.pos, e.src AS etymSrc, e.etym_no AS etymNo, e.kana AS kana,
                (SELECT text FROM sense_gloss
                  WHERE sense_id = s.id AND lang='zh' AND kind <> 'umbrella') AS zh,
                (SELECT text FROM sense_gloss
@@ -424,6 +445,16 @@ export class JapaneseDictService {
         return r ? Number(r.v) : null;
       } catch { return null; }
     })();
+    // 抽过哪些版 —— **构造时算一次**（小表，不必每开一个词条页查一遍）。
+    // ⚠️ 表可能还不存在（这门还没跑 `scripts/ingest_etymology.py`）⇒ 兜到空数组；
+    //    空数组的意思是「一版都没抽」，展示层对所有词源块一律闭嘴 —— 那是对的。
+    this.etymEditions = (() => {
+      try {
+        return (this.db.prepare('SELECT DISTINCT edition FROM etymology')
+          .all() as Array<{ edition: string }>).map((x) => x.edition);
+      } catch { return []; }
+    })();
+
     this.hasCache = meta !== null;
     this.cacheTopN = meta ?? 0;
   }
@@ -592,7 +623,13 @@ export class JapaneseDictService {
     // ── 义项 ──
     const senses = (this.q.senses.all(id) as Array<Record<string, unknown>>).map((s) => ({
       id: s.id as number,
-      etymKey: (s.etymKey as string) ?? null,
+      // 🔴 键必须与 `etymology.edition` 逐字一致：ja 走 `has_entry` 那一支，
+      //    `ingest_etymology.db_keys()` 取的是 **`entry.src`** ⇒ 这里也取 `e.src`。
+      //    ⚠️ 原来只取裸词源号（`'1'`），而 texts 的键是 `'en-edition:1'` ——
+      //    **两边各自自洽、拼起来对不上**，页面上一条词源都印不出来而且一声不吭
+      //    （`[[correct-steps-can-compose-a-hole]]`）。
+      //    ⭐ 实测改前改后**分组数零变化**（214,105 个词条逐个比过），只是键更完整了。
+      etymKey: etymKeyOfEntry(s.etymSrc as string | null, s.etymNo as string | null),
       kana: (s.kana as string) ?? null,
       umbrella: (s.umbrella as string) ?? null,
       zh: (s.zh as string) ?? null,
@@ -652,6 +689,11 @@ export class JapaneseDictService {
 
     return {
       lang: 'ja', id, word: head.word as string,
+      etymologyEditions: this.etymEditions,
+      // 键＝`${edition}:${etym_no}`，与展示层 `etymKeyOfEntry()` 拼出来的逐字一致
+      etymologyTexts: Object.fromEntries(
+        (this.q.etymology.all(id) as Array<{ edition: string; etym_no: string; text: string }>)
+          .map((x) => [`${x.edition}:${x.etym_no}`, x.text])),
       pos: (head.pos as string) ?? null,
       kanjiGrade: (head.kanji_grade as string) ?? null,
       vclass: ((this.q.vclassOf.get(id) as { vclass?: string } | undefined)

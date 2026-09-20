@@ -79,6 +79,18 @@ DELIVERABLE = {
     "1.5b": [("英译中的付费释义",
               "SELECT COUNT(*) FROM sense_gloss WHERE lang='zh' "
               "AND src='model:deepseek-v4-flash'")],
+    # 🔴🔴 阶段 1f（2026-09-20 补）。**这一层在 ja 上整个缺席过三个月**：
+    #    `scripts/ingest_etymology.py` 2026-09-14 就有，ja 09-15 开建却没进它的语种名单 ——
+    #    而当时阶段表全 ✅、四道闸全绿，因为**阶段表对没列进阶段表的层结构性失明**。
+    # 🔴 第二条断言不能省。「表非空」挡不住这一层最典型的失效方式：
+    #    `etymology.edition` 写 `en-edition` 而展示层的键取裸词源号（`1`），
+    #    两边各自自洽、拼起来对不上 ⇒ **40,270 行一条都到不了页面，而且一声不吭**
+    #    （`[[correct-steps-can-compose-a-hole]]`）。⇒ 要问的是「配对得上几条」。
+    "1f":  [("etymology 词源正文层", "SELECT COUNT(*) FROM etymology"),
+            ("正文与义项那一侧的键真的配得上（不是各自自洽）",
+             "SELECT COUNT(*)>30000 FROM etymology e WHERE EXISTS("
+             "  SELECT 1 FROM entry en WHERE en.word_id=e.word_id"
+             "   AND en.src=e.edition AND en.etym_no=e.etym_no)")],
     "2":   [("inflection 变形层", "SELECT COUNT(*) FROM inflection"),
             # 变形词形必须真的降级成 is_lemma=0，否则"建了变形层"只是多了一张表
             ("变形词形已降级", "SELECT COUNT(*) FROM dict WHERE is_lemma=0")],
@@ -138,6 +150,11 @@ FILES = {
            ("字面量闸", "ja/tests/test_no_literal_counts.py"),
            ("备份保留策略的行为测试", "ja/tests/test_prune_backups.py")],
     "-1": [("三份源的实测存档", "docs/JA_PLAN.md")],
+    # 🔴 词源层是**七门共用一个脚本**，ja 的交付物就是「它的名单里有 ja」＋「跨门那道闸认 ja」。
+    #    第二个文件登记在这儿是有意的：这一层缺席三个月**正是因为跨门的闸没登记 ja**，
+    #    只登记入库脚本，等于把当初那个洞原样留着。
+    "1f": [("词源层入库脚本（七门共用）", "scripts/ingest_etymology.py"),
+           ("跨语种词源契约闸", "apps/web/src/contract-check-etym.tsx")],
     # 🔴 阶段 7 交付**两道**闸，不是一道。只登记回归闸等于另一道干不干都能过 ——
     #    而它们问的是**没有交集的两个问题**（`[[external-anchor-gates]]`）：
     #    回归闸问「过去的修复还在不在」（锚自己，会过期），
@@ -233,6 +250,32 @@ COVERAGE = [
      " ON p.base=t.base",
      "阶段 2 修表结构的落点。修之前是 0% —— 源头认不出的格子打 "
      "`error-unrecognized-form`，我们整行丢弃，丢的正好是普通体那几列"),
+    # 阶段 4/§四.2（2026-09-19）。🔴 **这一条就是「声调够不够上页面」的判据本身。**
+    #   全库词元的声调覆盖只有 7.4%，但全库里大量是生僻词，那个数没有决策价值；
+    #   换成核心词（`core_level` 来自 Waller 表）＝ 42.4%，而自有 `freq_zipf` 前 5,000
+    #   给出 42.6% —— **两把独立的尺子收敛**，结论不依赖任何一份词表。
+    #   ⚠️ 上限就在这儿：中文版 dump 里带声调的只有 18,534 个词形，我们收了 18,469，
+    #   **是源头天花板不是抽漏**（逐条回源数过）。⇒ 这个数涨不上去正常，**掉下来才是回归**。
+    ("核心词的声调覆盖率", 35.0,
+     "SELECT 100.0*COUNT(DISTINCT CASE WHEN EXISTS("
+     "  SELECT 1 FROM pronunciation p WHERE p.word_id=d.id AND p.pitch_pos IS NOT NULL)"
+     "  THEN d.id END)/COUNT(*) FROM dict d WHERE d.core_level IS NOT NULL",
+     "§四.2 的判据。实测 42.4%，N5 55.1% → N1 35.6%。"
+     "结案为 auxiliary（有则显示、不做默认模块），推翻条件见 JA_PLAN §四.2"),
+    # 词源层（2026-09-20）。🔴 **分母是「源头这一支写了正文的」不是全部词条** ——
+    #   英文版 46,196 个条目带 `etymology_text`（23.2%），其余是源头自己没写，
+    #   拿全库当分母算出来的数只反映维基的编纂密度，不反映我们抽没抽。
+    #   ⚠️ 这一层在 ja 上**整个缺席过三个月**，而阶段表全 ✅、三道闸全绿 ——
+    #   是收尾时逐个点名核对六门共有的层才看见的。⇒ 掉下来就是它又没跑。
+    # 🔴 **第一版我把分母写成了「有词源正文的词」** —— 分母里套了
+    #   `EXISTS(… FROM etymology …)`，于是这个数**恒等于 100%**，是一道假闸。
+    #   同一天我刚因为这个毛病修过 P6 的 M1d（变异稀释量够不到下限），**自己又犯一次**。
+    #   ⇒ 分母换成「有 en-edition 词条的词形」：收词会稀释它，层没重跑它会掉。
+    ("有英文版词条的词里带词源正文的占比", 30.0,
+     "SELECT 100.0*(SELECT COUNT(DISTINCT word_id) FROM etymology)"
+     "/(SELECT COUNT(DISTINCT word_id) FROM entry WHERE src='en-edition')",
+     "实测 36.74%（36,607 / 99,632）。上限就在这儿：英文版 dump 里只有 23.2% 的条目"
+     "带 `etymology_text`，日语版与中文版**各 0 条** ⇒ 涨不上去正常，掉下来才是回归"),
     ("**不是**空白页的词形占比", 95.0,
      "SELECT 100.0*(SELECT COUNT(*) FROM dict d WHERE EXISTS("
      "  SELECT 1 FROM sense s WHERE s.word_id=d.id) OR EXISTS("
@@ -406,10 +449,86 @@ def p7():
     return bad
 
 
+def p8():
+    """🔴🔴 **欠账表里同一个编号不许出现两次。**
+
+    2026-09-20 用户问「ja 的欠账不是都完成了吗」，一解析发现 **8 号有两行，而且结论相反**：
+    一行 ✅（收词闸建了）、一行 🔴（清单没建）。两行各对一半，于是**这张表同时说了"还了"
+    和"没还"**，读者按哪行都不算读错。
+
+    ⇒ 而 P1–P7 对它**结构性失明**：它们查阶段交付物在不在、查 ⚪ 有没有写推翻条件，
+      **没有一条查账本自己的完整性**。与同一轮里逮到的两个洞是同一个形状 ——
+      「闸查的是登记了的那几条对不对，没有一条查登记表本身有没有毛病」
+      （`contract-check-etym.tsx` 的 `registryGate`、`gen_manifest.py` 的未登记自检）。
+    """
+    s = PLAN.read_text(encoding="utf-8")
+    # 🔴 表整个不在是 **P2 的职责**，P8 只管「表里有没有重号」。
+    #    第一版这里直接 `s.index(SHEET)` ⇒ 标题一没就抛异常，**当场把已有的变异 M9 打坏了**
+    #    （报「变异自己抛异常」而不是「M9 被逮到」）。
+    #    ⚠️ 新加一条断言**把别人的变异弄死**，比这条断言本身漏报更难发现 ——
+    #      它看起来像"变异写错了"，而不是"我刚加的东西越界了"。
+    if SHEET not in s:
+        return []
+    tail = s[s.index(SHEET):]
+    tail = tail[:tail.index("\n# ")] if "\n# " in tail else tail
+    seen, dup = {}, []
+    for ln in tail.splitlines():
+        if not ln.startswith("| ") or ln.startswith("| #") or set(ln) <= set("| -"):
+            continue
+        num = ln.strip("|").split("|")[0].strip()
+        if not num or not num[0].isdigit():
+            continue
+        if num in seen:
+            dup.append(num)
+        seen[num] = seen.get(num, 0) + 1
+    return [("P8", "欠账表里编号 %s 出现了 %d 次 —— **同一笔账写两行，结论可能相反**，"
+                   "读者按哪行都不算读错。合并成一行，把两半都写进去"
+             % (n, seen[n])) for n in sorted(set(dup))]
+
+
+BACKLOG = ROOT / "docs" / "BACKLOG.md"
+
+
+def p9():
+    """🔴🔴 **这一门的欠账表里不许寄存别门的账。**
+
+    2026-09-20 用户问：「把所有的账都记在顶层，为什么要记在个别语言下？
+    你只有记在顶层，才知道所有语言留下来的所有问题啊？」—— 而当时 `JA_PLAN`
+    的 24 行欠账里 **12 行牵涉别门**，其中两条干脆就是别人的账：
+      · en 的 `Late`/`Middle`（从 ja 开工起躺在这儿，**做 en 的人看不到**）
+      · `split_colloc` 的空格判据，写着「日语开工前必须先改」——
+        而这个前提早已失效（ja 没有搭配层），**没人会去复查躺在别人账本里的前提**。
+    ⇒ 已建 `docs/BACKLOG.md` 当唯一顶层账本，两条搬过去了。
+
+    **判据按含义不按形式**（`[[criteria-from-meaning-not-form]]`）：
+    不扫语种码 —— ja 的行里为了对照提到 es/de 是正常的，扫码会满屏假红
+    （P7 早就记过这一课：同一个符号在六张计划表里含义不同，按符号判误报 37 行）。
+    判据是**「我不得不写下『这不是 ja 的账』」这个动作本身** ——
+    写得出这句话，就说明它该搬走。
+
+    ⚠️ 同时验顶层账本**存在**：判据引用它，它没了这条就该红。
+    """
+    bad = []
+    if not BACKLOG.exists():
+        return [("P9", "顶层账本 `docs/BACKLOG.md` 不存在 —— 跨门的账没有家，"
+                       "必然重新寄存进某一门的计划表")]
+    s = PLAN.read_text(encoding="utf-8")
+    tail = s[s.index(SHEET):] if SHEET in s else ""
+    tail = tail[:tail.index("\n# ")] if "\n# " in tail else tail
+    for ln in tail.splitlines():
+        if not ln.startswith("| ") or "不是 ja 的账" not in ln:
+            continue
+        num = ln.strip("|").split("|")[0].strip()
+        bad.append(("P9", "欠账 %s 自己写着「不是 ja 的账」——**别门的账不许寄存在这张表里**，"
+                          "搬到 `docs/BACKLOG.md`（做那门的人永远不会来 ja 的计划表里找账）"
+                    % num))
+    return bad
+
+
 def report(verbose=True):
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     try:
-        red = p1(con) + p2() + p4() + p6(con) + p7()
+        red = p1(con) + p2() + p4() + p6(con) + p7() + p8() + p9()
     finally:
         con.close()
     if verbose:
@@ -596,6 +715,32 @@ def m_cov_plain_forms():
     ], lambda: any(c == "P6" and "普通体" in w for c, w in check_brief()))
 
 
+def m_cov_core_pitch():
+    """🔴 P6 §四.2：**核心词集合被稀释**，而声调一行都没少。
+
+    ⚠️ 变异打在**分母**上（把一万个生僻词也标成核心词），不是删声调 ——
+       删声调谁都逮得到；真正会悄悄发生的是「换了一份更大的核心词表」
+       或「收词之后核心词判定跟着变宽」，那时 `pronunciation` 一行不少，
+       行数闸全绿，而这个数掉下去。
+    """
+    return _with_db([
+        "UPDATE dict SET core_level=5, core_src='mut' WHERE core_level IS NULL"
+        " AND id IN (SELECT id FROM dict WHERE is_lemma=1 AND id NOT IN"
+        "            (SELECT word_id FROM pronunciation) LIMIT 10000)",
+    ], lambda: any(c == "P6" and "核心词的声调覆盖" in w for c, w in check_brief()))
+
+
+def m_cov_etymology():
+    """🔴 P6 阶段 1f：**词源层整批没跑**（或收词把它稀释了）。
+
+    ⚠️ 变异删掉一半词源行 —— 36.74% → 约 18%，跌破 30% 下限。
+       这一层曾经**整个不存在三个月**而所有闸全绿，这道覆盖率闸就是补那个洞的。
+    """
+    return _with_db([
+        "DELETE FROM etymology WHERE id % 2 = 0",
+    ], lambda: any(c == "P6" and "词源正文" in w for c, w in check_brief()))
+
+
 def m_stage7():
     """阶段 7 声明✅ 而回归闸文件不存在 —— **真的把文件挪走**。
 
@@ -710,7 +855,36 @@ def m_negative_with_falsifier():
     return s2 is not None and _with_plan(s2, lambda: not any(c == "P7" for c, w in check_brief()))
 
 
+def m_dup_sheet_row():
+    """🔴🔴 P8：同一笔欠账写成两行 —— **这是 2026-09-20 的真事故，不是假想的。**
+
+    8 号当时就是两行：一行 ✅（收词闸建了）、一行 🔴（清单没建），
+    于是这张表同时说了"还了"和"没还"。变异照原样复制一行已有的欠账，编号不变。
+    """
+    import re as _re
+    m = _re.search(r"^\| 12 \|.*$", _SRC, _re.M)
+    if not m:
+        return False
+    s2 = _SRC[:m.end()] + "\n" + m.group(0) + _SRC[m.end():]
+    return _with_plan(s2, lambda: any(c == "P8" for c, w in check_brief()))
+
+
+def m_foreign_row():
+    """🔴🔴 P9：往 ja 的欠账表里寄存一条**别门的账**（2026-09-20 之前的真实状态）。"""
+    import re as _re
+    m = _re.search(r"^\| 12 \|.*$", _SRC, _re.M)
+    if not m:
+        return False
+    row = "| 99 | **某某** | en | 🔴 挂着。⚠️ **这不是 ja 的账，是 en 的** |"
+    s2 = _SRC[:m.end()] + "\n" + row + _SRC[m.end():]
+    return _with_plan(s2, lambda: any(c == "P9" for c, w in check_brief()))
+
+
 MUTATIONS = [
+    ("M15", "🔴🔴 P9：ja 的欠账表里寄存了别门的账（搬到顶层之前的真实状态）",
+     m_foreign_row),
+    ("M14", "🔴🔴 P8：同一笔欠账写成两行（8 号当时就是这样，两行结论相反）",
+     m_dup_sheet_row),
     ("M1", "阶段 4 声明✅ 而声调被删光（只查整表非空逮不到）", m_stage4),
     ("M2", "阶段 4b 声明✅ 而收词那批的读音没补", m_stage4b),
     ("M3", "🔴 P6：中文释义被删掉一半", m_cov_zh),
@@ -720,6 +894,8 @@ MUTATIONS = [
     ("M1d", "🔴 P6：收词稀释了义项标签覆盖率（行数闸对此失明）", m_cov_sense_tags),
     ("M2b", "🔴 P6：普通体那几列又被整批丢掉（56 万行一行不少，行数闸全绿）",
      m_cov_plain_forms),
+    ("M4d", "🔴 P6：收词把核心词稀释了（声调一条没少，覆盖率却掉了）", m_cov_core_pitch),
+    ("M1f", "🔴 P6：词源层整批没跑（这一层曾经缺席三个月而所有闸全绿）", m_cov_etymology),
     ("M5", "阶段 7 声明✅ 而回归闸文件不存在", m_stage7),
     ("M6", "阶段 8 声明✅ 而展示层没有 japanese.ts", m_stage8),
     ("M7", "带字母后缀的阶段号 5a 要被认出来", m_suffix),

@@ -33,6 +33,7 @@ ja 这一轮自己也演过同一出：阶段 1 的罗马字断言写成 `romaji
     python3 -u ja/tests/test_no_regression.py --mutate
 """
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -45,6 +46,7 @@ import paths                                          # noqa: E402
 # 🔴 判据只许一份 —— 下面这些全是**生成侧那一份**
 from build_entry_layer import GRADE_LABEL             # noqa: E402
 from harvest_relations import KIND, clean_target, JA  # noqa: E402
+from harvest_relations import clean_targets            # noqa: E402
 from harvest_examples import simplified_only          # noqa: E402
 from fill_freq import _same                           # noqa: E402
 from backfill_kana import PURE_KANA                   # noqa: E402
@@ -93,6 +95,15 @@ ACCEPT = {
         "③425 条**盲文**（⠁⠷⠵），正确地没有假名读音。"
         "🔴 阶段 4b 之前这个数是 140,105（覆盖 39.8%）—— 那是阶段 3a 收词之后"
         "**没人重跑读音层**造成的，账的闸 P6 现在按覆盖率盯着它。"),
+    "Y2 可见的关系目标是中文词（不是日语）": (
+        14,      # 🔴 2026-09-19 建闸即带基线，因为**这 14 条我逐条读过、不是一类**：
+                 #    11 条是真中文（`七七事变`／`黑历史`／`相岛`／`报告書`／`时计`），
+                 #    **3 条其实是日语**（`唖呕` 是拡張新字体、`蓬蔂`、`兵馬倥偬` 是四字熟語）。
+                 #    ⇒ 再收窄判据到 0 就会误伤那 3 条 —— 拿「错」换「错」。
+        "生成侧的判据（`is_chinese_target`）看的是 dump 里有没有 `roman`/`ruby`，"
+        "这 14 条**带着** roman/ruby 所以躲过了它；这里按落点查只能叠三个信号，"
+        "分不开最后这一档。🔴 **要清零需要的不是更狠的判据，是逐条裁决** —— "
+        "11 条该挂起、3 条该留。⚠️ 涨上去才是回归：说明清洗那两轮被撤销了，或源头又灌进来一批。"),
     "C1 变形悬空原形（base_id 为空）": (
         863,     # 🔴 2026-09-19 收紧 995 → 863：修活用表结构那轮补回了普通体各列，
                  #    新插的 4,351 个词形里有一批正好是原来悬空的原形。
@@ -416,6 +427,97 @@ def build(con):
         "SELECT COUNT(*) FROM (SELECT src_ref FROM inflection"
         " GROUP BY src_ref HAVING COUNT(*)>1)")))
 
+    # ── X 核心词等级（2026-09-19）──
+    # 🔴🔴 这一列**不是权威难度，是内部尺子**：JLPT 官方自 2010 年改制后不再公布
+    #    词汇表，我们用的是民间重建的 Waller 表（CC BY），整理者自己写着
+    #    「essentially an educated guess」。见 `data/refs/jlpt-waller/README.md`。
+    a(("X", "X1 core_level 越界（只许 1–5，1=N5）", q(
+        "SELECT COUNT(*) FROM dict WHERE core_level IS NOT NULL"
+        " AND core_level NOT BETWEEN 1 AND 5")))
+    a(("X", "X2 有等级却没记出处（CC BY 的溯源断了）", q(
+        "SELECT COUNT(*) FROM dict WHERE core_level IS NOT NULL"
+        " AND (core_src IS NULL OR core_src='')")))
+    # 🔴🔴 X3 是这一族里最要紧的一条，而且它**不查数据、查源码**：
+    #    「不上页面」是个决定，决定必须有东西替它站岗，否则哪天有人接上去没人会知道。
+    #    ⚠️ 判据是「展示层源码里不许出现这两个列名」—— 真接上去了必然要写列名。
+    #    改主意（决定要印）时**先改这条断言**，那一步就是在逼自己重读上面那段警告。
+    # ⚠️ 这个环境变量是**给变异用的唯一口子**，而且**读一次就自清**（`pop`）——
+    #    否则它会渗到后面每一条变异里，把别的断言一起染红。
+    ovr = os.environ.pop("JA_X3_SRC_OVERRIDE", "")
+    src_files = ([Path(x) for x in ovr.split(",") if x] if ovr else
+                 [HERE.parent.parent / "packages/dict-core/src/japanese.ts",
+                  HERE.parent.parent / "apps/web/src/App.tsx"])
+    a(("X", "X3 核心词等级被接进了展示层（它是内部尺子，不是可印的难度标签）", sum(
+        1 for f in src_files if f.exists()
+        and ("core_level" in f.read_text(encoding="utf-8")
+             or "core_src" in f.read_text(encoding="utf-8")))))
+    # ⚠️ X4 只问在不在，不问几条（同 J3）：这一列整批被清空时 X1/X2 恒为 0。
+    a(("X", "X4 核心词等级整批没了（只问在不在）", q(
+        "SELECT COUNT(*)=0 FROM dict WHERE core_level IS NOT NULL")))
+
+    # ── X5 规划器的统计信息（2026-09-20）──
+    # 🔴🔴 **阶段 9 的头号性能修复是手敲跑的一次 `ANALYZE`，没做成步骤。**
+    #    于是整个仓库里 `ANALYZE` 只出现在一句注释里，没有任何代码会执行它 ——
+    #    加完词源层一查：`sqlite_stat1` 里 dict 写着 710,264（实际 714,173）、
+    #    `sense_relation` 差 -5,316、**`etymology` 整张表压根没有统计信息**。
+    #    ⚠️ 而阶段 9 的账查的是「`sqlite_stat1` **存不存在**」—— 对**陈旧**结构性失明
+    #    （`[[fix-regression-and-gate]]`：行数型判据挡不住"东西在但是坏的"）。
+    # 🔴 判据 **import 生成侧那一份**（`run_analyze.survey`），不在这儿另写一遍口径 ——
+    #    否则两边会漂移，正是阶段 7 定下的规矩。
+    # ⚠️ 容忍 0.5%：统计信息本来就是抽样估算，要求逐字相等会因为一次小写库就假红。
+    # 🔴 **名字必须是静态的**：变异按名字指向断言，名字里拼进表名就等于每次跑
+    #    都换一个名字 ⇒ 变异全变成「指向不存在的断言」而被静默跳过
+    #    （`mutate()` 开头那段 ghost 检查就是为这个写的，我差点当场触发它）。
+    from run_analyze import survey as _survey          # noqa: PLC0415
+    _stale = [t for t, real, st in _survey(con)
+              if st is None or abs(real - st) * 200 > real]
+    a(("X", "X5 规划器的统计信息比库陈了（建表/收词之后没重跑 ANALYZE）", len(_stale)))
+
+    # ── Y 关系目标的成词性（2026-09-19，欠账 15/16）──
+    # 🔴 Y1 是**可逆性回核**，不是另写一遍判据：把库里每个**可见**目标重跑生成侧的
+    #    `clean_targets()`，必须原样返回自己。这一条同时守住三件事 ——
+    #    含空格的没了、罗马字回显剥干净了、并列表拆开了。
+    #    ⚠️ 它逮到过我自己引入的 bug：并列表规则一度把顿号也当分隔符，
+    #    于是 `井の中の蛙、大海を知らず` 会被拆成两条 —— **50 多条谚语**。
+    a(("Y", "Y1 可见的关系目标重跑生成侧判据会变（含空格/罗马字回显/并列表没拆）", sum(
+        1 for (t,) in con.execute(
+            "SELECT DISTINCT target FROM sense_relation WHERE hidden=0 AND target IS NOT NULL")
+        if clean_targets(t) != [t])))
+    # 🔴 Y2 查的是**中文词印在日语页上**。判据只能按落点查（生成侧那条要看 dump 里的
+    #    `roman`/`ruby`，这里没有）⇒ 三个信号叠加：来自中/日版 ＋ 含简体专用字 ＋ 自己不是词条。
+    #    ⚠️ **英文版不算**：那批 `呕唖`/`丰容` 是拡張新字体不是中文（我误判过一次）。
+    simp = simplified_only(con)
+    a(("Y", "Y2 可见的关系目标是中文词（不是日语）", sum(
+        1 for t, src in con.execute(
+            "SELECT r.target, r.src FROM sense_relation r WHERE r.hidden=0"
+            " AND r.src IN ('zh-edition','ja-edition')"
+            " AND NOT EXISTS(SELECT 1 FROM dict d WHERE d.word=r.target)")
+        if any(ch in simp for ch in (t or "")))))
+    # ⚠️ Y3 只问在不在（同 J3）：这两轮清洗整批回滚时 Y1/Y2 恒为 0。
+    a(("Y", "Y3 被挂起的关系整批没了（清洗回滚了）", q(
+        "SELECT COUNT(*)=0 FROM sense_relation WHERE hidden=1")))
+
+    # ── Z 词源层（2026-09-20）──
+    # 🔴🔴 这一层**整个缺席过**：`scripts/ingest_etymology.py` 2026-09-14 就有，
+    #    ja 09-15 开建却没被加进它的语种名单，库里连 `etymology` 表都没有，
+    #    而阶段表全 ✅、三道闸全绿 —— **「阶段表说完成」对没列进阶段表的层结构性失明。**
+    #    是收尾整理文档时逐个点名核对六门共有的层才看见的。
+    a(("Z", "Z1 etymology 表整批没了（只问在不在）", q(
+        "SELECT COUNT(*)=0 FROM etymology")))
+    a(("Z", "Z2 词源行的 word_id 悬空", q(
+        "SELECT COUNT(*) FROM etymology e LEFT JOIN dict d ON d.id=e.word_id"
+        " WHERE d.id IS NULL")))
+    # 🔴🔴 Z3 查的是**拼接点**，不是任何一侧。我刚栽在这儿：
+    #    展示层的 etymKey 取裸词源号（`1`），而 `etymology.edition` 写的是 `en-edition`
+    #    ⇒ 键是 `en-edition:1`，两边**各自自洽、拼起来对不上**，
+    #    入库对齐闸全绿、写后回核全绿、tsc 全绿，**而页面上一条词源都印不出来且一声不吭**
+    #    （`[[correct-steps-can-compose-a-hole]]`：每步都对、跨步假设失效＝谁都没负责的洞）。
+    #    ⇒ 判据必须是「词源行能不能被义项那一侧的键找到」。
+    a(("Z", "Z3 词源正文与义项对不上（键拼起来查不到，页面静默空白）", q(
+        "SELECT COUNT(*) FROM etymology e WHERE NOT EXISTS("
+        "  SELECT 1 FROM sense s JOIN entry en ON en.id=s.entry_id"
+        "   WHERE s.word_id=e.word_id AND en.src=e.edition AND en.etym_no=e.etym_no)")))
+
     # ── D 声调 ──
     a(("D", "D1 重音核超出拍数范围", q(
         "SELECT COUNT(*) FROM pronunciation WHERE pitch_pos IS NOT NULL"
@@ -582,6 +684,16 @@ def report(db=None, verbose=True):
 # ══════════════════════════════════════════════════════════════════
 # ⭐ 变异验证：把闸该逮的东西造出来，看它红不红。
 # 🔴 每条都在**库的临时副本**上真的改数据，不是改断言。
+def _wire_core_level(con):
+    """模拟「有人把 `core_level` 接进了展示层」。
+
+    🔴 X3 查的是**源码**不是数据，所以这条变异不动库，而是把 X3 的扫描目标
+       临时指向一个确实写着 `core_level` 的文件（生成侧那个脚本本身）。
+       口子读一次就自清，不会渗到后面的变异。
+    """
+    os.environ["JA_X3_SRC_OVERRIDE"] = str(HERE.parent / "pipeline" / "intake_core_level.py")
+
+
 def _unprotect(con):
     """把 `【】` 里的内容也一起 t2s —— **正是「保护段失效」本身**。"""
     import opencc
@@ -713,6 +825,50 @@ MUT = [
     # ⚠️ I0 本身就是**从一次崩溃里长出来的**：M35 第一版的 REPLACE 留下了 `["adverbial", ]`，
     #    闸直接抛 JSONDecodeError —— 整族断言一条都没跑，调用方只看见一个堆栈。
     #    这条变异锁住「坏数据要报红，不要崩」。
+    # ── 统计信息陈旧（2026-09-20）──
+    # 🔴 变异**删掉 `etymology` 的统计行** —— 这正是 9-20 的真现场：建了新表、没重跑
+    #    `ANALYZE`，于是规划器对这张表一无所知。删一行比改数字更贴近真实失效方式
+    #    （新表根本不会**有**统计行，而不是有一个错的）。
+    ("M50", "🔴🔴 X5 新建的表没有统计信息（阶段 9 的 ANALYZE 是手敲的、没做成步骤）",
+     ["DELETE FROM sqlite_stat1 WHERE tbl='etymology'"],
+     "X5 规划器的统计信息比库陈了（建表/收词之后没重跑 ANALYZE）"),
+    # ── 核心词等级（2026-09-19）──
+    ("M40", "X1 core_level 冒出值域外的级别",
+     ["UPDATE dict SET core_level=6 WHERE id IN"
+      " (SELECT id FROM dict WHERE core_level=1 LIMIT 4)"],
+     "X1 core_level 越界（只许 1–5，1=N5）"),
+    ("M41", "X2 出处被抹掉（CC BY 的溯源断了）",
+     ["UPDATE dict SET core_src=NULL WHERE core_level IS NOT NULL"],
+     "X2 有等级却没记出处（CC BY 的溯源断了）"),
+    ("M42", "🔴 X3 有人把核心词等级接进了展示层（源码里出现了列名）",
+     [_wire_core_level],
+     "X3 核心词等级被接进了展示层（它是内部尺子，不是可印的难度标签）"),
+    ("M43", "🔴 X4 这一列整批被清空（X1/X2 那时恒为 0）",
+     ["UPDATE dict SET core_level=NULL, core_src=NULL"],
+     "X4 核心词等级整批没了（只问在不在）"),
+    # ── 词源层（2026-09-20）──
+    ("M47", "🔴 Z1 词源层整批没了（这一层曾经根本不存在，而所有闸全绿）",
+     ["DELETE FROM etymology"],
+     "Z1 etymology 表整批没了（只问在不在）"),
+    ("M48", "Z2 词源行指向不存在的词",
+     # ⚠️ 只改一行：`UNIQUE(word_id, edition, etym_no)` 下把多行改成同一个 word_id 会撞键
+     ["UPDATE etymology SET word_id=-1 WHERE id=(SELECT MIN(id) FROM etymology)"],
+     "Z2 词源行的 word_id 悬空"),
+    ("M49", "🔴🔴 Z3 键的两侧各自改一个字（各自自洽、拼起来对不上、页面静默空白）",
+     ["UPDATE etymology SET edition='kk-ja' WHERE edition='en-edition'"],
+     "Z3 词源正文与义项对不上（键拼起来查不到，页面静默空白）"),
+    # ── 关系目标的成词性（2026-09-19，欠账 15/16）──
+    ("M44", "🔴 Y1 关系目标里又长回了空格（罗马字回显/并列表没拆）",
+     ["UPDATE sense_relation SET target=target||' (mut)' WHERE id IN"
+      " (SELECT id FROM sense_relation WHERE hidden=0 LIMIT 3)"],
+     "Y1 可见的关系目标重跑生成侧判据会变（含空格/罗马字回显/并列表没拆）"),
+    ("M45", "🔴 Y2 中文词又露到页面上（清洗被撤销）",
+     ["UPDATE sense_relation SET hidden=0 WHERE hidden=1"
+      " AND src IN ('zh-edition','ja-edition')"],
+     "Y2 可见的关系目标是中文词（不是日语）"),
+    ("M46", "🔴 Y3 两轮清洗整批回滚（那时 Y1/Y2 里的行全都变回可见）",
+     ["UPDATE sense_relation SET hidden=0"],
+     "Y3 被挂起的关系整批没了（清洗回滚了）"),
     ("M39", "🔴 I0 tags 变成非法 JSON（闸要报红，不许崩掉整族断言）",
      ["UPDATE inflection SET tags='[\"adverbial\", ]' WHERE id IN"
       " (SELECT id FROM inflection ORDER BY id LIMIT 3)"],

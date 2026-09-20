@@ -41,13 +41,22 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LANGS = ["en", "es", "it", "fr", "pt", "de"]
+LANGS = ["en", "es", "it", "fr", "pt", "de", "ja"]
 
 # 🔴 `paths.KK`（英文版 per-language 切片）在**这门库里**对应哪个来源前缀。
 #    en/es/it/fr/pt 记成 `en-edition`，de 记成 `kk-en` —— 建库那几轮各自定的，
 #    不是同一个字符串。**写死会过期，所以启动时必须回库核一次**（见 `Plan.check`）。
 EN_PREFIX = {"en": "en-edition", "es": "en-edition", "it": "en-edition",
-             "fr": "en-edition", "pt": "en-edition", "de": "kk-en"}
+             "fr": "en-edition", "pt": "en-edition", "de": "kk-en",
+             # 🔴 ja 2026-09-20 补。**这一层在 ja 上整个缺席了**：ja 是 2026-09-15 开建的，
+             #    比本脚本（09-14）还晚，却没人把它加进 LANGS ——
+             #    而「阶段表全 ✅」对**没列进阶段表的层**结构性失明。
+             # ⚠️ ja 走的是 `has_entry` 那一支（`sense.entry_id` 存在）⇒ `db_keys()`
+             #    取 **`entry.src`** 当 edition，展示层对应 `etymKeyOfEntry(e.src, e.etym_no)`。
+             #    **不是 `src_ref` 的前缀**（那是 en/de 那一支的取法，它们没有 entry_id）。
+             #    我一度按 de 的样子改成 `kk-ja`，被脚本自己的前缀核对当场挡下 ——
+             #    **同一个脚本里两种取法，照抄另一门会对不上。**
+             "ja": "en-edition"}
 
 # ── 非英文版（2026-09-14 补）─────────────────────────────────────────────────
 # it/fr/pt 的义项还来自各语言自己的维基版。它们的 dump **字段名不一样**：
@@ -71,7 +80,8 @@ EDITION_DUMP = {
     "kk-de": "dewiktionary.jsonl.gz",
 }
 # dump 是**多语种整包**，要按 lang_code 筛出目标语言那一部分。
-LANG_CODE = {"it": "it", "fr": "fr", "pt": "pt", "es": "es", "de": "de", "en": "en"}
+LANG_CODE = {"it": "it", "fr": "fr", "pt": "pt", "es": "es", "de": "de", "en": "en",
+             "ja": "ja"}
 
 DDL = """CREATE TABLE etymology (
   id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,6 +183,24 @@ def db_keys(con):
     #    第一版两边都去 `src_ref` 里拆号，而 fr/pt 的**本版** `src_ref` 是三段式
     #    （`kk-fr:accueil:noun#0`，压根没有号）⇒ 整批被丢掉。
     #    展示层用的是 `etymKeyOfEntry(e.src, e.etym_no)`，这里必须跟它一致。
+    # 📋 **待办（2026-09-20 量过、未动手）：这一支只认「有已出版义项」的词条，会漏掉一批正文。**
+    #    见 `docs/JA_PLAN.md` 欠账 25。改法就是把下面的 `FROM sense JOIN entry` 换成
+    #    直接 `FROM entry JOIN dict`（严格超集）——**本函数 docstring 写的「库里每条词源支」
+    #    本来就该按词条数，是实现没跟上**。但它牵动五门，所以先记账不动手：
+    #      en / de  走下面 `sense_src` 那一支，**这行代码根本不经过它们**
+    #      es       无义项的 entry ＝ **0** ⇒ 结果一行不变，**结构上免疫**
+    #      ja       15,651 条无义项 entry ⇒ 干跑实测 40,270 → **41,447（+1,177）**
+    #      it       en-edition 77,216 → **81,665（+4,449）**（2026-09-20 干跑实测）
+    #      fr       en-edition 52,673 → **53,592（+919）**
+    #      pt       🔴 **不一样：宽桥会被闸① 拦下**（对不齐 4,719 ＝ 1.578%）——
+    #               库里对 `-a`/`-aco` 这类词多了一条 `etym_no='0'` 的无义项词条，
+    #               而 dump 多词源时从 1 编号。**闸拦得对**，见欠账 25。
+    #      ⚠️ 本版那几支（it/fr/pt-edition）都没量，要另跑 `--edition`。
+    #    ⭐ **别拿「无义项的 entry 数」当风险量级** —— it 有 451,922 条无义项 entry，
+    #      而实际漏的词源只有 4,449；fr 1,972,110 对 919。**差一到三个数量级。**
+    #    🔴 **改之前必须先拆回归闸 Z3**：它要求每条词源行都能被**义项**那一侧找到，
+    #      而新增的行恰恰挂不到义项 ⇒ 直接写会把闸打红。**不许为了让改动通过而放宽它**，
+    #      拆法写在欠账 25 里（Z3a 结构 / Z3b 页面口径原样保留 / Z3c 存档行记基线）。
     sql = ("""SELECT s.word_id, d.word, e.src, e.etym_no, e.src_ref FROM sense s
               JOIN dict d ON d.id = s.word_id
               JOIN entry e ON e.id = s.entry_id

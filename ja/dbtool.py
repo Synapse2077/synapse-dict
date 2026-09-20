@@ -92,6 +92,10 @@ TRACK = [
     # 活用类（五段/一段/サ変/カ変…）—— **词元的属性**，2026-09-16 补（欠账 4）
     'entry.vclass',
     'pos', 'level', 'freq_zipf',
+    # 核心词等级（2026-09-19）。🔴 **内部尺子，不是权威难度标签** ——
+    #   JLPT 官方 2010 年后不再公布词汇表，用的是民间重建的 Waller 表（CC BY）。
+    #   回归闸 X2 锁住「这一列不出现在任何渲染输出里」。见 data/refs/jlpt-waller/README.md
+    'core_level', 'core_src',
     # 关系层与变形层的关键列
     'sense_relation.target', 'inflection.base_id', 'inflection.label_zh',
     # 证据层→出版层的认领。2026-09-18 回填 ja/zh 两版之后这一列才**三版都有意义**

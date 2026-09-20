@@ -671,6 +671,27 @@ const CHECKS: Check[] = [
       return null;
     },
   },
+  // ── 词源正文（2026-09-20）──
+  // 🔴🔴 这一层曾经**整个不存在**（ja 没被加进 `scripts/ingest_etymology.py` 的名单），
+  //    接上之后又栽了一次「两边各自自洽、拼起来对不上」：`etymology.edition` 写
+  //    `en-edition`，而服务层的 etymKey 取裸词源号 ⇒ 页面**静默空白**，
+  //    入库闸/写后回核/tsc 全绿。⇒ 这条断言站在**页面**上，不站在任何一侧。
+  {
+    word: '桜',
+    name: '🔴 词源正文印出来了（数据层三道闸对「页面静默空白」是看不见的）',
+    hit: (t) => (t.includes('From Old Japanese') ? null
+      : '页面上没有词源正文 —— 库里有 40,270 行，键拼不上就是一个字都不印'),
+  },
+  {
+    word: '食べる',
+    name: '词源块不印「源头未给出」给我们没抽过的版（把没抽说成没写＝造假）',
+    hit: (t, e: any) => {
+      const eds: string[] = e.etymologyEditions ?? [];
+      if (!eds.length) return '服务层没给「抽过哪些版」⇒ 组件无从闭嘴';
+      // 日语只抽了英文版（日语版/中文版 dump 里 etymology_text 是 0 条）
+      return eds.includes('en-edition') ? null : `抽过的版名对不上：${eds.join(',')}`;
+    },
+  },
 ];
 
 let red = 0;

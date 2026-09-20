@@ -43,4 +43,8 @@ ZH_EDITION  = DATA / "dumps" / "zhwiktionary.jsonl.gz"                      # �
 WORK        = DATA / "work" / "ja"                  # 过程产物：runs / 冲突表 / 模型输出
 BACKUPS     = DATA / "backups"                      # 写库前的自动备份
 DUMPS       = DATA / "dumps"
+# 第三方参考词表（2026-09-19）。⚠️ **不是权威表，是民间重建**：JLPT 官方 2010 年改制后
+# 不再公布词汇表 ⇒ 只当内部尺子（挑核心词/算覆盖率），不作读者可见的难度标签。
+# 授权、匹配率、尚未履行的署名义务全写在该目录的 README.md 里，用它之前先读。
+CORE_LIST   = DATA / "refs" / "jlpt-waller"
 ENV         = ROOT / ".env"

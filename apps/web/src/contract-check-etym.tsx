@@ -1,5 +1,5 @@
 /**
- * 词源分块契约闸：跨 en/es/it/fr/pt/de **六门**。2026-09-12。
+ * 词源分块契约闸：跨 en/es/it/fr/pt/de/ja **七门**。2026-09-12（ja 2026-09-20 补登记）。
  *
  * ═══ 起因 ═══
  * 用户看 en 的 `gore` 问「这个单词为什么有两轮名词/动词？」
@@ -21,31 +21,102 @@
  *     npx tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-etym.tsx
  *     npx tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-etym.tsx --mutate
  */
+import { existsSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
 import {
   EnglishEntryView, SpanishEntryView, ItalianEntryView,
-  FrenchEntryView, PortugueseEntryView, GermanEntryView,
+  FrenchEntryView, PortugueseEntryView, GermanEntryView, JapaneseEntryView,
 } from './App';
 import { etymologyBrief } from '@synapse-dict/dict-labels';
 
 const mutate = process.argv.includes('--mutate');
 const PER = 24;
-type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de';
-const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de'];
+type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de' | 'ja';
+const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja'];
 
 const VIEW: Record<Lang, unknown> = {
   en: EnglishEntryView, es: SpanishEntryView, it: ItalianEntryView,
   fr: FrenchEntryView, pt: PortugueseEntryView, de: GermanEntryView,
+  ja: JapaneseEntryView,
 };
-/** es 的义项在 `unifiedSenses` 里，其余五门在 `senses`。 */
+/** es 的义项在 `unifiedSenses` 里，其余六门在 `senses`。 */
 const SENSE_FIELD: Record<Lang, string> = {
   en: 'senses', es: 'unifiedSenses', it: 'senses',
-  fr: 'senses', pt: 'senses', de: 'senses',
+  fr: 'senses', pt: 'senses', de: 'senses', ja: 'senses',
 };
 
-type Sense = { pos: string | null; etymKey?: string | null };
+/**
+ * 🔴🔴 **每门「词源在页面上长什么样」的声明 —— 判据按形状分支，不按语种码分支。**
+ *
+ * 2026-09-20 加 ja 时逼出来的。ja 与前六门有**两处实质不同**，两处都不是缺陷，
+ * 是日语读者认同形异源的方式本来就不一样 —— 直接把 `'ja'` 塞进 `LANGS` 会满屏假红，
+ * 而假红与真红长得一模一样（这个文件里已经栽过两次：圈号 65 条、徽标 22 条）：
+ *
+ *   ① **词源标题是「回退式」的，不是常备的。** ja 按「词性＋词源」断组（与六门同一条规矩），
+ *      但组标题印的是**读音**（`猫` ＝ 汉字／名词 ねこ／名词 ねこま）——
+ *      日语的同形异源读者是按读音认的，常备一个序号反而说不出区别在哪。
+ *      ⚠️ 只有**读音救不了场**时才退回印序号：两支词源读音一模一样（`3K` 两支都念
+ *      さんけい）⇒ 读音标签整个不出现，页面上连着两个裸「名词」。
+ *      实测 518 个词形／593 对，**590 对是这个机制**（2026-09-20 由本闸 G4 逮到并修）。
+ *      ⇒ G1 对 ja 比的是**回退规则算出来的序列**，不是六门那个"多词源就印"的序列。
+ *   ② **每个词性组都印词源正文**；六门只在**多词源**时才印（`etymHeadOf()` 为真才渲染）。
+ *      ⚠️ 这条差异记在这儿是因为它**对读者可见**：en 库里 493,490 条词源正文，
+ *        单词源的词（98%+）一条都印不出来。孰对孰错不在本闸的射程内，
+ *        但**两种形状都得有闸守着**，否则哪天谁把 ja 改成六门那样，没有一条断言会响。
+ */
+type Shape = {
+  /**
+   * `always` ＝ 多词源就给每一块印「词源 ①」（六门）；
+   * `fallback` ＝ 平时靠读音标签认，**只有读音分不开相邻两组时才退回印序号**（ja）。
+   */
+  etymHeadings: 'always' | 'fallback';
+  /** 每个词性组都印词源正文（ja），还是只在多词源时印（六门）。 */
+  noteOnEveryGroup: boolean;
+};
+const SHAPE: Record<Lang, Shape> = {
+  en: { etymHeadings: 'always', noteOnEveryGroup: false },
+  es: { etymHeadings: 'always', noteOnEveryGroup: false },
+  it: { etymHeadings: 'always', noteOnEveryGroup: false },
+  fr: { etymHeadings: 'always', noteOnEveryGroup: false },
+  pt: { etymHeadings: 'always', noteOnEveryGroup: false },
+  de: { etymHeadings: 'always', noteOnEveryGroup: false },
+  ja: { etymHeadings: 'fallback', noteOnEveryGroup: true },
+};
+
+/**
+ * 🔴🔴 **登记表自检：库里建了 `etymology` 表的语种，必须在 `LANGS` 里。**
+ *
+ * 2026-09-20 加的，而它要补的洞就是**这道闸自己身上那个**：
+ * `scripts/ingest_etymology.py` 2026-09-14 就有，ja 09-15 开建却没进它的名单 ——
+ * 于是 ja 整整三个月连 `etymology` 表都没有，而**数据九个阶段全绿、展示层十六条全绿**。
+ * 收尾打完结标记的当天才发现，标记当天撤回。
+ *
+ * ⇒ 与 `scripts/test_backup_policy_gate.py` 的 `_discover()` 同一个形状：
+ *   **闸查的是「登记了的那几门对不对」，没有一条查「是不是所有门都登记了」。**
+ *   名单从磁盘推，对不上就红；加语种时不需要记得改这里，忘了它会自己响。
+ */
+function registryGate(): string[] {
+  const bad: string[] = [];
+  for (const d of ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja']) {
+    const f = new URL(`../../../data/db/synapse-dict-${d}.sqlite`, import.meta.url).pathname;
+    if (!existsSync(f)) continue;
+    const db = new DatabaseSync(f, { readOnly: true });
+    const has = (db.prepare(
+      "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='etymology'",
+    ).get() as { n: number }).n > 0;
+    db.close();
+    if (has && !(LANGS as string[]).includes(d)) {
+      bad.push(`${d}：库里有 etymology 表，而 LANGS 名单里没有它 ⇒ 这门的词源层没有任何闸`);
+    }
+  }
+  return bad;
+}
+
+// `kana` 只有 ja 有 —— 回退式词源标题的判据要用它（读音分不分得开相邻两组）。
+type Sense = { pos: string | null; etymKey?: string | null; kana?: string | null };
 type Entry = Record<string, unknown>;
 
 function render(lang: Lang, entry: Entry): string {
@@ -123,7 +194,7 @@ function headsExpected(senses: Sense[]): string[] {
  * ⚠️ 分组规则与上面 `headsExpected` 同源，只是返回键而不是序号 ——
  *    两处要一起改（这份闸本来就承认"独立算一遍"的代价，注释在 `sameEtymGroup` 上）。
  */
-function etymBlocksOf(senses: Sense[]): string[] {
+function etymBlocksOf(senses: Sense[], shape: Shape): string[] {
   if (senses.length === 0) return [];
   const groups: Array<{ pos: string | null; etym: string | null }> = [];
   for (const s of senses) {
@@ -135,12 +206,54 @@ function etymBlocksOf(senses: Sense[]): string[] {
     }
     groups.push({ pos: s.pos, etym });
   }
+  // ja：**每个组都印一条正文**，与"这支词源以前出没出现过"无关。
+  // ⚠️ 不能走下面那条「与上一组不同才算一块」的路 —— `(名词 E1)(动词 E1)` 在 ja 上
+  //    是**两条正文**，按六门的口径只会算出一块，H1 当场假红。
+  //    `etym` 为 null 的组组件一个字都不印（`EtymologyNote` 第一行就 return null），
+  //    所以不计入；ja 实测 `etym_no` 一条 NULL 都没有，这个分支是给将来兜底的。
+  if (shape.noteOnEveryGroup) {
+    return groups.map((g) => g.etym).filter((x): x is string => x !== null);
+  }
   const distinct = new Set(groups.map((g) => g.etym).filter((x) => x !== null));
   if (distinct.size <= 1) return [];            // 单词源不印标题
   const out: string[] = [];
   groups.forEach((g, i) => {
     if (g.etym !== null && (i === 0 || groups[i - 1].etym !== g.etym)) out.push(g.etym);
   });
+  return out;
+}
+
+/**
+ * **回退式词源标题（ja）应有的序列。** 与组件 `JapaneseEntryView` 的 `needEtym` 同一条规则。
+ *
+ * 🔴 判据是读者眼睛看到的那件事本身：**这一组的标题与上一组一模一样** ⇒ 必须说出为什么分两块。
+ *    不是"多词源就印"（那是六门的规矩，日语上是噪声：`猫` 的 ねこ/ねこま 已经说清楚了）。
+ * ⚠️ 与 `sameEtymGroup` 同族的代价：闸与组件各写一份同样的规则，**改了一边必须改另一边**，
+ *    否则 G1 立刻报红。之所以还是各写一份，是因为直接 import 组件的函数就变成了拿实现验实现。
+ */
+function fallbackHeads(senses: Sense[]): string[] {
+  const groups: Array<{ pos: string | null; kana: string | null; etym: string | null }> = [];
+  for (const s of senses) {
+    const etym = s.etymKey ?? null;
+    const last = groups[groups.length - 1];
+    if (last && last.pos === s.pos && last.etym === etym) continue;
+    groups.push({ pos: s.pos, kana: s.kana ?? null, etym });
+  }
+  const showKana = new Set(groups.map((g) => g.kana).filter(Boolean)).size >= 2;
+  const order = new Map<string, number>();
+  for (const g of groups) if (g.etym && !order.has(g.etym)) order.set(g.etym, order.size + 1);
+  const title = (g: { pos: string | null; kana: string | null }) =>
+    `${g.pos ?? ''}|${showKana && g.kana ? g.kana : ''}`;
+  const need = groups.map(() => false);
+  for (let i = 1; i < groups.length; i += 1) {
+    if (title(groups[i]) === title(groups[i - 1])
+        && (groups[i].pos || (showKana && groups[i].kana))) {
+      if (groups[i].etym) need[i] = true;
+      if (groups[i - 1].etym) need[i - 1] = true;
+    }
+  }
+  const out: string[] = [];
+  groups.forEach((g, i) => { if (need[i] && g.etym) out.push(`E${order.get(g.etym)}`); });
   return out;
 }
 
@@ -153,7 +266,9 @@ const CHECKS: Array<{
   name: string;
   // 🔴 2026-09-14 加上 `entry`：H 组要比「页面印的正文」与「库里那一支的正文」——
   //    只有义项和 HTML 是比不出**配对对不对**的。
-  hit: (senses: Sense[], h: string, entry: Entry) => string | null;
+  // 🔴 2026-09-20 加上 `shape`：ja 的词源在页面上是另一个长相（见 `SHAPE` 的注释）。
+  //    判据分支在**形状**上，不在语种码上 —— 哪天别的门改成 ja 那样，改一行声明即可。
+  hit: (senses: Sense[], h: string, entry: Entry, shape: Shape) => string | null;
 }> = [
   {
     // G1 一条判据同时守住四种缺陷：少印、多印、顺序错、跨词源合组。
@@ -162,8 +277,9 @@ const CHECKS: Array<{
     // ⚠️ it 的分组还多一个 `entryId` 细分 ⇒ 它印的 `P` 可能比这里算的多。
     //    所以比较时**只对齐词源标记**，`P` 的条数不参与 —— 否则 it 会恒红。
     name: '🔴 G1 词源标题的序号或位置与义项数据不符',
-    hit: (senses, h) => {
-      const want = headsExpected(senses).filter((x) => x !== 'P');
+    hit: (senses, h, _e, shape) => {
+      const want = (shape.etymHeadings === 'fallback'
+        ? fallbackHeads(senses) : headsExpected(senses)).filter((x) => x !== 'P');
       const got = headsInHtml(h).filter((x) => x !== 'P');
       return want.join(' ') !== got.join(' ')
         ? `应为「${want.join(' ') || '（无）'}」，实为「${got.join(' ') || '（无）'}」` : null;
@@ -173,6 +289,9 @@ const CHECKS: Array<{
     // G2 **负控**：只有一个词源（或压根没有词源号）的词，不许出现词源标题。
     //    六门里 98%+ 的词是这一支 —— 没有这条，"到处都印词源①"能让 G1 照样绿。
     name: '🔴 G2 单词源的词印出了词源标题',
+    // ⭐ 这条**七门同一个判据**：ja 的回退式标题也不可能出现在单词源的词上
+    //    （只有一支词源时，相邻两组的 `key` 不可能相同 —— 相同就已经合并了）。
+    //    ⇒ 不给 ja 开分支。少一条分支就少一处会漂移的地方。
     hit: (senses, h) => {
       const keys = new Set(senses.map((s) => s.etymKey ?? null).filter((x) => x !== null));
       return keys.size <= 1 && /class="etym-label"/.test(h)
@@ -224,14 +343,24 @@ const CHECKS: Array<{
     //    它与 G1/G3 互补 —— 那两条比的是词源标题的序列与块数，
     //    **对"多断了一组但两边都没有词源标题"这种情况结构性失明**。
     name: '🔴 G4 相邻两组词性标题相同，中间却没有词源标题（读者看不出为什么分成两块）',
+    // ⭐ **七门共用一条，不按语种分支** —— 读者口径本来就与语种无关：
+    //    "两个一模一样的标题挨着出现，而中间什么都没解释"。
+    //    解释物是词源标题（六门）还是读音标签（ja），这条判据都不需要知道。
+    // 🔴 2026-09-20 改：标题取 div 的**全部内容再剥标签**，不再是 `([^<]*)<`。
+    //    日语的读音标签是标题 div **里面**的一个 `<span>`（`名词<span…>ねこ</span>`），
+    //    截到第一个 `<` 就把它整个丢了 ⇒ `猫` 的 ねこ／ねこま 两组会报假红。
+    //    六门的标题里没有嵌套元素，两种取法结果完全相同 —— **是补全，不是放宽**。
     hit: (_senses, h) => {
       const heads = [...h.matchAll(
-        /<div class="(etym-label|pos-group-label(?: pos-group-unset)?)"[^>]*>([^<]*)</g)]
-        .map((m) => ({ kind: m[1] === 'etym-label' ? 'E' : 'P', text: m[2] }));
+        /<div class="(etym-label|pos-group-label(?: pos-group-unset)?)"[^>]*>([\s\S]*?)<\/div>/g)]
+        .map((m) => ({
+          kind: m[1] === 'etym-label' ? 'E' : 'P',
+          text: m[2].replace(/<[^>]*>/g, '').trim(),
+        }));
       const bad: string[] = [];
       for (let i = 1; i < heads.length; i += 1) {
         if (heads[i].kind !== 'P' || heads[i - 1].kind !== 'P') continue;
-        if (heads[i].text === heads[i - 1].text) bad.push(heads[i].text);
+        if (heads[i].text && heads[i].text === heads[i - 1].text) bad.push(heads[i].text);
       }
       return bad.length ? `连着两个「${bad[0]}」，中间没有词源标题` : null;
     },
@@ -246,7 +375,7 @@ const CHECKS: Array<{
     //    `etymologyTexts` 不存在 ⇒ 这门还没接，跳过；哪天 es/it/fr/pt/de 接上了，
     //    这三条自动开始守它们，一个字都不用改（`[[criteria-from-meaning-not-form]]`）。
     name: '🔴 H1 该说话的词源标题底下一句话都没有',
-    hit: (senses, h, e) => {
+    hit: (senses, h, e, shape) => {
       const ed = (e as { etymologyEditions?: string[] }).etymologyEditions;
       if (!ed) return null;                       // 这门还没接词源正文层
       // 🔴 **不是每个标题都该有话说。** it/fr/pt 的义项来自 2–4 个维基版，
@@ -254,7 +383,7 @@ const CHECKS: Array<{
       //    说「源头未给出」就是把"我们没做"说成"源头没有"。
       //    ⇒ 期望条数 ＝ 词源支里**所属版已抽过**的那些，不是全部标题。
       //    （fr 实测 40 个词里就有 7 个这样的块，判据不区分就会恒红。）
-      const want = etymBlocksOf(senses).filter((k) => ed.includes(editionOf(k))).length;
+      const want = etymBlocksOf(senses, shape).filter((k) => ed.includes(editionOf(k))).length;
       const notes = (h.match(/class="etym-text/g) || []).length;
       return want !== notes ? `该有 ${want} 条正文/说明，页面上 ${notes} 条` : null;
     },
@@ -266,12 +395,15 @@ const CHECKS: Array<{
     //    ⇒ 逐块比：页面上第 k 个词源块印的那句，必须等于**第 k 个词源键**在
     //      `etymologyTexts` 里那份切出来的第一句。
     name: '🔴 H2 词源正文贴到了别的词源支上',
-    hit: (senses, h, e) => {
+    hit: (senses, h, e, shape) => {
       const texts = (e as { etymologyTexts?: Record<string, string> }).etymologyTexts;
       if (!texts) return null;
       const ed = (e as { etymologyEditions?: string[] }).etymologyEditions ?? [];
-      const all = etymBlocksOf(senses);
-      if (all.length < 2) return null;         // 单词源不印标题，没什么可配的
+      const all = etymBlocksOf(senses, shape);
+      // 🔴 ja 单词源的词也印正文 ⇒ **单块也要比**。这正是 ja 上最值钱的一条：
+      //    `etymology.edition` 写 `en-edition` 而服务层的 etymKey 一度取裸词源号（`1`），
+      //    两边各自自洽、拼起来对不上 ⇒ 页面静默空白，入库闸/回核/tsc 全绿。
+      if (all.length < (shape.noteOnEveryGroup ? 1 : 2)) return null;
       // 只比**印得出来的那些**：没抽过的版不渲染任何块，把它算进去会整体错位。
       const keys = all.filter((k) => ed.includes(editionOf(k)));
       // ⚠️ **先把语种徽标整个元素剥掉，再剥标签。** 第一版直接 `replace(/<[^>]*>/g,'')`，
@@ -309,12 +441,12 @@ const CHECKS: Array<{
     // 负控：库里明明有正文，页面却说「源头未给出」—— 把「有」说成「没有」，
     // 与 H1「留白」是一对：一个是不说话，一个是说错话。
     name: '🔴 H3 库里有词源正文，页面却说源头没给',
-    hit: (senses, h, e) => {
+    hit: (senses, h, e, shape) => {
       const texts = (e as { etymologyTexts?: Record<string, string> }).etymologyTexts;
       if (!texts) return null;
       const ed = (e as { etymologyEditions?: string[] }).etymologyEditions ?? [];
-      const all = etymBlocksOf(senses);
-      if (all.length < 2) return null;
+      const all = etymBlocksOf(senses, shape);
+      if (all.length < (shape.noteOnEveryGroup ? 1 : 2)) return null;
       const keys = [...new Set(all.filter((k) => ed.includes(editionOf(k))))];
       const have = keys.filter((k) => etymologyBrief(texts[k])).length;
       const none = (h.match(/etym-text-none/g) || []).length;
@@ -354,7 +486,8 @@ const MUTS: Array<[string, (h: string) => string]> = [
 ];
 
 // ── 取样：**两支都要**，否则断言是恒真的 ──
-const pages: Array<[string, Sense[], string, boolean, Entry]> = [];  // [词, 义项, html, 多词源?, entry]
+// [词, 义项, html, 多词源?, entry, 这门的形状]
+const pages: Array<[string, Sense[], string, boolean, Entry, Shape]> = [];
 const bucket = new Map<string, number>();
 for (const lang of LANGS) {
   const svc = getService(lang) as unknown as {
@@ -362,12 +495,27 @@ for (const lang of LANGS) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = (svc as any).db as { prepare: (s: string) => { all: () => unknown[] } };
   const q = (sql: string) => (db.prepare(sql).all() as Array<{ word: string }>).map((r) => r.word);
-  const multi = q(`SELECT d.word FROM dict d
-     WHERE d.id IN (SELECT word_id FROM entry WHERE etym_no IS NOT NULL
-                     GROUP BY word_id HAVING COUNT(DISTINCT etym_no)>1) LIMIT ${PER}`);
-  const single = q(`SELECT d.word FROM dict d
-     WHERE d.id IN (SELECT word_id FROM entry WHERE etym_no IS NOT NULL
-                     GROUP BY word_id HAVING COUNT(DISTINCT etym_no)=1) LIMIT ${PER}`);
+  /**
+   * 🔴🔴 **`LIMIT` 必须写在 `GROUP BY` 那一层里，不能只写在外层。**
+   *
+   * 2026-09-20：原来写的是 `WHERE d.id IN (SELECT … GROUP BY … HAVING …) LIMIT 24`。
+   * 外层那个 `LIMIT` 对子查询**一点约束都没有** —— 计划是 `LIST SUBQUERY`：
+   * 先把**全库**合格的 `word_id` 整张物化成一个列表，再去外层取 24 行。
+   * ja 库 25 万条 entry 上无感，轮到 en（5.2 GB／数百万条）就是 **13.7 GB 常驻内存**，
+   * 机器卡死（用户当场中断，以为是死循环 —— 它不是循环，是一次性物化）。
+   * ⇒ 挪进子查询之后计划变成 `CO-ROUTINE`（流式，攒够 24 组就停）：
+   *   同一台机器 `EXPLAIN` 前后对比过，实跑 **0.116 秒**。
+   * ⚠️ 能流式的前提是 `idx_entry_word ON entry(word_id)` —— 七门都建了，回库核过。
+   * ⭐ 教训不是"少写一个 LIMIT"，是**取样语句要按最大的那门库来写**：
+   *   这道闸的取样量恒定（每门 24×2 个词），而**代价随库的大小走**，
+   *   在最小的那门上测不出来（`[[enrich-perf-discipline]]`：小切片先计时）。
+   */
+  const sample = (op: string) => q(`SELECT d.word FROM dict d JOIN (
+       SELECT word_id FROM entry WHERE etym_no IS NOT NULL
+        GROUP BY word_id HAVING COUNT(DISTINCT etym_no)${op} LIMIT ${PER}
+     ) x ON x.word_id = d.id`);
+  const multi = sample('>1');
+  const single = sample('=1');
   for (const [kind, words] of [['多词源', multi], ['单词源', single]] as const) {
     let n = 0;
     for (const w of words) {
@@ -375,22 +523,30 @@ for (const lang of LANGS) {
       if (!e) continue;
       const senses = (e[SENSE_FIELD[lang]] ?? []) as Sense[];
       if (senses.length === 0) continue;
-      pages.push([`${lang} ${w}`, senses, render(lang, e), kind === '多词源', e]);
+      pages.push([`${lang} ${w}`, senses, render(lang, e), kind === '多词源', e, SHAPE[lang]]);
       n += 1;
     }
     bucket.set(`${lang} ${kind}`, n);
   }
 }
 
-console.log('═══ 契约闸（词源分块）：跨六门 ═══\n');
+console.log(`═══ 契约闸（词源分块）：跨 ${LANGS.length} 门 ═══\n`);
+
+// 登记表自检先跑 —— 名单漏了一门，下面那些断言对它**结构性失明**（见 `registryGate`）。
+const unregistered = registryGate();
+if (unregistered.length) {
+  console.log('🔴🔴 登记表与磁盘对不上：');
+  for (const x of unregistered) console.log(`     ${x}`);
+  process.exit(1);
+}
 console.log(`  取样 ${pages.length} 个词：\n`
   + [...bucket].map(([k, v]) => `    ${k.padEnd(12)} ${v}`).join('\n') + '\n');
 
 const fails = new Map<string, string[]>();
 const counts = new Map<string, number>();
-for (const [w, senses, html, , entry] of pages) {
+for (const [w, senses, html, , entry, shape] of pages) {
   for (const c of CHECKS) {
-    const why = c.hit(senses, html, entry);
+    const why = c.hit(senses, html, entry, shape);
     if (why) {
       const a = fails.get(c.name) ?? [];
       if (a.length < 4) a.push(`${w}：${why}`);
@@ -417,11 +573,13 @@ if (mutate) {
   for (const [name, f] of MUTS) {
     const got = new Set<string>();
     let hits = 0;
-    for (const [, senses, html, , entry] of pages) {
+    for (const [, senses, html, , entry, shape] of pages) {
       let bad: string;
       try { bad = f(html); } catch { continue; }
       if (bad === html) continue;          // 这个词身上造不出这种缺陷，跳过
-      for (const c of CHECKS) if (c.hit(senses, bad, entry)) { got.add(c.name); hits += 1; }
+      for (const c of CHECKS) {
+        if (c.hit(senses, bad, entry, shape)) { got.add(c.name); hits += 1; }
+      }
     }
     if (got.size === 0) { dead += 1; console.log(`   🔴 ${name}  —— 没有任何断言逮到它`); }
     else {

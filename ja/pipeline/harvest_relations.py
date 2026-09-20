@@ -52,6 +52,7 @@ import sqlite3
 
 import dbtool
 import paths
+from pipeline.harvest_examples import simplified_only
 
 f = lambda n: format(n, ",")
 KIND = {"synonyms": "synonym", "antonyms": "antonym", "hypernyms": "hypernym",
@@ -60,6 +61,38 @@ KIND = {"synonyms": "synonym", "antonyms": "antonym", "hypernyms": "hypernym",
         "coordinate_terms": "coordinate", "proverbs": "proverb",
         "abbreviations": "abbreviation"}
 JA = re.compile(r"[ぁ-ゖァ-ヺ一-鿿々〆ヶ]")
+
+
+def is_chinese_target(it, src, simp):
+    """这个关系目标是**中文**不是日语吗？→ True 就挂 `hidden=1`（不删，可逆）。
+
+    🔴🔴 **三个版本三种机制，判据不能合并成一条。**（2026-09-19，欠账 15）
+
+    ① **中文版**：`derived`/`related` 数组把**日语词与它的中文释义交替排列**，
+       而中文那一半**只有 `word` 一个键、没有 `roman`/`ruby`**：
+
+           {'word': '少女歌劇', 'roman': 'shōjo kageki', 'ruby': [...]}   ← 真词
+           {'word': '年轻'}  {'word': '兴趣'}  {'word': '爱好'}            ← 中文释义碎片
+
+       ⇒ 判据＝`裸（无 roman 无 ruby）` ∧ `含简体专用字`。实测**精确命中 81 条**，
+       而 `唖呕`/`柜霜`/`蔂`（真日语拡張新字体）带 roman/ruby，正确避开。
+       ⚠️ 「裸」单用太宽（6,744 条，含 `五月`/`早苗月` 这种真日语词），必须取交集。
+
+    ② **日语版**：把日语写法与中文简体写法**成对列出**
+       （`漢語`/`汉语`、`洗手間`/`卫生间`、`漢奸`/`汉奸`）⇒ 含简体专用字的那一半就是中文。
+
+    ③ 🔴 **英文版一条都不许碰。** 那 40 条（`呕唖`/`丰容`/`柜霜`）**不是中文，是拡張新字体** ——
+       源头把 `呕唖` 与 `嘔啞` 成对列在 `character` 条目下、tag 写着 `extended shinjitai`。
+       我第一版把三版合成一条判据、差点把它们当中文删掉
+       （`[[criteria-narrower-than-you-think]]` 的反面：**判据比它要描述的东西宽**）。
+       `侭田`（姓氏，唯一已知的假阳性）也来自英文版 ⇒ 排除英文版自动躲开它。
+    """
+    w = (it.get("word") or "").strip()
+    if not any(ch in simp for ch in w):
+        return False
+    if src == "zh-edition":
+        return not it.get("roman") and not it.get("ruby")
+    return src == "ja-edition"
 LATIN_PHRASE = re.compile(r"^[^぀-ヿ一-鿿]*\s[^぀-ヿ一-鿿]*$")
 
 
@@ -86,6 +119,91 @@ def clean_target(w):
     return w
 
 
+# ── 2026-09-19（欠账 16）：目标里**含空格**的 2,029 条，一条判据管不了 ──
+# 逐条看过之后是四种形状，每种的处置不同。判据写成「认得出哪一种」而不是「长得像不像词」。
+# ① 并列表：`縞馬, 斑馬`。🔴 **只认半角逗号+空格，不认顿号。**
+#    顿号在日语里是**句内标点**：`井の中の蛙、大海を知らず`／`一日の計は朝にあり、一年の計は元旦にあり`
+#    是一条谚语不是两个目标。实测已落库的 297 条拆分**全部**来自半角逗号、顿号零条 ⇒
+#    顿号分支在真列表上没用过，却会拆坏 50 多条谚语。**可逆性回核逮到的，不是闸。**
+LIST_SEP = re.compile(r",\s+")
+ROMAJI_PAREN = re.compile(r"^(.+?)\s*\(([A-Za-zāīūēōâîûêô'’\- ]+)\)$")   # ② `女郎 (jorō)`
+ARROW = re.compile(r"\s*[→⇒]\s*")                     # ③ `兄様 → 兄さん` / `→ 襲`
+
+
+LATIN = re.compile(r"[A-Za-z]")
+
+
+def _one(w):
+    """一个候选串 → 干净目标或 None。
+
+    要求：有日文字符、不含空格、**且不混拉丁字母**。
+    🔴 最后一条是抽样反验逼出来的：`ja-cardinals?action=edite Japanese numbers…` 这种
+       模板残渣的末段是 `numbersNumberKanjiKanaRomaji0零れい` —— 有日文、无空格，
+       前两条判据放它过去了。**日语词条不会把拉丁字母混在词里**（`GNP`/`AA` 是纯拉丁，
+       走 `clean_target` 那条路，不经过这里）。
+    """
+    w = (w or "").strip(" 　\"”'’[]")
+    if not w or " " in w or not JA.search(w) or LATIN.search(w):
+        return None
+    return w
+
+
+def clean_targets(w):
+    """→ **目标列表**（0…N 个）。`clean_target` 只能返回一个，装不下并列表。
+
+    🔴 四种形状，顺序不能改（`[[regex-alternation-order]]`：顺序本身就是判据）：
+      ① **并列表** `縞馬, 斑馬` ⇒ 拆成 2 个。⚠️ 拆出来**每一片都要过 `_one`**，
+         否则 `割符(historically read as かちふ, today read as…)` 这种带逗号的散文
+         会被拆成两段垃圾（实测 5 条，正好落到 ④）。
+      ② **罗马字回显** `女郎 (jorō)` ⇒ 剥掉括号。欠账 13 清过**串尾**回显，
+         带括号这个变体活了下来 —— **同一个病的第二种写法**。
+      ③ **箭头** `兄様 → 兄さん`（两边都是词）/ `→ 襲`（左边空）/
+         `胸を貸す → a more powerful person…`（右边是英文）⇒ 沿箭头切，留过得了 `_one` 的。
+      ④ **前半是词、其后全无日文** `ごみ箱 rubbish bin`、`あたし 30%`（问卷百分比）
+         ⇒ 取前半。
+      ⑤ 剩下的是**活用构成公式**（`stem + い`、`mizenkei + ない`）与整句散文 ⇒ 返回空列表，
+         调用方挂 `hidden=1` 而不是删（`[[prefer-reversible-designs]]`）。
+    """
+    w = clean_target(w)
+    if not w:
+        return []
+    if " " not in w and "," not in w:
+        return [w]
+    # 🔴 **活用构成公式一律不是词**：`stem + い`、`mizenkei + ない`、`ren'yōkei + ましょう`。
+    #    这条必须在 ④⑤ **之前**：镜像规则⑤会把 `ren'yōkei + ましょう` 的尾巴 `ましょう`
+    #    当成词收下来 —— 那是活用后缀不是相关词。
+    #    ⚠️⚠️ **必须在「无空格就原样返回」之后**：我验「含 `+` 的 40 个串全是公式」时
+    #    只在**含空格的那批**上验过，却把它用到了全部目标上 ⇒ `C++`／`LGBT+`／`+α`
+    #    这些真词条被误杀。**判据只在它被验过的域里成立**
+    #    （`[[criteria-narrower-than-you-think]]`，同一天第三次）。
+    if "+" in w:
+        return []
+    if LIST_SEP.search(w):
+        parts = [_one(p) for p in LIST_SEP.split(w)]
+        return [p for p in parts if p] if all(parts) else []
+    m = ROMAJI_PAREN.match(w)
+    if m and _one(m.group(1)):
+        return [_one(m.group(1))]
+    if ARROW.search(w):
+        return [p for p in (_one(x) for x in ARROW.split(w)) if p]
+    # ④ 前半是词、其后全无日文：`ごみ箱 rubbish bin`、`あたし 30%`
+    first = w.split(" ")[0]
+    head = _one(first)
+    if head and not JA.search(w[len(first):]):
+        return [head]
+    # ⑤ **④ 的镜像**：后半是词、其前全无日文 —— `(2ch slang) セクースする`、
+    #    `Ibaraki) しぐ`、`and see ちんぽこ`。日语在末尾时 ④ 认不出来，
+    #    而这一族是**标签前缀/引导语**，丢掉就等于丢掉一个真词。
+    last = w.split(" ")[-1]
+    tail = _one(last)
+    pre = w[:len(w) - len(last)]
+    # ⚠️ 前缀必须**像标签**（以 `)`/`]` 收尾）或**很短**，否则就是在从整句英文里抠尾巴：
+    #    `that consists of suffixing verbs with the auxiliary… 遊ばせ` 不该变成 `遊ばせ`。
+    if tail and not JA.search(pre) and (pre.rstrip().endswith((")", "]")) or len(pre) <= 12):
+        return [tail]
+    return []
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
@@ -100,10 +218,15 @@ def main():
         bridge[src].setdefault((word, text), sid)
     con.close()
 
+    # 简体专用字表 —— **import 例句层那一份，不新写**（`[[refactor-mindset-code-quality]]`）
+    con2 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    SIMP = simplified_only(con2)
+    con2.close()
+
     st = collections.Counter()
     rows = {}                      # (word_id, sense_id, kind, target) -> 行
 
-    def add(w, sid, kind, tgt, tags, src, ref):
+    def add(w, sid, kind, tgt, tags, src, ref, hidden=0):
         i = wid.get(w)
         if i is None:
             st[src + "/词形不在库里"] += 1
@@ -115,8 +238,8 @@ def main():
         if tgt == w:
             st[src + "/🔴 丢：指向自己"] += 1
             return
-        rows[k] = (i, sid, kind, tgt, tags, 0, src, ref)
-        st[src + "/收下 " + kind] += 1
+        rows[k] = (i, sid, kind, tgt, tags, hidden, src, ref)
+        st[src + ("/⚪ 中文目标⇒hidden " if hidden else "/收下 ") + kind] += 1
 
     ED = [("en-edition", lambda: open(paths.KK, encoding="utf-8"), None),
           ("ja-edition", lambda: open(paths.EDITION, encoding="utf-8"), None),
@@ -158,22 +281,26 @@ def main():
                 # ── ① 语义关系 ──
                 for key, kind in KIND.items():
                     for it in (o.get(key) or []):
-                        t = clean_target(it.get("word"))
-                        if not t:
+                        ts = clean_targets(it.get("word"))
+                        if not ts:
                             st[src + "/🔴 丢：不是词（英文释义/模板报错）"] += 1
                             continue
-                        add(w, None, kind, t, None, src,
-                            "%s:top:%s:%s:%s" % (src, w, kind, t))
+                        cn = int(is_chinese_target(it, src, SIMP))
+                        for t in ts:
+                            add(w, None, kind, t, None, src,
+                                "%s:top:%s:%s:%s" % (src, w, kind, t), hidden=cn)
                     for s in o.get("senses") or []:
                         gl = ((s.get("glosses") or [""])[0] or "").strip()
                         sid = br.get((w, gl))
                         for it in (s.get(key) or []):
-                            t = clean_target(it.get("word"))
-                            if not t:
+                            ts = clean_targets(it.get("word"))
+                            if not ts:
                                 st[src + "/🔴 丢：不是词（英文释义/模板报错）"] += 1
                                 continue
-                            add(w, sid, kind, t, None, src,
-                                "%s:sense:%s:%s:%s:%s" % (src, w, sid, kind, t))
+                            cn = int(is_chinese_target(it, src, SIMP))
+                            for t in ts:
+                                add(w, sid, kind, t, None, src,
+                                    "%s:sense:%s:%s:%s:%s" % (src, w, sid, kind, t), hidden=cn)
 
     # 🔴🔴 **同音索引页的判据必须在聚合之后再判一次。**
     #    §二.5 的规矩是「一个词形指向 ≥2 个目标 ⇒ 同音索引页，不是异表记」。

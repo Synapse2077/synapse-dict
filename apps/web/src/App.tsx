@@ -626,6 +626,10 @@ type JaEntry = {
   lang: 'ja'; id: number; word: string; pos: string | null;
   kanjiGrade: string | null; vclass: string | null;
   freqZipf: number | null; isLemma: boolean;
+  /** 词源正文全文，键＝`${edition}:${etym_no}`；页面只印 `etymologyBrief()` 切的第一句。 */
+  etymologyTexts?: Record<string, string>;
+  /** 我们抽过哪些维基版的词源正文。没抽过的版，组件必须闭嘴（见 `EtymologyNote`）。 */
+  etymologyEditions?: string[];
   readings: JaReading[];
   kanjiReadings: JaKanjiReading[];
   senses: JaSense[];
@@ -4966,12 +4970,13 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
 }) {
   // 按「词性 + 词源号」断组 —— 与前六门同一条规矩：
   // 词性相同**且**词源相同才合并，否则同形异源会被并进一组。
-  const groups: Array<{ key: string; pos: string | null; kana: string | null; senses: JaSense[] }> = [];
+  const groups: Array<{ key: string; pos: string | null; kana: string | null;
+    etymKey: string | null; senses: JaSense[] }> = [];
   for (const s of entry.senses) {
     const key = `${s.pos ?? ''}|${s.etymKey ?? ''}`;
     const last = groups[groups.length - 1];
     if (last && last.key === key) last.senses.push(s);
-    else groups.push({ key, pos: s.pos, kana: s.kana, senses: [s] });
+    else groups.push({ key, pos: s.pos, kana: s.kana, etymKey: s.etymKey ?? null, senses: [s] });
   }
   // 🔴 **一个词形有多个读音时，每组要标出它是哪个读音。**
   //    `猫` 有三组（汉字 ／ 名词 ねこ ／ 名词 ねこま），三组的中英文释义几乎一样
@@ -4981,6 +4986,32 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
   //    而且会让读者以为这里在做什么区分。判据是事实（有几个读音），不是"保险起见都标"。
   const groupKana = new Set(groups.map((g) => g.kana).filter(Boolean));
   const showKana = groupKana.size >= 2;
+  // 🔴🔴 **读音分不开的那些组，必须退回用词源号解释。** 2026-09-20，词源契约闸 G4 逮到的。
+  //    `showKana` 是个**词级**判据（"全词有没有 ≥2 种读音"），而"这个标题分不分得开
+  //    相邻这两组"是个**组对级**问题 —— 两支词源**读音一模一样**时它恒为 false：
+  //    `3K` 两支都念 さんけい、`DID` 都念 ディーアイディー ⇒ 页面上连着两个裸「名词」，
+  //    读者看不出为什么分成两块。实测 **518 个词形（0.24%）／593 对，其中 590 对是这个机制**。
+  // ⚠️ 这正是 es `pasar` 那一问的日语版（用户 2026-09-12：「如果都是动词为什么不能合在一起」），
+  //    而当时给六门的修法是印词源号 —— 日语没跟上，因为它的解释物本来是读音。
+  // 🔴 **只在读音救不了场的地方印**，不是六门那样只要多词源就印：
+  //    日语的同形异源读者是按读音认的，`猫`（ねこ/ねこま）印上序号是加噪声不是加信息。
+  //    ⇒ 判据直接写"与上一组的标题是不是一模一样"，即读者眼睛看到的那件事本身
+  //      （`[[criteria-from-meaning-not-form]]`）。相邻两组都标，否则只标后一组时
+  //      读者会以为前一组不属于任何词源。
+  const etymOrder = new Map<string, number>();
+  for (const g of groups) {
+    if (g.etymKey && !etymOrder.has(g.etymKey)) etymOrder.set(g.etymKey, etymOrder.size + 1);
+  }
+  const titleOf = (g: { pos: string | null; kana: string | null }) =>
+    `${g.pos ?? ''}|${showKana && g.kana ? g.kana : ''}`;
+  const needEtym = groups.map(() => false);
+  for (let i = 1; i < groups.length; i += 1) {
+    if (titleOf(groups[i]) === titleOf(groups[i - 1])
+        && (groups[i].pos || (showKana && groups[i].kana))) {
+      if (groups[i].etymKey) needEtym[i] = true;
+      if (groups[i - 1].etymKey) needEtym[i - 1] = true;
+    }
+  }
   const bySense = new Map<number, JaExample[]>();
   const entryLevel: JaExample[] = [];
   for (const x of entry.examples) {
@@ -5104,6 +5135,10 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
           <h3>释义</h3>
           {groups.map((g, gi) => (
             <div key={gi} className="pos-group">
+              {/* 读音分不开这两组时才印词源号 —— 判据与 `needEtym` 的注释在一处。 */}
+              {needEtym[gi] && g.etymKey && (
+                <div className="etym-label">{etymLabel(etymOrder.get(g.etymKey)!)}</div>
+              )}
               {(g.pos || (showKana && g.kana)) && (
                 <div className="pos-group-label">
                   {g.pos && posLabel(g.pos, 'ja')}
@@ -5112,6 +5147,14 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
                   )}
                 </div>
               )}
+              {/* 🔴 词源正文（2026-09-20 接上）。这一层在 ja 上**整个缺席过**：
+                  `scripts/ingest_etymology.py` 2026-09-14 就有，而 ja 09-15 开建
+                  却没被加进它的语种名单 ⇒ 库里连 `etymology` 表都没有，
+                  而「阶段表全 ✅」对**没列进阶段表的层**结构性失明。
+                  ⚠️ `EtymologyNote` 自带「没抽过的版一个字都不说」的判据 ——
+                  日语只抽了英文版（日语版/中文版的 dump 里 `etymology_text` 是 0 条）。 */}
+              <EtymologyNote etymKey={g.senses[0]?.etymKey ?? null}
+                  texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
           <ol className="sense-list">
             {groupJaByUmbrella(g.senses).map((grp, ui) => (grp.umbrella ? (
               /* 伞形组：小标题 ＋ 底下的兄弟义项。`長谷川` 的 40 条河流走这条分支。 */

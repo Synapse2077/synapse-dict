@@ -185,7 +185,37 @@ def main():
         print("\n(干跑。确认后 --apply)")
         return
 
-    with dbtool.session("ja-pronunciation", expect={"#pronunciation": len(rows)}) as s:
+    # 🔴 **改成幂等的清空重建**（2026-09-19）。原来只 INSERT、`expect` 写的是总数，
+    #    重跑一次就翻倍 —— 而这一层**必须能重跑**：阶段 5d 补收 soft-redirect 词形之后
+    #    没人回头重跑它，源头有声调的 9 个词（`焙る`/`産む`/`ヰスキー`…）就一直没进库。
+    #    同 `build_inflection_layer` 的模式，**一个坑不修两遍**。
+    #    ⚠️ 这张表目前只有本阶段一个写入方（实测 src_ref 前缀只有 kk-ja/zh/zh-pitch 三种，
+    #       全部由 `scan()` 生成）。将来若有别的脚本往这儿写，**必须先在这里登记**，
+    #       否则下面这条 DELETE 会静默吃掉它（变形层那轮差点吃掉 `recover_pointer_senses`）。
+    # 🔴 **改动前的基数直接用 `dbtool.snapshot()`，不自己写一遍 COUNT。**
+    #    我第一版自己写了 `COUNT(ipa)`（只排 NULL），而闸的口径是
+    #    `TRIM(COALESCE(col,''))<>''`（非空**且非空串**）—— 声调行的 `ipa` 存的是空串，
+    #    两个口径差 18,460，`expect` 当场算成 −18,434、第二版又算成 +35。
+    #    **判据只许有一份**（`[[refactor-mindset-code-quality]]`）：闸自己的快照就是那一份。
+    before = dbtool.snapshot()
+    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    orphan = con.execute(
+        "SELECT COUNT(*) FROM pronunciation WHERE src_ref NOT LIKE 'kk-ja:%'"
+        " AND src_ref NOT LIKE 'zh:%' AND src_ref NOT LIKE 'zh-pitch:%'").fetchone()[0]
+    con.close()
+    assert not orphan, ("🔴 %d 行的 src_ref 不是本阶段生成的形状，清空重建会吃掉它们。"
+                        "查清是谁写的，登记进本处再跑。" % orphan)
+    b = lambda k: before.get(k, 0)
+    with dbtool.session("ja-pronunciation", expect={
+            # 行侧的数法必须与闸一致：**非空字符串**才算 ⇒ 真值判断，不是 `is not None`
+            "#pronunciation": len(rows) - b("#pronunciation"),
+            "pronunciation.ipa": sum(1 for r in rows if r[2]) - b("pronunciation.ipa"),
+            "pronunciation.notation": sum(1 for r in rows if r[3]) - b("pronunciation.notation"),
+            "pronunciation.pitch_mark": sum(1 for r in rows if r[4]) - b("pronunciation.pitch_mark"),
+            "pronunciation.pitch_pos": sum(1 for r in rows if r[5] is not None)
+                                       - b("pronunciation.pitch_pos"),
+            }, invalidates=[]) as s:
+        s.execute("DELETE FROM pronunciation")
         s.executemany(
             "INSERT INTO pronunciation (word_id, entry_id, ipa, notation, pitch_mark,"
             " pitch_pos, region, src, src_ref) VALUES (?,?,?,?,?,?,?,?,?)", rows)
