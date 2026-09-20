@@ -57,6 +57,21 @@ NAMES = {
     "pt": r"^portuguese$|portugais|portugees|portugiesisch|portoghese|portugués|português|portugalski|"
           r"portekizce|portugalšt|"
           r"португал|πορτογαλ|葡萄牙|포르투갈|ポルトガル",
+    # ⚠️ 2026-09-20：**同一个坑的第三次**（it 是第一次、pt/tr/cs 是第二次）——
+    #    开做韩语时表里压根没有 ko，`--lang ko` 直接 argparse 报错。
+    #    韩语的麻烦在于「朝鲜/韩」两套命名并存：中文版有「朝鮮語」也可能有「韓語」，
+    #    日语版用「朝鮮語」，两套都得认，只认一套就会整版漏掉。
+    # 🔴🔴 **同一天又栽了第四次**：上面那行我第一版写的是 `korejsk`，于是 cs 版的
+    #    `korejština`（660 senses）没匹配到，脚本报「cs 版没匹配到 ko 的本地名」。
+    #    捷克语的语言名后缀是 **`-ština`** 不是 `-ský` —— 而这条**本表里已经有答案**：
+    #    `pt` 那行写着 `portugalšt`、`it` 那行写着 `italšt`，我照抄了形状却抄错了词干。
+    #    ⇒ 逮到它的不是灵感，是**把脚本那句「没匹配到」当成待验证而不是结论**去查了一遍
+    #      （nl/de 查完确认是真没有韩语，cs 是我写错）。
+    #      🔴 「没匹配到」有两种成因 —— **源头真没有** 和 **我的模式错了** ——
+    #      脚本分不出这两种，所以每次看到这句警告都必须人工回索引页核一次。
+    "ko": r"^korean$|coréen|coreen|koreaans|koreanisch|coreano|koreański|korejsk|korejšt|korece|"
+          r"корейск|κορεατ|κορεάτ|"
+          r"韓語|韩语|朝鮮語|朝鲜语|韓国語|한국어",
 }
 
 ROW = re.compile(r'<a\s+href="([^"]+?)/index\.html"[^>]*>([^<]+?)\s*\((\d+)\s+senses\)', re.I)

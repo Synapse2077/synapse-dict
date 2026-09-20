@@ -21,7 +21,7 @@
  *     npx tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-etym.tsx
  *     npx tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-etym.tsx --mutate
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -100,8 +100,18 @@ const SHAPE: Record<Lang, Shape> = {
  */
 function registryGate(): string[] {
   const bad: string[] = [];
-  for (const d of ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja']) {
-    const f = new URL(`../../../data/db/synapse-dict-${d}.sqlite`, import.meta.url).pathname;
+  // 🔴🔴 **名单从磁盘推，不从我的记忆推 —— 而这一行我第一版写错了。**
+  //    2026-09-20 我写下「名单从磁盘推」这句话的同一天，把语种列表**硬编码成了七个**
+  //    （`['en','es','it','fr','pt','de','ja']`）。开始做韩语时才发现：
+  //    ko 建完库、这道闸**根本不会去看它** —— 正是它要防的那个病，原样犯在它自己身上。
+  //    ⇒ 扫 `data/db/` 目录，有几个成品库就检查几门。加语种不需要改这里。
+  const dbDir = new URL('../../../data/db/', import.meta.url).pathname;
+  const langs = readdirSync(dbDir)
+    .map((f) => /^synapse-dict-([a-z]{2})\.sqlite$/.exec(f)?.[1])
+    .filter((x): x is string => !!x)
+    .sort();
+  for (const d of langs) {
+    const f = `${dbDir}synapse-dict-${d}.sqlite`;
     if (!existsSync(f)) continue;
     const db = new DatabaseSync(f, { readOnly: true });
     const has = (db.prepare(
