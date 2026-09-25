@@ -46,15 +46,28 @@ def check_brief():
             return
         want(cid, name, cond, detail)
 
-    # ── M1/M2：两条**结构性**的拦截，它们是空库上唯一跑得到的写库路径 ──
+    # ── M1/M2：两条**结构性**的拦截 ──
     # 🔴 M1 的意义：库被误删 / paths.DB 写错时，静默从零开始写比报错危险得多
     #    （`[[backup-retention]]` 咬过六次的都是「删数据的默认值不够保守」这个形状）。
+    #
+    # 🔴🔴 **必须把 DB 指到一个不存在的路径上测**，不能靠"现在库恰好还没建"。
+    #    2026-09-20 建完库当天就栽了：这条原来直接 `session("fix-something")`，
+    #    库不存在时它测的是拦截、**库一旦存在它就变成了一次真实写库**
+    #    —— 当场打了个备份文件出来，而断言"没拦住"反而红了。
+    #    一条**测试的含义随环境改变**的检查，比没有检查更坏：它在最该守的那天
+    #    （库刚建好）自己调转枪口。⇒ 造一个确定不存在的路径，让它永远测同一件事。
+    _real_db = dbtool.DB
+    dbtool.DB = _real_db.with_name("__definitely_not_a_db__.sqlite")
     try:
-        with dbtool.session("fix-something", expect={}):
-            pass
-        want("M1", "空库上的非建库写入", False, "**没拦住**")
-    except SystemExit as e:
-        want("M1", "空库上的非建库写入", "不是建库步骤" in str(e), str(e)[:60])
+        try:
+            with dbtool.session("fix-something", expect={}, verbose=False):
+                pass
+            want("M1", "库不存在时的非建库写入", False, "**没拦住**")
+        except SystemExit as e:
+            want("M1", "库不存在时的非建库写入", "不是建库步骤" in str(e), str(e)[:60])
+    finally:
+        dbtool.DB = _real_db
+    want("M1b", "测完把 dbtool.DB 还原了", dbtool.DB == _real_db)
 
     # 🔴 M2 的意义：同一个形状发生过三次（pt 变形层 46.2% 空白页／ja 读音层
     #    99.90%→39.8%／ja 中文覆盖 98.66%→70.77%），三次都写了教训、三次都没拦住下一次。
@@ -106,12 +119,48 @@ def check_brief():
     # ── M5：汉字判据不许只查基本区（元素字/鸟名/鱼名在扩展区，词典里大量出现）──
     want("M5a", "扩展 F 区 𬭊（化学元素字）", dbtool.has_han_char("𬭊"))
     want("M5b", "扩展 A 区 䴙（鸟名）", dbtool.has_han_char("䴙"))
+    # 🔴 2026-09-20 加：韩语汉字音里真实出现 `𰜩`（U+30729，扩展 G）。
+    #    拷过来的区间表停在 U+2FA1F ⇒ 它被判成"不是汉字"。
+    #    **扩展区还在往后加**，一份写死的区间表必然追不上 —— 这两条钉住上界。
+    want("M5c", "扩展 G 区 𰜩（U+30729，韩语汉字音里真实出现）", dbtool.has_han_char("𰜩"))
+    want("M5d", "扩展 H 区 U+31350", dbtool.has_han_char(chr(0x31350)))
+    # 反向：不是汉字的东西不许被收进来（区间放宽不能放到谚文/假名头上）
+    want("M5e", "谚文不算汉字", not dbtool.has_han_char("가"))
+    want("M5f", "假名不算汉字", not dbtool.has_han_char("あ"))
 
     # ── M6：`has_han` 这个名字必须**不存在** ──
     # 🔴 从另外七门拷来的脚本必然写着 `dbtool.has_han(...)`。留着它＝静默给错答案；
     #    删掉它＝`AttributeError` 当场炸。`[[prefer-reversible-designs]]`
     want("M6", "`has_han` 这个名字不存在", not hasattr(dbtool, "has_han"),
          "**它存在了** —— 拷过来的脚本会静默拿到错答案")
+
+    # ── M7：闸门自己的清单里不许有死条目（列 **和** 表两半都查）──
+    # 🔴🔴 这条是 2026-09-20 建完库当天加的：`TRACK_TABLES` 里躺着
+    #    `pronunciation_entry`，而 ko 的 schema 不建它。回头一查，**ja/en/de/pt
+    #    四门的 TRACK_TABLES 里都列着它、库里都没有**（只有 it 真有，282,060 行）。
+    #    ja 那次只修了「列」那一半 ⇒ **同一个洞有两半时，修一半比不修更危险**，
+    #    它会让人以为这类问题已经解决了。
+    if dbtool.DB.exists():
+        import sqlite3
+        _c = sqlite3.connect("file:%s?mode=ro" % dbtool.DB, uri=True)
+        try:
+            dead = dbtool._track_audit(_c, verbose=False)
+            want("M7", "闸门清单（TRACK + TRACK_TABLES）里没有死条目",
+                 not dead, "死条目：%s" % dead)
+            # 闸自证：审计函数得真的**认得出**死条目，而不是永远返回空列表
+            dbtool.TRACK_TABLES.append("__nonexistent_table__")
+            dbtool.TRACK.append("__nonexistent_col__")
+            try:
+                probe = dbtool._track_audit(_c, verbose=False)
+                want("M7b", "审计函数认得出**表**的死条目",
+                     "#__nonexistent_table__" in probe, "它没认出来 —— 这道闸是死的")
+                want("M7c", "审计函数认得出**列**的死条目",
+                     "__nonexistent_col__" in probe, "它没认出来 —— 这道闸是死的")
+            finally:
+                dbtool.TRACK_TABLES.remove("__nonexistent_table__")
+                dbtool.TRACK.remove("__nonexistent_col__")
+        finally:
+            _c.close()
 
     return red
 

@@ -59,8 +59,12 @@ async def ask_deepseek(cl, e, text, think):
     return d["choices"][0]["message"]["content"], d.get("usage") or {}
 
 
-async def ask_doubao(cl, e, text, think):
-    model = e["DOUBAO_MODEL_ONLINE_LITE"].strip()
+async def ask_doubao(cl, e, text, think, lite=False):
+    # 🔴 2026-09-21 修：这里一直发的是 `DOUBAO_MODEL_ONLINE_LITE`，
+    #    而用户 2026-08-01 定的规矩原文是「同时咨询豆包 **pro** 和 deepseek v4-pro」。
+    #    ⇒ 脚本与规矩漂开了，而两边都没人报错：**咨询照常返回，只是档次不对**。
+    #    咨询是「商量规则」，正是该用 pro 的那一类；lite 留成显式选项。
+    model = e["DOUBAO_MODEL_ONLINE_LITE" if lite else "DOUBAO_SEED_2_1_PRO"].strip()
     body = {"model": model,
             "messages": [{"role": "system", "content": SYS},
                          {"role": "user", "content": text}],
@@ -82,6 +86,8 @@ async def main():
     ap.add_argument("--no-think", action="store_true")
     ap.add_argument("--only", choices=("v4pro", "doubao"), default="",
                     help="只问一家（默认两家并行）")
+    ap.add_argument("--lite", action="store_true",
+                    help="豆包走 lite 端点（默认 pro —— 商量规则用 pro 是用户定的）")
     ap.add_argument("--big", action="store_true",
                     help="材料超过 %d KB 时必须显式加上，见文件头「豆包的边界」" % MAX_KB)
     a = ap.parse_args()
@@ -105,15 +111,25 @@ async def main():
         # ⚠️ 协程要**按需创建**：先建两个再丢掉一个，会留下 "never awaited" 警告，
         #    而那条警告长得跟"请求失败了"很像。
         makers = {"v4pro": lambda: ask_deepseek(cl, e, text, think),
-                  "doubao": lambda: ask_doubao(cl, e, text, think)}
+                  "doubao": lambda: ask_doubao(cl, e, text, think, a.lite)}
         names = [a.only] if a.only else list(makers)
         res = await asyncio.gather(*(makers[n]() for n in names),
                                    return_exceptions=True)
 
+    # 🔴 建目录要在**写之前**：2026-09-24 两家都答完了、写盘时 `FileNotFoundError`，
+    #    一次咨询的钱白花。失败点在最后一步，而最后一步之前的东西都已经付过钱了。
+    out.mkdir(parents=True, exist_ok=True)
     for name, r in zip(names, res):
         p = out / ("%s.%s.md" % (doc.stem, name))
         if isinstance(r, Exception):
-            print("🔴 %s 失败：%s" % (name, r), file=sys.stderr)
+            # 🔴 2026-09-24：原来写的是 `%s % r`，而**超时类异常的 `str()` 是空串** ——
+            #    ko 那轮豆包跑满 1200s 挂掉，打出来就是「🔴 doubao 失败：」后面什么都没有，
+            #    我拿不到任何可诊断的东西，连"是超时还是 4xx"都分不出。
+            #    ⇒ 打**类型名 ＋ repr**，空 `str()` 的异常也说得出自己是谁。
+            #    ⚠️ 同一形状：`[[residual-bucket-is-not-evidence]]` 的反面 ——
+            #      **"什么都没打印"被我读成了"没什么可说的"**，而它其实是信息丢了。
+            print("🔴 %s 失败：%s: %r（用时 %.0fs）"
+                  % (name, type(r).__name__, r, time.time() - t0), file=sys.stderr)
             continue
         content, usage = r
         p.write_text(content, encoding="utf-8")

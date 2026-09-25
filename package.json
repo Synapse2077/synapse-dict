@@ -21,7 +21,9 @@
     "gate:tags": "tsx scripts/contract/tag_coverage_all.ts",
     "gate:en-chips": "tsx scripts/contract/en_sense_chips.ts",
     "gate:service-api": "tsx scripts/contract/service_api.ts",
-    "gate:ja-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-ja.tsx"
+    "gate:ja-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-ja.tsx",
+    "gate:ko-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-ko.tsx",
+    "gate:ko-labels": "python3 ko/tests/test_display_labels.py"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -93,8 +93,36 @@ TABLE = "dict"
 TRACK = [
     # ── 此刻能确定的通用列。**每建出一层，当天往下加它的列。** ──
     'pos', 'level', 'freq_zipf',
+    # ── 韩语一等字段（阶段 1 建 entry 层时加进来）──
+    # 汉字表记。阶段 1 从英文版填（forms 里 tags 含 hanja）
+    'entry.hanja', 'entry.hanja_src',
+    # 活用类（阶段 2b 补）。🔴 这两列是**翻案**来的：阶段 0 判断「英文版 0 条」
+    #   而那个 0 是查错了字段的结果 —— 源头的标签名是 `table-tags`，
+    #   `irregular` 是它的**值**。实测 9,379 条，覆盖用言条目的 88.7%。
+    #   值存**源头原词**（`irregular`/`no-table-tags`、`vowel-stem`/`consonant-stem`），
+    #   不改写成布尔：`no-table-tags` 读成"规则"是推断不是源头的话。
+    # 🔴🔴 2026-09-24 拆成两列。上面那段注释「值存源头原词」是**对的**，
+    #    错的是**列名**：`conj_class` 承诺了「活用类」而存的是 `table-tags`，
+    #    于是计划表和账的闸拿它当活用类覆盖率数了一轮（K8 那笔账因此比记的小）。
+    #    ⇒ 源头原词改名 `conj_table_tag`（它是什么叫什么），
+    #      `conj_class` 改存**真的活用类**（여불규칙/ㅂ불규칙/…，见 `conj_class.py`）。
+    #    ⚠️ 与 K10 同一个签名：**数的是"有值的行"不是"有信息的行"**。本项目第二次。
+    'entry.conj_table_tag', 'entry.conj_class', 'entry.conj_class_src',
+    'entry.stem_class',
+    # 四套罗马字。**阶段 3 才填**（从韩文版的 sounds，四套成套）——
+    # 🔴 阶段 1 有意不填：英文版只给一套（实测与 RR 一致 92.4%），
+    #    先填一套再被阶段 3 覆盖就是**两个写入方**，ja 的 `inflection` 正是这么栽的
+    #    （`fixes/recover_pointer_senses.py` 和重建脚本各写各的，最后建了 OWNERS 闸）。
+    #    **一个字段一个写入方**；现在列进来，它从 0 变成非 0 时闸会说话。
+    'entry.roman_rr', 'entry.roman_rr_translit', 'entry.roman_mr', 'entry.roman_yale',
+    'entry.roman_src',
     # 关系层与变形层的关键列
     'sense_relation.target', 'inflection.base_id', 'inflection.label_zh',
+    # 关系边指向库里哪一页（阶段 9 加）。🔴 与 `target` 是**两件事**：
+    #   `target` ＝ 源头原文（`경마(競馬)`、`^팔도`），展示用，一个字不许动；
+    #   `target_norm` ＝ 解析后的词头（`경마`、`팔도`），**只管链接落点**，查不到就 NULL。
+    #   建出来的当天列进来 —— 它被清空（全库死链）或被某一步重写时闸才会说话。
+    'sense_relation.target_norm',
     # 证据层→出版层的认领。🔴 ja 拖到阶段 1e 才回填上这一列（此前 ja/zh 两版全 NULL），
     #   ko 从建库那一步起就该是非空的 —— 列在这儿，它被清空或改动时闸会响。
     'sense_src.sense_id',
@@ -110,8 +138,24 @@ TRACK_TABLES = [
                 #    **阶段表对没列进去的层结构性失明。**
                 'etymology', 'entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag',
                 'sense_relation', 'inflection',
-                'pronunciation', 'pronunciation_entry', 'example', 'example_gloss',
-                'collocation', 'collocation_gloss', 'audio']
+                'pronunciation', 'example', 'example_gloss',
+                'collocation', 'collocation_gloss', 'audio',
+                # 汉字音层（谚文音节 → 一组汉字）。2026-09-20 阶段 1 途中补建 ——
+                # 建出来的当天就列进来，别等项目做完才数（ja 的 sense_tag 空了整个项目）。
+                'hanja_reading',
+                # 🔴 **`pronunciation_entry` 有意不在这张表里**（2026-09-20 实测后删的）。
+                #    拷过来时它在，而 ko 的 schema 不建它 ⇒ 它会变成第五个死条目
+                #    （ja/en/de/pt 四门的 TRACK_TABLES 里都列着它、库里都没有，
+                #     只有 it 真的有这张表，282,060 行）。
+                #    不建的判据是**实测**不是省事：需要「一个读音属于部分而非全部 entry」的
+                #    词形，英文版 429 个（占 0.75%）、韩文版 54 个。
+                #    而 `UNIQUE(word_id, entry_id, ipa, notation)` 的主键里**含 entry_id**
+                #    ⇒ 这 429 个复制成两三行就装下了，冗余约 1,000 行。
+                #    为 1,000 行的冗余去养一张多对多关联表不划算（对照：es 只有 14 个词形
+                #    符合条件，同样不建；it 建了 282,060 行，它的规模是另一回事）。
+                #    🔴 什么会推翻它：若某一层做完后实测「复制出来的读音行」超过
+                #      `pronunciation` 总行数的 5%，说明我把规模估小了，那时再建关联表。
+                ]
 
 
 def _cols(conn, table=None):
@@ -128,6 +172,15 @@ def _track_audit(conn, verbose=True):
     而 `snapshot` 只在 `dict` 上找。它们静静躺了整个项目，一次都没守过。
 
     ⇒ 这个函数把死条目报出来。**库已经建完之后还找不到的，就是死条目。**
+
+    ═══ 🔴🔴 2026-09-20：ja 那次只修了**列**那一半，`TRACK_TABLES` 没人审计 ═══
+    开 ko 建完库当天就撞见：`TRACK_TABLES` 里列着 `pronunciation_entry`，
+    而我的 schema 没建它 —— `snapshot()` 照样静默跳过，快照里连个空位都没有。
+    回头查另七门：**这张表只有 `it` 真实存在（282,060 行），
+    而 ja / en / de / pt 四门的 `TRACK_TABLES` 里都列着它、库里都没有** ——
+    四个死条目躺着，和当初那 19 个列一模一样的形状。
+    ⇒ 本函数同时审计 `TRACK` 和 `TRACK_TABLES`。
+      **同一个洞有两半时，修一半比不修更危险** —— 它会让人以为这类问题已经解决了。
     """
     tabs = _tables(conn)
     dead = []
@@ -135,13 +188,19 @@ def _track_audit(conn, verbose=True):
         tbl, col = c.split(".", 1) if "." in c else (TABLE, c)
         if tbl not in tabs or col not in _cols(conn, tbl):
             dead.append(c)
+    dead_tabs = [t for t in TRACK_TABLES if t not in tabs]
     if dead and verbose:
-        print("\n⚠️ TRACK 里有 %d 条在库里找不到（写错名字？还是从别的语种抄来的残留？）："
+        print("\n⚠️ TRACK 里有 %d 条**列**在库里找不到（写错名字？还是从别的语种抄来的残留？）："
               % len(dead))
         print("     %s" % "、".join(dead))
         print("   🔴 找不到的列**闸门守不住** —— 它会被静默跳过，"
               "而清单看起来仍然覆盖着它。")
-    return dead
+    if dead_tabs and verbose:
+        print("\n⚠️ TRACK_TABLES 里有 %d 张**表**在库里找不到：" % len(dead_tabs))
+        print("     %s" % "、".join(dead_tabs))
+        print("   🔴 同上 —— 行数闸对它完全失明。要么建出来，要么从清单里删掉，"
+              "**不许让它躺着**。")
+    return dead + ["#" + t for t in dead_tabs]
 
 
 def _tables(conn):
@@ -153,11 +212,22 @@ def _tables(conn):
 #    `𬭊`/`𬭶`/`𫟼`/`𬭛` 是**化学元素字**（扩展 F 区，U+2A700+），
 #    `䳍`（鹬鸵）/`䴙䴘` 在扩展 A 区（U+3400+），`𩽾𩾌`（鮟鱇）在扩展 B 区（U+20000+）。
 #    词典里恰恰**大量出现**这类字（元素名、鸟名、鱼名），基本区判据必然误伤。
+#
+# 🔴🔴 2026-09-20 **同一个坑的第二次**：从 ja 拷过来的区间表停在 U+2FA1F，
+#    而韩语汉字音里出现了 `𰜩`（U+30729，**扩展 G 区**）—— `has_han_char('𰜩')` 返回
+#    False，于是它既进不了汉字判据，也会让 `is_chinese_text` 在这类字上判错。
+#    当初 de 那轮补的是「别只查基本区」（元素字/鸟名在扩展 A–F），
+#    **这次是同一条教训的下一段**：扩展区还在往后加（G 是 Unicode 13、
+#    H 是 15、I 是 15.1），一份 2026 年之前写死的区间表必然追不上。
+#    ⇒ 收**整个 CJK 表意文字空间**，宁可宽一格也别漏字：漏一个字是"把真汉字
+#      判成不是汉字"，而多收的码位本来就没有别的东西住在那儿。
 _HAN_RANGES = (
     (0x3400, 0x4DBF),      # 扩展 A
     (0x4E00, 0x9FFF),      # 基本区
     (0xF900, 0xFAFF),      # 兼容表意
-    (0x20000, 0x2FA1F),    # 扩展 B–F + 兼容补充
+    (0x20000, 0x2FA1F),    # 扩展 B–F ＋ 兼容补充
+    (0x2EBF0, 0x2EE5F),    # 扩展 I（Unicode 15.1）
+    (0x30000, 0x323AF),    # 扩展 G（U+30000–3134F）＋ 扩展 H（U+31350–323AF）
 )
 
 
@@ -842,6 +912,15 @@ def _ledger_gate(verbose=True):
     """
     p = HERE / "tests" / "test_plan_ledger.py"
     if not p.exists():
+        # 🔴🔴 2026-09-21 改：原来这里是 `return` —— **静默**。
+        #    ja 就是这么栽的：这个文件从阶段 -2 缺到阶段 4b，三道挂钩每次写库
+        #    都什么都没做，而日志照样打「■ 不变量核对通过 ✓」，
+        #    我盯着那行绿字做完了九个阶段，**没注意到「账的闸通过 ✓」从来没出现过**。
+        #    ⇒ 缺席必须出声。一道不在场的闸和一道全绿的闸，日志上长得不能一样。
+        print("\n⚠️ 账的闸**不存在**（%s）—— 计划表与库对不对得上，现在没有任何东西在查。"
+              % p.relative_to(paths.ROOT), file=sys.stderr)
+        print("   这不是「通过」，是「没查」。见 `docs/KO_PLAN.md` 欠账 K9。",
+              file=sys.stderr)
         return
     try:
         from tests.test_plan_ledger import check_brief as _lb

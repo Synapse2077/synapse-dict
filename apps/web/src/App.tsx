@@ -15,6 +15,8 @@ import {
   JA_KANJI_READING_KIND, JA_KANJI_READING_SUBKIND, JA_KANJI_READING_ORDER,
   JA_REGISTER_LABELS, JA_REGION_LABELS, JA_GRAMMAR_LABELS, JA_USAGE_LABELS,
   jaVclassLabel, mostSpecificTopics,
+  KO_POS_LABELS, KO_RELATION_LABELS, KO_ANNOTATION_KINDS,
+  KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE,
 } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
@@ -648,7 +650,8 @@ type JaEntry = {
 //    `entry as JaEntry` 报「两个类型没有足够重叠」—— 这次 tsc 逮到了；
 //    但如果新类型恰好与某个旧类型形状接近，它会**静默通过**并在运行时读到 undefined。
 //    ⇒ `scripts/contract/service_api.ts` 那道闸盯的是服务层，这里盯的是展示层。
-type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry | DeEntry | JaEntry;
+type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry | DeEntry | JaEntry
+  | KoEntry;
 
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
@@ -683,6 +686,14 @@ export const EXAMPLES: Record<string, string[]> = {
   pt: ['olá', 'falar', 'livro', 'bonito', 'pão', 'saudade'],
   de: ['Haus', 'gehen', 'ankommen', 'gut', 'Frau', 'schön'],
   ja: ['猫', '桜', '食べる', '痛い', '勉強', '時間'],
+  // 韩语六个，各带一类**本语种特有**的字段（照 ja 那行的口径挑，逐个回库验过）：
+  //   사랑  跨三版背书的读音 sʰa̠ɾa̠ŋ、12 条例句、两个词条（第二个汉字表记 舍廊）
+  //   읽다  **发音形谚文** `익따`（读作"익따"不读"읽다"）—— 拉丁七门全无这一层
+  //   걷다  ㄷ불규칙 ＋ **169 个活用形**（全库最多的那一档），也是 K17 同形异义的样本
+  //   아름답다 ㅂ불규칙形容词，活用表来自**规则生成**（`src='rule'`），页面要标出来
+  //   한국  `entry.hanja` 韓國 ＋ RR 带隔音符 `han'guk`
+  //   꽃    `counter → 송이`（配用量词，ko 特有的关系类）＋ 34 条 derived
+  ko: ['사랑', '읽다', '걷다', '아름답다', '한국', '꽃'],
 };
 
 // --- English parsing helpers ---
@@ -741,10 +752,18 @@ function parseTags(raw: string | null): string[] {
 //        **助词**（は/が/を/に）—— **同一个码，两门语言不是一个东西**。
 //        改全局表会把意语一起改坏 ⇒ 必须是**按语种的覆盖层**，不是往全局表加。
 // ⚠️ `lang` 省略时行为与从前**完全一致**（只查全局表），所以六门的调用点不用动。
+// 🔴 `over?.[p] || …` 用的是 `||` 不是 `??`，**这是有意的**：ko 把 `unknown`
+//    覆盖成 `''`（57% 的词条源头没给词性，印「未标注」徽标只剩噪声），
+//    而 `''` 要继续往下落到全局表的「未标注」会毁掉那个决定。
+//    ⇒ 下面对 ko 单独处理：本层给出 `''` 就是**有意不印**，直接返回空。
 function posLabel(raw: string | null, lang?: string): string {
   if (!raw) return '';
-  const over = lang === 'ja' ? JA_POS_LABELS : null;
-  return raw.split('/').map((p) => over?.[p] || POS_LABELS[p] || p).join('/');
+  const over = lang === 'ja' ? JA_POS_LABELS : lang === 'ko' ? KO_POS_LABELS : null;
+  return raw.split('/').map((p) => {
+    const o = over?.[p];
+    if (o !== undefined) return o;      // '' ＝ 有意不印，不再往下落
+    return POS_LABELS[p] || p;
+  }).join('/');
 }
 
 // 真人录音。音频托管在 Wikimedia Commons，我们只存 URL、在线播，**不下载字节**。
@@ -1748,6 +1767,10 @@ export default function App() {
           <JapaneseEntryView entry={entry as JaEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
+        {entry && entry.lang === 'ko' && (
+          <KoreanEntryView entry={entry as KoEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+        )}
+
         {/* 🔴 **兜底只给 es，不再是「其余全部」。**
             2026-09-16 之前这一行写的是 `lang !== 'en' && !== 'it' && …` ——
             **任何未接线的新语种都会落进西语视图**，而且看上去还能用：
@@ -1755,7 +1778,7 @@ export default function App() {
             日语特有的假名/声调/字种等级则**静默消失**。
             `[[it-display-layer-stage8]]`：**兜底越体面，缺陷越难发现**。
             ⇒ 改成白名单：认识的走自己的视图，不认识的**明说没接**。 */}
-        {entry && !['en', 'it', 'fr', 'pt', 'de', 'ja'].includes(entry.lang) && (
+        {entry && !['en', 'it', 'fr', 'pt', 'de', 'ja', 'ko'].includes(entry.lang) && (
           entry.lang === 'es'
             ? <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
             : (
@@ -5315,6 +5338,399 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+    </article>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 韩语展示层。2026-09-25（阶段 9b）。
+//
+// ⚠️ 下面这组类型是 `packages/dict-core/src/korean.ts` 的**手抄副本** ——
+//    与 `JaSense` 那条注释同一笔债。加字段时两处都要改；
+//    **手抄的类型没有闸，靠 tsc 兜住**。
+//
+// ═══ 🔴 韩语与前七门不一样、照抄会出错的五处 ═══
+// ① **关系有两个字段**：`target` 是源头原文（`경마(競馬)`、`^팔도`），照原样显示；
+//    `targetNorm` 才是链接落点。拿 `target` 当链接实测 **34.6% 点下去是空白页**。
+// ② **`hanja_spelling` / `alt_hanja` 印文本不印链接** —— 目标是 `換面相訟` 这种
+//    多字汉字串，我们没有这种词头。那不是缺陷，**汉字表记是注不是词**。
+//    判据只有一份，在 `KO_ANNOTATION_KINDS`（`[[dict-labels-package]]`）。
+// ③ **音标要按 `notation` 加定界符**：韩语 98.6% 是**窄式**（带音变的实际音值），
+//    一律印 `/…/` 是错的；`bare` ＝源头没说记法，**不许替源头猜**，裸印。
+// ④ **发音形谚文是 ko 独有的一层**（`읽다` 实际读作 `익따`）——
+//    比 IPA 对中文读者直观得多，不能因为「七门都没有」就不印。
+// ⑤ **活用表不截断**。`걷다` 有 169 个形、5,932 个词元有 100 个以上（近一半）——
+//    这是 `DISPLAY_EXTREMES` §2.4 说的「不是长尾，是常态」。
+//    ⇒ 用 `<details>` 收起来并**写明共多少个**，不 `slice`：
+//      用户 2026-09-10 定过「不要擅自折叠信息」，§四.1 的原话是
+//      **「折叠可以，死胡同不行」**；`<details>` 能展开，`slice` 是死胡同。
+// ════════════════════════════════════════════════════════════════════════════
+type KoRelation = {
+  kind: string;
+  /** 源头原文，**显示用**（含汉字括号注）。不要拿它当链接。 */
+  target: string;
+  /** 链接落点（解析后的词头），查不到是 null ⇒ 印成纯文本。 */
+  targetNorm: string | null;
+  zh: string | null;
+};
+type KoRelationGroup = { kind: string; items: KoRelation[] };
+type KoSense = {
+  id: number; etymNo: string | null; pos: string | null;
+  zh: string | null; en: string | null; ko: string | null;
+  zhFromModel: boolean;
+  relations: KoRelationGroup[];
+};
+type KoExample = {
+  senseId: number | null; text: string;
+  zh: string | null; en: string | null; ref: string | null; roman: string | null;
+};
+type KoEntryRow = {
+  hanja: string | null; pos: string | null; etymNo: string | null;
+  roman: string | null; conjClass: string | null; conjClassSrc: string | null;
+};
+type KoEntry = {
+  lang: 'ko'; id: number; word: string; isLemma: boolean; roman: string | null;
+  entries: KoEntryRow[];
+  pronunciations: Array<{
+    ipa: string; notation: 'narrow' | 'phonemic' | 'bare';
+    hangeul: string | null; region: string | null; src: string; endorsed: boolean;
+  }>;
+  senses: KoSense[];
+  relations: KoRelationGroup[];
+  examples: KoExample[];
+  inflections: Array<{ label: string; forms: string[]; generated: boolean }>;
+  baseOf: Array<{ base: string; labels: string[]; ok: boolean }>;
+  hanjaReadings: Array<{ hanja: string; eumhun: string | null; glossEn: string | null }>;
+  etymology: Array<{ edition: string; etymNo: string | null; text: string }>;
+  audio: Array<{ file: string; url: string | null; kind: string; region: string | null }>;
+};
+
+/**
+ * 一排关系目标。🔴 **可点与不可点的判据有两条，缺一条都会造出空白页或假链接：**
+ *   ① `KO_ANNOTATION_KINDS`：汉字表记那一族是**注**，从来不是链接；
+ *   ② `targetNorm == null`：解析不到词头（源头引用了我们没收的词）⇒ 纯文本。
+ * ⚠️ 显示的始终是 `target` 原文 —— `부인(婦人)` 与 `부인(否認)` 是两个词，
+ *    把括号里的汉字抹掉读者就分不清源头指的是哪一个（K20）。
+ */
+function KoRelationRow({ group, onWord }: {
+  group: KoRelationGroup; onWord: (w: string) => void;
+}) {
+  const annotation = KO_ANNOTATION_KINDS.has(group.kind);
+  return (
+    <div className="rel-row">
+      <span className="rel-kind">
+        {KO_RELATION_LABELS[group.kind] ?? relTagLabel(group.kind)}
+      </span>
+      {group.items.map((t, i) => (
+        <span key={`${t.target}-${i}`} className="rel-item">
+          {!annotation && t.targetNorm ? (
+            <a className="rel-link" href={`#${encodeURIComponent(t.targetNorm)}`}
+              title={t.zh ?? undefined}
+              onClick={(e) => { e.preventDefault(); onWord(t.targetNorm!); }}>{t.target}</a>
+          ) : (
+            <span className="rel-plain" title={t.zh ?? undefined}>{t.target}</span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** 一行读音。`notation` 决定定界符；发音形谚文与 IPA 并排（ko 独有的一层）。 */
+function KoReadingRow({ p, speak }: {
+  p: KoEntry['pronunciations'][number]; speak: (w: string) => void;
+}) {
+  return (
+    <div className="phonetic-row ko-reading">
+      {/* 🔴 朗读按钮挂在**发音形**上，不挂在词头上 —— 与 ja 同一条理由：
+          词头是「它长什么样」，读音是「它怎么念」。而韩语多一层：
+          `읽다` 的实际读音是 `익따`，读词头等于念错。 */}
+      <button className="phonetic-btn" type="button"
+        title={`播放发音（合成音）：${p.hangeul ?? ''}`}
+        onClick={() => speak(p.hangeul ?? '')}
+        disabled={!p.hangeul}>
+        <span className="phonetic-value">{koIpaWrap(p.ipa, p.notation)}</span>
+        {p.hangeul && <span className="ko-hangeul-phonetic">{p.hangeul}</span>}
+        <SpeakerIcon />
+      </button>
+      {p.region && <span className="badge region">{p.region}</span>}
+      {/* 🔴 `g2p` 必须如实说明是**我们按 표준발음법 算的**，不是源头给的。
+          `[[dont-say-source-lacks-what-we-skipped]]`：我们算的与源头给的
+          要在结构上分开，展示层不许抹平。 */}
+      {KO_PRON_SRC_NOTE[p.src] && (
+        <span className="badge src-note" title="这条读音不是源头给的">
+          {KO_PRON_SRC_NOTE[p.src]}
+        </span>
+      )}
+      {/* ⭐ 跨版背书：两个以上维基版本写了同一个读音。只标有、不标无。 */}
+      {p.endorsed && (
+        <span className="badge endorsed" title={`多版一致：${p.src}`}>多版一致</span>
+      )}
+    </div>
+  );
+}
+
+export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
+  entry: KoEntry; speakLocale: string; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
+}) {
+  // 按「词性 ＋ 词源号」断组 —— 与前七门同一条规矩：词性相同**且**词源相同才合并，
+  // 否则同形异源被并进一组（`사랑` 的两个词条，第二个的汉字表记是 舍廊）。
+  const groups: Array<{ key: string; pos: string | null; etymNo: string | null;
+    senses: KoSense[] }> = [];
+  for (const s of entry.senses) {
+    const key = `${s.pos ?? ''}|${s.etymNo ?? ''}`;
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.senses.push(s);
+    else groups.push({ key, pos: s.pos, etymNo: s.etymNo ?? null, senses: [s] });
+  }
+  // 🔴 只在**相邻两组标题一模一样**时才印词源号 —— 与 ja 那段同一条判据：
+  //    判据写的是「读者眼睛看到的那件事」（这两块凭什么分开），不是「有多个词源」。
+  const etymSeq = new Map<string, number>();
+  for (const g of groups) {
+    if (g.etymNo && !etymSeq.has(g.etymNo)) etymSeq.set(g.etymNo, etymSeq.size + 1);
+  }
+  const needEtym = groups.map(() => false);
+  for (let i = 1; i < groups.length; i += 1) {
+    if (groups[i].pos === groups[i - 1].pos) {
+      if (groups[i].etymNo) needEtym[i] = true;
+      if (groups[i - 1].etymNo) needEtym[i - 1] = true;
+    }
+  }
+
+  const bySense = new Map<number, KoExample[]>();
+  const entryLevel: KoExample[] = [];
+  for (const x of entry.examples) {
+    if (x.senseId === null) entryLevel.push(x);
+    else {
+      const a = bySense.get(x.senseId);
+      if (a) a.push(x); else bySense.set(x.senseId, [x]);
+    }
+  }
+
+  // 🔴 同一页里同一个 (类别, 目标) 只印一次 —— `contract-check-layout` 的
+  //    「没有一个目标被印两遍」是七门都满足的契约。ko 上尤其要：
+  //    词级关系占 86%（`sense_id IS NULL`），与义项级的很容易重。
+  // ⚠️ 只在**渲染**时去重，不动数据：「哪条义项有这个近义词」是源头给的事实。
+  const shown = new Set<string>();
+  const dedupe = (gs: KoRelationGroup[]) => gs
+    .map((g) => ({
+      kind: g.kind,
+      items: g.items.filter((t) => {
+        // 🔴 去重键用 **`targetNorm` 优先**，不是 `target`。
+        //    `한국` 上第一版就撞到了：义项级印 `^북한`、词级印 `북한(北韓)`，
+        //    两个字符串不同 ⇒ 去重器放行 ⇒ **同一个词在一页上印了两遍**。
+        //    `targetNorm` 才是「这两条指的是不是同一个词」的答案。
+        const k = `${g.kind} | ${t.targetNorm ?? t.target}`;
+        if (shown.has(k)) return false;
+        shown.add(k);
+        return true;
+      }),
+    }))
+    .filter((g) => g.items.length > 0);
+
+  const renderExamples = (xs: KoExample[]) => (
+    <ul className="example-list">
+      {xs.map((x, i) => (
+        <li className="example-item" key={i}>
+          <div className="example-text" lang="ko">{x.text}</div>
+          {x.roman && <div className="example-roman">{x.roman}</div>}
+          {(x.zh || x.en) && <div className="example-zh">{x.zh ?? x.en}</div>}
+          {x.ref && <div className="example-ref">{x.ref}</div>}
+        </li>
+      ))}
+    </ul>
+  );
+
+  const renderSense = (s: KoSense) => (
+    <li key={s.id} className="sense-item">
+      {/* 三语：中文 → 英文 → 韩语原文（`[[gloss-three-languages]]`）。
+          ⚠️ 没有中文时英文顶上来当主释义，不缩成带徽标的补充行 ——
+          否则这批义项在页面上整个「没有释义」。 */}
+      {s.zh && <div className="sense-zh">{s.zh}</div>}
+      {s.en && (s.zh ? (
+        <div className="sense-src" lang="en">
+          <span className="sense-src-lang">EN</span>{s.en}
+        </div>
+      ) : <div className="sense-zh">{s.en}</div>)}
+      {s.ko && (
+        <div className="sense-src" lang="ko">
+          <span className="sense-src-lang">KO</span>{s.ko}
+        </div>
+      )}
+      {dedupe(s.relations).map((r) => (
+        <KoRelationRow key={r.kind} group={r} onWord={onWord} />
+      ))}
+      {bySense.has(s.id) && renderExamples(bySense.get(s.id)!)}
+    </li>
+  );
+
+  // 🔴 义项区先渲染成变量再放进 return —— `dedupe` 是有状态的（见 ja 那段注释）：
+  //    留在 JSX 里就等于依赖「表达式按源码顺序求值」这条看不见的约束。
+  const senseSections = groups.length > 0 ? (
+    <section className="entry-section">
+      <h3>释义</h3>
+      {groups.map((g, gi) => (
+        <div key={gi} className="pos-group">
+          {needEtym[gi] && g.etymNo && (
+            <div className="etym-label">{etymLabel(etymSeq.get(g.etymNo)!)}</div>
+          )}
+          {/* `posLabel` 对 ko 的 `unknown` 返回 `''` —— 有意不印（57% 的词条
+              源头没给词性）。所以这里判的是**标签非空**，不是 `g.pos` 非空。 */}
+          {posLabel(g.pos, 'ko') && (
+            <div className="pos-group-label">{posLabel(g.pos, 'ko')}</div>
+          )}
+          <ol className="sense-list">{g.senses.map(renderSense)}</ol>
+        </div>
+      ))}
+    </section>
+  ) : null;
+  const wordRels = dedupe(entry.relations);
+
+  const playable: PlayableAudio[] = entry.audio.map((a) => ({
+    file: a.file, url: a.url, speaker: null, region: a.region, regionSrc: null,
+  }));
+  const nForms = entry.inflections.reduce((a, r) => a + r.forms.length, 0);
+  const anyGenerated = entry.inflections.some((r) => r.generated);
+  // 词条级的汉字表记与活用类：取第一个有值的。
+  const hanja = entry.entries.find((e) => e.hanja)?.hanja ?? null;
+  const conj = entry.entries.find((e) => e.conjClass);
+
+  return (
+    <article className="entry-detail ko-entry">
+      <header className="entry-header">
+        <h2 className="entry-word" lang="ko">{entry.word}</h2>
+        {/* 🔴 只显示 RR 一套（用户 2026-09-20 拍板：四套全存、页面只显示 RR）。
+            回归闸扫本文件的源码盯这一条 —— 别为了「顺手」把另三套一起端出来。 */}
+        {entry.roman && <span className="entry-roman">{entry.roman}</span>}
+        {/* 汉字表记：`한국` → 韓國。中文读者靠它一眼认词，是 ko 最有价值的一格。 */}
+        {hanja && (
+          <span className="badge hanja" title="这个词的汉字表记">{hanja}</span>
+        )}
+        {/* 🔴 活用类印在**词头旁边**，不印在每一行变形上 —— 它是词元的属性。
+            `conjClassSrc` 如实说明它是推定的：源头没有「活用类」这个字段，
+            我们是按活用形反推 / 按构词后缀推的（K8）。 */}
+        {conj?.conjClass && (
+          <span className="badge conj-class"
+            title={KO_CONJ_SRC_LABELS[conj.conjClassSrc ?? ''] ?? undefined}>
+            {KO_CONJ_CLASS_LABELS[conj.conjClass] ?? conj.conjClass}
+          </span>
+        )}
+      </header>
+
+      {entry.pronunciations.length > 0 ? (
+        <section className="ko-readings">
+          {entry.pronunciations.map((p, i) => (
+            <KoReadingRow key={i} p={p} speak={(w) => speak(w, speakLocale)} />
+          ))}
+        </section>
+      ) : (
+        /* 没有读音行时仍要有朗读入口，否则这些页面再也读不出声（照 ja 的处置）。 */
+        <div className="phonetic-row">
+          <button className="phonetic-btn" type="button"
+            title={`播放发音（合成音）：${entry.word}`}
+            onClick={() => speak(entry.word, speakLocale)}>
+            <span className="phonetic-value">{entry.roman ?? entry.word}</span>
+            <SpeakerIcon />
+          </button>
+        </div>
+      )}
+
+      {playable.length > 0 && (
+        <HumanAudioRow audios={playable} word={entry.word}
+          fallback={() => speak(entry.word, speakLocale)} regionLabel={(x) => x} />
+      )}
+
+      {/* 谚文音节 → 它对应的汉字音训（`주` → 主/住/注…）。ko 独有的一层，
+          377 个音节条目与汉字条目靠它。放在读音区之后：
+          读音回答「这个**词**怎么念」，这里回答「这个**字**是哪些汉字」。 */}
+      {entry.hanjaReadings.length > 0 && (
+        <section className="entry-section ko-hanja-readings">
+          <h3>汉字音</h3>
+          <ul className="form-list">
+            {entry.hanjaReadings.map((h, i) => (
+              <li key={i}>
+                <span className="ko-hanja">{h.hanja}</span>
+                {h.eumhun && <span className="ko-eumhun">{h.eumhun}</span>}
+                {h.glossEn && <span className="ko-hanja-gloss" lang="en">{h.glossEn}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* 本页是活用形时，指回它的原形。⚠️ 方向别印反：列出来的是**原形**。 */}
+      {entry.baseOf.length > 0 && (
+        <div className="ko-bases">
+          <span className="ja-pointer-title"
+            title="本页这个词形，是下面这些词的活用形">原形</span>
+          {entry.baseOf.map((b) => (
+            <span key={b.base} className="ja-base">
+              {b.ok
+                ? <a className="rel-link" href={`#${encodeURIComponent(b.base)}`}
+                    onClick={(e) => { e.preventDefault(); onWord(b.base); }}>{b.base}</a>
+                : <span className="rel-plain">{b.base}</span>}
+              {b.labels.map((l) => <span key={l} className="ja-base-label">{l}</span>)}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {senseSections}
+
+      {entryLevel.length > 0 && (
+        <section className="entry-section">
+          <h3>例句</h3>
+          {renderExamples(entryLevel)}
+        </section>
+      )}
+
+      {wordRels.length > 0 && (
+        <section className="entry-section">
+          <h3>语义关系</h3>
+          {wordRels.map((r) => <KoRelationRow key={r.kind} group={r} onWord={onWord} />)}
+        </section>
+      )}
+
+      {entry.inflections.length > 0 && (
+        <section className="entry-section ko-inflections">
+          {/* 🔴 `<details>` 而不是 `slice` —— 见文件头⑤。`open` 的判据是
+              **条数**：短表（大多数词）直接摊开，长表默认收起。
+              收起时标题写明共多少个（`DISPLAY_EXTREMES` §四.2）。 */}
+          <details open={nForms <= 24}>
+            <summary className="ko-infl-summary">
+              <h3>活用</h3>
+              <span className="ko-infl-count">共 {nForms} 个形式</span>
+              {/* 🔴 **读者有权知道哪一格是源头给的、哪一格是我们算的。**
+                  745,037 行是按规则生成的（K8/K18，实测残差 0.043%）。
+                  把两者印成一样就是拿生成物冒充源头。 */}
+              {anyGenerated && (
+                <span className="badge generated"
+                  title="源头没有给出完整活用表，这些形式是按韩语活用规则生成的">
+                  含规则生成
+                </span>
+              )}
+            </summary>
+            <ul className="form-list inflection-list">
+              {entry.inflections.map((row, i) => (
+                <li key={i}>
+                  {row.forms.map((fm, fi) => (
+                    <span className="infl-form" key={fm}>
+                      {fi > 0 && <span className="infl-sep">／</span>}
+                      <a className="rel-link" href={`#${encodeURIComponent(fm)}`}
+                        onClick={(e) => { e.preventDefault(); onWord(fm); }}>{fm}</a>
+                    </span>
+                  ))}
+                  <span className="infl-label">{row.label}</span>
+                  {row.generated && (
+                    <span className="infl-generated" title="按规则生成">规则</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </details>
         </section>
       )}
     </article>
