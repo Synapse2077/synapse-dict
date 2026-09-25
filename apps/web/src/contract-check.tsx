@@ -33,7 +33,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService, probeLanguages, LANGUAGES, type ItalianEntry } from '@synapse-dict/dict-core';
 import { POS_LABELS, REL_LABELS, itAudioRegion } from '@synapse-dict/dict-labels';
-import { ItalianEntryView, groupItSenses, getInitialLang, readingBelongsTo, EXAMPLES } from './App';
+import { ItalianEntryView, groupItSenses, getInitialLang, readingBelongsTo, EXAMPLES,
+         hashFor } from './App';
 
 // 🔴 走 `getService('it')` —— 与 API **同一条代码路径、同一个数据目录推算逻辑**。
 //    第一版直接 `new ItalianDictService()` 少传路径，报 ERR_INVALID_ARG_TYPE。
@@ -639,6 +640,41 @@ function examplesMutations(): void {
   if (caught !== cases.length) process.exit(1);
 }
 
+/**
+ * 深链片段守卫（八门共用）。2026-09-25。
+ *
+ * 🔴 用户复制页面上的关系词，粘出来是 `#%EA%B1%B8%EC%9D%8C` 而不是 `걸음`：
+ *    **「复制内容的时候，不是复制内容本身，反而复制了其跳转链接」**。
+ *    根子是全站 35 处 href 都写着 `encodeURIComponent` —— 它把所有非 ASCII 编码掉。
+ * ⇒ 换成 `hashFor`：非 ASCII 原样、必须编码的 ASCII 照旧。这道闸钉住两件事：
+ *    ① 非 ASCII 真的没被编码（不然改了等于没改）；
+ *    ② **`/` 仍然是 `%2F`** —— 搭配页前缀 `c/` 靠「裸斜杠只可能是我们的分隔符」
+ *       来区分，这条一破，带斜杠的词形会被当成搭配（`applyHash` 那段注释）；
+ *    ③ 每一个片段都能被 `decodeURIComponent` **原样回解**（读取侧用的就是它，
+ *       老书签也必须继续认）。
+ */
+function hashGuard(): number {
+  const cases: Array<[string, string]> = [
+    ['걸음', '걸음'], ['사가', '사가'], ['경마(競馬)', '경마(競馬)'],
+    ['귀환 불능 지점', '귀환%20불능%20지점'],
+    ['a/b', 'a%2Fb'], ['は/が', 'は%2Fが'],      // 🔴 斜杠必须留着编码
+    ['x#y', 'x%23y'], ['100%', '100%25'],
+    ['gehen', 'gehen'], ['café', 'café'],
+  ];
+  let bad = 0;
+  for (const [inp, want] of cases) {
+    const got = hashFor(inp);
+    const rt = decodeURIComponent(got);
+    if (got !== want || rt !== inp) {
+      bad += 1;
+      console.log(`   \u{1F534} hashFor(${JSON.stringify(inp)}) = ${got}`
+        + `（期望 ${want}）回解=${JSON.stringify(rt)}`);
+    }
+  }
+  if (!bad) console.log(`   \u2705 深链片段 ${cases.length} 例全对（非 ASCII 原样、/ 仍编码、都能原样回解）`);
+  return bad;
+}
+
 const argv = process.argv.slice(2);
 const limit = argv.includes('--limit') ? Number(argv[argv.indexOf('--limit') + 1]) : 0;
 const words = targets(limit);
@@ -646,7 +682,9 @@ if (argv.includes('--lang')) {
   console.log('\n═══ 语种码守卫 ═══');
   const a = langGuard();
   console.log('\n═══ 欢迎页推荐词守卫 ═══');
-  process.exit(a + examplesGuard() === 0 ? 0 : 1);
+  const e = examplesGuard();
+  console.log('\n═══ 深链片段守卫 ═══');
+  process.exit(a + e + hashGuard() === 0 ? 0 : 1);
 } else if (argv.includes('--mutate')) {
   mutate(words);
   console.log('\n═══ 推荐词守卫的变异验证 ═══');
@@ -656,7 +694,9 @@ if (argv.includes('--lang')) {
   const langBad = langGuard();
   console.log('\n═══ 欢迎页推荐词守卫 ═══');
   const exBad = examplesGuard();
-  const bad = run(words) + langBad + exBad;
+  console.log('\n═══ 深链片段守卫 ═══');
+  const hashBad = hashGuard();
+  const bad = run(words) + langBad + exBad + hashBad;
   console.log(`\n   ${bad === 0 ? '✅ 全部通过' : `🔴 共 ${bad} 处不符`}`);
   process.exit(bad === 0 ? 0 : 1);
 }

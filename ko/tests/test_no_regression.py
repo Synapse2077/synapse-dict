@@ -156,6 +156,30 @@ CHECKS = [
      "罗马字的正确值由库内 8,567 个 `*하다` 参照词定出（rr/translit/mr=hada、yale=hata）；"
      "读音那一行整条删掉（没有正确值可填，且 `하다` 另有跨三版背书的 `ha̠da̠`）"),
 
+    # 🔴 **一个音频文件挂在多个词形上，而这些词的韩语读音没有交集 ⇒ 它不是其中任何一个的录音。**
+    #    源头（中文版简繁两片）把 `Y.mp3` 挂在 **45 个**常用韩语词上（가다/학교/그리고…），
+    #    另有 13 行是汉语/日语读音挂在汉字条目上（读者点 `士` 听到普通话 `shì`）。
+    #    `[[dict-framework-doc]]`：**错比缺更伤权威** —— 宁可没有录音。
+    # ⚠️ 判据**必须**写成「读音没有交集」而不是「挂在多个词形上」：后者会误伤三族
+    #    正确的共用 —— `Ko-가.ogg.mp3` 挂在 7 个**韩语都读 가** 的汉字上（假價加可歌街駕）、
+    #    `Ko-안따` 挂在同音词 안다/앉다 上、`Ko-있다` 挂在 잇다/잊다 上。
+    #    第一版写成「非 `Ko-` 前缀就删」，**会误伤 969 行 Lingua Libre 韩语录音**（全库 58%）。
+    ("R14", "没有张冠李戴的录音（一文件多词形且韩语读音无交集）",
+     "@wrong_audio", 0,
+     "`Y.mp3` 曾挂在 45 个常用词上；13 行汉语/日语读音曾挂在汉字条目上。"
+     "删完有 13 个汉字条目一条录音都没有 —— 有意如此"),
+
+    # 🔴 **一条释义里没有任何字母/数字 ⇒ 它不是释义。**
+    #    日文版有 18 条 gloss 是空的维基内链 `[[]]。`，模型照规矩原样保留，
+    #    于是页面上印出 `[[]]` 当释义 —— **比没有释义更糟**。
+    #    另有 ko 版源头自带的 `?` / `.` 3 条、en/ko 那批译文 2 条，共 23 条。
+    # ⚠️ 判据**交给 Unicode 答**（类别 `L*`/`N*`），不许手抄字符范围：
+    #    我手写的那版漏掉 **CJK 扩展平面**，差点删掉 5 条正确的释义
+    #    （`두브늄`→`𨧀`、`시보르귬`→`𨭎` —— 化学元素的汉字名，一个字就是完整释义）。
+    ("R15", "出版层没有「没内容的释义」", "@empty_gloss", 0,
+     "跑批 927/927、失败 0、定题 3/3、逐 id 点名一条不差 —— 过程指标全绿，"
+     "而其中 18 条的**内容**是空的。闸问「有没有」，判官问「对不对」"),
+
     ("R8", "`entry.hanja` 没有被搬到 `dict` 上",
      "SELECT COUNT(*) FROM pragma_table_info('dict') WHERE name='hanja'", 0,
      "1,944 个词形对应 ≥2 个不同汉字（`양` → 壤/兩/良/陽/孃/洋/量/羊），"
@@ -164,7 +188,7 @@ CHECKS = [
 
 
 # 🔴 回归闸应该有多少条。**这个数是声明，不是数出来的** —— 见 `_audit_checks`。
-R_ROSTER = 13
+R_ROSTER = 15
 
 
 def _audit_checks():
@@ -214,7 +238,49 @@ def _audio_filename_leak(con):
     return n
 
 
-_FUNCS = {"@audio_filename_leak": _audio_filename_leak}
+_FOREIGN_AUDIO = re.compile(r"^(Zh|Ja|En|Vi|Th|Yue|Cmn)-", re.I)
+_AUDIO_NOISE = re.compile(r"[()\u02D0\u00B7\s]")
+
+
+def _wrong_audio(con):
+    """张冠李戴的录音有几行。判据与 `pipeline/fix_wrong_audio.py` 同一条。"""
+    import collections
+    rows = con.execute("SELECT id, word, file FROM audio").fetchall()
+    bad = {i for i, _w, fn in rows if _FOREIGN_AUDIO.match(fn)}
+    by = collections.defaultdict(list)
+    for r in rows:
+        by[r[2]].append(r)
+
+    def readings(w):
+        r = {x[0] for x in con.execute(
+            "SELECT p.hangeul_phonetic FROM pronunciation p JOIN dict d ON d.id=p.word_id"
+            " WHERE d.word_norm=? AND p.hangeul_phonetic IS NOT NULL", (w,))}
+        r |= {x[0] for x in con.execute(
+            "SELECT d.word FROM hanja_reading h JOIN dict d ON d.id=h.word_id"
+            " WHERE h.hanja=?", (w,))}
+        return {_AUDIO_NOISE.sub("", x) for x in r if x}
+
+    for fn, rs in by.items():
+        ws = {r[1] for r in rs}
+        if len(ws) < 2:
+            continue
+        sets = [readings(w) for w in ws]
+        if not (all(sets) and set.intersection(*sets)):
+            bad |= {r[0] for r in rs}
+    return len(bad)
+
+
+def _empty_gloss(con):
+    """出版层里「没有任何字母/数字」的释义有几条。判据与 `fix_empty_markup_gloss` 同一条。"""
+    import unicodedata
+    return sum(1 for r in con.execute("SELECT text FROM sense_gloss")
+               if not any(unicodedata.category(c)[0] in ("L", "N")
+                          for c in (r[0] or "")))
+
+
+_FUNCS = {"@audio_filename_leak": _audio_filename_leak,
+          "@wrong_audio": _wrong_audio,
+          "@empty_gloss": _empty_gloss}
 
 
 def check_brief():

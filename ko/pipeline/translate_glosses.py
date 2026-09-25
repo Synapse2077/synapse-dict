@@ -71,6 +71,9 @@ SYS = """你是韩汉词典的释义编辑。把给定的词典释义译成中�
 规矩：
 1. 译成**词典释义**的体例：名词用名词、动词用动词短语，不要译成句子，不要加句号。
 2. 原释义用分号或逗号并列了几个义项的，中文也并列，用「，」分隔，顺序不变。
+   ⚠️ 但若译完之后并列项**中文完全相同**，只保留一个 ——
+      日文版常把同义词并列（`軽音楽。ライトミュージック。`），两个都译成「轻音乐」
+      就成了「轻音乐，轻音乐」。实测 ja 切片 21 条里有 1 条这样（5%）。
 3. **只译释义本身**。不要输出韩语词头、不要加罗马字或音标、不要加「意思是」这类引导语、
    不要加解释或例句。
 4. 原释义是**元描述**的（如 "abbreviation of X"、"'X'의 준말"、"alternative form of X"），
@@ -122,6 +125,32 @@ def gap_rows(con, lang):
          ORDER BY s.id""", (lang,)).fetchall()
 
 
+def gap_rows_ja(con):
+    """缺中文、而**证据层**有日语原文的义项。2026-09-25 加。
+
+    🔴 与 `gap_rows` 的差别只有一处：日语原文在 `sense_src` 不在 `sense_gloss`
+       —— `[[gloss-three-languages]]` 的三语方针把日语挡在出版层外面，
+       所以 `harvest_ja_glosses.py` 把它收进了证据层。
+       出版层最终落的仍然是**中文译文**，方针没破。
+    ⚠️ 其余一切（分批 / 定题 / 按 id 点名 / 回收）与 en/ko 两路**共用同一份代码** ——
+       在这儿抄一份 `build`/`load` 迟早漂开（`[[refactor-mindset-code-quality]]`）。
+    ⚠️ 与 `gap_rows` 同一条纪律：一个义项只出一次（这里天然满足，
+       `harvest_ja_glosses` 是一条 ja 义项建/认领一条 sense），仍然显式 `GROUP BY`。
+    """
+    return con.execute("""
+        SELECT s.id, d.word, e.pos, MIN(ss.text)
+          FROM sense s
+          JOIN dict d  ON d.id = s.word_id
+          JOIN entry e ON e.id = s.entry_id
+          JOIN sense_src ss ON ss.sense_id = s.id
+                           AND ss.lang = 'ja' AND ss.src = 'ja-edition'
+         WHERE s.hidden = 0
+           AND NOT EXISTS (SELECT 1 FROM sense_gloss x
+                            WHERE x.sense_id = s.id AND x.lang = 'zh')
+         GROUP BY s.id
+         ORDER BY s.id""").fetchall()
+
+
 def pick_slice(rows, frac):
     """按义项 id 的稳定哈希抽 —— **不是 `rows[::n]`**。
 
@@ -152,6 +181,14 @@ def build(rows):
 # 回收：把答案文件写进 `sense_gloss`
 # ══════════════════════════════════════════════════════════════════
 SRC_MODEL = "model:deepseek-v4-flash"
+# 🔴 日语那一路**另起一个 src**：读者看不见，但验收要分得开 ——
+#    它的上游是**日文版的日语释义**，不是 en/ko 版的释义。
+#    `[[dont-say-source-lacks-what-we-skipped]]`：来源不同的东西不许在结构上抹平。
+SRC_MODEL_JA = "model:deepseek-v4-flash+ja-edition"
+
+
+def src_model(lang):
+    return SRC_MODEL_JA if lang == "ja" else SRC_MODEL
 
 # 🔴 引号风格**在代码里确定性归一**，不靠 prompt 保证。
 #    实测切片里同一批混用四种（全角单 169／不加 127／全角双 68／直角 33）——
@@ -190,7 +227,9 @@ def load(con_rw_path, langs, dry=True):
 
     rows, stat = [], collections.Counter()
     seen = set()
+    srcs = set()
     for lang in langs:
+        srcs.add(src_model(lang))
         p = OUT / ("%s.jsonl" % lang)
         if not p.exists():
             print("⚠️ %s 没有答案文件（还没跑批？）" % p.name)
@@ -218,7 +257,7 @@ def load(con_rw_path, langs, dry=True):
                 stat["🔴 空译文（不入库）"] += 1
                 continue
             seen.add(sid)
-            rows.append((sid, "zh", "definition", 0, zh, SRC_MODEL))
+            rows.append((sid, "zh", "definition", 0, zh, src_model(lang)))
             stat["要写"] += 1
     for k, v in stat.most_common():
         print("   %-28s %9s" % (k, format(v, ",")))
@@ -243,8 +282,9 @@ def load(con_rw_path, langs, dry=True):
     left = q("SELECT COUNT(*) FROM sense s WHERE NOT EXISTS("
              "SELECT 1 FROM sense_gloss g WHERE g.sense_id=s.id AND g.lang='zh')")
     print("\n═══ 写后回核 ═══")
-    print("   模型译文行            %s" % format(
-        q("SELECT COUNT(*) FROM sense_gloss WHERE src='%s'" % SRC_MODEL), ","))
+    for sm in sorted(srcs):
+        print("   模型译文行 %-28s %s"
+              % (sm, format(q("SELECT COUNT(*) FROM sense_gloss WHERE src='%s'" % sm), ",")))
     print("   仍缺中文的义项        %s" % format(left, ","))
     print("   义项中文覆盖率        %.2f%%" % q(
         "SELECT 100.0*COUNT(DISTINCT sense_id)/(SELECT COUNT(*) FROM sense) "
@@ -256,7 +296,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--load", action="store_true", help="把答案文件写进库")
     ap.add_argument("--apply", action="store_true")
-    ap.add_argument("--lang", choices=["en", "ko"], default="")
+    ap.add_argument("--lang", choices=["en", "ko", "ja"], default="")
     ap.add_argument("--slice", type=float, default=0.0,
                     help="只跑这个比例（实测单价用）")
     ap.add_argument("--conc", type=int, default=8)
@@ -278,7 +318,7 @@ def main():
     langs = [a.lang] if a.lang else ["en", "ko"]
     OUT.mkdir(parents=True, exist_ok=True)
     for lang in langs:
-        rows = gap_rows(con, lang)
+        rows = gap_rows_ja(con) if lang == "ja" else gap_rows(con, lang)
         if a.filter:
             import re as _re
             rx = _re.compile(a.filter)

@@ -155,7 +155,8 @@ export type KoreanEntry = {
   /** 这个谚文音节对应的汉字音训（`주` → 主/住/注…） */
   hanjaReadings: { hanja: string; eumhun: string | null; glossEn: string | null }[];
   etymology: { edition: string; etymNo: string | null; text: string }[];
-  audio: { file: string; url: string | null; kind: string; region: string | null }[];
+  audio: { file: string; url: string | null; kind: string;
+    region: string | null; speaker: string | null }[];
 };
 
 /** 🔴 归一只用于**匹配**，不用于身份。macOS 输入法产出 NFD。 */
@@ -197,7 +198,18 @@ export class KoreanDictService {
                (SELECT g.text FROM sense s JOIN sense_gloss g ON g.sense_id = s.id
                  WHERE s.word_id = d.id AND s.hidden = 0 AND g.lang = 'zh'
                  ORDER BY s.rank, s.id LIMIT 1) AS brief,
-               d.pos
+               -- 🔴🔴 **不要 d.pos**：它是第三套值域（反引号在模板串里会截断字符串，
+               --    所以这段注释一律不用反引号）。全库实测三列三套 ——
+               --    entry.pos      短码      n / v / hanja / suf / syl      ← 展示层认这套
+               --    entry.pos_raw  长码      noun / verb / character
+               --    dict.pos       长码＋斜杠 noun / noun-unknown / root-noun-unknown
+               --    把 dict.pos 端出去，调用方哪天印它就是一排英文原码
+               --    （contraction / proverb 连全局表都没有）。
+               --    这一跤我在 entry.pos 上已经栽过一次：映射表照 pos_raw 写、
+               --    展示层读 pos，双方一致报全绿而每个徽标都是空的。
+               --    ⇒ 搜索项与词条页**用同一套值域**，只留一个要维护的映射表。
+               (SELECT e.pos FROM entry e WHERE e.word_id = d.id
+                 AND e.pos IS NOT NULL AND e.pos <> 'unknown' LIMIT 1) AS pos
         FROM dict d
         WHERE d.word_norm >= ? AND d.word_norm < ?
         ORDER BY d.is_lemma DESC, LENGTH(d.word), d.word
@@ -302,9 +314,16 @@ export class KoreanDictService {
         'SELECT edition, etym_no AS etymNo, text FROM etymology'
         + ' WHERE word_id = ? ORDER BY etym_no'),
 
+      // 🔴 `speaker` 必须端出去：ko 实测 **1,606 行里 1,482 行没有 region**，
+      //    而 `HumanAudioRow` 的标签是「region ?? speaker ?? 未标注」——
+      //    不给 speaker，`한국` 的两条录音就排出**两个都写着「未标注」的按钮**，
+      //    读者分不清点哪个。这正是 fr 的 `chien` 排出八个「法国」那个缺陷
+      //    （`capAudios` 的注释里记着），ko 上换了个形状又发作一次。
+      //    ⭐ 退到「有信息的那个」，不是编一个地区出来 —— 录音人是源头给的事实。
       audio: this.db.prepare(
         'SELECT file, COALESCE(url_mp3, url_ogg, url_wav, url_other) AS url,'
-        + ' kind, region FROM audio WHERE word = ? ORDER BY (kind<>\'human\'), id'),
+        + ' kind, region, speaker FROM audio'
+        + ' WHERE word = ? ORDER BY (kind<>\'human\'), id'),
     };
   }
 
@@ -416,7 +435,8 @@ export class KoreanDictService {
       etymology: this.q.etymology.all(id) as unknown as
         { edition: string; etymNo: string | null; text: string }[],
       audio: this.q.audio.all(hit.word) as unknown as
-        { file: string; url: string | null; kind: string; region: string | null }[],
+        { file: string; url: string | null; kind: string;
+          region: string | null; speaker: string | null }[],
     };
   }
 

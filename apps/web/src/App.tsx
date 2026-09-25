@@ -803,6 +803,40 @@ type PlayableAudio = {
 
 // ⭐ **限量规则只有这一份**，契约闸 `import` 它来算期望值。
 //    两边各写一版 ⇒ 闸迟早与实现漂开，那正是 `[[fix-regression-and-gate]]` 的第三种机制。
+/**
+ * 词形 → URL 片段（`#` 后面那一段）。**八门共用，只有这一份。**
+ *
+ * 🔴 起因：用户 2026-09-25 复制页面上的关系词，粘出来是
+ *    `#%EA%B1%B8%EC%9D%8C` 而不是 `걸음` ——
+ *    **「复制内容的时候，不是复制内容本身，反而复制了其跳转链接」**。
+ *    根子是全站 30 多处都写着 `encodeURIComponent(word)`：它把**所有非 ASCII**
+ *    百分号编码，于是谚文/假名/汉字的深链一律变成一串不可读的 `%XX`。
+ *
+ * ⭐ RFC 3986 之后的 URL（IRI）**允许片段里直接放 UTF-8**，浏览器认。
+ *   ⇒ 非 ASCII 原样保留，只编码**必须编码的 ASCII**。
+ *
+ * 🔴 实现方式是**先 `encodeURIComponent` 再只把非 ASCII 还原** —— 不是自己写一张
+ *   「哪些要编码」的表。理由：`encodeURIComponent` 的编码集是对的，而我手写的表
+ *   永远会缺一个（本项目手抄字符范围已经翻过车）。这样写，**原来的所有保证一条没丢**：
+ *   ⚠️ 尤其是 `/` 仍然被编成 `%2F` —— 搭配页的前缀 `c/` 靠「裸斜杠只可能是
+ *     我们自己写的分隔符」来区分（见 `applyHash` 上面那段注释）。还原非 ASCII
+ *     不会碰到它，因为 `/` 是 ASCII。
+ * ⚠️ 逐**字符**判断，不逐段：`%20%EA%B1%B8` 这种混合串里，空格要留着编码、
+ *   谚文要还原，整段一起判会把空格也放出来。
+ *
+ * ⭐ 读取侧 `applyHash` 用的是 `decodeURIComponent`，它对原样的谚文是**空操作**
+ *   ⇒ 新旧两种片段都认，老书签不会坏。
+ */
+export function hashFor(word: string): string {
+  return encodeURIComponent(word).replace(/(?:%[0-9A-Fa-f]{2})+/g, (m) => {
+    let out = '';
+    for (const ch of decodeURIComponent(m)) {
+      out += (ch.codePointAt(0) ?? 0) < 128 ? encodeURIComponent(ch) : ch;
+    }
+    return out;
+  });
+}
+
 export function capAudios<T extends { url: string | null; region?: string | null }>(
   audios: T[],
 ): T[] {
@@ -878,7 +912,7 @@ function CollocationSection({ items, lang, onColloc }: {
                 ? (
                   <a
                     className="colloc-text colloc-link"
-                    href={`#c/${encodeURIComponent(c.text)}`}
+                    href={`#c/${hashFor(c.text)}`}
                     onClick={(ev) => { ev.preventDefault(); onColloc(c.text); }}
                   >{c.text}</a>
                 )
@@ -923,7 +957,7 @@ export function CollocationView({ detail, onWord }: {
   const link = (w: string) => (
     <a
       className="rel-link"
-      href={`#${encodeURIComponent(w)}`}
+      href={`#${hashFor(w)}`}
       onClick={(ev) => { ev.preventDefault(); onWord(w); }}
     >{w}</a>
   );
@@ -1077,7 +1111,7 @@ function RelationRow({ rels, onWord }: {
           {list.map((r, i) => (
             <span key={i} className="rel-item">
               {r.linkable
-                ? <a className="rel-link" href={`#${encodeURIComponent(r.target)}`}
+                ? <a className="rel-link" href={`#${hashFor(r.target)}`}
                      onClick={(ev) => { ev.preventDefault(); onWord(r.target); }}>{r.target}</a>
                 : <span className="rel-plain">{r.target}</span>}
               {/* 🔴 2026-08-21：原来是 `r.tags.join('·')` —— 把原始英文标签直接印出来
@@ -1383,13 +1417,13 @@ export default function App() {
   const selectWord = useCallback((word: string) => {
     setSelectedWord(word);
     setSelectedColloc(null);
-    window.location.hash = encodeURIComponent(word);
+    window.location.hash = hashFor(word);
   }, []);
 
   const selectColloc = useCallback((text: string) => {
     setSelectedColloc(text);
     setSelectedWord(null);
-    window.location.hash = `c/${encodeURIComponent(text)}`;
+    window.location.hash = `c/${hashFor(text)}`;
   }, []);
 
   // 🔴🔴 **一条搜索结果的「落点」和它的「字面」是两回事，只许有一个地方说这件事。**
@@ -2102,7 +2136,7 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
           {entry.formOf.map((f, i) => (
             <span className="rel-item" key={i}>
               {f.clickable
-                ? <a className="rel-link" href={`#${encodeURIComponent(f.base)}`}
+                ? <a className="rel-link" href={`#${hashFor(f.base)}`}
                      onClick={(ev) => { ev.preventDefault(); onWord(f.base); }}>{f.base}</a>
                 : <span>{f.base}</span>}
               <span className="exchange-label"> 的{f.label}</span>
@@ -2235,7 +2269,7 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                     异体：{s.altOf.map((a, i) => (
                       <span className="rel-item" key={i}>
                         {a.clickable
-                          ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
+                          ? <a className="rel-link" href={`#${hashFor(a.target)}`}
                               onClick={(ev) => { ev.preventDefault(); onWord(a.target); }}>{a.target}</a>
                           : a.target}
                       </span>
@@ -2253,7 +2287,7 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                     {g.targets.map((t, i) => (
                       <span className="rel-item" key={i}>
                         {t.clickable
-                          ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                          ? <a className="rel-link" href={`#${hashFor(t.word)}`}
                               onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
                           : <span className="rel-plain">{t.word}</span>}
                       </span>
@@ -2342,7 +2376,7 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
               {g.targets.map((t, i) => (
                 <span className="rel-item" key={i}>
                   {t.clickable
-                    ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                    ? <a className="rel-link" href={`#${hashFor(t.word)}`}
                               onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
                     : <span className="rel-plain">{t.word}</span>}
                 </span>
@@ -2358,7 +2392,7 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
           <div className="exchange-list">
             {entry.forms.map((f, i) => (
               <span className="exchange-item" key={i}>
-                <a className="rel-link" href={`#${encodeURIComponent(f.form)}`}
+                <a className="rel-link" href={`#${hashFor(f.form)}`}
                    onClick={(ev) => { ev.preventDefault(); onWord(f.form); }}>{f.form}</a>
                 {f.label && <span className="exchange-label">{f.label}</span>}
               </span>
@@ -2740,7 +2774,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
           <ul className="infl-notes">
             {entry.forms.slice(0, 24).map((f, i) => (
               <li key={i}>
-                <a className="rel-link" href={`#${encodeURIComponent(f.word)}`}
+                <a className="rel-link" href={`#${hashFor(f.word)}`}
                   onClick={(e) => { e.preventDefault(); onWord(f.word); }}>{f.word}</a>
                 {' — '}{f.label}
               </li>
@@ -2780,7 +2814,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
               const base = entry.bases.find((b) => b.word === bw);
               return (
                 <div className="base-item" key={bw}>
-                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                  <a className="base-word" href={`#${hashFor(bw)}`}
                     onClick={(e) => { e.preventDefault(); onWord(bw); }}>
                     {bw}
                   </a>
@@ -2953,7 +2987,7 @@ function RelationGroups({ groups, onWord }: {
           {g.targets.map((t) => (
             <span className="rel-item" key={t.word}>
               {(t.linkable ?? t.clickable)
-                ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                ? <a className="rel-link" href={`#${hashFor(t.word)}`}
                      onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
                 : <span className="rel-plain">{t.word}</span>}
             </span>
@@ -3236,7 +3270,7 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }
               const base = entry.bases.find((b) => b.word === bw);
               return (
                 <div className="base-item" key={bw}>
-                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                  <a className="base-word" href={`#${hashFor(bw)}`}
                     onClick={(e) => { e.preventDefault(); onWord(bw); }}>
                     {bw}
                   </a>
@@ -3528,7 +3562,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
             <span className="alt-of" key={a.target}>
               异体 →{' '}
               {a.clickable
-                ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
+                ? <a className="rel-link" href={`#${hashFor(a.target)}`}
                      onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
                 : <span className="alt-of-plain">{a.target}</span>}
               {a.zh && <span className="alt-of-zh">{a.zh}</span>}
@@ -3697,7 +3731,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
               const base = entry.bases.find((b) => b.word === bw);
               return (
                 <div className="base-item" key={bw}>
-                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                  <a className="base-word" href={`#${hashFor(bw)}`}
                     onClick={(e) => { e.preventDefault(); onWord(bw); }}>
                     {bw}
                   </a>
@@ -3777,7 +3811,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           <ul className="form-list">
             {entry.forms.slice(0, 40).map((f, i) => (
               <li className="form-item" key={i}>
-                <a className="rel-link" href={`#${encodeURIComponent(f.form)}`}
+                <a className="rel-link" href={`#${hashFor(f.form)}`}
                    onClick={(e) => { e.preventDefault(); onWord(f.form); }}>{f.form}</a>
                 {f.label && <span className="form-label">{f.label}</span>}
               </li>
@@ -3943,7 +3977,7 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
             <span className="alt-of" key={a.target}>
               异体 →{' '}
               {a.clickable
-                ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
+                ? <a className="rel-link" href={`#${hashFor(a.target)}`}
                      onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
                 : <span className="alt-of-plain">{a.target}</span>}
               {a.zh && <span className="alt-of-zh">{a.zh}</span>}
@@ -4027,7 +4061,7 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
                         {s.altOf.map((a) => (
                           <span className="alt-of" key={a.target}>
                             → {a.clickable
-                              ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
+                              ? <a className="rel-link" href={`#${hashFor(a.target)}`}
                                    onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
                               : <span className="alt-of-plain">{a.target}</span>}
                             {a.zh && <span className="alt-of-zh">{a.zh}</span>}
@@ -4082,7 +4116,7 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
               const base = entry.bases.find((b) => b.word === bw);
               return (
                 <div className="base-item" key={bw}>
-                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                  <a className="base-word" href={`#${hashFor(bw)}`}
                     onClick={(e) => { e.preventDefault(); onWord(bw); }}>
                     {bw}
                   </a>
@@ -4158,7 +4192,7 @@ function PtRelationGroups(
               <span key={i}>
                 {i > 0 && '、'}
                 {t.clickable
-                  ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                  ? <a className="rel-link" href={`#${hashFor(t.word)}`}
                       onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
                   : <span className="rel-plain">{t.word}</span>}
               </span>
@@ -4424,7 +4458,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                         {s.altOf.map((a, ai) => (
                           <span className="rel-item" key={ai}>
                             {a.clickable
-                              ? <a className="rel-link" href={`#${encodeURIComponent(a.target)}`}
+                              ? <a className="rel-link" href={`#${hashFor(a.target)}`}
                                   onClick={(e) => { e.preventDefault(); onWord(a.target); }}>{a.target}</a>
                               : a.target}
                             {a.zh && <span className="alt-zh">（{a.zh}）</span>}
@@ -4454,7 +4488,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                             {g.targets.map((t, ti) => (
                               <span className="rel-item" key={ti}>
                                 {t.clickable
-                                  ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                                  ? <a className="rel-link" href={`#${hashFor(t.word)}`}
                                       onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
                                   : <span className="rel-plain">{t.word}</span>}
                               </span>
@@ -4564,7 +4598,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
             {entry.derivations.map((d, i) => (
               <span className="de-infl" key={i}>
                 {d.clickable
-                  ? <a className="rel-link" href={`#${encodeURIComponent(d.base)}`}
+                  ? <a className="rel-link" href={`#${hashFor(d.base)}`}
                       onClick={(e) => { e.preventDefault(); onWord(d.base); }}>{d.base}</a>
                   : d.base}
                 {d.label && <span className="de-infl-label">{d.label}</span>}
@@ -4584,7 +4618,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           <div className="de-form-grid">
             {entry.forms.map((fm, i) => (
               <span className="de-form-cell" key={i}>
-                <a className="rel-link" href={`#${encodeURIComponent(fm.form)}`}
+                <a className="rel-link" href={`#${hashFor(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
                 {fm.label && <span className="de-form-label">{fm.label}</span>}
               </span>
@@ -4605,7 +4639,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           <div className="de-form-grid">
             {entry.derivedForms.map((fm, i) => (
               <span className="de-form-cell" key={i}>
-                <a className="rel-link" href={`#${encodeURIComponent(fm.form)}`}
+                <a className="rel-link" href={`#${hashFor(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
                 {fm.label && <span className="de-form-label">{fm.label}</span>}
               </span>
@@ -4623,7 +4657,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
               {g.targets.map((t, ti) => (
                 <span className="rel-item" key={ti}>
                   {t.clickable
-                    ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                    ? <a className="rel-link" href={`#${hashFor(t.word)}`}
                         onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
                     : <span className="rel-plain">{t.word}</span>}
                 </span>
@@ -4645,7 +4679,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
             {entry.inflections.map((x, i) => (
               <li key={i}>
                 {x.clickable
-                  ? <a className="rel-link" href={`#${encodeURIComponent(x.base)}`}
+                  ? <a className="rel-link" href={`#${hashFor(x.base)}`}
                       onClick={(e) => { e.preventDefault(); onWord(x.base); }}>{x.base}</a>
                   : x.base}
                 {x.label && <span className="de-infl-label"> {x.label}</span>}
@@ -4660,7 +4694,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                 ? (DE_ARTICLE[base.gender] || DE_ARTICLE[bg0 || ''] || '') : '';
               return (
                 <div className="base-item" key={bw}>
-                  <a className="base-word" href={`#${encodeURIComponent(bw)}`}
+                  <a className="base-word" href={`#${hashFor(bw)}`}
                     onClick={(e) => { e.preventDefault(); onWord(bw); }}>
                     {bArticle ? `${bArticle} ` : ''}{bw}
                   </a>
@@ -4873,7 +4907,7 @@ function JaPointerList({ title, items, hint, onWord }: {
       {items.map((p) => (
         <span key={p.target} className="ja-pointer">
           {p.clickable
-            ? <a className="rel-link" href={`#${encodeURIComponent(p.target)}`}
+            ? <a className="rel-link" href={`#${hashFor(p.target)}`}
                         onClick={(e) => { e.preventDefault(); onWord(p.target); }}>{p.target}</a>
             : <span className="rel-plain">{p.target}</span>}
           {p.zh && <span className="ja-pointer-zh">{p.zh}</span>}
@@ -4978,7 +5012,7 @@ function JaRelationRow({ group, onWord }: {
       {group.targets.map((t) => (
         <span key={t.word} className="rel-item">
           {t.clickable
-            ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+            ? <a className="rel-link" href={`#${hashFor(t.word)}`}
                         onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
             : <span className="rel-plain">{t.word}</span>}
         </span>
@@ -5115,7 +5149,7 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
                     {r.targets.map((t) => (
                       <span key={t.word} className="rel-item">
                         {t.clickable
-                          ? <a className="rel-link" href={`#${encodeURIComponent(t.word)}`}
+                          ? <a className="rel-link" href={`#${hashFor(t.word)}`}
                         onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
                           : <span className="rel-plain">{t.word}</span>}
                       </span>
@@ -5275,7 +5309,7 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
           {entry.bases.map((b) => (
             <span key={b.word} className="ja-base">
               {b.clickable
-                ? <a className="rel-link" href={`#${encodeURIComponent(b.word)}`}
+                ? <a className="rel-link" href={`#${hashFor(b.word)}`}
                         onClick={(e) => { e.preventDefault(); onWord(b.word); }}>{b.word}</a>
                 : <span className="rel-plain">{b.word}</span>}
               {b.labels.map((l) => (
@@ -5329,7 +5363,7 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
                   <span className="infl-form" key={fm.word}>
                     {fi > 0 && <span className="infl-sep">／</span>}
                     {fm.clickable
-                      ? <a className="rel-link" href={`#${encodeURIComponent(fm.word)}`}
+                      ? <a className="rel-link" href={`#${hashFor(fm.word)}`}
                         onClick={(e) => { e.preventDefault(); onWord(fm.word); }}>{fm.word}</a>
                       : <span className="rel-plain">{fm.word}</span>}
                   </span>
@@ -5404,7 +5438,8 @@ type KoEntry = {
   baseOf: Array<{ base: string; labels: string[]; ok: boolean }>;
   hanjaReadings: Array<{ hanja: string; eumhun: string | null; glossEn: string | null }>;
   etymology: Array<{ edition: string; etymNo: string | null; text: string }>;
-  audio: Array<{ file: string; url: string | null; kind: string; region: string | null }>;
+  audio: Array<{ file: string; url: string | null; kind: string;
+    region: string | null; speaker: string | null }>;
 };
 
 /**
@@ -5414,19 +5449,21 @@ type KoEntry = {
  * ⚠️ 显示的始终是 `target` 原文 —— `부인(婦人)` 与 `부인(否認)` 是两个词，
  *    把括号里的汉字抹掉读者就分不清源头指的是哪一个（K20）。
  */
-function KoRelationRow({ group, onWord }: {
-  group: KoRelationGroup; onWord: (w: string) => void;
+function KoRelationRow({ group, onWord, hideKind }: {
+  group: KoRelationGroup; onWord: (w: string) => void; hideKind?: boolean;
 }) {
   const annotation = KO_ANNOTATION_KINDS.has(group.kind);
   return (
     <div className="rel-row">
-      <span className="rel-kind">
-        {KO_RELATION_LABELS[group.kind] ?? relTagLabel(group.kind)}
-      </span>
+      {!hideKind && (
+        <span className="rel-kind">
+          {KO_RELATION_LABELS[group.kind] ?? relTagLabel(group.kind)}
+        </span>
+      )}
       {group.items.map((t, i) => (
         <span key={`${t.target}-${i}`} className="rel-item">
           {!annotation && t.targetNorm ? (
-            <a className="rel-link" href={`#${encodeURIComponent(t.targetNorm)}`}
+            <a className="rel-link" href={`#${hashFor(t.targetNorm)}`}
               title={t.zh ?? undefined}
               onClick={(e) => { e.preventDefault(); onWord(t.targetNorm!); }}>{t.target}</a>
           ) : (
@@ -5587,10 +5624,24 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
       ))}
     </section>
   ) : null;
-  const wordRels = dedupe(entry.relations);
 
+  // 🔴🔴 **汉字表记要从「语义关系」里拿出来单开一区。** 2026-09-25，用户看 `사가` 说
+  //    「有很多没有释义」那一轮。
+  //    `사가` 页上唯一的内容是 12 条 `hanja_spelling`，而它们印在「语义关系」标题下面 ——
+  //    读者看到的是「这个词的近义/反义之类是 史家 私家 …」，而真相是
+  //    **那 12 个汉字就是这个词的全部已知含义**（사가 是 12 个同音词共用的拼写）。
+  //    ⇒ 汉字表记是**注**不是关系（判据已有：`KO_ANNOTATION_KINDS`），单开一区、
+  //      并且写明它是什么。实测 **195,016 个词元（72.9%）** 没有释义但有汉字表记 ——
+  //      对中文读者，这一区才是他们真正读得懂的那一格。
+  const annotationRels = dedupe(entry.relations.filter(
+    (g) => KO_ANNOTATION_KINDS.has(g.kind)));
+  const wordRels = dedupe(entry.relations.filter(
+    (g) => !KO_ANNOTATION_KINDS.has(g.kind)));
+
+  // 🔴 `speaker` 要传下去 —— 见 `korean.ts` 的 audio 查询注释：
+  //    1,606 行里 1,482 行没有 region，不给 speaker 就是一排「未标注」。
   const playable: PlayableAudio[] = entry.audio.map((a) => ({
-    file: a.file, url: a.url, speaker: null, region: a.region, regionSrc: null,
+    file: a.file, url: a.url, speaker: a.speaker, region: a.region, regionSrc: null,
   }));
   const nForms = entry.inflections.reduce((a, r) => a + r.forms.length, 0);
   const anyGenerated = entry.inflections.some((r) => r.generated);
@@ -5669,7 +5720,7 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
           {entry.baseOf.map((b) => (
             <span key={b.base} className="ja-base">
               {b.ok
-                ? <a className="rel-link" href={`#${encodeURIComponent(b.base)}`}
+                ? <a className="rel-link" href={`#${hashFor(b.base)}`}
                     onClick={(e) => { e.preventDefault(); onWord(b.base); }}>{b.base}</a>
                 : <span className="rel-plain">{b.base}</span>}
               {b.labels.map((l) => <span key={l} className="ja-base-label">{l}</span>)}
@@ -5679,6 +5730,37 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
       )}
 
       {senseSections}
+
+      {/* 🔴 **没有释义时不印任何"说明文字"。** 2026-09-25 用户看了第一版说
+          「这段根本没必要展示，直接展示汉字表记就行，你展示这个让用户很迷惑」——
+          我原来在这儿印了一段「维基词典的五个版本都没有给出这个词的释义…」。
+          三个毛病：①「释义」这个标题底下写着「没有释义」，自相矛盾；
+          ②读者要的是词义，不是**我们的收录状况** —— 那是账本该记的，不是页面该说的；
+          ③一整段话压在真正有用的汉字表记上面。
+          ⭐ **诚实是结构性的，不是靠一段道歉换来的**：没有「释义」区
+            本身就说明了没有释义，而汉字表记区自带一句话说清它是什么。
+          ⚠️ 与 `[[dont-recast-deliverables-as-junk]]` 不冲突 —— 那条禁止的是
+            **把缺口伪装成内容**（`|| g.kind` 把缺失的中文名印成英文原码），
+            不是要求把缺口写成一段说明。 */}
+
+      {/* 汉字表记独立成区（见上面 `annotationRels` 的注释）。
+          ⚠️ 这一区**不做链接**：目标是 `換面相訟` 这种多字汉字串，我们没有这种词头。 */}
+      {annotationRels.length > 0 && (
+        <section className="entry-section ko-hanja-spellings">
+          <h3>汉字表记</h3>
+          {/* ⚠️ 只在**有多个**汉字表记时才提示歧义 —— 只有一个时这句话是废话。
+              判据是事实（有几个），不是"保险起见都印"。 */}
+          {annotationRels.reduce((n, g) => n + g.items.length, 0) > 1 && (
+            <p className="section-note">同一个谚文拼写对应下列多个汉字词。</p>
+          )}
+          {/* ⚠️ `hanja_spelling` 不再印类别名 —— 区标题已经是「汉字表记」，
+              印两遍是噪声。`alt_hanja`（另一种汉字写法）意思不同，仍要印。 */}
+          {annotationRels.map((r) => (
+            <KoRelationRow key={r.kind} group={r} onWord={onWord}
+              hideKind={r.kind === 'hanja_spelling'} />
+          ))}
+        </section>
+      )}
 
       {entryLevel.length > 0 && (
         <section className="entry-section">
@@ -5719,7 +5801,7 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
                   {row.forms.map((fm, fi) => (
                     <span className="infl-form" key={fm}>
                       {fi > 0 && <span className="infl-sep">／</span>}
-                      <a className="rel-link" href={`#${encodeURIComponent(fm)}`}
+                      <a className="rel-link" href={`#${hashFor(fm)}`}
                         onClick={(e) => { e.preventDefault(); onWord(fm); }}>{fm}</a>
                     </span>
                   ))}

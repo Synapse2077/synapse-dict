@@ -120,11 +120,22 @@ DELIVERABLE = {
            "SELECT COUNT(*) FROM sense_gloss WHERE lang='zh' AND src LIKE 'model:%'"),
           # 🔴 只查"有中文"会被阶段 4a 白送的那批顶替 ⇒ 必须挑 `model:` 前缀，
           #    那才是阶段 5 自己的落点（`[[measure-landing-not-source]]`）
-          ("译文没有落到空壳义项上（没有源文就译不出东西）",
+          # 🔴🔴 **这条 2026-09-25 改过一次口径，原因要写清楚，否则下次看像是放水。**
+          #    它守的是一句话：**每一条模型译文都追得回一段源文，我们没有凭空造中文。**
+          #    原判据只在 `sense_gloss` 里找源文 —— 而当天收了日文版的 927 条释义，
+          #    **日语原文按三语方针进的是证据层 `sense_src`，不进出版层**
+          #    （`harvest_ja_glosses.py`）。于是它当场报红，而数据是对的。
+          #    ⇒ 源文在**出版层或证据层**都算，**守的那句话一个字没变**。
+          #    ⚠️ 这不是"闸红了就放宽" —— 判据原来问的是「源文在不在 sense_gloss」，
+          #      那是**目的的可观测代理**；现在问的是「源文在不在」，才是目的本身
+          #      （`[[proxy-metric-gets-optimized]]`）。变异验证见 M11。
+          ("每条模型译文都追得回源文（出版层或证据层）",
            "SELECT COUNT(*)=0 FROM sense_gloss g WHERE g.lang='zh' "
            "AND g.src LIKE 'model:%' AND NOT EXISTS("
            "SELECT 1 FROM sense_gloss h WHERE h.sense_id=g.sense_id "
-           "AND h.lang<>'zh' AND h.src NOT LIKE 'model:%')")],
+           "AND h.lang<>'zh' AND h.src NOT LIKE 'model:%') AND NOT EXISTS("
+           "SELECT 1 FROM sense_src ss WHERE ss.sense_id=g.sense_id "
+           "AND ss.lang<>'zh')")],
     "6": [("example 例句层", "SELECT COUNT(*) FROM example"),
           # 6a 白送的译文：归零说明"中文版全角空格切分"那一支没跑
           ("例句译文（中文版白送的那批）",
@@ -209,7 +220,13 @@ FILES = {
           ("删掉冒充 IPA 的 X-SAMPA", "ko/pipeline/fix_xsampa_ipa.py"),
           ("音频文件名漏进罗马字与读音", "ko/pipeline/fix_audio_filename_leak.py"),
           ("同一条录音存了两行（转码名 vs 原始名）",
-           "ko/pipeline/dedupe_audio_transcodes.py")],
+           "ko/pipeline/dedupe_audio_transcodes.py"),
+          # 🔴 9d 这两件是**一套**：`analyze_db` 修好计划器，`query_plans` 保证它别再坏。
+          #    只留前者＝这次修好了、下次重建库又回到 51 ms 而没人知道。
+          ("统计信息（`ANALYZE`，热查询 51.45ms → 0.04ms）",
+           "ko/pipeline/analyze_db.py"),
+          ("查询计划闸（从 `korean.ts` 抠真 SQL，4 条变异全过）",
+           "ko/probes/query_plans.py")],
 }
 
 # 阶段 9 的交付物是**展示层真的改了读取路径**（`[[it-display-layer-stage8]]`：

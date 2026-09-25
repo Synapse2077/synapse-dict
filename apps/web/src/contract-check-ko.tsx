@@ -17,8 +17,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { KoreanEntryView } from './App';
-import { EXAMPLES } from './App';
+import { KoreanEntryView, EXAMPLES, hashFor } from './App';
 import { KO_RELATION_LABELS, KO_ANNOTATION_KINDS, POS_LABELS,
          KO_POS_LABELS, KO_CONJ_CLASS_LABELS } from '@synapse-dict/dict-labels';
 
@@ -78,6 +77,29 @@ const CHECKS: Check[] = [
     hit: (t) => (/[0-9`\\]/.test(t.replace(/共 \d+ 个形式/g, '')) ? 'IPA 里出现了 ASCII 数字/反引号/反斜杠' : null) },
   { word: '한국', name: '关系目标不带 wiktextract 的 `^` 专名标记',
     hit: (t) => (t.includes('^') ? '页面上出现了 `^`' : null) },
+
+  // ══ 🔴 2026-09-25 用户看 `사가` 说「有很多没有释义」那一轮 ══
+  //    实测 267,645 个词元里 208,159（77.8%）没有释义，而**回五份源逐行比过，
+  //    只有 1.4% 在任何一版里有真释义** —— 是源头的上限（K10），不是我们漏抽。
+  //    ⇒ 页面必须**明说**，不许让它看起来像「正常但内容少」。
+  // 🔴 这一条**换过口径**（2026-09-25 用户看了第一版之后）：原来断言
+  //    「没有释义时要明说源头没给」，页面上印一段「维基词典的五个版本都没有…」。
+  //    用户原话：**「这段根本没必要展示，直接展示汉字表记就行，你展示这个让用户很迷惑」**。
+  //    ⇒ 现在断言反过来：**没有释义时，页面上不许出现「释义」这个标题**
+  //      （标题底下没东西，比没有标题更让人困惑），也不许有那段说明文字。
+  //    ⭐ 诚实是结构性的：没有「释义」区本身就说明了没有释义。
+  { word: '사가', name: '没有释义时不印空的「释义」标题、也不印说明文字',
+    hit: (t) => (/释义/.test(t) || /维基词典/.test(t)
+      ? '印了「释义」标题或收录状况说明 —— 读者要的是词义，不是我们的收录状况'
+      : null) },
+  { word: '사가', name: '汉字表记独立成区（不再混在「语义关系」下面）',
+    hit: (t) => (/汉字表记[\s\S]*史家/.test(t) && !/语义关系[\s\S]*史家/.test(t)
+      ? null : '汉字表记还印在「语义关系」标题下 —— 读者会以为那是近义词之类') },
+  // 🔴 一个文件不可能是 45 个不同词的录音。源头（中文版两片）把 `Y.mp3` 挂在
+  //    45 个常用词上，读者点 `가다` 会听到别的声音（`[[dict-framework-doc]]`：错比缺更伤权威）。
+  { word: '가다', name: '录音不是张冠李戴的 `Y.mp3`',
+    hit: (_t, e) => ((e.audio ?? []).some((a: any) => a.file === 'Y.mp3')
+      ? '挂着 `Y.mp3`（同一个文件挂在 45 个词上）' : null) },
 ];
 
 /** 全量扫描：对每个抽样词渲染一遍，盯**跨词的结构性契约**。 */
@@ -110,7 +132,7 @@ function sweep(words: string[]) {
       // ② 汉字注那一族不许是链接；其余的链接必须有 targetNorm
       for (const it of g.items) {
         if (KO_ANNOTATION_KINDS.has(g.kind)) {
-          if (html.includes(`href="#${encodeURIComponent(it.target)}"`)) annotationLinks += 1;
+          if (html.includes(`href="#${hashFor(it.target)}"`)) annotationLinks += 1;
         } else if (it.targetNorm) { links += 1; } else { deadLinks += 1; }
       }
     }

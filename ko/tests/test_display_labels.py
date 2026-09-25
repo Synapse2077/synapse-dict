@@ -62,7 +62,7 @@ COMMON_TS = HERE.parent.parent / "packages" / "dict-labels" / "src" / "common.ts
 SHEETS = [
     ("KO_POS_LABELS",
      "SELECT DISTINCT pos FROM entry WHERE pos IS NOT NULL",
-     "词性", 5, "POS_LABELS"),
+     "词性（`entry.pos` —— `KoreanEntryView` 渲染的那一列）", 5, "POS_LABELS"),
     ("KO_RELATION_LABELS",
      "SELECT DISTINCT kind FROM sense_relation",
      "关系", 18, None),
@@ -133,6 +133,42 @@ def read_sheet(src, name):
     return parse_keys(body)
 
 
+KOREAN_TS = HERE.parent.parent / "packages" / "dict-core" / "src" / "korean.ts"
+
+# 🔴🔴 **一个字段三套值域**，实测：
+#     entry.pos      短码       n / v / hanja / suf / syl        ← 展示层认这套
+#     entry.pos_raw  长码       noun / verb / character
+#     dict.pos       长码＋斜杠  noun / noun-unknown / root-noun-unknown
+# 这张表只维护第一套。⇒ **服务层不许把另两套端给展示层** ——
+# 端了，调用方哪天印它就是一排英文原码（`contraction` / `proverb` 连全局表都没有）。
+# ⚠️ 这不是假设：我在 `entry.pos` 上已经栽过一次（映射表照 `pos_raw` 写、
+#    展示层读 `pos`，双方一致报全绿而每个徽标都是空的）。
+#    2026-09-25 本闸新增第二套值域那一刻，当场逮到 `korean.ts` 的 `search`
+#    正在 SELECT `d.pos` —— 今天没人渲染它，但它躺在返回体里等人踩。
+#    ⇒ 已改成从 `entry` 取短码；这条断言守住它不回来。
+BANNED_IN_SERVICE = [
+    (r"\bd\.pos\b", "`d.pos`（`dict.pos`，长码＋斜杠合并）"),
+    (r"\bpos_raw\b", "`pos_raw`（源头原词长码）"),
+]
+
+
+def service_value_domain():
+    """服务层有没有把另两套词性值域端出去。"""
+    if not KOREAN_TS.exists():
+        return [("red", "korean.ts", "服务层文件不在 —— 这条断言无从做起")]
+    src = KOREAN_TS.read_text(encoding="utf-8")
+    # 去掉 SQL 注释与 JS 行注释，否则注释里提到它也会命中
+    body = re.sub(r"--[^\n]*", "", src)
+    body = re.sub(r"//[^\n]*", "", body)
+    out = []
+    for pat, what in BANNED_IN_SERVICE:
+        if re.search(pat, body):
+            out.append(("red", "korean.ts",
+                        "🔴 服务层 SELECT 了 %s —— 那是**另一套值域**，"
+                        "映射表只维护 `entry.pos` 的短码。端出去＝等着印英文原码" % what))
+    return out
+
+
 def check():
     """→ [(级别, 表名, 说明), ...]。级别 'red' 拦，'warn' 只报。"""
     if not TS.exists():
@@ -140,9 +176,13 @@ def check():
     src = TS.read_text(encoding="utf-8")
     common = COMMON_TS.read_text(encoding="utf-8") if COMMON_TS.exists() else ""
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
-    out = []
+    out = list(service_value_domain())
     try:
         for name, sql, label, min_keys, fallback in SHEETS:
+            # ⚠️ 同一张表可能对两列值域各查一遍（`entry.pos` / `dict.pos`），
+            #    报告里用 `label` 区分，别只印表名
+            tag = "%s → %s" % (name, label.split("（")[1].split(" ")[0]) \
+                if "（" in label else name
             keys = read_sheet(src, name)
             # 🔴 覆盖层只放"不一样的"，所以覆盖率要算 **本层 ∪ 全局表**。
             #    只查本层 ⇒ 逼着 ko 把全局表抄一遍（`[[dict-labels-package]]` 反对的事）；
@@ -151,34 +191,38 @@ def check():
             if fallback:
                 base = read_sheet(common, fallback)
                 if base is None:
-                    out.append(("red", name,
+                    out.append(("red", tag,
                                 "🔴 落回的全局表 `%s` 抠不到 —— **闸失效了**"
                                 % fallback))
                     continue
             # ── 闸自己的闸 ──
             if keys is None:
-                out.append(("red", name,
+                out.append(("red", tag,
                             "🔴 正则抠不到这张表 —— **闸失效了**，"
                             "不是「值域全覆盖」。先修闸"))
                 continue
             if len(keys) < min_keys:
-                out.append(("red", name,
+                out.append(("red", tag,
                             "🔴 只抠到 %d 格，独立声明的下界是 %d —— "
                             "多半是解析错了或表被删了一截" % (len(keys), min_keys)))
                 continue
-            dom = {r[0] for r in con.execute(sql)}
+            # 🔴 `posLabel()` 按 `/` 拆开逐段查 —— 值域也要按同一条规则拆，
+            #    否则 `noun/unknown` 会被当成一个认不出的码。
+            dom = {seg for r in con.execute(sql)
+                   for seg in (r[0].split("/") if "pos" in sql else [r[0]])
+                   if seg}
             covered = keys | (base or set())
             missing = sorted(dom - covered)
             extra = sorted(keys - dom)
             if missing:
-                out.append(("red", name,
+                out.append(("red", tag,
                             "🔴 %s 库里 %d 种，%s里都没有的 %d 个：%s\n"
                             "        ⇒ 页面上这些行的徽标会是**空的**"
                             % (label, len(dom),
                                "本层和 `%s`" % fallback if fallback else "表",
                                len(missing), missing)))
             if extra:
-                out.append(("warn", name,
+                out.append(("warn", tag,
                             "⚠️ 表里多出（库里没有）：%s\n"
                             "        ⇒ 不影响页面，但说明写表的依据不是实测" % extra))
     finally:
