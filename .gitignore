@@ -37,3 +37,6 @@ __pycache__/
 *.tar
 *.xz
 *.log
+
+# 闪动探针的开发期日志（apps/web/.flicker.jsonl），诊断完即删
+.flicker.jsonl

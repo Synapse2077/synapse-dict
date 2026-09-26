@@ -10,7 +10,7 @@ import {
   PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE, ptInflHeading,
   DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel,
   EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels, enSenseTopics,
-  etymologyBrief,
+  etymologyBrief, audioChipLabels,
   JA_POS_LABELS, JA_KANJI_GRADE_LABELS, JA_RELATION_LABELS, JA_RELATION_SECTION, jaPitchType,
   JA_KANJI_READING_KIND, JA_KANJI_READING_SUBKIND, JA_KANJI_READING_ORDER,
   JA_REGISTER_LABELS, JA_REGION_LABELS, JA_GRAMMAR_LABELS, JA_USAGE_LABELS,
@@ -1042,24 +1042,18 @@ function HumanAudioRow({ audios, word, fallback, regionLabel }: {
     el.play().catch(giveUp);
   };
 
+  // 🔴🔴 **2026-09-26（K23）标签逻辑整段搬进 `dict-labels/audio.ts`。**
+  //    这里原来是三行内联：base = 地区 ?? 录音人 ?? 未标注；重复时带上录音人。
+  //    它在 ko `한국` 上失效 —— **地区和录音人都是空的，没东西可带** ⇒ 又是两个「未标注」。
+  //    全量实测这不是 ko 一门的事：**八门全中，3,563 个词**（见 audio.ts 文件头）。
+  //    ⇒ 换成一条**不变式**：同一个词的所有标签两两不同（`contract-check-audio.tsx` 盯着）。
+  const labels = audioChipLabels(usable, regionLabel);
+
   return (
     <div className="audio-row">
       <span className="audio-row-label">真人发音</span>
-      {usable.map((a) => {
-        // 🔴 2026-08-31：`region` 为空时原样印「未标注」——`banco` 两条录音都没地区，
-        //    两个按钮就都写着「未标注」，读者**分不清哪个是哪个**（用户看 banco 时暴露）。
-        //    pt 全库 5,510 条（60%）无地区**但有录音人** ⇒ 退到录音人名。
-        //    ⚠️ 退到「有信息的那个」，不是编一个地区出来 —— 录音人是源头给的事实。
-        //    （es/it 共用这个组件，同样受益：它们也有无地区的录音。）
-        // 🔴 2026-08-31 渲染评审：`a` 有四条录音，标签是「巴西 巴西 ~ 巴西 ~ 巴西 ~」——
-        //    **同名按钮读者分不清点哪个**。⇒ 同一个标签出现多次时，把录音人带上。
-        //    ⚠️ 只在**重复时**带，单条时保持简洁（`Afeganistão` 只有一条，不必啰嗦）。
-        const base = a.region ? regionLabel(a.region)
-          : (a.speaker ? a.speaker.replace(/_/g, ' ') : '未标注');
-        const dupLabel = usable.filter((x) => (x.region ? regionLabel(x.region)
-          : (x.speaker ? x.speaker.replace(/_/g, ' ') : '未标注')) === base).length > 1;
-        const region = dupLabel && a.speaker
-          ? `${base} · ${a.speaker.replace(/_/g, ' ')}` : base;
+      {usable.map((a, i) => {
+        const region = labels[i];
         const hint = [
           a.speaker ? `录音人 ${a.speaker}` : null,
           a.regionSrc === 'speaker' ? '地区按录音人推定' :
@@ -1161,9 +1155,21 @@ function refreshVoices() {
   const v = window.speechSynthesis.getVoices();
   if (v.length) voiceCache = v;
 }
+// 🔴 **这个监听器必须在模块被热替换时摘掉。** 2026-09-25 查「页面闪动」时发现：
+//    它挂在**模块顶层**，而 Vite 每次热更新都会重新求值整个模块 ⇒ 每改一次
+//    `App.tsx` 就多挂一个 `voiceschanged` 监听。开发服务器连着跑几天、改几十次之后，
+//    浏览器里躺着几十份同一个回调。**生产环境模块只求值一次，所以线上看不出来** ——
+//    这类只在开发期累积的泄漏，靠读代码是看不见的，得在"为什么闪"这种问题上撞见。
+//    ⚠️ 不要改成「在组件里 useEffect 挂」：`voiceCache` 是模块级的，
+//      监听器的生命周期就该跟模块走，跟组件走反而会在多实例时重复挂。
 if (typeof window !== 'undefined' && window.speechSynthesis) {
   refreshVoices();
   window.speechSynthesis.addEventListener('voiceschanged', refreshVoices);
+  if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+      window.speechSynthesis.removeEventListener('voiceschanged', refreshVoices);
+    });
+  }
 }
 
 // 🔴 macOS 附带一批**搞笑音**（Ventura 起还给它们配了各语言版本）。实测这台机器上

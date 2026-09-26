@@ -180,6 +180,48 @@ CHECKS = [
      "跑批 927/927、失败 0、定题 3/3、逐 id 点名一条不差 —— 过程指标全绿，"
      "而其中 18 条的**内容**是空的。闸问「有没有」，判官问「对不对」"),
 
+    # ══ 2026-09-26（K23 那一轮顺带逮到的三笔，判据都是**扩**出来的）══
+    # 🔴 R16：同一个 Commons 文件不许存成两行。2026-09-25 修过 456 组，
+    #    而判据当时要求名字**逐字符相同** ⇒ 漏掉 39 组下划线变体
+    #    （MediaWiki 把 `_` 与空格当同一个字符）。判据现在住在
+    #    `scripts/commons_filename.py`，八门共用，本闸 import 它、不重写。
+    ("R16", "同一个 Commons 文件没有存成两行", "@audio_dup", 0,
+     "第一版判据漏掉 39 组 `LL-Q9176_(kor)-…wav.mp3` / `LL-Q9176 (kor)-…wav`；"
+     "这 39 组**在页面上看不出来**（一行有录音人一行没有，标签正好不重复）"),
+
+    # 🔴 R17：文件名声明了别的语言的录音，一行都不许有。
+    #    (a) 的判据原来只认 `Zh-`/`Ja-` 这类**前缀**，而 Lingua Libre 把语言
+    #    编在 `LL-Q<编号>_(<语言码>)-` 里 ⇒ 漏掉 `LL-Q9186_(yue)-…-祖国.wav`
+    #    挂在汉字条目 `祖國` 上（**Q9186 是粤语**）。
+    ("R17", "没有别的语言的录音（含 LL 文件名里的语言码）", "@foreign_audio", 0,
+     "读者点 `祖國` 会听到粤语 `zou2 gwok3`，而韩语音是 `조국`。"
+     "判据窄得漏掉真的 —— 宽和窄两个方向都要量"),
+
+    # 🔴 R18：**这一条不是判据，是一张给人读的名册。**
+    #    「文件名里找不到这个词／它的发音形／它的四套罗马字」——
+    #    实测 25 行，逐条读过**全是对的**：`ㄱ` 挂 `Voiced_velar_plosive`（字母的
+    #    音素录音）、汉字条目挂韩语音（`郡守`→`Ko-군수`）、同音词共用
+    #    （`잇다`/`잊다`→`Ko-있다`）、发音形命名（`많다`→`Ko-만타`）。
+    #    ⚠️ **有意不写成「删除判据」**：这 25 行没有共同的可判形状，硬写一条
+    #    覆盖它们的判据一定会把正确的一起带走。数字一变就红，**让人去读新增的那几行**
+    #    （`[[judge-output-must-be-adjudicable]]`：判官产出要可裁决，不是硬读）。
+    #    2026-09-26 这张名册里原有 28 行，读出 3 行真错的（现振健小说朗读挂在 `웃다`、
+    #    粤语录音挂在 `祖國`、占位文件 `Example.wav` 挂在 `창포`），删掉后剩 25。
+    ("R18", "「文件名与词无关」的名册仍是逐条读过的那 25 行", "@audio_unrelated", 25,
+     "数字变了就去读新增的那几行 —— 它是名册不是判据，多出来的可能对也可能错"),
+
+    # 🔴 R19：关系目标不许是「逗号切分切断括号」造出来的碎片。2026-09-26（K19）。
+    #    `harvest_relations_from_examples.py` 先按逗号切、再去括号注，**顺序反了**：
+    #        `굿재이(강원, 경남, 전남, 충북)` → 굿재이 ✅ │ 경남 ❌ │ 전남 ❌ │ 충북) ❌
+    #    ⇒ 道名成了假的方言词。**收割器里那一行还没改**，重跑 harvest 就会长回来。
+    # ⚠️ 判据写成**机制**（拿同一份源文用认括号的切分器重跑，取差集），
+    #    不写成「目标是不是道名」—— 后者会误伤 `서울`/`북한`/`제주` 这些真词
+    #    （全库 64 条「目标是地区名」里大多是正常的关系边）。
+    ("R19", "关系目标没有被切断的括号碎片", "@paren_split", 0,
+     "账上原来记的是「`dialectal` 的 kind 判错」，回源头才知道 89% 的 kind 是对的、"
+     "坏的是 target；`조선 → 매아미` 那批更是**完全正确**（它那条义项是「매미의 북한말」）。"
+     "⚠️ 返回 -1 ＝ **判据自检没过**（两个切分器的差集不再是 9），不是「有假目标」"),
+
     ("R8", "`entry.hanja` 没有被搬到 `dict` 上",
      "SELECT COUNT(*) FROM pragma_table_info('dict') WHERE name='hanja'", 0,
      "1,944 个词形对应 ≥2 个不同汉字（`양` → 壤/兩/良/陽/孃/洋/量/羊），"
@@ -188,7 +230,7 @@ CHECKS = [
 
 
 # 🔴 回归闸应该有多少条。**这个数是声明，不是数出来的** —— 见 `_audit_checks`。
-R_ROSTER = 15
+R_ROSTER = 19
 
 
 def _audit_checks():
@@ -278,7 +320,124 @@ def _empty_gloss(con):
                           for c in (r[0] or "")))
 
 
+
+# ── 2026-09-26 新增的三条实现 ──────────────────────────────────────────────
+import sys as _s2
+import pathlib as _p2
+_s2.path.insert(0, str(_p2.Path(__file__).resolve().parents[2] / "scripts"))
+
+
+def _audio_dup(con):
+    """同一个 Commons 文件存了几行多余的。判据 import `scripts/commons_filename.py`，
+    **八门共用那一份**，绝不在这里重写（判据写两处就会漂，同一天付过两次学费）。"""
+    import collections
+    from commons_filename import commons_key
+    g = collections.defaultdict(int)
+    for w, fn in con.execute("SELECT word, file FROM audio"):
+        g[(w, commons_key(fn))] += 1
+    return sum(v - 1 for v in g.values() if v > 1)
+
+
+def _foreign_audio(con):
+    """文件名声明了别的语言的录音有几行。判据 import 修复脚本本身的那一份。"""
+    import importlib.util
+    fp = _p2.Path(__file__).resolve().parents[1] / "pipeline" / "fix_wrong_audio.py"
+    spec = importlib.util.spec_from_file_location("_fwa", fp)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    n = 0
+    for fn, in con.execute("SELECT file FROM audio"):
+        if m.FOREIGN.match(fn or ""):
+            n += 1
+            continue
+        g = m.LL_LANG.match(fn or "")
+        if g and g.group(1).lower() != m.LL_KOREAN:
+            n += 1
+    return n
+
+
+def _audio_unrelated(con):
+    """名册：文件名里找不到「词形／发音形／任一罗马字」的行数。见 R18 的注释。"""
+    import re
+    import unicodedata
+    forms = {}
+    for w, in con.execute("SELECT DISTINCT word FROM audio"):
+        forms[w] = {w}
+    for w, ph in con.execute(
+            "SELECT d.word, p.hangeul_phonetic FROM pronunciation p"
+            " JOIN dict d ON d.id = p.word_id WHERE p.hangeul_phonetic IS NOT NULL"):
+        if w in forms:
+            forms[w].add(ph)
+    for w, a, b, c2, d2 in con.execute(
+            "SELECT d.word, e.roman_rr, e.roman_rr_translit, e.roman_mr, e.roman_yale"
+            " FROM entry e JOIN dict d ON d.id = e.word_id"):
+        if w in forms:
+            forms[w].update(x for x in (a, b, c2, d2) if x)
+    strip = re.compile(r"[\s_\-'’.()]+")
+
+    def norm(x):
+        return strip.sub("", unicodedata.normalize("NFC", x or "").lower())
+
+    n = 0
+    for w, fn in con.execute("SELECT word, file FROM audio"):
+        nf = norm(fn)
+        if not any(norm(x) and norm(x) in nf for x in forms.get(w, {w})):
+            n += 1
+    return n
+
+
+
+
+def _paren_split(con):
+    """「逗号切分切断括号」造出来的假目标还剩几条。
+
+    判据与修复脚本**同一份**（`fix_relation_paren_split`：两个切分器求差），
+    连有意保留的那条清单（`KEEP`）也是它的 —— 一个字都不在这里重写。
+    """
+    import importlib.util
+    fp = _p2.Path(__file__).resolve().parents[1] / "pipeline" / "fix_relation_paren_split.py"
+    spec = importlib.util.spec_from_file_location("_frps", fp)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    H = m.H
+    indict = {w: i for i, w in con.execute("SELECT id, word FROM dict")}
+    id2w = {i: w for w, i in indict.items()}
+    old, new = set(), set()
+    for _s, word, lab, payload in H.load_rows():
+        if lab in H.DROP or lab not in H.M:
+            continue
+        kind, _t = H.M[lab]
+        wid = indict.get(word)
+        if wid is None:
+            continue
+        for raw in H.SPLIT.split(payload):
+            t = H.clean(raw)
+            if t and (H.HANGUL.search(t) or H.CJK.search(t)) and t != word:
+                old.add((wid, kind, t))
+        for frag in m.split_outside_parens(payload):
+            t = H.clean(frag)
+            if t and (H.HANGUL.search(t) or H.CJK.search(t)) and t != word:
+                new.add((wid, kind, t))
+    ghost = {g for g in (old - new)
+             if (id2w.get(g[0]), g[1], g[2]) not in m.KEEP}
+    # 🔴🔴 **闸自己的闸，堵掉一个真盲区。** 变异验证时逮到：
+    #    把 `split_outside_parens` 退化成旧切分器（`if depth == 0` → `if True`），
+    #    两个切分器产出相同 ⇒ 差集为空 ⇒ **这条检查报 0，全绿** ——
+    #    而判据已经失效。判据与修复脚本共用一份的代价就是「坏了两边一起瞎」。
+    # ⇒ 锚在**常量**上：这份 dump 上，两个切分器的差集（去掉 `KEEP`）恒为 9。
+    #    切分器一退化这个数就变 0，当场红。源文换了也会红 —— 那时该重新裁决，正是要的。
+    EXPECT_GHOST = 9
+    if len(ghost) != EXPECT_GHOST:
+        return -1     # ≠ 0 ⇒ 报红；-1 表示「判据自检没过」，不是「有假目标」
+    now = {(w, k, t) for w, k, t in con.execute(
+        "SELECT word_id, kind, target FROM sense_relation")}
+    return len(ghost & now)
+
 _FUNCS = {"@audio_filename_leak": _audio_filename_leak,
+          "@paren_split": _paren_split,
+          "@audio_dup": _audio_dup,
+          "@foreign_audio": _foreign_audio,
+          "@audio_unrelated": _audio_unrelated,
           "@wrong_audio": _wrong_audio,
           "@empty_gloss": _empty_gloss}
 

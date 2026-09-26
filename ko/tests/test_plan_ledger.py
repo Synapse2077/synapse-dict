@@ -226,7 +226,22 @@ FILES = {
           ("统计信息（`ANALYZE`，热查询 51.45ms → 0.04ms）",
            "ko/pipeline/analyze_db.py"),
           ("查询计划闸（从 `korean.ts` 抠真 SQL，4 条变异全过）",
-           "ko/probes/query_plans.py")],
+           "ko/probes/query_plans.py"),
+          # 🔴 9e（K23）这五件是**一套**，缺一件就有一类缺陷没人看：
+          #    标签不变式（展示）／Commons 文件等价判据（唯一的家）／
+          #    录音重复闸（数据，跨语种）／标签闸（展示，跨语种）／张冠李戴的修复。
+          #    ⚠️ 两道闸**互相看不见**：ko 那 39 组重复行在页面上看不出来，
+          #    而标签重复的是另外 39 个词，两批完全不相交。
+          ("发音按钮标签不变式（两两不同，八门共用）",
+           "packages/dict-labels/src/audio.ts"),
+          ("Commons 文件名等价判据（八门共用的唯一一份）",
+           "scripts/commons_filename.py"),
+          ("跨语种录音重复闸（欠账锚在常量上，涨了红降了也红）",
+           "scripts/test_audio_dup_gate.py"),
+          ("跨语种发音标签闸（真渲染 → 读 `.audio-region` 的字）",
+           "apps/web/src/contract-check-audio.tsx"),
+          ("删掉张冠李戴的录音（外语 / 占位文件 / 文学朗读）",
+           "ko/pipeline/fix_wrong_audio.py")],
 }
 
 # 阶段 9 的交付物是**展示层真的改了读取路径**（`[[it-display-layer-stage8]]`：

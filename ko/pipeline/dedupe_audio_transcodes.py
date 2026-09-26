@@ -27,6 +27,17 @@
     `<名字>.<oga|ogg|wav|flac|opus>.mp3`  ←→  `<名字>.<同一个扩展名>`
 只有这一种形状算同一条录音。实测 **456 组 / 每组恰好 2 行 / 四个字段零冲突**。
 
+🔴🔴 **2026-09-26 第二轮：判据漏了一维，又并掉 39 组。**
+   第一版要求名字**逐字符相同**，而 MediaWiki 把标题里的下划线与空格
+   当同一个字符（见 `commons_title`）⇒ 漏掉
+       `LL-Q9176_(kor)-HappyMidnight-가슴.wav.mp3`（ko-edition，下划线）
+       `LL-Q9176 (kor)-HappyMidnight-가슴.wav`（commons，空格）
+   ⚠️ 这 39 组**在页面上看不出来**（一行有录音人一行没有，标签正好不重复），
+      所以 K23 那道标签闸对它结构性失明 —— 两批各 39 个词，**完全不相交**。
+   ⇒ 判据宽了会误并，窄了会漏并；**两个方向都要有独立的东西来查**：
+      并得对不对 → 组内自检（恰一行转码名、四字段零冲突）；
+      并得全不全 → `scripts/test_audio_dup_gate.py`（跨语种，八门一起查）。
+
 🔴 **有意不并**另外 3 行（`Ko-한국.oga` vs `Ko-한국.ogg`）：那是两个**不同的
    Commons 文件**，不是转码关系。第一版我用「去掉任意扩展名后同名」去分组，
    多扫出 3 行 —— 判据宽了一点点就会把说不清的东西一起并掉
@@ -53,19 +64,18 @@ import sqlite3
 import dbtool
 import paths
 
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parents[2] / "scripts"))
+from commons_filename import TRANSCODE, commons_key  # noqa: E402
+
 f = lambda n: format(n, ",")
 
-# 🔴 只认转码后缀，不认「任意扩展名」（见文件头）
-TRANSCODE = re.compile(r"\.(oga|ogg|wav|flac|opus)\.mp3$", re.I)
+# 🔴🔴 **判据不在这里定义，import 共享那一份**（`scripts/commons_filename.py`）。
+#    2026-09-26：这条判据在八门上都要用（`scripts/test_audio_dup_gate.py` 也用它），
+#    而它已经因为「写在两个地方」付过两次学费 —— 第一版漏掉下划线变体、
+#    同一个脚本里回核与分组用了两套判据。判据只许有一个家。
 URLS = ("url_mp3", "url_ogg", "url_wav", "url_other")
 COLS = ("id", "word", "file") + URLS + ("ipa", "speaker", "region", "region_src",
                                         "kind", "src")
-
-
-def original_name(fn):
-    """转码名 → 原始 Commons 文件名；本来就是原始名的原样返回。"""
-    m = TRANSCODE.search(fn)
-    return fn[:m.end() - 4] if m else fn
 
 
 def main():
@@ -79,7 +89,7 @@ def main():
     groups = collections.defaultdict(list)
     for r in rows:
         d = dict(zip(COLS, r))
-        groups[(d["word"], original_name(d["file"]).lower())].append(d)
+        groups[(d["word"], commons_key(d["file"]))].append(d)
     dups = {k: v for k, v in groups.items() if len(v) > 1}
 
     # 🔴 判据的自检：每组必须**恰有一行是转码名**，否则分组判据不成立
@@ -142,7 +152,7 @@ def main():
         cur = sum(1 for r in rows if r[COLS.index(c)])
         print("   %-10s 现有 %5s → 合并后 %5s%s"
               % (c, f(cur), f(post[c]),
-                 "   ← 删掉的那 456 行各自都有一份，保留行也有，没有丢地址"
+                 "   ← 并掉的那些行各自都有一份，保留行也有，没有丢地址"
                  if c == "url_mp3" else ""))
     # 🔴 反向：合并之后**每一行都还至少有一个可播地址**
     dead = sum(1 for v in groups.values()
@@ -170,8 +180,12 @@ def main():
     q = lambda x: con.execute(x).fetchone()[0]
     after = con.execute("SELECT word, file FROM audio").fetchall()
     g2 = collections.defaultdict(list)
+    # 🔴 **回核必须用与分组同一条判据。** 2026-09-26 扩判据时这一行差点漏掉：
+    #    它原来是 `original_name(fn).lower()`（不过 `commons_title`）——
+    #    那就意味着「修的是下划线≡空格这一类，回核却按逐字符比」，
+    #    刚修掉的那一类它永远报 0。检查与修复用两套判据 ＝ 检查等于没做。
     for w, fn in after:
-        g2[(w, original_name(fn).lower())].append(fn)
+        g2[(w, commons_key(fn))].append(fn)
     still = sum(len(v) - 1 for v in g2.values() if len(v) > 1)
     checks = [
         ("录音行数", len(after), n_before - len(drop_ids)),

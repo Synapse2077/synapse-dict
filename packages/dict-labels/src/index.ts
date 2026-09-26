@@ -12,6 +12,7 @@
 
 export * from './common.js';
 export * from './etym.js';
+export * from './audio.js';
 export * from './topic-tree.js';
 export * from './es.js';
 export * from './it.js';
