@@ -748,6 +748,22 @@ button.brand:focus-visible {
   color: var(--text-secondary);
 }
 
+/* 角色：**不带序号的**词源分区标题（只写「词源」）。2026-09-27，ko。
+   🔴 为什么另起一个类而不是复用 `.etym-label`：
+     `.etym-label` 的内容是**序号**（`词源 ①`），只有一个词源时序号对读者没有意义，
+     契约闸 G2 也据此禁止它出现。而「这一段是词源」这件事**在只有一个词源时同样要说** ——
+     用户 2026-09-27 看 `아름답다` 问「这是什么啊」就是因为没人说过这句话。
+   ⇒ 两个类各管一件事：`etym-label` 管「这是第几支」，`etym-title` 管「这一段是词源」。
+   ⚠️ **不画上边框**：只有一支词源时不存在"把两支切开"这件事，
+      那条线会变成「释义」小标题的下划线（`.etym-label` 的注释里记过同一个坑）。 */
+.etym-title {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
 /* 词源标题下面那一句正文（2026-09-14）。
    ⚠️ 字号刻意比义项中文小一档、颜色退到次级 —— 它是**背景信息**，
       不该跟释义抢视线；但也不能小到看不清（用户 2026-09-11：字体样式要统一，
@@ -2126,4 +2142,237 @@ button.rel-link {
   padding: 0;
   border-left: 2px solid var(--border);
   padding-left: 10px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   韩语独有的角色（阶段 9，K32，2026-09-26）
+
+   ═══ 为什么这一段现在才有 ═══
+   🔴 `KoreanEntryView` 进 `App.tsx` 是 09-25，而本文件里 **`ko-*` 规则一条都没有**。
+      也就是说 ko 视图从写出来那天起就没有本语种的样式 —— 汉字音区、原形区、
+      活用表摘要三处的元素之间没有任何间距/字号/颜色规则。
+   ⇒ 这是 `PITFALLS` I3「自造类名 ＝ 页面没样式，而且探针看不见它」的**第四次**
+     （de 16 个 → ja 33 个 → ko 19 个）。逮到它的是 `css-audit.ts`，
+     而那道闸从 09-25 起就红着、**没有任何东西逼人跑它**（见 ko 的 K31）。
+
+   ═══ 照 ja 那一段的两步走，不是直接写新规则 ═══
+   ① **有共用角色的一律改用共用名字**：`entry-roman` → `ko-roman`（与 `.ja-romaji`
+      同角色但位置不同，仍归本语种）；`badge conj-class` → **`badge vclass`**
+      —— 活用类与 ja 的五段/一段、it 的变位类是**同一个视觉角色**，
+      本文件的总规矩是「同一个视觉角色只许有一份声明」⇒ 直接复用，少写一条规则。
+      ko 视图已经在用的共用件：`entry-detail`/`entry-section`/`form-list`/
+      `inflection-list`/`infl-form`/`infl-sep`/`infl-label`/`phonetic-row`/
+      `phonetic-btn`/`badge.region`/`rel-link`/`rel-plain`/`ja-base`* —— 一个都不重复声明。
+   ② 剩下的才在这里声明。
+
+   ⚠️ **不许用「加一条空规则」把闸弄绿** —— 那是 `[[proxy-metric-gets-optimized]]`。
+      下面每一条都对应渲染出来看得见的一处（`render-dump --lang ko --html` 读过）。
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* 作用域钩子。本身不画任何东西，只用来把下面几条限制在韩语页内。 */
+.ko-entry {
+  --ko-hanja-font: 'Noto Serif KR', 'Songti SC', serif;
+}
+
+/* ---- 词头旁：罗马字 ----
+   只印 RR 一套（用户 2026-09-20 拍板）。比正文低一档＋斜体，与 `.ja-romaji` 同档 ——
+   它是**转写**不是词，不该和词头抢。 */
+.ko-roman {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* 汉字表记徽标（`한국` → 韓國）。中文读者靠它一眼认词，是 ko 最有价值的一格
+   ⇒ 用强调色而不是中性灰，并且上衬线体（汉字在无衬线里笔画容易糊）。 */
+.badge.hanja {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+  font-family: var(--ko-hanja-font);
+}
+
+/* ---- 读音区 ----
+   一个词可能有多个读音（`조선` 的长短音两读）。
+   ⚠️ 每行本身是 `.phonetic-row`，它带 `margin-bottom: 26px`（那是给「整块读音」
+      留的间距）。多行并列时那个值太大 ⇒ 在这里压掉，间距交给容器的 `gap`。 */
+.ko-readings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 26px;
+}
+
+.ko-readings .ko-reading {
+  margin-bottom: 0;
+}
+
+/* ---- 读音的出处标记：两个方向都要如实说 ----
+   🔴 `[[dont-say-source-lacks-what-we-skipped]]`：我们算的与源头给的要在**结构上**
+      分开，展示层不许抹平。ko 有 73% 的读音是我们按 표준발음법 算的（G2P）。
+   ⇒ `src-note`＝「不是源头给的」，用**警示色但低饱和**：它是限定条件，不是错误；
+     `endorsed`＝「多版一致」（几份源给出同一个读音），用**认可色**。
+   ⚠️ 两个都做成 `.badge`，字号交给 `.badge` 那条，这里只给颜色 ——
+     `styles.css` 的总规矩：同一个视觉角色只许有一份声明。 */
+.badge.src-note {
+  background: color-mix(in srgb, #d9822b 14%, transparent);
+  color: #d9822b;
+  font-weight: 500;
+}
+
+.badge.endorsed {
+  background: color-mix(in srgb, #2e9e5b 14%, transparent);
+  color: #2e9e5b;
+  font-weight: 500;
+}
+
+/* 关系边的源头标签（`녀자` 的「朝鲜」、`소세지` 的「非规范」、`따듯하다` 的「语感弱」）。
+   🔴 它是**限定语不是内容**：紧跟在目标词后面、比目标词小一号、颜色更淡，
+     读者的视线仍然落在词上。用中性灰而不是警示色 ——「朝鲜」不是毛病。
+   ⚠️ 与 `.badge.src-note` 有意不同色：那个说「这不是源头给的」，
+     这个说「源头说它是这种变体」，两件事。 */
+.badge.rel-tag {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  font-weight: 400;
+  margin-inline-start: 4px;
+}
+
+/* 发音形谚文（`읽다` → `익따`）—— ko 独有的一层，是**音变之后的实际读法**。
+   它和 IPA 同在发音按钮里，必须一眼分得开：IPA 是国际记号，这个是韩文。
+   ⇒ 用谚文本身的字重和强调色，不用斜体（谚文没有斜体传统，拉宽反而糊）。 */
+.ko-hangeul-phonetic {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ---- 汉字音区（谚文音节 → 一组汉字）----
+   🔴 与上面的读音区**视觉上必须分得开**（与 `.ja-kanji-readings` 同一条理由）：
+      那是「这个**词**怎么念」，这里是「这个**字**是哪些汉字」。
+   ⚠️ 一个音节最多 29 条（`일`），所以是 wrap 的列表不是一行。 */
+.ko-hanja-readings {
+  margin-top: 10px;
+}
+
+.ko-hanja-readings .form-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+/* 🔴 这三个 span 原来**紧挨着印**（`一한 일one`）—— 汉字、音训、英文释义之间
+   一个像素的间隔都没有，那正是 K32 最刺眼的一处。间隔交给 li 的 flex gap。 */
+.ko-hanja-readings .form-list li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+
+/* 汉字本体 —— 这一区的主角，比周围大一档并上衬线体。 */
+.ko-hanja {
+  font-size: 17px;
+  line-height: 1.4;
+  font-family: var(--ko-hanja-font);
+}
+
+/* 音训（`한 일` ＝「一个的 일」）：韩语给这个字的训读＋音读，是**韩语侧**的信息。 */
+.ko-eumhun {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* 英文字义 —— 第三档，最弱。它是补充，不是这一区存在的理由。 */
+.ko-hanja-gloss {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* ---- 汉字表记区（`換面相訟` 这种多字汉字串，不做链接）----
+   ⚠️ 它与上面的「汉字音」不是一回事：那是**一个字**，这是**整个词**的汉字写法。 */
+.ko-hanja-spellings .rel-item,
+.ko-hanja-spellings .rel-plain {
+  font-family: var(--ko-hanja-font);
+}
+
+/* 区内的一句说明（「同一个谚文拼写对应下列多个汉字词」）。
+   ⚠️ 只在**真有多个**时才印（判据在 `App.tsx` 里）——这里只管它长什么样：
+      比正文小一档、灰一档，明确是注不是内容。 */
+.section-note {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* ---- 原形区（本页是活用形时，指回它的原形）----
+   子元素复用 `.ja-base`/`.ja-base-label`/`.ja-pointer-title`（已声明），
+   这里只给容器 —— 与 `.ja-bases` 同一份形状。 */
+.ko-bases {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 13px;
+}
+
+/* ---- 活用表（本仓库唯一用 `<details>` 的一处）----
+   🔴 `DISPLAY_EXTREMES` §四.1「折叠可以，死胡同不行」⇒ 用 `<details>` 不用 `slice`。
+      那就必须让读者**看得出它能展开** —— 而展开三角是浏览器默认给 `<summary>` 的，
+      条件是它保持 `display: list-item`。
+   ⚠️🔴 **第一版我给 `.ko-infl-summary` 设了 `display: flex`**（为了让
+      `<h3>活用</h3>` 和「共 102 个形式」排在一行）—— 那会**把三角整个去掉**，
+      于是长活用表默认收起、而页面上没有任何东西表示它可以打开：
+      折叠变成了死胡同，正好把上面那条规矩违反掉。
+   ⇒ 正确解法是反过来：**不动 `<summary>` 的 display**，只把里面的 `<h3>` 改成
+     行内，三个子元素就自然跟在三角后面排成一行，间距用 margin 给。 */
+.ko-inflections details > summary {
+  list-style-position: outside;
+  margin-left: 2px;
+}
+
+.ko-inflections details[open] > summary {
+  margin-bottom: 4px;
+}
+
+.ko-infl-summary {
+  cursor: pointer;
+}
+
+.ko-infl-summary h3 {
+  display: inline;
+  margin: 0;
+}
+
+/* 条数（`共 102 个形式`）—— 收起时它是读者判断要不要展开的唯一依据
+   （`DISPLAY_EXTREMES` §四.2），所以给它读得清的字号，不当脚注处理。 */
+.ko-infl-count {
+  margin-left: 8px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ko-infl-summary .badge.generated {
+  margin-left: 8px;
+}
+
+/* 「含规则生成」（区级）与「规则」（行级）——
+   🔴 **读者有权知道哪一格是源头给的、哪一格是我们算的**（K8/K18：745,037 行
+      按规则生成，实测残差 0.043%）。把两者印成一样就是拿生成物冒充源头。
+   ⇒ 用中性底色的弱标记：**如实说明，但不喧哗** —— 它是出处说明，不是警告。 */
+.badge.generated {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.infl-generated {
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
 }

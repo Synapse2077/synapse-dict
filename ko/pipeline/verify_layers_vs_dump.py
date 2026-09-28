@@ -49,6 +49,7 @@ import paths
 import harvest_examples as HE
 import build_inflection_layer as BI
 import build_pronunciation as BP
+import fix_audio_filename_leak as FAL   # 🔴 判据的唯一家（录音文件名冒充 IPA）
 
 f = lambda n: format(n, ",")
 
@@ -275,7 +276,18 @@ def layer_pronunciation(show=0):
                 #    ⚠️ 登记成**判据**不是数字：源头侧套同一条过滤 ⇒
                 #      「源头新出现一条正常 IPA 而我们没收」照样会红。
                 #      写成「允许差 98 条」就把闸关了。
-                if ipa and not XSAMPA.search(ipa):
+                # 🔴🔴 **录音文件名冒充 IPA，有意不收**（2026-09-26 补登记）。
+                #    源头把 `Ko[ha̠da̠].oga` 写在 `sounds.ipa` 里，而那是**录音文件名**；
+                #    2026-09-25 `fix_audio_filename_leak.py` 把库里那条改对了
+                #    （`하다` 的读音与罗马字都存过文件名）。
+                #    ⇒ 这道「源头↔库」恒等闸从那天起就报「源头有·库里没有 1」，
+                #      **而没人跑过它** —— 修了源头的错别字却没跟着登记，闸就红在那儿。
+                #      `[[source-typo-fix-ours-not-quote]]`：改我们的出版文本，
+                #      而**恒等闸必须知道这次偏离是有意的**。
+                #    ⚠️ 登记成**判据**不是数字（与上面 X-SAMPA 同一条纪律）：
+                #      判据 import `fix_audio_filename_leak.is_audio`，源头侧套同一条 ⇒
+                #      源头哪天写了一条真 IPA 而我们没收，照样会红。
+                if ipa and not XSAMPA.search(ipa) and not FAL.is_audio(ipa):
                     acc[(w, ipa)].add(notation)
     want = {(w, i, BP.pick_notation(ns)) for (w, i), ns in acc.items()}
 

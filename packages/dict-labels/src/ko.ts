@@ -125,6 +125,88 @@ export const KO_RELATION_LABELS: Record<string, string> = {
   hangeul: '谚文读法',
 };
 
+/**
+ * 关系边的 `tags`（源头给的标签数组）里**值得印给读者**的那些。2026-09-27（K33）。
+ *
+ * 🔴🔴 为什么非印不可：`여자 → 녀자`、`수박 겉 핥기 → 수박 껍질만 핥는다` 这些边
+ *   在页面上都只是「异形」，而它们真正的信息是**这是朝鲜（문화어）的说法** ——
+ *   对韩汉词典的读者，南北差异是这一格的全部价值。数据里 61 条一直存着
+ *   （`variety-kp` 31 ／ `North-Korea` 33），**而展示层从来没读过这一列**。
+ *   2026-09-27 拿 K33 的五条新边去渲染时才看见（⭐ 又一次：**逮到的方式只有一个，
+ *   把数据渲染出来读**）。两家外审也都点名说这个区分不许丢。
+ *
+ * 🔴 这张表与 `KO_RELATION_TAG_SKIP` **合起来必须覆盖全部值域**（覆盖闸盯着）。
+ *   「白名单」式的表会静默漏掉源头下一版多给的码；显式跳过集才逮得住漂移。
+ */
+export const KO_RELATION_TAG_LABELS: Record<string, string> = {
+  // ── 地域/变体：ko 这一层最有价值的标签 ──
+  'variety-kp': '朝鲜', 'North-Korea': '朝鲜',
+  'variety-kr': '韩国', 'South-Korea': '韩国',
+  Yanbian: '延边', China: '中国朝鲜语', Russia: '中亚高丽语',
+  Gyeongsang: '庆尚', Jeolla: '全罗', Hamgyong: '咸镜', Gangwon: '江原',
+  Yukjin: '六镇', Seoul: '首尔',
+  Northern: '北部', Southern: '南部', Eastern: '东部', Southeastern: '东南部',
+
+  // ── 规范判断：读者最需要知道「这个写法能不能用」 ──
+  nonstandard: '非规范', misspelling: '误写', proscribed: '不推荐',
+
+  // ── 语体/年代 ──
+  archaic: '古语', obsolete: '废弃', dated: '旧式', literary: '书面语',
+  colloquial: '口语', slang: '俚语', Internet: '网络语',
+  honorific: '敬语', impolite: '非敬语', informal: '非格式体',
+  vulgar: '粗俗', derogatory: '贬义', offensive: '冒犯',
+  endearing: '爱称', humorous: '戏谐', poetic: '诗语',
+
+  // ── 频度 ──
+  common: '常见', uncommon: '少见', rare: '罕见',
+
+  // 🔴 韩语的**语感对立**（어감）—— 强弱/大小/送气是这门语言里的真区别，
+  //    `따듯하다`／`따뜻하다` 的差别就靠这一格说清。别当成"程度副词"删掉。
+  strong: '语感强', weak: '语感弱', big: '语感大', small: '语感小',
+  aspirated: '送气',
+
+  // ── 构形 ──
+  contraction: '缩合形', clipping: '截短形', 'short-form': '简略形',
+  initialism: '首字母缩写', allomorph: '同位变体', 'before-vowel': '元音前',
+  passive: '被动', active: '主动', causative: '使动', future: '将来',
+  'hanja-native': '汉字·固有混合',
+};
+
+/**
+ * 有意**不印**的 tags，一格一个理由。🔴 这不是"剩下的"，是逐个判过的 ——
+ * `[[residual-bucket-is-not-evidence]]`：写成"其他"就没人知道里面有什么。
+ */
+export const KO_RELATION_TAG_SKIP: Record<string, string> = {
+  // 与 kind 本身重复：印出来就是「异形 异形 녀자」
+  hangeul: '与 kind `hangeul` 重复', alternative: '与 kind `alternative` 重复',
+  counter: '与 kind `counter` 重复', dialectal: '与 kind `dialectal` 重复',
+  abbreviation: '与 kind `abbreviation` 重复',
+  variant: '与 kind `alternative`/`alt_of` 重复，且比它们更含糊',
+  compound: '与 kind `derived` 重复', root: '结构标注，不是给读者的信息',
+  spelling: '单独出现时没有信息（"拼写"是什么拼写？）',
+  // 只在组合里有意义，单独印会误导
+  Early: '只与 `Modern` 组合成「早期近代韩语」；单独印成"早期"是错的',
+  Modern: '同上（80 条里两者总是同时出现）',
+  'Early-Modern-Korean': '同上，且它已经是那个组合的完整写法（1 条）',
+  // 模糊限定词：印出来读者不知道限定的是什么
+  especially: '模糊限定（"尤指"什么？源头把范围写在别处）',
+  sometimes: '模糊限定', US: '语境不明（2 条，无法判断指在美韩语还是美式英语借词）',
+};
+
+export function koRelationTagLabels(tagsJson: string | null): string[] {
+  if (!tagsJson) return [];
+  let arr: unknown;
+  try { arr = JSON.parse(tagsJson); } catch { return []; }
+  if (!Array.isArray(arr)) return [];
+  const out: string[] = [];
+  for (const t of arr) {
+    const label = KO_RELATION_TAG_LABELS[String(t)];
+    // 认不出的码**不印** —— 印原码就是把英文漏到页面上（契约闸盯着这一条）。
+    if (label && !out.includes(label)) out.push(label);
+  }
+  return out;
+}
+
 export function koRelationLabel(kind: string): string | undefined {
   return KO_RELATION_LABELS[kind];
 }

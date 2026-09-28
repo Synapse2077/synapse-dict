@@ -128,6 +128,16 @@ TRACK = [
     'sense_src.sense_id',
     # 例句的原文译文
     'example.src_translation',
+    # 🔴 关系边被藏起来的原因（2026-09-27，K30）。**盯 `hidden_why` 而不是 `hidden`**：
+    #    `hidden` 是 0/1，而 TRACK 的口径是「非空计数」—— `TRIM('0')` 也非空
+    #    ⇒ 0→1 的改动在它眼里是 0 变化，**等于没盯**。
+    #    `hidden_why` 从 NULL 变成有值才看得见，而 R22 保证了
+    #    `hidden=1` ⟺ `hidden_why` 非空 ⇒ 盯住它就等于盯住了 `hidden`。
+    'sense_relation.hidden_why',
+    # 🔴 例句被藏起来的原因（2026-09-27，K33）。同一个理由：`example.hidden` 的 0→1
+    #    在「非空计数」口径下是 0 变化，只有 `hidden_why` 看得见。
+    #    R25 保证了 `example.hidden=1` ⟺ `hidden_why` 非空。
+    'example.hidden_why',
 ]
 
 TRACK_TABLES = [
@@ -139,6 +149,9 @@ TRACK_TABLES = [
                 'etymology', 'entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag',
                 'sense_relation', 'inflection',
                 'pronunciation', 'example', 'example_gloss',
+                # 词源正文的译文（2026-09-27，K36）。建出来的当天列进来 ——
+                # 38,796 条词源正文 100% 是英文，中文读者一个字读不懂。
+                'etymology_gloss',
                 'collocation', 'collocation_gloss', 'audio',
                 # 汉字音层（谚文音节 → 一组汉字）。2026-09-20 阶段 1 途中补建 ——
                 # 建出来的当天就列进来，别等项目做完才数（ja 的 sense_tag 空了整个项目）。
@@ -630,15 +643,33 @@ def _line(snap, d=None):
     return " | ".join(parts)
 
 
+# 🔴🔴 **这次写库动了哪些表** —— 从 SQL 里抠表名。K31 的第二版，2026-09-26。
+#
+# 第一版把「哪几道闸过期了」建在 `diff()`（计数差）上。当天就撞到洞：
+# K16 重译 20 条例句译文是**纯内容 UPDATE**，所有计数一个没变 ⇒ `diff` 是空的
+# ⇒ **一道闸都没被标脏**，而例句译文正是外锚闸和契约闸盯的东西。
+# ⭐ 这正是 `[[primary-key-is-not-enough]]` 记过的形状：**计数型判据对内容改动
+#   结构性失明**。⇒ 判据换成「写了哪张表」，它对 INSERT/UPDATE/DELETE 一视同仁。
+_WRITE_SQL = re.compile(
+    r"\b(?:INSERT(?:\s+OR\s+[A-Z]+)?\s+INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)"
+    r"\s+[\"'`\[]?([a-z_][a-z0-9_]*)", re.I)
+
+
 class _S:
     """会话句柄。只暴露写库入口，强制所有写操作被计数。"""
 
     def __init__(self, conn):
         self.conn = conn
         self.written = 0
+        self.touched = set()        # 这次写库动过的表名（给 K31 的欠账机制用）
+
+    def _note(self, sql):
+        for m in _WRITE_SQL.finditer(sql or ""):
+            self.touched.add(m.group(1).lower())
 
     def executemany(self, sql, seq):
         seq = list(seq)
+        self._note(sql)
         self.conn.executemany(sql, seq)
         self.written += len(seq)
         return len(seq)
@@ -648,9 +679,13 @@ class _S:
         if name in _cols(self.conn):
             return False
         self.conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (TABLE, name, decl))
+        self.touched.add(TABLE)     # 改了结构，读者口径的闸一律重跑
         return True
 
     def execute(self, sql, args=()):
+        # ⚠️ `execute` 既用来读也用来写（脚本常拿它跑 SELECT）。`_note` 只认
+        #    写语句的关键字，所以 SELECT 不会被误记成「动过表」。
+        self._note(sql)
         return self.conn.execute(sql, args)
 
 
@@ -831,9 +866,57 @@ def session(tag, expect=None, dry=False, verbose=True, invalidates=None):
         _con.close()
     # 🔴 **说在最后** —— 那是人还在看屏幕的时候。说在开头会被后面几十行不变量冲掉。
     _announce_invalidated(_INV.get("cur"), verbose)
+    _gate_debt(d, tag, s.touched, s.written)
 
 
 _INV = {"cur": None}
+
+
+def _gate_debt(d, tag, touched=(), written=0):
+    """K31 —— 这次写库让哪几道闸**过期**了：记进欠账文件，并在最末尾大声说。
+
+    ═══ 为什么不是「记得跑一下」 ═══
+    2026-09-26 发现两道外锚闸从 **09-25 起红了整整一天**，两条都不是新缺陷，
+    是「修了数据没跟着重跑闸」。这里之前什么都不说 ⇒ 没有任何东西会提醒人。
+    `[[lesson-must-become-mechanism]]`：**做成机制的全守住了，写成文字的一条没守住。**
+
+    ⚠️ 与上面几道一样**只报不拦**（数据已经 commit 了）。真正拦人的是
+       账的闸 P10：欠账非空就红，而账的闸每次写库都自动跑。
+
+    🔴 算不出依赖时（`gates.service_tables()` 抛）**把所有闸都记成脏的** ——
+       宽的代价是多跑几分钟，窄的代价就是 09-25 那两条。
+       `[[dont-gate-facts-on-my-uncertainty]]`：不确定的时候别默认「没事」。
+    """
+    try:
+        sys.path.insert(0, str(HERE))
+        import gates
+    except Exception as e:                       # noqa: BLE001 —— 读不到名单本身要喊
+        print("\n🔴🔴 闸名单 `ko/gates.py` 读不到（%s）—— **这本身要查**："
+              "K31 的整个机制靠它。" % e, file=sys.stderr)
+        return
+    # 🔴🔴 **判据是「写了哪张表」∪「哪些计数变了」，不是只看计数。**
+    #    只看计数的第一版当天就被 K16 的纯内容 UPDATE 穿过去了（计数全没变、
+    #    欠账是空的、而 20 条例句译文已经改了）——
+    #    `[[primary-key-is-not-enough]]`：计数型判据对内容改动结构性失明。
+    try:
+        names, from_diff = gates.dirty(d, extra_tables=touched)
+    except BaseException as e:                   # noqa: BLE001
+        print("\n🔴🔴 算不出哪些闸过期了（%s）⇒ **按最坏情况把每道闸都记成脏的**。"
+              % e, file=sys.stderr)
+        names = [g["name"] for g in gates.GATES]
+        from_diff = {"（算不出）"}
+    touched = set(touched) | set(from_diff)
+    # 🔴 写了行、却一张表也没认出来 ⇒ **抠表名的正则漏了这种写法**。
+    #    那种时候按最坏情况全标脏，并大声说 —— 静默漏掉正是 K31 要治的病。
+    if written and not touched:
+        print("\n🔴🔴 写了 %s 条，而一张表也没从 SQL 里认出来 —— **`_WRITE_SQL` 漏了"
+              "这种写法**。按最坏情况把每道闸都标脏。" % format(written, ","),
+              file=sys.stderr)
+        names = [g["name"] for g in gates.GATES]
+        touched = {"（认不出表名）"}
+    if names:
+        gates.mark(names, tag, touched)
+    gates.announce()
 
 
 def _word_count_layers():

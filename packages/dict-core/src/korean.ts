@@ -91,6 +91,13 @@ export type KoreanRelation = {
   targetNorm: string | null;
   /** 目标的中文释义（一句），给读者判断要不要点 */
   zh: string | null;
+  /**
+   * 源头给的标签数组（JSON 字符串）。展示层用 `koRelationTagLabels()` 取中文名，
+   * 认不出的码**不印**。🔴 这一列里躺着南北变体（`variety-kp` / `North-Korea`
+   * 共 64 条）、规范判断（`nonstandard` 53）、语感对立（`strong`/`weak` 65）——
+   * 建库起就有，而展示层到 2026-09-27 才读它。
+   */
+  tags: string | null;
 };
 
 export type KoreanRelationGroup = { kind: string; items: KoreanRelation[] };
@@ -98,6 +105,8 @@ export type KoreanRelationGroup = { kind: string; items: KoreanRelation[] };
 export type KoreanSense = {
   id: number;
   etymNo: string | null;
+  /** `${版}:${etym_no}` —— 八门共用 `<EtymologyNote>` 的键（见 senses 查询的注释）。 */
+  etymKey: string | null;
   pos: string | null;
   zh: string | null;
   en: string | null;
@@ -155,6 +164,10 @@ export type KoreanEntry = {
   /** 这个谚文音节对应的汉字音训（`주` → 主/住/注…） */
   hanjaReadings: { hanja: string; eumhun: string | null; glossEn: string | null }[];
   etymology: { edition: string; etymNo: string | null; text: string }[];
+  /** 词源正文，键＝`${edition}:${etym_no}` —— 八门共用 `<EtymologyNote>` 的入口。 */
+  etymologyTexts: Record<string, string>;
+  /** **已经抽过词源的版**。组件靠它区分「源头没写」与「我们没抽」，不许省。 */
+  etymologyEditions: string[];
   audio: { file: string; url: string | null; kind: string;
     region: string | null; speaker: string | null }[];
 };
@@ -172,6 +185,10 @@ export class KoreanDictService {
   private readonly db: DatabaseSync;
 
   private readonly q: Record<string, ReturnType<DatabaseSync['prepare']>>;
+
+  /** 抽过词源的版 —— **构造时算一次**（小表）。空数组＝一版都没抽，
+   *  展示层对所有词源块一律闭嘴，那是对的（`<EtymologyNote>` 自带这条判据）。 */
+  private readonly etymEditions: string[];
 
   constructor(databasePath: string) {
     this.databasePath = databasePath;
@@ -238,6 +255,17 @@ export class KoreanDictService {
       // 出版层义项。🔴 `hidden = 0` —— 那 200,207 条空壳是 K10（文件头⑤）。
       senses: this.db.prepare(`
         SELECT s.id, s.pos, e.etym_no AS etymNo,
+               -- 🔴🔴 2026-09-26（K26）：这一列以前不存在，于是 38,796 条词源正文
+               --    一个字都到不了读者面前。八门共用的 EtymologyNote 用
+               --    「版 ＋ 冒号 ＋ etym_no」当键，而 ko 的义项只端了 etymNo，
+               --    组件因此永远拿不到键。
+               --    ⚠️ 这段注释里**不许出现 JS 的插值写法** —— 它在反引号模板串里，
+               --    写了就会被当成插值求值（这一版就是这么报出 8 个 TS1005 的）。
+               --    ko 的词源 100% 来自 en-edition，且与 entry.src='en-edition'
+               --    在 (word_id, etym_no) 上完全对得上（实测 40,080 组）。
+               --    别的版的 entry 拼出来的键（zh-edition-simp:0）查不到正文，
+               --    而组件自带判据「没抽过的版一个字都不说」⇒ 那是正确的静默。
+               (COALESCE(e.src, '') || ':' || COALESCE(e.etym_no, '0')) AS etymKey,
                (SELECT text FROM sense_gloss WHERE sense_id = s.id AND lang='zh'
                  ORDER BY seq LIMIT 1) AS zh,
                (SELECT src  FROM sense_gloss WHERE sense_id = s.id AND lang='zh'
@@ -267,6 +295,11 @@ export class KoreanDictService {
                --    ⚠️ 这一段**不能用反引号**：它在 JS 模板串里，反引号会当场截断字符串
                --       （第一版就是这么写的，tsc 报 TS1005 一串）。
                REPLACE(r.target, '^', '') AS target, r.target_norm AS targetNorm,
+               -- 源头给的标签数组。🔴 展示层只印认得出的那些
+               --    （KO_RELATION_TAG_LABELS）—— 64 条南北变体标签在这一列里
+               --    从建库起就存着，没人读过，是渲染出来才看见的。
+               -- ⚠️ 这一段同样**不能用反引号**（见上面那条注释）：它在 JS 模板串里。
+               r.tags AS tags,
                (SELECT g.text FROM sense s2 JOIN sense_gloss g ON g.sense_id = s2.id
                  JOIN dict d2 ON d2.id = s2.word_id
                  WHERE d2.word_norm = r.target_norm AND g.lang='zh' AND s2.hidden = 0
@@ -325,6 +358,16 @@ export class KoreanDictService {
         + ' kind, region, speaker FROM audio'
         + ' WHERE word = ? ORDER BY (kind<>\'human\'), id'),
     };
+
+    // 🔴 K26：这一行以前不存在。`etymologyEditions` 是组件区分
+    //    「源头没写」与「我们没抽」的唯一依据，缺了它组件只能一律闭嘴 ——
+    //    而那正是 ko 的 38,796 条词源正文一个字都印不出来的其中一环。
+    this.etymEditions = (() => {
+      try {
+        return (this.db.prepare('SELECT DISTINCT edition FROM etymology')
+          .all() as Array<{ edition: string }>).map((x) => x.edition);
+      } catch { return []; }
+    })();
   }
 
   getStats() { return this.q.stats.get() as Record<string, number>; }
@@ -358,9 +401,15 @@ export class KoreanDictService {
     const bySense = new Map<number, KoreanRelation[]>();
     const wordLevel: KoreanRelation[] = [];
     for (const r of relRows) {
+      // 🔴 这里是**显式重建**，SQL 多 SELECT 一列不会自动流到调用方 ——
+      //    2026-09-27 加 `tags` 时正是漏在这一步：SQL 取了、类型加了、
+      //    展示层也写了渲染，而这一行没抄过去 ⇒ 页面上一个徽标都没出来。
+      //    逮到它的是**展示层契约闸**（`contract-check-ko.tsx`），不是 tsc。
+      //    ⚠️ 往 `KoreanRelation` 加字段时，这一行必须跟着加。
       const item: KoreanRelation = {
         kind: r.kind, target: r.target,
         targetNorm: r.targetNorm ?? null, zh: r.zh ?? null,
+        tags: r.tags ?? null,
       };
       if (r.senseId == null) wordLevel.push(item);
       else {
@@ -373,6 +422,7 @@ export class KoreanDictService {
     const senseViews: KoreanSense[] = senses.map((s) => ({
       id: s.id,
       etymNo: s.etymNo ?? null,
+      etymKey: s.etymKey ?? null,
       pos: s.pos ?? null,
       zh: s.zh ?? null,
       en: s.en ?? null,
@@ -426,6 +476,14 @@ export class KoreanDictService {
         (Omit<KoreanPronunciation, 'endorsed'> & { endorsed: number })[])
         .map((p) => ({ ...p, endorsed: !!p.endorsed })),
       senses: senseViews,
+      // 🔴 K26：组件要的是**键 → 正文**的字典，不是数组。ko 的词源 100% 是 en-edition，
+      //    但 `etymologyEditions` **从数据里算**而不是写死 `['en-edition']` ——
+      //    哪天抽了别的版，这里自动跟上；写死就会对新抽的版说「源头没给」。
+      etymologyTexts: Object.fromEntries(
+        (this.q.etymology.all(id) as unknown as
+          { edition: string; etymNo: string | null; text: string }[])
+          .map((x) => [`${x.edition}:${x.etymNo ?? '0'}`, x.text])),
+      etymologyEditions: this.etymEditions,
       relations: groupRelations(wordLevel),
       examples: this.q.examples.all(hit.word) as unknown as KoreanExample[],
       inflections,

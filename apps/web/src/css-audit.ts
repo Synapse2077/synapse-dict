@@ -49,10 +49,16 @@ const defined = new Set(
 //    ⚠️ 与上面那条 `shared` 注释是同一个形状（`[[correct-steps-can-compose-a-hole]]`）：
 //      分段逻辑本身没错，错在**这张表和 `App.tsx` 里实际有几个视图之间没有闸**。
 //    ⇒ 下面加了一条自检：本文件里 `export function *EntryView` 有几个，这张表就得有几行。
+// 🔴🔴 2026-09-26 加 ko。**而这一次自检是对的、闸是红的、没人跑过它。**
+//    上面那条自检（`unlisted` → `process.exit(1)`）从 `KoreanEntryView` 进
+//    `App.tsx` 那天（阶段 9，09-25）起就一直在报红，退出码 1。
+//    ⇒ 漏的不再是「自检」，而是**没有任何东西逼人跑这道闸**。
+//      这与 ko 的 K31 是同一个病的第三例（另两例是两道外锚闸从 09-25 红到 09-26）。
+//      ⇒ 已登记进 `ko/gates.py` 的闸名单，`python3 ko/run_gates.py --all` 会跑它。
 const VIEWS: Array<[string, string]> = [
   ['en', 'EnglishEntryView'], ['es', 'SpanishEntryView'], ['it', 'ItalianEntryView'],
   ['fr', 'FrenchEntryView'], ['pt', 'PortugueseEntryView'], ['de', 'GermanEntryView'],
-  ['ja', 'JapaneseEntryView'],
+  ['ja', 'JapaneseEntryView'], ['ko', 'KoreanEntryView'],
 ];
 
 // 🔴 登记表与源码对账：漏登记一个视图，本闸会把它的类名算到别人头上。

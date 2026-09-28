@@ -72,6 +72,17 @@ SHEETS = [
     ("KO_CONJ_SRC_LABELS",
      "SELECT DISTINCT conj_class_src FROM entry WHERE conj_class_src IS NOT NULL",
      "活用类来源", 2, None),
+    # 🔴 关系边的源头标签（2026-09-27，K33）。**读者口径＝展示层读哪一列**：
+    #    `korean.ts` 的 relations 查询 SELECT 了 `r.tags`，而且只在
+    #    `COALESCE(hidden,0)=0` 的边上，所以这里的 SQL 也只查可见边。
+    # 🔴🔴 落回的是 `KO_RELATION_TAG_SKIP`（**同一个文件里的显式跳过集**），
+    #    不是全局表。这道闸因此问的是「70 个码有没有被逐个判过」，
+    #    而不是「白名单里有没有」—— 白名单式的表会静默漏掉源头下一版多给的码。
+    ("KO_RELATION_TAG_LABELS",
+     "SELECT DISTINCT je.value FROM sense_relation r, json_each(r.tags) je"
+     " WHERE r.tags IS NOT NULL AND COALESCE(r.hidden,0)=0",
+     "关系边的源头标签（`sense_relation.tags` —— `KoRelationRow` 渲染的那一列）",
+     30, "KO_RELATION_TAG_SKIP"),
 ]
 
 def parse_keys(body):
@@ -189,7 +200,11 @@ def check():
             #    只查全局表 ⇒ 看不见本层有没有覆盖对。
             base = None
             if fallback:
-                base = read_sheet(common, fallback)
+                # 🔴 `KO_` 开头的落回表在**本语种那份文件里**（显式跳过集），
+                #    其余落回全局表。两者的作用不同：
+                #      全局表  ＝「这个码有个通用名字，ko 不必覆盖」
+                #      跳过集  ＝「这个码有意不印，理由写在表里」
+                base = read_sheet(src if fallback.startswith("KO_") else common, fallback)
                 if base is None:
                     out.append(("red", tag,
                                 "🔴 落回的全局表 `%s` 抠不到 —— **闸失效了**"

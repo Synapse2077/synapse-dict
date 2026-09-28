@@ -36,10 +36,14 @@
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getService } from '@synapse-dict/dict-core';
 import {
   EnglishEntryView, SpanishEntryView, ItalianEntryView,
   FrenchEntryView, PortugueseEntryView, GermanEntryView, JapaneseEntryView,
+  KoreanEntryView,
 } from './App';
 
 const mutate = process.argv.includes('--mutate');
@@ -48,13 +52,36 @@ const mutate = process.argv.includes('--mutate');
 //    三张都漏了，而**三道闸全绿** —— 因为它们查的是"登记了的那几门对不对"，
 //    没有一条查"是不是所有门都登记了"（`[[lesson-must-become-mechanism]]`）。
 //    ⇒ `css-audit.ts` 已经补上了"源码里有几个视图，表里就得有几行"的自检。
-type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de' | 'ja';
-const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja'];
+// 🔴🔴 2026-09-26 加 ko —— **第四次漏登记，而这次漏的是正在收尾的那门语言。**
+//    上面那条注释写着「三张表都漏了 ja，而三道闸全绿」，补救做进了 `css-audit.ts`
+//    （一条「源码里有几个视图，表里就得有几行」的自检）——
+//    **而那条自检只加在了那一个文件里**，本文件和 `render-dump.tsx` 都没有。
+//    ⇒ 于是 ko 又一次漏了整个阶段 9。`[[lesson-must-become-mechanism]]`：
+//      教训做进一个文件不等于做进这一类文件。下面补上同一条自检。
+type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de' | 'ja' | 'ko';
+const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja', 'ko'];
 const VIEW: Record<Lang, unknown> = {
   en: EnglishEntryView, es: SpanishEntryView, it: ItalianEntryView,
   fr: FrenchEntryView, pt: PortugueseEntryView, de: GermanEntryView,
-  ja: JapaneseEntryView,
+  ja: JapaneseEntryView, ko: KoreanEntryView,
 };
+
+// 🔴🔴 **登记表与源码对账** —— 与 `css-audit.ts` 里那条同一份判据。
+//    没有它，上面那张表漏一门就只是「少查一门」，而输出上与「全查了都通过」
+//    长得一模一样（ja 漏九个阶段、ko 漏整个阶段 9，都是这么发生的）。
+//    ⚠️ 判据是「源码里有几个视图，表里就得有几行」，**不是「表里这几门对不对」** ——
+//      后者对「是不是所有门都登记了」结构性失明。
+{
+  const app = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'App.tsx'), 'utf8');
+  const declared = new Set(Object.values(VIEW).map((f) => (f as { name: string }).name));
+  const unlisted = [...app.matchAll(/export function (\w+EntryView)\b/g)]
+    .map((m) => m[1]).filter((fn) => !declared.has(fn));
+  if (unlisted.length) {
+    console.log(`\n🔴 App.tsx 里有没登记进 LANGS/VIEW 的视图：${unlisted.join(', ')}`
+      + '\n   —— 本闸对它们结构性失明：少查一门与全查了都通过，输出上一模一样。');
+    process.exit(1);
+  }
+}
 
 /** 规范序列。角色 → 六门各自认得出它的类名（任一命中即可）。 */
 const CANON: Array<[string, RegExp]> = [
@@ -114,6 +141,10 @@ const SEEDS: Record<Lang, string[]> = {
   // 日语挑的是**块数多**的：`猫`/`桜` 关系怪物、`食べる`/`行く` 活用怪物、
   // `時間` 例句最多、`心`/`水`/`山` 义项多。
   ja: ['猫', '桜', '食べる', '行く', '時間', '心', '水', '山'],
+  // 韩语挑的是**块数多**的：`사람`/`물` 义项多、`하다`/`가다` 活用怪物、
+  //   `기적` 多词源（同形异义两支）、`犬` 汉字条目（走汉字音那一路）、
+  //   `가을` 关系多（中文版把关系塞进 examples 的那个词）、`읽다` 有发音形。
+  ko: ['사람', '물', '하다', '가다', '기적', '犬', '가을', '읽다'],
 };
 
 const pages: Array<[string, string[]]> = [];     // [词, 角色序列]

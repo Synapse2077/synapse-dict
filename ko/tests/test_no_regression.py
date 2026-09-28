@@ -222,6 +222,63 @@ CHECKS = [
      "坏的是 target；`조선 → 매아미` 那批更是**完全正确**（它那条义项是「매미의 북한말」）。"
      "⚠️ 返回 -1 ＝ **判据自检没过**（两个切分器的差集不再是 9），不是「有假目标」"),
 
+    # 🔴 R20：生成的活用形里不许有「规则平局」产出的。2026-09-26（K18）。
+    #    `learn()` 原来的门槛是 `>= 0.5 * seen[k]` ⇒ 两个变体各占一半时**两边都收**，
+    #    而平局意味着训练词元互相矛盾，生成物里必有一半是错的：
+    #        야멸치냐/야멸친데/야멸치다（形容词 ✅）  vs  야멸치느냐/야멸치는데/야멸친다（动词 ❌）
+    #    门槛已改成严格多数 `> 0.5`（改完重跑留出法，各类错率一字未变）。
+    # ⚠️ 判据用**旧门槛**去查（`conj_residual_strata.OLD_KEEP`）—— 用新门槛查永远是 0，
+    #    那就成了一条永远绿的假闸。这一条的意思是「旧门槛会产出的东西，库里不许有」。
+    ("R20", "生成的活用形里没有「规则平局」产出的", "@conj_tie", 0,
+     "K18 那 322 条按构造无法指认（有真值的词不生成、生成的词没真值）；"
+     "**可指认的只有支持度低的这一小撮**，实测 11 条、全在 `야멸치다` 上"),
+
+    # 🔴 R21：库里的列必须都在 `build_v3_schema.py` 的声明里。2026-09-27。
+    #    实测起点是 **6 列漂移**（K8 的四列活用类／`example.hidden_why`／
+    #    `sense_relation.target_norm`）—— 按 schema 重建库会把它们连数据一起静默丢掉。
+    #    ⚠️ 期望值是 **0 而不是「现在这么多」**：漂移没有"可接受配额"，
+    #      加列的那一步就该同时改声明（`[[expectation-must-be-declared]]`）。
+    ("R21", "库里的列都在 schema 声明里（没有 ALTER 出来的孤儿列）", "@schema_drift", 0,
+     "6 列漂移 2026-09-27 补齐；此后每加一列都要同时改 `build_v3_schema.py`，"
+     "否则重建库会静默丢数据"),
+
+    # 🔴 R22：关系边被藏起来了就必须说得出理由。2026-09-27（K30）。
+    #    `example.hidden` 背到第四种意思才被迫拆出 `hidden_why`（多行 blob／构词公式／
+    #    成分拆解／占位标签）—— 关系层这一列在它只有一种意思时就带上原因。
+    #    ⚠️ 这一条同时让 `TRACK` 盯得住：`hidden` 是 0/1，非空计数看不出 0→1，
+    #      而 `hidden_why` 从 NULL 变有值看得见 ⇒ 有了这个不变量，盯 `hidden_why`
+    #      就等于盯 `hidden`。
+    ("R22", "被藏起来的关系边都写明了原因",
+     "SELECT COUNT(*) FROM sense_relation WHERE COALESCE(hidden,0)=1"
+     " AND (hidden_why IS NULL OR TRIM(hidden_why)='')", 0,
+     "K30 藏起来的那批（方言表单元格／表头／英文说明／八卦符号／wiki 残渣）各带原因"),
+
+    # 🔴 R23：读者不该在两个标题下看见同一个词。2026-09-27（K34）。
+    #    起点 1,186 条（`乾` 的 `相关词` 里重复了 `反义词 地 坤` 和 `近义词 天`）。
+    #    ⚠️ 期望值 0，而且**判据只管兜底的 `related`** —— `derived`+`synonym` 那 140 组
+    #      两条都是真信息（`이빨` 既是 `이` 的近义词也是派生形），有意保留。
+    ("R23", "兜底的 `related` 没有撞上更具体的 kind", "@redundant_related", 0,
+     "1,186 条 2026-09-27 藏起来（零信息损失：每个目标都还在更具体的类别下印着）"),
+
+    # 🔴 R24：读者在「例句」标题下看到的必须是句子。2026-09-27（K33）。
+    #    起点 1,091 条（`臣` 的「例句」是 `臣僚/신료, 臣民/신민, …`；`기적` 的是 `기적소리`）。
+    #    ⚠️ 判据 **import 自 `pipeline/reclass_nonexamples.plan()`**，六类一类一条，
+    #      在这儿重写必漏 —— 那份脚本里有三份逐条读出来的手判名单
+    #      （`NOT_A_LIST`／`WL_KEEP` 有意不藏、`HAND_TABLE` 七种源头缺陷）。
+    ("R24", "「例句」标题下印的都是句子（没有词表/关系指针/wikitext 碎片）",
+     "@nonexample_rows", 0,
+     "1,091 条 2026-09-27 迁进关系层并藏起来（3,134 条新边；432 个页的假例句区消失，"
+     "其中 401 个当场换成可点的派生词，剩 31 个的行本来就是关系层的重复）"),
+
+    # 🔴 R25：例句被藏起来了也必须说得出理由。2026-09-27（K33）。与 R22 同形，另一张表。
+    #    `example.hidden` 背过四种意思才拆出 `hidden_why`；这一条把「拆完了就不许再糊」
+    #    做成闸，同时让 `TRACK` 的 `example.hidden_why` 盯得住 `hidden` 的 0→1。
+    ("R25", "被藏起来的例句都写明了原因",
+     "SELECT COUNT(*) FROM example WHERE COALESCE(hidden,0)=1"
+     " AND (hidden_why IS NULL OR TRIM(hidden_why)='')", 0,
+     "1,883 条藏起来的例句各带原因（crammed／占位标签／构词公式／词条成分拆解／"
+     "K33 那六类）"),
+
     ("R8", "`entry.hanja` 没有被搬到 `dict` 上",
      "SELECT COUNT(*) FROM pragma_table_info('dict') WHERE name='hanja'", 0,
      "1,944 个词形对应 ≥2 个不同汉字（`양` → 壤/兩/良/陽/孃/洋/量/羊），"
@@ -230,7 +287,7 @@ CHECKS = [
 
 
 # 🔴 回归闸应该有多少条。**这个数是声明，不是数出来的** —— 见 `_audit_checks`。
-R_ROSTER = 19
+R_ROSTER = 25
 
 
 def _audit_checks():
@@ -433,7 +490,109 @@ def _paren_split(con):
         "SELECT word_id, kind, target FROM sense_relation")}
     return len(ghost & now)
 
-_FUNCS = {"@audio_filename_leak": _audio_filename_leak,
+
+
+def _conj_tie(con):
+    """「规则平局」产出的生成活用形还剩几条。判据 import 修复脚本那一份，不重写。"""
+    import importlib.util
+    root = _p2.Path(__file__).resolve().parents[1]
+    for name, rel in (("_cg", "pipeline/conj_generate.py"),
+                      ("_crs", "probes/conj_residual_strata.py"),
+                      ("_pct", "pipeline/prune_conj_tie_forms.py")):
+        spec = importlib.util.spec_from_file_location(name, root / rel)
+        m = importlib.util.module_from_spec(spec)
+        _s2.modules[name] = m
+        spec.loader.exec_module(m)
+    G, S, P = _s2.modules["_cg"], _s2.modules["_crs"], _s2.modules["_pct"]
+    info = G.load_info(con)
+    R, support, real = S.learn_with_support(con, info)
+    IDX = G.index_rules(R)
+    use, tot = G.tag_share(real, info, sorted(real))
+    targets = sorted({b for b, in con.execute(
+        "SELECT DISTINCT base FROM inflection WHERE src='rule'")})
+    want = set()
+    for b in targets:
+        if b not in info or info[b][0] not in G.SAFE:
+            continue
+        for tags, w, sup in S.generate_with_support(
+                info, IDX, support, b, G.keepset(use, tot, info, b)):
+            if sup <= P.TIE:
+                want.add((b, w))
+    if not want:
+        return 0
+    return sum(1 for base, word in con.execute(
+        "SELECT i.base, d.word FROM inflection i JOIN dict d ON d.id=i.word_id"
+        " WHERE i.src='rule'") if (base, word) in want)
+
+def _schema_drift(con):
+    """库里有几列**不在 `build_v3_schema.py` 的声明里**。2026-09-27（K30 途中撞见）。
+
+    ═══ 起因 ═══
+    实测 **6 列漂移**，3 张表，全是 fix 脚本用 `ALTER TABLE` 加出来的，
+    而每一列都装着花过力气的数据：
+
+        entry.conj_class / conj_class_src / conj_table_tag / stem_class   K8 的活用类 12,975 行
+        example.hidden_why                                               K11/K15 的分类 792 行
+        sense_relation.target_norm                                       177,007 条链接落点
+
+    项目的规矩是「schema 定型，16 张表**一处**声明」。漂移的后果不是排版问题：
+    **按 schema 重建库会把这些列连数据一起静默丢掉** —— 而"静默"是关键，
+    重建脚本会正常跑完、闸也不会响（`[[replay-scripts-undo-fixes]]` 的同一族：
+    修复被后一步静默撤销）。
+
+    ⚠️ 判据是**单向**的：只查「库里有而声明里没有」。反方向（声明里有而库里没有）
+       是正常的 —— `snapshot()` 就靠它支持「先写进清单、再由脚本建出来」的顺序。
+    """
+    import re as _re
+    schema = (paths.ROOT / "ko" / "pipeline" / "build_v3_schema.py").read_text(encoding="utf-8")
+    n = 0
+    for (t,) in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"):
+        cols = [c[1] for c in con.execute("PRAGMA table_info(%s)" % t)]
+        m = _re.search(r"CREATE TABLE %s \((.*?)\n       \)" % _re.escape(t), schema, _re.S)
+        if m is None:
+            n += 1          # 整张表都不在声明里
+            continue
+        n += sum(1 for c in cols if not _re.search(r"\b%s\b" % _re.escape(c), m.group(1)))
+    return n
+
+
+def _nonexample_rows(con):
+    """「例句」层里还可见的**非例句**有几行。2026-09-27（K33）。
+
+    🔴 **判据 import 自 `pipeline/reclass_nonexamples.plan()`，不在这儿重写。**
+       那份脚本里有三样东西，重写一次必漏：
+         ① 六条判据一类一条（汉字构词表／关系指针／派生记法／wikitext／书目引文／词表），
+            其中 ① 收宽过两轮才停（装饰前缀、三段异体、双读音、谚文侧为空）
+         ② `NOT_A_LIST`＋`WL_KEEP` 共 17 行**有意不藏**（语言学范畴名词条的实例、
+            词缀页唯一的活用形示例、以及一条被判据误伤的真句子 `그럼, 알겠어`）
+         ③ `HAND_TABLE` 七条：源头七种不同的写坏方式，不许收进一条正则
+    """
+    sys.path.insert(0, str(paths.ROOT / "ko" / "pipeline"))
+    from reclass_nonexamples import plan as _np
+    return len(_np(con))
+
+
+def _redundant_related(con):
+    """兜底的 `related` 撞上更具体 kind 的边有几条。2026-09-27（K34）。
+
+    🔴 **判据 import 自 `pipeline/hide_redundant_related.plan()`，不在这儿重写一遍。**
+       那份脚本里有两条要紧的收窄，重写一次必漏一条：
+         ① 只算**词级可见**边（`sense_id IS NULL` ＋ `hidden=0`）—— 读者口径
+         ② `hangeul`/`hanja_form_of`/`hanja_spelling`/`alt_hanja` **不算「更具体」**：
+            谚文拼写 vs 汉字表记是两种不同信息，分区印是对的。
+            第一版判据没排除它们 ⇒ **宽了 13 倍**（19,860 组 vs 真的 1,452 组）。
+    """
+    sys.path.insert(0, str(paths.ROOT / "ko" / "pipeline"))
+    from hide_redundant_related import plan
+    return len(plan(con)[0])
+
+
+_FUNCS = {"@schema_drift": _schema_drift,
+          "@nonexample_rows": _nonexample_rows,
+          "@redundant_related": _redundant_related,
+          "@audio_filename_leak": _audio_filename_leak,
+          "@conj_tie": _conj_tie,
           "@paren_split": _paren_split,
           "@audio_dup": _audio_dup,
           "@foreign_audio": _foreign_audio,

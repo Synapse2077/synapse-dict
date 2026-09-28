@@ -124,6 +124,17 @@ DDL = [
          roman_mr          TEXT,          -- McCune-Reischauer（英语学术文献与旧地名）
          roman_yale        TEXT,          -- Yale（语言学界）
          roman_src         TEXT,
+         -- 🔴 活用类那四列（K8，**2026-09-27 才补进本声明**）。
+         --    在此之前只由 `conj_class.py`/`derive_conj_class.py` 的 `ALTER TABLE` 建出来，
+         --    **按 schema 重建库会丢掉 12,975 行活用类**（读者口径 35.98%→97.79% 那一笔）。
+         --  ⚠️ `conj_table_tag` 存**源头原词**（`irregular`/`vowel-stem`），
+         --     `conj_class` 存**真的活用类**（여불규칙/ㅂ불규칙/…）—— 两件事，别合并：
+         --     2026-09-24 就是因为一列承诺了「活用类」而存着 `table-tags`，
+         --     计划表拿它当覆盖率数了一轮（`[[ledger-numbers-lie]]`）。
+         conj_table_tag    TEXT,
+         conj_class        TEXT,
+         conj_class_src    TEXT,
+         stem_class        TEXT,
          -- 🔴 **有意不建 `vclass`**（活用类）：英文版 0 条、韩文版只给 452 条＝它自己
          --    用言的 4.3%，而我们**直接有 359,583 个变形词形**。见文件头 ⑤
          src      TEXT NOT NULL,
@@ -184,8 +195,18 @@ DDL = [
          target   TEXT NOT NULL,
          tags     TEXT,
          hidden   INTEGER NOT NULL DEFAULT 0,
+         -- 🔴 藏起来**必须说得出理由**（2026-09-27，K30）。`example.hidden` 背过四种意思
+         --    才被迫拆出 `hidden_why`；关系层这一列在它还只有一种意思的时候就带上原因，
+         --    是把那条教训用在前面而不是后面。
+         --  ⚠️ 不变量：`hidden=1` ⟺ `hidden_why` 非空（回归闸 R22 盯着）。
+         hidden_why TEXT,
          src      TEXT NOT NULL,
          src_ref  TEXT NOT NULL,
+         -- 🔴 关系边指向库里哪一页（阶段 9 补，**2026-09-27 才补进本声明**）。
+         --    与 `target` 是**两件事**：`target` ＝ 源头原文（`경마(競馬)`、`^팔도`），
+         --    展示用、一个字不许动；`target_norm` ＝ 解析后的词头（`경마`、`팔도`），
+         --    **只管链接落点**，查不到就 NULL（页面上印成不可点文本）。
+         target_norm TEXT,
          UNIQUE(word_id, sense_id, kind, target)
        )""",
     # ── 变形层（阶段 2 填）。🔴 韩语的活用表在**英文版** ────────────────
@@ -263,6 +284,11 @@ DDL = [
          src_lang        TEXT,
          roman           TEXT,            -- 例句的罗马字转写（源头给才存，不自己算）
          hidden          INTEGER NOT NULL DEFAULT 0,
+         -- 🔴 `hidden` 背过**四种**意思（多行 blob 117／K11 构词公式 290／
+         --    K15 成分拆解 339／占位标签 46）⇒ 阶段 6d 拆出这一列记原因。
+         --    **2026-09-27 才补进本声明** —— 在此之前它只由 `fix_nonexample_rows.py`
+         --    的 `ALTER TABLE` 建出来，**按 schema 重建库会把 792 行分类静默丢掉**。
+         hidden_why      TEXT,
          src             TEXT NOT NULL,
                                           -- 🔴 中文版的 `examples` 里混着**关系数据**：
                                           --   `近义词：추` / `派生詞：늦가을，올가을…` /
@@ -277,6 +303,19 @@ DDL = [
          text       TEXT NOT NULL,
          src        TEXT,
          PRIMARY KEY(example_id, lang)
+       )""",
+    # 🔴 词源正文的译文。2026-09-27（K36）。
+    #    与 `sense_gloss`／`example_gloss` **同一个形状**（外键＋lang＋text＋src）——
+    #    词源原文是**证据**，一个字不动；译文另存一行。
+    #    ⚠️ 不做成 `etymology.text_zh` 那样的列：那样一来「哪个版本的原文对应哪条译文」
+    #      就只能靠行本身，而原文若有一天从源头重抽，译文会跟着被覆盖掉。
+    #      加表可逆、加列就地改写不可逆（`[[prefer-reversible-designs]]`）。
+    """CREATE TABLE etymology_gloss (
+         etymology_id INTEGER NOT NULL,
+         lang         TEXT NOT NULL,
+         text         TEXT NOT NULL,
+         src          TEXT,
+         PRIMARY KEY(etymology_id, lang)
        )""",
     """CREATE TABLE collocation (
          id       INTEGER PRIMARY KEY AUTOINCREMENT,

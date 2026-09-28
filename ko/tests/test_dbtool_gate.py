@@ -162,6 +162,209 @@ def check_brief():
         finally:
             _c.close()
 
+    # ══════════════════════════════════════════════════════════════
+    # ── M8：K31 的写后欠账机制 ──
+    #
+    # 🔴🔴 这一组要验的不是「机制存在」，而是**它会不会真的响**。
+    #    K31 本身就是「机制不存在」造成的：09-25 修了两处数据，
+    #    两道外锚闸从那天起红了整整一天，因为写库之后**什么都不说**。
+    #    ⇒ 一条一条问：脏得对不对？欠账变不变红？闸红了会不会被误划掉？
+    #      名单自己坏了认不认得出？
+    import json as _json
+    import tempfile as _tmp
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    try:
+        import gates as _G
+    except Exception as e:                        # noqa: BLE001
+        red.append(("M8", "读不到 `ko/gates.py`（%s）—— K31 的整个机制靠它" % e))
+        _G = None
+
+    if _G is not None:
+        _real_pending = _G.PENDING
+        _real_ts = _G.SERVICE_TS
+        _real_unclaimed = dict(_G.UNCLAIMED)
+        _d = Path(_tmp.mkdtemp())
+        _G.PENDING = _d / "pending.json"
+        try:
+            # ── M8a/M8b：依赖算得对不对（**方向两边都验**）──
+            # 宽是有意的，但"宽"不等于"什么都脏" —— 只动 audio 不该脏掉义项外锚闸。
+            want_lazy("M8a", "动了 `pronunciation` ⇒ 例句/变形/读音外锚闸变脏",
+                      lambda: "外锚闸·例句/变形/读音"
+                      in _G.dirty({"#pronunciation": 5})[0],
+                      "它没脏 —— 正是 09-25 漏跑的那一道")
+            want_lazy("M8b", "只动 `audio` ⇒ 录音两道脏、义项外锚闸**不脏**",
+                      lambda: ("录音重复闸" in _G.dirty({"#audio": 1})[0]
+                               and "外锚闸·义项" not in _G.dirty({"#audio": 1})[0]),
+                      "依赖算错了（全脏＝等于没分类，人会关掉它）")
+            # 裸列名属于 `dict`，而 `dict` 几乎连着所有闸 —— 这一条验键的解析
+            want_lazy("M8c", "裸列名（`freq_zipf`）认得出属于 `dict`",
+                      lambda: _G.table_of("freq_zipf") == "dict"
+                      and _G.table_of("__rows__") == "dict"
+                      and _G.table_of("#sense") == "sense"
+                      and _G.table_of("entry.hanja") == "entry",
+                      "键解析错了 ⇒ 脏的算不准")
+
+            # ── M8d：欠账非空 ⇒ 账的闸 P12 必须红；划掉之后必须绿 ──
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from test_plan_ledger import p12 as _p12
+
+            def _p12_red_on_debt():
+                _G.clear_all()
+                if _p12():
+                    return False          # 本来就红，这条验不了（见下面的 detail）
+                _G.mark(["外锚闸·义项"], "m8-fake-tag", {"sense"})
+                got = [w for _c, w in _p12() if "外锚闸·义项" in w]
+                _G.clear("外锚闸·义项")
+                return bool(got) and not _p12()
+            want_lazy("M8d", "欠账非空 ⇒ P12 红；划掉 ⇒ P12 绿", _p12_red_on_debt,
+                      "🔴 欠着不跑而账的闸报绿 —— 那就回到 09-25 的状态了"
+                      "（或：P12 本来就红，这条没验到东西）")
+
+            # ── M8e：闸自己红了**不许划账** ──
+            #    这是整个机制的承重点：「绿」的唯一定义是退出码 0。
+            def _red_gate_keeps_debt():
+                _G.clear_all()
+                g = _G.by_name("录音重复闸")
+                old = g["cmd"]
+                g["cmd"] = "exit 3"
+                try:
+                    _G.mark(["录音重复闸"], "m8-fake-tag", {"audio"})
+                    ok = _G.run("录音重复闸", verbose=False)
+                    still = "录音重复闸" in _G.load()
+                finally:
+                    g["cmd"] = old
+                    _G.clear_all()
+                return (not ok) and still
+            want_lazy("M8e", "闸退出码非 0 ⇒ 这一笔**留着**", _red_gate_keeps_debt,
+                      "🔴🔴 跑红了却把账划掉 ＝ 机制反过来帮着掩盖")
+
+            # ── M8f：欠账文件读不动 ≠ 没欠账 ──
+            def _corrupt_is_not_clean():
+                _G.PENDING.write_text("{ 这不是 json", encoding="utf-8")
+                try:
+                    _G.load()
+                    return False
+                except BaseException:
+                    return True
+                finally:
+                    _G.clear_all()
+            want_lazy("M8f", "欠账文件坏了 ⇒ 抛，不当成「没欠账」",
+                      _corrupt_is_not_clean,
+                      "静默当空 ＝ 把红伪装成绿（`[[residual-bucket-is-not-evidence]]` 同形）")
+
+            # ── M8g：从 `korean.ts` 抠表的判据坏掉时，必须抛而不是退化成空集 ──
+            def _floor_guards_scan():
+                _G.SERVICE_TS = _real_ts.parent.parent.parent.parent / "package.json"
+                try:
+                    _G.service_tables()
+                    return False
+                except BaseException:
+                    return True
+                finally:
+                    _G.SERVICE_TS = _real_ts
+            want_lazy("M8g", "服务层扫描抠不到表 ⇒ 抛（不退化成「永远不脏」）",
+                      _floor_guards_scan,
+                      "🔴 扫空了却报没事 ＝ 契约闸永远不脏，正是 K31 要治的病本身")
+
+            # ── M8h：追踪的表**没人盯着**时，名单自检要认出来 ──
+            def _orphan_table_is_red():
+                dbtool.TRACK_TABLES.append("__orphan_table__")
+                try:
+                    return any("__orphan_table__" in b for b in _G.self_check())
+                finally:
+                    dbtool.TRACK_TABLES.remove("__orphan_table__")
+            want_lazy("M8h", "有表没有任何闸盯着 ⇒ 名单自检红", _orphan_table_is_red,
+                      "🔴 ja 的 `sense_tag` 空了整个项目而阶段表全 ✅，就是这个形状")
+
+            # ── M8i：UNCLAIMED 是**带锁的豁免** —— 那张表一旦有了行就得红 ──
+            def _unclaimed_with_rows_is_red():
+                _G.UNCLAIMED["audio"] = "（变异注入：audio 其实有行）"
+                try:
+                    return any("audio" in b and "UNCLAIMED" in b
+                               for b in _G.self_check())
+                finally:
+                    _G.UNCLAIMED.clear()
+                    _G.UNCLAIMED.update(_real_unclaimed)
+            want_lazy("M8i", "UNCLAIMED 里的表有了行 ⇒ 名单自检红",
+                      _unclaimed_with_rows_is_red,
+                      "豁免没有失效条件 ＝ 永久豁免，那是记账不是闸")
+
+            # ── M8j：npm 入口不存在 ⇒ 名单自检红（「文件在」≠「跑得起来」）──
+            def _missing_npm_script_is_red():
+                g = _G.by_name("词源展示契约闸")
+                old = g["cmd"]
+                g["cmd"] = "npm run --silent gate:__definitely_not_a_script__"
+                try:
+                    return any("__definitely_not_a_script__" in b
+                               for b in _G.self_check())
+                finally:
+                    g["cmd"] = old
+            want_lazy("M8j", "npm 入口在 package.json 里不存在 ⇒ 名单自检红",
+                      _missing_npm_script_is_red,
+                      "🔴 `contract-check-etym.tsx` 八门都写了、**没有入口**，"
+                      "整整一个阶段没人跑得动 —— 这条就是为它加的")
+
+            # ── M8k：闸文件被删 ⇒ 名单自检红 ──
+            def _missing_file_is_red():
+                g = _G.by_name("查询计划闸")
+                old = g["file"]
+                g["file"] = "ko/probes/__deleted__.py"
+                try:
+                    return any("__deleted__" in b for b in _G.self_check())
+                finally:
+                    g["file"] = old
+            want_lazy("M8k", "闸文件不存在 ⇒ 名单自检红", _missing_file_is_red)
+
+            # ── M8l：**本来不在欠账里**的闸跑出红，必须被记上 ──
+            #    第一版只做「绿了划账」⇒ 一道本来就红着的闸（只读源码、没有写库
+            #    弄脏过它，比如 `css-audit`）跑出红之后欠账还是空的、P12 照样绿。
+            #    那正是 09-25 的处境：**红着，而没有任何东西记得它红。**
+            def _red_run_creates_debt():
+                _G.clear_all()
+                g = _G.by_name("样式孤儿闸")
+                old = g["cmd"]
+                g["cmd"] = "exit 7"
+                try:
+                    ok = _G.run("样式孤儿闸", verbose=False)
+                    got = "样式孤儿闸" in _G.load()
+                finally:
+                    g["cmd"] = old
+                    _G.clear_all()
+                return (not ok) and got
+            want_lazy("M8l", "本来不欠账的闸跑出红 ⇒ 记上一笔（P12 会一直红）",
+                      _red_run_creates_debt,
+                      "🔴🔴 红了而没人记得它红 ＝ 回到 09-25 的处境")
+
+            # ── M8m：**纯内容写库**（计数一个不变）也必须标脏 ──
+            #    🔴🔴 这条是被真事故逼出来的：K16 重译 20 条例句译文是纯 UPDATE，
+            #    所有计数一个没变 ⇒ `diff` 是空的 ⇒ 第一版机制**一道闸都没标脏**，
+            #    而例句译文正是契约闸盯的东西。
+            #    `[[primary-key-is-not-enough]]`：**计数型判据对内容改动结构性失明。**
+            #    ⇒ 判据改成「这次写了哪张表」，由 `_S.touched` 从 SQL 里抠。
+            want_lazy("M8m", "计数没变、只改了内容 ⇒ 照样按「写了哪张表」标脏",
+                      lambda: _G.dirty({}, extra_tables={"example_gloss"})[0] != []
+                      and "展示层契约闸·ko" in _G.dirty({}, extra_tables={"example_gloss"})[0],
+                      "🔴🔴 内容改了而欠账是空的 —— 这就是 K16 那天真实发生的事")
+            # 方向的另一边：SQL 抠表名不能把 SELECT 当成写
+            def _select_is_not_a_write():
+                s = dbtool._S.__new__(dbtool._S)
+                s.touched = set()
+                s._note("SELECT id, text FROM example_gloss WHERE lang='zh'")
+                clean = not s.touched
+                s._note("UPDATE example_gloss SET text=? WHERE example_id=?")
+                got = s.touched == {"example_gloss"}
+                s._note("INSERT OR IGNORE INTO sense_relation (word_id) VALUES (?)")
+                return clean and got and "sense_relation" in s.touched
+            want_lazy("M8n", "抠表名认得出 UPDATE/INSERT OR IGNORE，**不把 SELECT 当写**",
+                      _select_is_not_a_write,
+                      "把读当成写 ⇒ 每次查库都标脏一片，人会关掉这个机制")
+        finally:
+            _G.PENDING = _real_pending
+            _G.SERVICE_TS = _real_ts
+            _G.UNCLAIMED.clear()
+            _G.UNCLAIMED.update(_real_unclaimed)
+            _json  # noqa: B018 —— 留着给以后写欠账文件形状的检查
+
     return red
 
 

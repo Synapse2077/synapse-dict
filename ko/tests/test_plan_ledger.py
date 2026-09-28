@@ -189,6 +189,28 @@ FILES = {
     "5": [("跑批客户端（并发/重试/半价窗口播报都在这儿）", "ko/pipeline/ds_batch.py"),
           ("释义翻译", "ko/pipeline/translate_glosses.py")],
     "6": [("例句收割（LABEL_DROP/split_text 的唯一家）", "ko/pipeline/harvest_examples.py"),
+          # 🔴 K16 的交付物是**四张裁定表**（ROSTER/NOT_IN_ROSTER/HAND/MISJUDGED），
+          #    不是一段代码：那 21 条是逐条读过的裁定，判据（含谚文/含拉丁）在这件事上
+          #    必然太宽（414 个候选里 390 个是对的）。表被删掉＝这笔账的依据没了。
+          ("例句译文残差的裁定与重译（含「我判错的那一条」）",
+           "ko/pipeline/retranslate_examples.py"),
+          # 🔴 K11：构词公式 → 关系边。交付物里最要紧的是 `resolve_base` 的**三种情形**
+          #    （前缀词条／用言词干／普通基式）——少一种就会把边挂到同形异义词上。
+          ("构词公式拆成关系边（基式解析分三种情形，两个信号一致才收）",
+           "ko/pipeline/intake_word_formation.py"),
+          # 🔴 K15 的交付物里最要紧的是**没有**发明新 kind：`proverb` 现成就是这件事。
+          ("谚语成分进关系层（复用 `proverb`，第三步剥助词有意不做）",
+           "ko/pipeline/intake_idiom_components.py"),
+          # 🔴 K30 两件：接通（英文注）与藏起来（六类不是词的）。
+          #    交付物里最要紧的是**六条判据各自的反向证据**和 `CLEAN` 那 3 条裁定。
+          ("关系目标「词＋英文注」接通链接（判据被 `비타민 C` 收窄过）",
+           "ko/pipeline/fix_relation_english_gloss.py"),
+          ("关系目标不是词的藏起来（六条判据、各带反向证据、`hidden_why` 记原因）",
+           "ko/pipeline/hide_relation_nonwords.py"),
+          # 🔴 K34：兜底 `related` 去重。判据由 R23 直接 import，所以这个文件
+          #    被删掉不只是少一个脚本 —— **回归闸会跑不起来**。
+          ("兜底 `related` 去重（判据是 R23 的家，零信息损失写前验）",
+           "ko/pipeline/hide_redundant_related.py"),
           ("从例句标签再收关系", "ko/pipeline/harvest_relations_from_examples.py"),
           ("录音（Commons ＋ dump 两路）", "ko/pipeline/harvest_audio.py")],
     "7": [("词源层（宽桥：FROM entry，不是 FROM sense JOIN entry）",
@@ -241,7 +263,25 @@ FILES = {
           ("跨语种发音标签闸（真渲染 → 读 `.audio-region` 的字）",
            "apps/web/src/contract-check-audio.tsx"),
           ("删掉张冠李戴的录音（外语 / 占位文件 / 文学朗读）",
-           "ko/pipeline/fix_wrong_audio.py")],
+           "ko/pipeline/fix_wrong_audio.py"),
+          # 🔴 9f（K26）：38,796 条词源在库里躺了一整个阶段，读者一条都看不见。
+          #    这道契约闸八门都写了，而 **2026-09-26 之前它在 `package.json` 里
+          #    没有入口** —— 文件在、没人跑得动。「存在」不等于「跑得起来」，
+          #    所以 `ko/gates.py` 的自检另有一条查 npm script 真的存在。
+          ("词源展示契约闸（八门共用，ko 的 Shape 是 fallback+每组都有注）",
+           "apps/web/src/contract-check-etym.tsx"),
+          # 🔴 9g（K31）：写库之后**没有一条机制逼人重跑相关的闸** ——
+          #    两道外锚闸从 09-25 红到 09-26 没人知道。这三件是一套：
+          #    名单与欠账机制 / 一条命令跑欠的那几道 / 变异验证在 test_dbtool_gate。
+          ("闸名单与写后欠账机制（deps 偏宽是有意的）", "ko/gates.py"),
+          ("跑欠跑的闸（绿了才划账、跑红了也记一笔）", "ko/run_gates.py"),
+          # 🔴 这两道是**建名单那天才发现的**：文件在、没有 npm 入口、谁也没跑过，
+          #    而 `css-audit` 从 09-25 起就红着（ko 没登记进它的 VIEWS）。
+          #    登记在这儿，它们再被漏掉时 P1 会说话。
+          ("块序/关系分级契约闸（ko 是第四次漏登记的语种，已补 ＋ 加了名单自检）",
+           "apps/web/src/contract-check-layout.tsx"),
+          ("样式孤儿闸（视图用的类名 vs styles.css 定义的）",
+           "apps/web/src/css-audit.ts")],
 }
 
 # 阶段 9 的交付物是**展示层真的改了读取路径**（`[[it-display-layer-stage8]]`：
@@ -306,15 +346,63 @@ COVERAGE = [
      "实测 **100.00%**（37,433/37,433）。模型译 33,139 条 ＋ 中文两片白送 4,294 条。"
      "⚠️ 残差已量：约 **30 条（0.1%）**半翻译（韩语词或英文词残留在中文句子里），"
      "记在 **K16**，上界如实报，不修判据去掩盖"),
-    ("义项的中文覆盖率（**真释义**，元描述不算）", 70.0,
+    # ══════════════════════════════════════════════════════════════
+    # 🔴🔴 2026-09-26：**这里原来是一条永远红的闸，已换成两条会动的。**
+    #
+    # 原来那条问「真中文 / **全部义项**」，实测 28.31%、下限 70 ⇒ **永远红**。
+    # 它当初（2026-09-24）之所以那么写，K10 的账上有明确理由：
+    #     「下限与分母都故意不动（分母排除 hidden 会变成 7.5%，
+    #       那等于"把有问题的藏起来就能让闸变绿"）」
+    # 那个理由**当时是对的**：那天这个数是 2.11%，排除 hidden 也只有 7.5%，**仍然红** ——
+    # 所以「排除 hidden」确实只是掩盖一件没做完的事。
+    #
+    # 🔴 但它已经被后来的工作作废了。阶段 5 把 72,062 条译完之后：
+    #     排除 hidden（＝读者看得到的义项）  78,828 / 78,854 = **100.00%**
+    # 而**这个数已经有一道闸在盯**（下面那条「读者能看到的义项里有中文的占比」，下限 99.0，绿）。
+    # 于是剩下这条 70 的不再测任何东西 —— 它是拿 K10 当便签纸贴在闸上。
+    # ⚠️ **一道永远红的闸信号量是零，而且它会把真红淹掉**：今天每一次写库都印它。
+    #
+    # ⇒ 换成两条，**当初那条顾虑由第二条真正承担**（而不再只是一句注释）：
+    #    ① 有真释义的义项占比    —— 收词稀释它就红（原来的 28.31% 这个数一个字没变）
+    #    ② hidden 标记与「有没有真释义」一致 —— **谁把有释义的义项藏起来，当场红**
+    #      ⇒ 「靠藏起来让闸变绿」这条路被堵死了，而原来只是靠不排除 hidden 来间接防它。
+    # 🔴 **这不是调低下限**：28.31% 这个数留在闸上，只是从「比一个它永远到不了的线」
+    #    改成「比一个会动的线」。要判断是不是放水，问的是
+    #    `[[proxy-metric-gets-optimized]]` 那一条：**改完之后，坏事发生时它还会不会红？**
+    #    ——会：稀释红（①）、藏起来红（②）、该译的没译红（下面那条 99.0）。
+    ("有真释义的义项占比（任何语言；＝1 − 空壳率）", 28.0,
      "SELECT 100.0*COUNT(DISTINCT sense_id)/(SELECT COUNT(*) FROM sense) "
-     "FROM sense_gloss WHERE lang='zh' AND NOT ("
+     "FROM sense_gloss WHERE NOT ("
      "  (text LIKE '汉字%' OR text LIKE '漢字%')"
      "  AND (text LIKE '%表记：%' OR text LIKE '%表記：%'"
      "    OR text LIKE '%标记：%' OR text LIKE '%標記：%'))",
-     "实测 **28.02%**（77,946 / 278,155）。分母里有 200,207 条**空壳义项** —— "
-     "它们一条释义都没有（K10），译也译不了（没有任何语言的源文）。"
-     "这条红的是 K10 那笔账，不是阶段 5 没做完"),
+     "实测 **28.31%**（78,828 / 278,477）。剩下 199,649 条是**空壳义项** —— "
+     "任何语言都没有真释义（K10）。**回五份源逐行比过：榨干所有源也只能 +1.05 点** "
+     "⇒ 这是源头上限，不是我们漏抽。下限 28.0 防的是**收词稀释**"),
+    # 🔴🔴 **反 gaming 的那道闸。** `hidden=1` 的唯一合法含义是「这条义项一条真释义都没有」
+    #    （由 `fix_meta_gloss.py` 按 gloss 是否为空来设）。实测两边**完全吻合、错配 0**：
+    #        hidden=0 的 78,854 ／ 有真释义的 78,828 ／ 交集 78,828
+    #        ⇒ 有真释义而被藏起来的：**0 条**
+    #    它会红的那一天，意思是有人把**有内容**的义项藏了起来 —— 而那正是
+    #    上面那段注释担心的那条路。**把顾虑做成闸，不是写成注释**
+    #    （`[[lesson-must-become-mechanism]]`）。
+    # 🔴🔴 **判据只问一个方向，而第一版我把两个方向混在一条里了。**
+    #    第一版写的是「`hidden` 与『有没有真释义』**一致**的占比」，当场报 99.99% ——
+    #    而那 26 条差额是**另一个方向**（`hidden=0` 而只有元描述，见 K10 的
+    #    `meta_gloss_unparsed.tsv`），跟「靠藏起来变绿」毫无关系。
+    #    ⇒ 一条判据混两种失败 ＝ 红了也不知道红的是哪件事。
+    #      这里只留要防的那一个方向；另一个方向是 K10 的 26 条，各有各的家。
+    ("`hidden=1` 的义项里确实一条真释义都没有的占比", 100.0,
+     "SELECT 100.0*SUM(CASE WHEN NOT EXISTS("
+     "  SELECT 1 FROM sense_gloss g WHERE g.sense_id=s.id AND NOT ("
+     "    (g.text LIKE '汉字%' OR g.text LIKE '漢字%')"
+     "    AND (g.text LIKE '%表记：%' OR g.text LIKE '%表記：%'"
+     "      OR g.text LIKE '%标记：%' OR g.text LIKE '%標記：%'))) "
+     "THEN 1 ELSE 0 END)/COUNT(*) FROM sense s WHERE COALESCE(s.hidden,0)=1",
+     "实测 **100.00%**（199,649/199,649，违例 0 条）。`hidden=1` 的唯一合法含义是"
+     "「这条义项一条真释义都没有」；它一旦低于 100，就是有人把**有内容**的义项藏了起来 ——"
+     "那是「靠藏起来让覆盖率变绿」的唯一入口，也是 2026-09-24 那条"
+     "「下限与分母都故意不动」注释真正担心的事"),
     # 🔴🔴🔴 2026-09-24 新增 —— **比"空白页"更根本的那个读者口径**。
     #    「空白页」问的是"点进去有没有东西看"，而这 19.5 万个词**有**东西看
     #    （一行汉字表记 ＋ 一条 G2P 读音）⇒ 它们在空白页那条判据上是合法的绿。
@@ -434,6 +522,13 @@ COVERAGE = [
 ALLOW_100 = {
     "变形形能指回原形的占比": "建链与收词形在同一事务里，指不回去在结构上不可能",
     "义项被证据层认领的占比": "建库时就认领，NULL 会被阶段 1 的交付物断言当场拦下",
+    # 🔴 2026-09-26：这一条**恒等 100 是它的设计**，不是分母套了分子的条件 ——
+    #    分子问「两个独立事实是否一致」（`sense.hidden` 这一列 vs `sense_gloss` 里有什么），
+    #    分母是全部义项。两边由**不同的写入方**维护，所以它**会掉下来**，
+    #    而掉下来的那天正是它要逮的事（有人把有释义的义项藏起来）。
+    "`hidden=1` 的义项里确实一条真释义都没有的占比":
+        "`hidden=1` 的定义就是「没有真释义」，由 `fix_meta_gloss.py` 按 gloss 设；"
+        "两边是两个写入方各自维护的独立事实 ⇒ 不一致在结构上可能发生，而不是恒真",
     # 🔴 2026-09-24：P11 当场拦住了这一条，**它拦得对** —— 恒等 100% 要先交代清楚。
     #    分母 `example WHERE hidden=0` **完全不引用 `example_gloss`**，
     #    所以不是"分母里套了分子的条件"那种假闸；它是阶段 6d 把 33,139 条全译完的真结果。
@@ -687,9 +782,160 @@ def p11(con):
     return bad
 
 
+def p12():
+    """🔴🔴 **有闸欠着没跑。** K31，2026-09-26。
+
+    ═══ 这一条要治的病 ═══
+    09-25 修了两处数据（日文版释义方针改了 / 录音文件名冒充 IPA 修掉了），
+    而相关的两道**外锚闸没有跟着重跑**。它们从那天起一直红着，
+    直到 09-26 做 K12 时顺手跑全量才发现 —— **红了整整一天没有任何东西提醒人**。
+
+    根因不是那两条红，是流程：`dbtool.session` 写后只自动跑
+    回归闸／账的闸／字面量闸，**外锚闸和契约闸要手动跑**，靠我记得。
+
+    ⇒ `ko/gates.py` 在每次写库后按「这次动了哪些表」记欠账；
+      这一条让欠账**变成红**。而账的闸每次写库都自动跑
+      ⇒ 欠着不跑的话，**下一次写库的屏幕上还会红**，跑绿才划账。
+
+    ⚠️ 顺带跑一遍 `gates.self_check()`：名单本身坏了（闸文件被删、
+       npm 入口不存在、某张追踪的表没人盯着），那么「欠账为空」是没有意义的
+       —— `[[expectation-must-be-declared]]`：闸自己的闸要在结论之前。
+    """
+    sys.path.insert(0, str(paths.ROOT / "ko"))
+    try:
+        import gates
+    except Exception as e:                        # noqa: BLE001
+        return [("P12", "读不到 `ko/gates.py`（%s）—— K31 的整个机制靠它" % e)]
+    bad = [("P12", "闸名单自身有问题：" + b) for b in gates.self_check()]
+    try:
+        cur = gates.load()
+    except BaseException as e:                    # noqa: BLE001
+        return bad + [("P12", "欠账文件读不动：%s" % e)]
+    for n in sorted(cur):
+        v = cur[n]
+        bad.append(("P12", "闸「%s」欠着没跑（%s 弄脏的，%s）⇒ "
+                           "python3 ko/run_gates.py"
+                    % (n, v.get("tag", "?"), v.get("when", "?"))))
+    return bad
+
+
+def p13():
+    """🔴 **欠账表的行首标记与正文自相矛盾。** 2026-09-26。
+
+    ═══ 起因 ═══
+    K22（录音张冠李戴）的正文开头写着「✅ 已结」、下面列着四条回归闸和变异验证，
+    而行首仍是 `| **K22** |`（开着）。于是它在「还欠什么」的清点里**一直算欠账**，
+    我今天列开账列表时还把它当成没做的。
+
+    ⇒ 这不是排版问题，是**账本自己说了两句相反的话**，而没有任何闸问过。
+      账的闸有 P1（阶段声明 ✅ 而交付物是 0）、P2（游离记账）、P8（编号重复）、
+      P9（别门的账），**独缺「同一行自己前后矛盾」**。
+
+    判据两个方向都要（少一个方向就是半道闸）：
+      ① 行首 `**Kn**`（开着）而正文**以 ✅/❌ 开头** ⇒ 做完了没划掉
+      ② 行首 `~~Kn~~`（划掉）而整段正文里**一个 ✅/❌ 都没有** ⇒ 划掉了没说凭什么
+
+    ⚠️ 判据一定要扫**整段正文**，不是前 N 个字符。我第一版只看前 60 字，
+       当场把 K16/K31/K25/K13 四条误判成红（它们的 ✅ 写在正文中段）——
+       `[[criteria-narrower-than-you-think]]` 的镜像：**判据比对象更窄**也会骗人。
+    """
+    bad = []
+    # 🔴🔴 **不许按列索引读这张表。** 第一版写的是 `line.split(" | ")[3:]`，
+    #    而实测 **34 行里 18 行切不出 5 段**：有的行末尾 `|` 前没有空格，
+    #    K10 的正文里还有字面 `` `||` ``（`|| g.kind` 那个例子）。
+    #    ⇒ 那 18 行里 P13 读的是**错的列**，K10 更是直接读到空字符串、**被静默跳过**。
+    #    判据改成两个都不依赖列数的形状：
+    #      ① 描述列（第 1 个和第 2 个 `|` 之间）—— 用正则精确取，非贪婪
+    #      ② 整行文本 —— 「有没有在什么地方说过结论」本来就该按整行问
+    for line in PLAN.read_text(encoding="utf-8").split("\n"):
+        m = re.match(r"^\| (?:\*\*(K\d+)\*\*|~~(K\d+)~~) \| (.*?) \| ", line)
+        if not m:
+            continue
+        num = m.group(1) or m.group(2)
+        closed = m.group(2) is not None
+        desc = m.group(3)
+        if not closed and desc.lstrip().startswith(("✅", "❌")):
+            bad.append(("P13", "欠账 %s 的描述以 ✅/❌ 开头（＝做完了）而编号没划掉 —— "
+                               "它会一直被当成欠账清点" % num))
+        if closed and "✅" not in line and "❌" not in line:
+            bad.append(("P13", "欠账 %s 划掉了，而整行里一个 ✅/❌ 都没有 —— "
+                               "凭什么划掉的？" % num))
+    return bad
+
+
+def _cells(line):
+    """按 markdown 真的切法数单元格：行内代码里的 `|` 与 `\\|` 不算。
+
+    🔴 判据不许用 `line.split(" | ")` —— 这张表里有的行 `|` 前后没空格
+       （P13 那一版栽过），有的正文里有字面 `` `||` ``（K10）。
+    """
+    out, buf, i, tick = [], [], 0, False
+    while i < len(line):
+        c = line[i]
+        if c == "`":
+            tick = not tick
+            buf.append(c)
+        elif c == "\\" and i + 1 < len(line):
+            buf.append(line[i:i + 2])
+            i += 2
+            continue
+        elif c == "|" and not tick:
+            out.append("".join(buf))
+            buf = []
+        else:
+            buf.append(c)
+        i += 1
+    out.append("".join(buf))
+    return out[1:-1] if len(out) >= 2 else out
+
+
+def p14():
+    """🔴🔴 **欠账表自己是不是一张合法的表。** 2026-09-27。
+
+    ═══ 起因 ═══
+    清 K33 时顺手数了一下单元格：**表头 4 列，而 34 行里 24 行是 5 格、3 行是 6 格**。
+    markdown 渲染器会把超出表头的单元格**整列丢掉** ——
+    也就是说这 24 行的最后一列（「什么算结清」）**在渲染出来的账本上根本不存在**，
+    而那一列正是「凭什么算结清」的全部内容。
+
+    🔴 三行 6 格的来源是**我自己结清时插错的 `|`**（把一格劈成两格），
+       与 K10 那条字面 `` `||` `` 同族 —— 结清脚本用字符串拼接往格子里追加文本，
+       多打一个竖线不会有任何东西报错。
+
+    ⇒ 这不是排版问题：**账本的一整列读不到，而账本是这一轮唯一的真相源**
+      （`KO_PLAN` 文件头的原话）。P13 问的是「一行有没有自相矛盾」，
+      P14 问的是「这张表还是一张表吗」。
+
+    判据：每一行的单元格数 ＝ 表头的单元格数。两个方向都拦（多了少了都红）。
+    """
+    lines = PLAN.read_text(encoding="utf-8").split("\n")
+    hdr = [l for l in lines if l.startswith("| # | 欠什么")]
+    if len(hdr) != 1:
+        return [("P14", "欠账表的表头找不到（或不止一个）—— 这道闸无从做起")]
+    want = len(_cells(hdr[0]))
+    # 🔴 表头列数**独立声明**，不从文件里数：数出来的话，谁把表头删掉一列，
+    #    期望跟着降，所有行反而"一致"了（`[[expectation-must-be-declared]]`）。
+    if want != 5:
+        return [("P14", "欠账表表头是 %d 列，而约定是 5 列"
+                        "（# ／ 欠什么 ／ 规模 ／ 经过与结论 ／ 什么算结清）" % want)]
+    bad = []
+    for line in lines:
+        m = re.match(r"^\| (?:\*\*(K\d+)\*\*|~~(K\d+)~~) ?\|", line)
+        if not m:
+            continue
+        n = len(_cells(line))
+        if n != want:
+            bad.append(("P14", "欠账 %s 有 %d 个单元格、表头 %d 列 —— "
+                               "渲染时%s" % (m.group(1) or m.group(2), n, want,
+                                          "多出来的那些会被整列丢掉" if n > want
+                                          else "这一行会缺格")))
+    return bad
+
+
 # ══════════════════════════════════════════════════════════════════
 CHECKS = [("P1", p1), ("P2", p2), ("P4", p4), ("P6", p6), ("P7", p7),
-          ("P8", p8), ("P9", p9), ("P10", p10), ("P11", p11)]
+          ("P8", p8), ("P9", p9), ("P10", p10), ("P11", p11), ("P12", p12),
+          ("P13", p13), ("P14", p14)]
 # 🔴 P3/P5 在 ko 上**有意不设**：P3（字面量闸）与 P5（备份保留策略）
 #    在 ko 上分别由 `dbtool` 的 `_literal_gate` 和 `_prune_backups` 自己守着，
 #    在这儿再设一条是两个写入方。⇒ 编号跳号是**有理由的**，登记在这里，
@@ -705,7 +951,8 @@ SKIP = {"P3": "字面量闸由 ko/dbtool.py 的 _literal_gate 守",
 #      后者是拿现状推期望，现状坏了期望跟着坏（`[[primary-key-is-not-enough]]` 同形）。
 #    ⚠️ 加一条检查就要动这张表一次。**那个手工动作就是这道闸的价值**：
 #      它逼人明说"我是有意加/减的"。
-ROSTER = ("P1", "P2", "P4", "P6", "P7", "P8", "P9", "P10", "P11")
+ROSTER = ("P1", "P2", "P4", "P6", "P7", "P8", "P9", "P10", "P11", "P12", "P13",
+          "P14")
 
 
 def p0():
@@ -788,8 +1035,68 @@ def main():
     PLAN.write_text(orig_plan, encoding="utf-8")
 
     # M4 把一条覆盖率下限抬到实测之上 → P6 必须红（证明它真在读数）
-    COVERAGE[0] = (COVERAGE[0][0], 99.9, COVERAGE[0][2], COVERAGE[0][3])
-    expect("P6", "覆盖率跌破下限", lambda: p6(con))
+    #
+    # 🔴🔴 **这一条原来是假的，2026-09-26 才发现。** 原版写的是
+    #     `COVERAGE[0] = (…, 99.9, …)`
+    # 而 `COVERAGE[0]` 实测 **99.9987%** ⇒ 抬到 99.9 之后**它仍然是绿的**。
+    # 它之所以一直显示"逮到了"，是因为当时表里另有一条**永远红**的闸
+    # （真中文/全部义项，实测 28.31%、下限 70）—— `p6()` 返回非空，`expect` 就记了一分。
+    # ⇒ **那道死闸一直在掩盖这条坏掉的变异**，而这正是"一条永远红的检查会把真红淹掉"
+    #   最贴切的实例：它连一条变异失效都能盖住。
+    # 两处改：① 下限抬成**不可能达到的常量**，注入必然生效；
+    #        ② **断言红的是这一条**（按名字核对），不许靠别人的红过关。
+    _save0 = COVERAGE[0]
+    COVERAGE[0] = (_save0[0], 1e9, _save0[2], _save0[3])
+    _red = p6(con)
+    _hit = any(_save0[0] in why for _cid, why in _red)
+    print("   %s P6    覆盖率跌破下限（且红的就是被注入那一条）"
+          % ("✅" if _hit else "🔴 没逮到"))
+    if not _hit:
+        ok = False
+    COVERAGE[0] = _save0
+
+    # ══════════════════════════════════════════════════════════════
+    # M4b/M4c：2026-09-26 那次改动**必须自证不是放水**。
+    # 那天我把一条「永远红」的闸（真中文/全部义项，实测 28.31%、下限 70）换成了两条。
+    # 把红改成绿是最容易放水的动作 ⇒ 这两条变异就是它的负控：
+    #   M4b 稀释 ⇒ 第一条要红        M4c **真的把有释义的义项藏起来** ⇒ 第二条要红
+    def _cov(name_part):
+        for i, c in enumerate(COVERAGE):
+            if name_part in c[0]:
+                return i
+        raise AssertionError("🔴 找不到覆盖率条目 %r —— 锚失效了" % name_part)
+
+    # M4b：把「有真释义的义项占比」的下限抬到实测(28.31)之上 → 必须红
+    i = _cov("有真释义的义项占比")
+    _save = COVERAGE[i]
+    COVERAGE[i] = (_save[0], 99.0, _save[2], _save[3])
+    expect("P6", "空壳率被稀释（有真释义的义项占比跌破下限）", lambda: p6(con))
+    COVERAGE[i] = _save
+
+    # 🔴🔴 M4c：**在一个小内存库上真的造出那个攻击** —— 把一条**有真释义**的义项
+    #    标成 `hidden=1`。这是「靠藏起来让覆盖率变绿」的唯一入口，而 2026-09-24
+    #    那条「下限与分母都故意不动」的注释担心的正是它。
+    #    ⚠️ 不抬下限来造红（那只证明它在读数），**要证明它认得出这件事**。
+    i = _cov("`hidden=1` 的义项里确实")
+    mem = sqlite3.connect(":memory:")
+    mem.executescript(
+        "CREATE TABLE sense (id INTEGER PRIMARY KEY, hidden INTEGER);"
+        "CREATE TABLE sense_gloss (sense_id INTEGER, lang TEXT, text TEXT);"
+        # 干净的一条：hidden=1 且只有元描述 ⇒ 合法
+        "INSERT INTO sense VALUES (1, 1);"
+        "INSERT INTO sense_gloss VALUES (1, 'zh', '汉字或谚汉混合表记：가（家）');")
+    got_clean = mem.execute(COVERAGE[i][2]).fetchone()[0]
+    # 注入：hidden=1 而有一条**真释义**
+    mem.executescript("INSERT INTO sense VALUES (2, 1);"
+                      "INSERT INTO sense_gloss VALUES (2, 'zh', '房子');")
+    got_bad = mem.execute(COVERAGE[i][2]).fetchone()[0]
+    mem.close()
+    ok_attack = got_clean >= 100.0 and got_bad < 100.0
+    print("   %s P6    把**有真释义**的义项标成 hidden=1（靠藏起来变绿）"
+          "　干净 %.1f%% → 注入后 %.1f%%"
+          % ("✅" if ok_attack else "🔴 没逮到", got_clean, got_bad))
+    if not ok_attack:
+        ok = False
     COVERAGE[0] = (COVERAGE[0][0], 70.0, COVERAGE[0][2], COVERAGE[0][3])
 
     # M5 把一条覆盖率改成「分母里套分子的条件」→ P11 必须逮到这道假闸
@@ -853,6 +1160,43 @@ def main():
     _c = CHECKS.pop()
     expect("P0", "检查表自己有缺口（我删过一条而闸报全绿）", p0)
     CHECKS.append(_c)
+
+    # M12 两个方向各注入一次 → P13 必须红（K34 那一轮顺手建的）
+    # 🔴 锚**钉在常量上**：拿一个真实存在的已结清编号做替换，并断言替换真的发生了
+    #    —— `[[fix-regression-and-gate]]`：锚在会变的行文上，`replace` 会变成空操作
+    #    而「什么都没注入却通过」。
+    # 方向①：真实存在的已结清行去掉删除线 ⇒ 变成「做完了没划掉」
+    cur = PLAN.read_text(encoding="utf-8")
+    assert cur.count("| ~~K22~~ |") == 1, "🔴 变异锚命中次数不对"
+    PLAN.write_text(cur.replace("| ~~K22~~ |", "| **K22** |"), encoding="utf-8")
+    assert PLAN.read_text(encoding="utf-8") != cur, "🔴 替换是空操作"
+    expect("P13", "做完了没划掉（正文以 ✅ 开头而编号是开着的）", p13)
+    PLAN.write_text(orig_plan, encoding="utf-8")
+
+    # 方向②：**追加**一行划掉了却没有结论标记的假账。
+    # 🔴 不用「从真实行里抹掉 ✅」那种注入 —— 我第一版那么做，把 `❌` 从**第 2 列**
+    #    （描述列）抹掉了，而 P13 读的是**正文列** ⇒ 什么都没注入而变异「通过」。
+    #    这正是 `[[fix-regression-and-gate]]` 记的那一族：注入要打在判据真读的那一处。
+    cur = PLAN.read_text(encoding="utf-8")
+    fake = "\n| ~~K999~~ | 变异注入 | 0 | 正文里一个结论标记都没有 | — |\n"
+    PLAN.write_text(cur + fake, encoding="utf-8")
+    assert "K999" in PLAN.read_text(encoding="utf-8"), "🔴 追加没生效"
+    expect("P13", "划掉了却没说凭什么（正文里没有 ✅/❌）", p13)
+    PLAN.write_text(orig_plan, encoding="utf-8")
+
+    # M11 记一笔假欠账 → P12 必须红（K31）
+    # 🔴 欠账文件指到临时目录，**不许碰真的那一份** —— 变异验证自己弄脏
+    #    真状态，下一次写库就会拿一笔假账去红，那是拿闸制造噪声。
+    import tempfile as _tmp
+    sys.path.insert(0, str(paths.ROOT / "ko"))
+    import gates as _G
+    _real_pending = _G.PENDING
+    _G.PENDING = Path(_tmp.mkdtemp()) / "pending.json"
+    try:
+        _G.mark(["外锚闸·义项"], "m11-fake-tag", {"sense"})
+        expect("P12", "有闸欠着没跑（09-25 那两条红了一天就是因为这里不说话）", p12)
+    finally:
+        _G.PENDING = _real_pending
 
     con.close()
     assert PLAN.read_text(encoding="utf-8") == orig_plan, "🔴 计划表没还原！"

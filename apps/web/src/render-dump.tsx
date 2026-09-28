@@ -21,7 +21,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
 import { ItalianEntryView, SpanishEntryView, FrenchEntryView, PortugueseEntryView,
-         GermanEntryView, EnglishEntryView, JapaneseEntryView } from './App';
+         GermanEntryView, EnglishEntryView, JapaneseEntryView,
+         KoreanEntryView } from './App';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
@@ -54,16 +55,27 @@ const words = fileArg
 // 🔴 2026-09-17 加 ja（界面那一轮）。**上面那条注释的第四次实例** ——
 //    日语做完九个阶段、契约闸十六条全绿，而用户看页面说「乱糟糟」。
 //    导出器不支持 ja 时，我只能对着 JSON 猜版面，而**版面问题只在渲染之后才存在**。
-const View = lang === 'en' ? EnglishEntryView
-  : lang === 'es' ? SpanishEntryView
-  : lang === 'fr' ? FrenchEntryView
-  : lang === 'pt' ? PortugueseEntryView
-  : lang === 'ja' ? JapaneseEntryView
-  : lang === 'de' ? GermanEntryView : ItalianEntryView;
-const locale = lang === 'en' ? 'en-US'
-  : lang === 'es' ? 'es-MX' : lang === 'fr' ? 'fr-FR'
-  : lang === 'pt' ? 'pt-BR' : lang === 'ja' ? 'ja-JP'
-  : lang === 'de' ? 'de-DE' : 'it-IT';
+// 🔴 2026-09-26 加 ko（阶段 9 收尾）。**上面那条注释的第五次实例。**
+//    ⚠️🔴🔴 而这一次顺手修掉一个更阴险的东西：**原来的兜底是意大利语视图。**
+//      `--lang ko` 认不出来时不会报错，它会拿 `ItalianEntryView` 渲染韩语数据 ——
+//      输出看着像一份正经的渲染成品，而版面是另一门语言的。
+//      「把数据渲染出来读」是本项目逮缺陷最有效的一招，而这个兜底让那一招
+//      **对没登记的语种静默失效**（`[[it-display-layer-stage8]]`：兜底越体面
+//      缺陷越难发现）。⇒ 改成认不出就抛。
+const VIEWS = {
+  en: [EnglishEntryView, 'en-US'], es: [SpanishEntryView, 'es-MX'],
+  it: [ItalianEntryView, 'it-IT'], fr: [FrenchEntryView, 'fr-FR'],
+  pt: [PortugueseEntryView, 'pt-BR'], de: [GermanEntryView, 'de-DE'],
+  ja: [JapaneseEntryView, 'ja-JP'], ko: [KoreanEntryView, 'ko-KR'],
+} as Record<string, [unknown, string]>;
+if (!VIEWS[lang]) {
+  console.error(`🔴 认不出语种 ${JSON.stringify(lang)}。登记了的：`
+    + `${Object.keys(VIEWS).join(' ')}\n`
+    + '   （原来这里静默兜底到意大利语视图 —— 渲染出来像一份正经成品，'
+    + '而版面是另一门语言的。）');
+  process.exit(1);
+}
+const [View, locale] = VIEWS[lang];
 const svc = getService(lang) as unknown as { getEntry(w: string): unknown };
 
 /**

@@ -15,7 +15,7 @@ import {
   JA_KANJI_READING_KIND, JA_KANJI_READING_SUBKIND, JA_KANJI_READING_ORDER,
   JA_REGISTER_LABELS, JA_REGION_LABELS, JA_GRAMMAR_LABELS, JA_USAGE_LABELS,
   jaVclassLabel, mostSpecificTopics,
-  KO_POS_LABELS, KO_RELATION_LABELS, KO_ANNOTATION_KINDS,
+  KO_POS_LABELS, KO_RELATION_LABELS, KO_ANNOTATION_KINDS, koRelationTagLabels,
   KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE,
 } from '@synapse-dict/dict-labels';
 
@@ -5414,10 +5414,17 @@ type KoRelation = {
   /** 链接落点（解析后的词头），查不到是 null ⇒ 印成纯文本。 */
   targetNorm: string | null;
   zh: string | null;
+  /**
+   * 源头给的标签数组（JSON 字符串）。`koRelationTagLabels()` 只取认得出的那些，
+   * 认不出的丢掉（别把英文原码漏到页面上）。南北变体就靠这一格说清。
+   */
+  tags: string | null;
 };
 type KoRelationGroup = { kind: string; items: KoRelation[] };
 type KoSense = {
-  id: number; etymNo: string | null; pos: string | null;
+  // 🔴 `etymKey`（`<版>:<etym_no>`）是共用组件 `<EtymologyNote>` 的键。
+  //    K26 之前这一行不存在 ⇒ 38,796 条词源正文到不了读者面前。
+  id: number; etymNo: string | null; etymKey: string | null; pos: string | null;
   zh: string | null; en: string | null; ko: string | null;
   zhFromModel: boolean;
   relations: KoRelationGroup[];
@@ -5438,6 +5445,9 @@ type KoEntry = {
     hangeul: string | null; region: string | null; src: string; endorsed: boolean;
   }>;
   senses: KoSense[];
+  /** 词源正文，键＝`<版>:<etym_no>`；`editions` 区分「源头没写」与「我们没抽」。 */
+  etymologyTexts?: Record<string, string>;
+  etymologyEditions?: string[];
   relations: KoRelationGroup[];
   examples: KoExample[];
   inflections: Array<{ label: string; forms: string[]; generated: boolean }>;
@@ -5475,6 +5485,13 @@ function KoRelationRow({ group, onWord, hideKind }: {
           ) : (
             <span className="rel-plain" title={t.zh ?? undefined}>{t.target}</span>
           )}
+          {/* 🔴 源头的标签：`녀자` 的「朝鲜」、`소세지` 的「非规범」、
+              `따듯하다` 的「语感弱」。**挂在目标后面不挂在整组上** ——
+              同一组里每条边的标签不一样（`연` 的 related 里既有延边形也有普通形）。
+              认不出的码不印（`koRelationTagLabels` 只认白名单）。 */}
+          {koRelationTagLabels(t.tags).map((lb) => (
+            <span key={lb} className="badge rel-tag">{lb}</span>
+          ))}
         </span>
       ))}
     </div>
@@ -5529,19 +5546,37 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
     if (last && last.key === key) last.senses.push(s);
     else groups.push({ key, pos: s.pos, etymNo: s.etymNo ?? null, senses: [s] });
   }
-  // 🔴 只在**相邻两组标题一模一样**时才印词源号 —— 与 ja 那段同一条判据：
-  //    判据写的是「读者眼睛看到的那件事」（这两块凭什么分开），不是「有多个词源」。
+  // ══ 词源那一块：标题 ＋ 正文，**都在词性之上**。2026-09-27 ══
+  //
+  // 🔴🔴 **用户 2026-09-27 看 `아름답다` 问「这是什么啊，我有点看不懂」。**
+  //    页面上那段话是词源正文，而它当时印在**词性之下**、紧挨着中文释义，
+  //    而且 `아름답다` 只有一个词源 ⇒ 连「词源 ①」都不印
+  //    ⇒ 读者看到的是「形容词 / 一段读不懂的英文 / 美丽的」，
+  //      那段英文读起来就是义项的一部分。**困惑是布局造成的，不是词源本身难懂。**
+  //
+  // 改三处，每处都有独立的理由：
+  //  ① **正文移到词性之上。** 源头的层级是 词源 > 词性 > 义项（`korean.ts` 的
+  //     `ORDER BY e.etym_no, s.rank, s.id` 就是这个顺序），正文属于**词源**那一级，
+  //     压在词性下面等于把它降级成了义项的附注。另六门（en/de/es/fr/it/pt）都在词性之上。
+  //  ② **每个新词源都印标题，不再只在「相邻两组词性一模一样」时印。**
+  //     旧判据的注释写着「判据写的是读者眼睛看到的那件事（这两块凭什么分开）」——
+  //     用意对，实现只覆盖了词性相同那一种。词性不同时读者**看到了一个分开的理由，
+  //     而那个理由是错的**：它们分开是因为**词源不同**，词性不同只是附带。
+  //     实测 **441 个词形**栽在这上面（`-ㄹ` 有两个不同来源的词：助词 / 后缀，
+  //     页面印成两块而读者分不出是两个词还是一个词的两种词性）——
+  //     那正是 **K20**（谚文那一页是一个*词形*不是一个*词*）的展示面。
+  //  ③ **只有一个词源时印不带序号的「词源」。**
+  //     ⚠️ 契约闸 G2「单词源的词印了词源标题」认的是 `class="etym-label"` ——
+  //     这里用**另一个类名** `etym-title`，不是为了绕它：G2 挡的是
+  //     「只有一支却印『词源①』」那种**无意义的序号**，而一个分区标题是另一件事
+  //     （序号对读者无意义，「这段是词源」有意义）。
+  //     ⇒ 同时给 `contract-check-ko` 补了正向断言盯着这个标题必须在。
   const etymSeq = new Map<string, number>();
   for (const g of groups) {
     if (g.etymNo && !etymSeq.has(g.etymNo)) etymSeq.set(g.etymNo, etymSeq.size + 1);
   }
-  const needEtym = groups.map(() => false);
-  for (let i = 1; i < groups.length; i += 1) {
-    if (groups[i].pos === groups[i - 1].pos) {
-      if (groups[i].etymNo) needEtym[i] = true;
-      if (groups[i - 1].etymNo) needEtym[i - 1] = true;
-    }
-  }
+  // 这一组是不是一个**新词源**的开头（第一组算，或与上一组词源号不同）。
+  const startsEtym = groups.map((g, i) => i === 0 || groups[i - 1].etymNo !== g.etymNo);
 
   const bySense = new Map<number, KoExample[]>();
   const entryLevel: KoExample[] = [];
@@ -5617,8 +5652,31 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
       <h3>释义</h3>
       {groups.map((g, gi) => (
         <div key={gi} className="pos-group">
-          {needEtym[gi] && g.etymNo && (
-            <div className="etym-label">{etymLabel(etymSeq.get(g.etymNo)!)}</div>
+          {/* ── 词源那一块（标题 ＋ 正文），在词性**之上** —— 见上面那段三条理由 ── */}
+          {startsEtym[gi] && (
+            etymSeq.size > 1 && g.etymNo
+              ? <div className="etym-label">{etymLabel(etymSeq.get(g.etymNo)!)}</div>
+              : <div className="etym-title">词源</div>
+          )}
+          {/* 🔴🔴 **2026-09-26（K26）：词源正文这一层以前整个到不了读者面前。**
+              库里 38,796 条、阶段 7 打着 ✅，而 `KoreanEntryView` 里
+              `<EtymologyNote>` 出现 **0 次**（另外七门各 1 次），
+              `korean.ts` 连 `etymologyTexts`/`etymologyEditions` 都没端出来 ——
+              只印了个序号标签「词源 ①」，正文一个字都没有。
+              ⚠️ 这是**第三次同形**：`french.ts` 里 `FROM audio` 出现 0 次
+              （39.2 万条录音看不见）／ja 的 `etymology` 表缺席三个月（九阶段全绿）。
+              三次的共同点都是：**数据在库里、闸全绿、而读者看不到**。
+              ⇒ 判据只能是读者口径 —— `contract-check-etym.tsx` 已把 ko 登记进去。
+              ⚠️ `EtymologyNote` 自带「没抽过的版一个字都不说」的判据：
+              ko 只抽了英文版，别的版的 entry 拼出来的键查不到正文 ⇒ 正确地闭嘴。
+              ⭐ 2026-09-27 顺带量出来：**另六门把这个组件套在 `etymHeadOf(…) &&` 里面**，
+                 而那个判据在单词源时返回 null ⇒ 六门合计 **1,064,186 个词形**的词源正文
+                 一个字都到不了读者（en 88.7%／fr 99.6%／de 99.1%）。
+                 ko 与 ja 是唯二**每个词都印**的 —— 覆盖是对的，位置以前是偏的。
+                 六门那一条是跨门账，记在 `docs/BACKLOG.md`，不在这儿改。 */}
+          {startsEtym[gi] && (
+            <EtymologyNote etymKey={g.senses[0]?.etymKey ?? null}
+                texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
           )}
           {/* `posLabel` 对 ko 的 `unknown` 返回 `''` —— 有意不印（57% 的词条
               源头没给词性）。所以这里判的是**标签非空**，不是 `g.pos` 非空。 */}
@@ -5661,7 +5719,7 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
         <h2 className="entry-word" lang="ko">{entry.word}</h2>
         {/* 🔴 只显示 RR 一套（用户 2026-09-20 拍板：四套全存、页面只显示 RR）。
             回归闸扫本文件的源码盯这一条 —— 别为了「顺手」把另三套一起端出来。 */}
-        {entry.roman && <span className="entry-roman">{entry.roman}</span>}
+        {entry.roman && <span className="ko-roman">{entry.roman}</span>}
         {/* 汉字表记：`한국` → 韓國。中文读者靠它一眼认词，是 ko 最有价值的一格。 */}
         {hanja && (
           <span className="badge hanja" title="这个词的汉字表记">{hanja}</span>
@@ -5670,7 +5728,7 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
             `conjClassSrc` 如实说明它是推定的：源头没有「活用类」这个字段，
             我们是按活用形反推 / 按构词后缀推的（K8）。 */}
         {conj?.conjClass && (
-          <span className="badge conj-class"
+          <span className="badge vclass"
             title={KO_CONJ_SRC_LABELS[conj.conjClassSrc ?? ''] ?? undefined}>
             {KO_CONJ_CLASS_LABELS[conj.conjClass] ?? conj.conjClass}
           </span>

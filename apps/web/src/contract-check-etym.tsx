@@ -29,23 +29,24 @@ import { getService } from '@synapse-dict/dict-core';
 import {
   EnglishEntryView, SpanishEntryView, ItalianEntryView,
   FrenchEntryView, PortugueseEntryView, GermanEntryView, JapaneseEntryView,
+  KoreanEntryView,
 } from './App';
 import { etymologyBrief } from '@synapse-dict/dict-labels';
 
 const mutate = process.argv.includes('--mutate');
 const PER = 24;
-type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de' | 'ja';
-const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja'];
+type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de' | 'ja' | 'ko';
+const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja', 'ko'];
 
 const VIEW: Record<Lang, unknown> = {
   en: EnglishEntryView, es: SpanishEntryView, it: ItalianEntryView,
   fr: FrenchEntryView, pt: PortugueseEntryView, de: GermanEntryView,
-  ja: JapaneseEntryView,
+  ja: JapaneseEntryView, ko: KoreanEntryView,
 };
 /** es 的义项在 `unifiedSenses` 里，其余六门在 `senses`。 */
 const SENSE_FIELD: Record<Lang, string> = {
   en: 'senses', es: 'unifiedSenses', it: 'senses',
-  fr: 'senses', pt: 'senses', de: 'senses', ja: 'senses',
+  fr: 'senses', pt: 'senses', de: 'senses', ja: 'senses', ko: 'senses',
 };
 
 /**
@@ -62,7 +63,8 @@ const SENSE_FIELD: Record<Lang, string> = {
  *      さんけい）⇒ 读音标签整个不出现，页面上连着两个裸「名词」。
  *      实测 518 个词形／593 对，**590 对是这个机制**（2026-09-20 由本闸 G4 逮到并修）。
  *      ⇒ G1 对 ja 比的是**回退规则算出来的序列**，不是六门那个"多词源就印"的序列。
- *   ② **每个词性组都印词源正文**；六门只在**多词源**时才印（`etymHeadOf()` 为真才渲染）。
+ *   ② **每个词性组都印词源正文**（ja）；六门只在**多词源**时才印（`etymHeadOf()` 为真才渲染），
+ *      ko 是第三种：**每支词源一条**（含单词源）。三种都在 `Shape.noteMode` 上登记着。
  *      ⚠️ 这条差异记在这儿是因为它**对读者可见**：en 库里 493,490 条词源正文，
  *        单词源的词（98%+）一条都印不出来。孰对孰错不在本闸的射程内，
  *        但**两种形状都得有闸守着**，否则哪天谁把 ja 改成六门那样，没有一条断言会响。
@@ -73,17 +75,68 @@ type Shape = {
    * `fallback` ＝ 平时靠读音标签认，**只有读音分不开相邻两组时才退回印序号**（ja）。
    */
   etymHeadings: 'always' | 'fallback';
-  /** 每个词性组都印词源正文（ja），还是只在多词源时印（六门）。 */
-  noteOnEveryGroup: boolean;
+  /**
+   * 词源正文印几条。**三种，各有实测理由，别合并：**
+   *   `multi-only` 六门 —— 只在词有 ≥2 支词源时印。
+   *      🔴🔴 这是**六门的疤，不是标准**：`<EtymologyNote>` 被套在
+   *      `etymHeadOf(…) &&` 里面，而它单词源时返回 null ⇒ 2026-09-27 实测
+   *      **1,064,186 个词形**的词源正文一个字都到不了读者
+   *      （en 424,409／88.7%、fr 304,620／99.6%、de 152,236／99.1%、
+   *       it 97,459、pt 48,875、es 36,587）。实证：en `porion` 库里有
+   *      `From Ancient Greek πόρος …`，页面从「释义」直接跳到「名词」。
+   *      ⇒ 已记 `docs/BACKLOG.md`。这里**如实登记现状**，不假装它是对的。
+   *   `group` ja —— 每个**词性组**都印一条。
+   *   `etymology` ko —— 每**支词源**印一条（含单词源），一支跨几个词性组只印一次。
+   */
+  noteMode: 'multi-only' | 'group' | 'etymology';
 };
 const SHAPE: Record<Lang, Shape> = {
-  en: { etymHeadings: 'always', noteOnEveryGroup: false },
-  es: { etymHeadings: 'always', noteOnEveryGroup: false },
-  it: { etymHeadings: 'always', noteOnEveryGroup: false },
-  fr: { etymHeadings: 'always', noteOnEveryGroup: false },
-  pt: { etymHeadings: 'always', noteOnEveryGroup: false },
-  de: { etymHeadings: 'always', noteOnEveryGroup: false },
-  ja: { etymHeadings: 'fallback', noteOnEveryGroup: true },
+  en: { etymHeadings: 'always', noteMode: 'multi-only' },
+  es: { etymHeadings: 'always', noteMode: 'multi-only' },
+  it: { etymHeadings: 'always', noteMode: 'multi-only' },
+  fr: { etymHeadings: 'always', noteMode: 'multi-only' },
+  pt: { etymHeadings: 'always', noteMode: 'multi-only' },
+  de: { etymHeadings: 'always', noteMode: 'multi-only' },
+  ja: { etymHeadings: 'fallback', noteMode: 'group' },
+  // 🔴🔴 **ko 2026-09-26 才登记进来（K26），而登记之前它的词源层对读者完全不可见。**
+  //    实测：另外七门的视图各调用 `<EtymologyNote>` **1 次**，`KoreanEntryView` **0 次**，
+  //    而且 `korean.ts` 连 `etymologyTexts`/`etymologyEditions` 都没端出来 ——
+  //    38,796 条词源正文一个字都印不出来，阶段 7 却打着 ✅。
+  //    这是**第三次同形**（`french.ts` 的 `FROM audio` 0 次／ja 的 `etymology` 表缺席三个月）。
+  //
+  // 🔴 **两处形状我第一版都声明错了，是这道闸当场报红纠正的**（G1 12 条、H1 26 条、H2 3 条）：
+  //   ① `etymHeadings` 不是 `'always'` 而是 **`'fallback'`**。ko 的 `needEtym` 判的是
+  //      「相邻两组**词性相同**时才印词源号」（判据是"读者凭什么看出这两块是分开的"），
+  //      不是六门的"多词源就印"。⭐ 而 `fallbackHeads()` 在**没有假名**时正好退化成
+  //      这条规则（`showKana` 为假 ⇒ `title()` 只比词性）—— **闸的形状抽象已经覆盖 ko，
+  //      不需要第三种**。我照抄六门的 `'always'`，页面上少印的那些当场被 G1 逮到。
+  //      🔴🔴 **2026-09-27 改回 `'always'` —— 09-26 那个 `'fallback'` 登记的是一个缺陷。**
+  //      那条窄规则的注释写着「判据写的是读者眼睛看到的那件事（这两块凭什么分开）」，
+  //      用意对，实现只覆盖了**词性相同**那一种。词性不同时读者看到了一个分开的理由，
+  //      **而那个理由是错的**：它们分开是因为词源不同，词性不同只是附带。
+  //      实测 **441 个词形**栽在这上面（`-ㄹ` 两支词源是助词/后缀两个不同来源的词，
+  //      页面两块无标题 ⇒ 读者分不出是两个词还是一个词的两种词性），
+  //      正是 **K20**（谚文那一页是一个*词形*不是一个*词*）的展示面。
+  //      ⚠️ 当时我把它当成「ja 的形状抽象正好覆盖 ko」收了，
+  //      **而那个"正好"是两个缺陷长得一样**，不是同一条设计。
+  //   ② 正文不是"只在多词源时印"。ko 单词源的词也印。
+  //      ⭐ 这是**量过之后的产品决定，不是省事**：有词源的 33,161 个词形里
+  //      **91.1%（30,204）是单词源** ⇒ 照六门那样"只在多词源时印"，
+  //      这 30,204 个词一个字都看不到，正是本文件给 en 记的那个疤（98%+ 印不出来）。
+  //
+  // 🔴 **2026-09-27 从 `group` 改成 `etymology`，改的是被登记下来的一个副作用。**
+  //    「每个词性组印一条」这个写法保住的是**覆盖**（单词源也印），
+  //    而它的副作用是**同一支词源的正文在几个词性块里各印一遍** ——
+  //    实测 **430 个词形**在重复印、合计多印 **488 遍**
+  //    （`-니` 6 个词性块只有 4 支词源，etym 1 和 2 各印了两遍）。
+  //    ⇒ 覆盖的理由一个字没变，去掉的只是重复。**这不是把红改绿**：
+  //      H1/H2 的期望值从"块数"改成"支数"，少印一支照样红（变异验证 M7/M8）。
+  // 🔴 同时 2026-09-27 把词源那一块（标题＋正文）**移到词性之上** ——
+  //    用户看 `아름답다` 问「这是什么啊，我有点看不懂」：那段正文当时压在词性下面、
+  //    紧挨中文释义，而单词源时连「词源 ①」都不印 ⇒ 读起来就是义项的一部分。
+  //    并给单词源的词印不带序号的「词源」（类名 `etym-title`，不是 `etym-label` ——
+  //    G2 禁止的是"只有一支却印序号"，而"这一段是词源"在单词源时同样要说）。
+  ko: { etymHeadings: 'always', noteMode: 'etymology' },
 };
 
 /**
@@ -221,11 +274,14 @@ function etymBlocksOf(senses: Sense[], shape: Shape): string[] {
   //    是**两条正文**，按六门的口径只会算出一块，H1 当场假红。
   //    `etym` 为 null 的组组件一个字都不印（`EtymologyNote` 第一行就 return null），
   //    所以不计入；ja 实测 `etym_no` 一条 NULL 都没有，这个分支是给将来兜底的。
-  if (shape.noteOnEveryGroup) {
+  if (shape.noteMode === 'group') {
     return groups.map((g) => g.etym).filter((x): x is string => x !== null);
   }
+  // ko：每**支**词源一条正文（含单词源），一支跨几个词性组只算一条。
+  // ⚠️ 与下面六门那条的差别只在**要不要先排掉单词源**，走的都是
+  //    「与上一组不同才算一块」——所以这里不能提前 return，得共用下面那段。
   const distinct = new Set(groups.map((g) => g.etym).filter((x) => x !== null));
-  if (distinct.size <= 1) return [];            // 单词源不印标题
+  if (shape.noteMode === 'multi-only' && distinct.size <= 1) return [];
   const out: string[] = [];
   groups.forEach((g, i) => {
     if (g.etym !== null && (i === 0 || groups[i - 1].etym !== g.etym)) out.push(g.etym);
@@ -413,7 +469,7 @@ const CHECKS: Array<{
       // 🔴 ja 单词源的词也印正文 ⇒ **单块也要比**。这正是 ja 上最值钱的一条：
       //    `etymology.edition` 写 `en-edition` 而服务层的 etymKey 一度取裸词源号（`1`），
       //    两边各自自洽、拼起来对不上 ⇒ 页面静默空白，入库闸/回核/tsc 全绿。
-      if (all.length < (shape.noteOnEveryGroup ? 1 : 2)) return null;
+      if (all.length < (shape.noteMode === 'multi-only' ? 2 : 1)) return null;
       // 只比**印得出来的那些**：没抽过的版不渲染任何块，把它算进去会整体错位。
       const keys = all.filter((k) => ed.includes(editionOf(k)));
       // ⚠️ **先把语种徽标整个元素剥掉，再剥标签。** 第一版直接 `replace(/<[^>]*>/g,'')`，
@@ -456,7 +512,7 @@ const CHECKS: Array<{
       if (!texts) return null;
       const ed = (e as { etymologyEditions?: string[] }).etymologyEditions ?? [];
       const all = etymBlocksOf(senses, shape);
-      if (all.length < (shape.noteOnEveryGroup ? 1 : 2)) return null;
+      if (all.length < (shape.noteMode === 'multi-only' ? 2 : 1)) return null;
       const keys = [...new Set(all.filter((k) => ed.includes(editionOf(k))))];
       const have = keys.filter((k) => etymologyBrief(texts[k])).length;
       const none = (h.match(/etym-text-none/g) || []).length;
