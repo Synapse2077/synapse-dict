@@ -22,10 +22,11 @@
 import importlib
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LANGS = ("en", "es", "it", "fr", "pt", "de", "ja")
+LANGS = ("en", "es", "it", "fr", "pt", "de", "ja", "ko", "vi")
 
 
 def _discover():
@@ -89,6 +90,52 @@ def probe(lang):
     return declared, effective, budget, ""
 
 
+def mechanism_probe(lang, mod):
+    """**正反控制**：拿一份临时计划表正着问一遍 `_language_is_done()`。→ 红的原因或 None。
+
+    ═══ 🔴🔴 为什么非加这一条不可（2026-10-02 vi 实证）═══
+    `vi/dbtool.py` 是从 ko 拷的，`PLAN_DOC` 改成了 `VI_PLAN.md`、注释也改成了
+    「`# ✅ vi 完结`」，**而正则里还写着 `ko`** —— 读 vi 的计划表却找「ko 完结」，
+    永远匹配不上。哪天 vi 标完结，预算不会收紧：**fr 那行 ✅ 白写半个月的原形**，
+    而这道闸就是为那件事建的。
+
+    ⚠️ 本文件此前**逮不到它**，有两层：
+      ① `LANGS` 名单里没有 vi ⇒ 结构性失明（`_discover` 已经在治这一层，它响了）；
+      ② **即使登记了也逮不到** —— 计划表没标完结 ⇒ declared=False、
+         `_language_is_done()` 也返回 False ⇒ `declared == effective` **判绿**。
+         两个 False 相等，不代表机制是通的，只代表**两边都没有信息**
+         （`[[expectation-must-be-declared]]`：期望值要独立声明，不能从现状推）。
+         这个洞只会在「有人真去标完结」那天现形 —— 而那天正是它最该已经被修好的一天。
+    ⇒ 不等那天：**主动给它一份标了完结的临时计划表，看它认不认。**
+      正控制（标了 ⇒ 必须 True）＋ 反控制（没标 ⇒ 必须 False，否则它根本没在读文件）。
+    ⚠️ 临时文件是 `tempfile`，**真计划表一个字节都不动**。
+    """
+    fn = getattr(mod, "_language_is_done", None)
+    if fn is None:
+        return None                      # 没有机制，由 probe() 那边报
+    if not hasattr(mod, "PLAN_DOC"):
+        # ⚠️ **登记在册的豁免，不是静默跳过**：本门的完结判定不经 `PLAN_DOC`，
+        #    探不到。main() 会把它大声印出来（而不是当成通过）。
+        return "SKIP:完结判定不经 `PLAN_DOC`，正反控制探不到"
+    saved = mod.PLAN_DOC
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / f"{lang.upper()}_PLAN.md"
+            mod.PLAN_DOC = p
+            p.write_text(f"# ✅ {lang} 完结（正控制，临时文件）\n", "utf-8")
+            if not fn():
+                return (f"标了 `# ✅ {lang} 完结` 而 `_language_is_done()` 仍是 False —— "
+                        "**判定机制对本语种永远不会生效**"
+                        "（正则里的语种代码多半是从别门拷过来没改）")
+            p.write_text("# 这份没有完结标记（反控制）\n", "utf-8")
+            if fn():
+                return ("计划表里没有完结标记而 `_language_is_done()` 返回 True —— "
+                        "它没在读计划表，那个 ✅ 不是判据")
+    finally:
+        mod.PLAN_DOC = saved
+    return None
+
+
 def main():
     print("■ 跨语种闸：计划表宣布的完结，是否真的作用到备份预算上\n")
     print(f"  {'语种':<5}{'计划表':>8}{'实际生效':>10}{'生效预算':>10}   备注")
@@ -102,18 +149,30 @@ def main():
         print("     ⇒ 新语种没进名单时，这道闸会对它**结构性失明**（见 `_discover` 的注释）")
         return 1
 
+    skipped = []
     for lang in LANGS:
         declared, effective, budget, note = probe(lang)
         b = f"{budget / 1024 ** 3:.1f}G" if budget else "-"
         e = {True: "完结", False: "未完结", None: "?"}[effective]
         ok = (effective is not None) and (declared == effective)
+        # 🔴 **两边都是 False 不算一致** ⇒ 正反控制必须也过（见 `mechanism_probe`）
+        if ok:
+            why = mechanism_probe(lang, load_dbtool(lang))
+            if why and why.startswith("SKIP:"):
+                skipped.append((lang, why[5:]))
+            elif why:
+                ok, note = False, (note + "；" if note else "") + why
         if not ok:
             bad.append((lang, declared, effective, note))
         print(f"  {lang:<5}{'完结' if declared else '未完结':>8}{e:>10}{b:>10}   "
               f"{'✅' if ok else '❌'} {note}")
     print()
+    # ⚠️ **登记在册的豁免要大声印**，不许静默跳过（否则它和「通过」长得一样）
+    for lang, why in skipped:
+        print("  ⚠️ %s：%s" % (lang, why))
     if not bad:
-        print("■ ✅ %d 门全部一致" % len(LANGS))
+        print("■ ✅ %d 门全部一致（含正反控制：拿临时计划表正着问过 `_language_is_done()`）"
+              % len(LANGS))
         return 0
     for lang, declared, effective, note in bad:
         if declared and not effective:

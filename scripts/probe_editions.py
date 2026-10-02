@@ -37,7 +37,12 @@ from html import unescape
 UA = {"User-Agent": "synapse-dict/1.0 (dictionary research; contact via repo)"}
 
 # 值得探的版本（按已知体量，非穷举）。en 单列：它是我们六个库的建库基准。
-EDITIONS = ["en", "fr", "zh", "nl", "de", "es", "ru", "pl", "it", "pt", "el", "ja", "ko", "tr", "cs"]
+# 🔴 2026-09-28：**目标语言自己的版本必须在这张表里**，否则整版探不到。
+#    ko/ja 当初都是加过的，而 vi 开工时表里没有 `vi` —— 对 vi 尤其致命：
+#    英文版只给 62,237 条，**越南文版自己那 56,502 条是同一量级的另一半**，
+#    漏掉它等于把可用料砍掉近一半。⇒ 换语种时这张表和 NAMES 要一起改。
+EDITIONS = ["en", "fr", "zh", "nl", "de", "es", "ru", "pl", "it", "pt", "el", "ja", "ko", "tr", "cs",
+            "vi"]
 
 # 目标语言在各版本里的本地名模式。匹配用小写子串/正则，宁可多报也别漏。
 NAMES = {
@@ -72,6 +77,14 @@ NAMES = {
     "ko": r"^korean$|coréen|coreen|koreaans|koreanisch|coreano|koreański|korejsk|korejšt|korece|"
           r"корейск|κορεατ|κορεάτ|"
           r"韓語|韩语|朝鮮語|朝鲜语|韓国語|한국어",
+    # ⚠️ 2026-09-28 加 vi。**这一条是在撞上之前补的**，前四次（it／pt+tr+cs／ko 两次）
+    #    都是脚本报「没匹配到」才回头修 —— 而那句警告分不出「源头真没有」和「我写错了」。
+    # 🔴 越南语的陷阱不在中日韩，在**波兰语**：`wietnamski` 是 **W 开头**，
+    #    拉丁词干 `vietnam` 匹配不到它。（`vietnamština`／`Vietnamca` 反而含词干，没问题。）
+    # 🔴🔴 更要紧的是 **vi 版自己把越南语叫 `Tiếng Việt`**，整串不含 "vietnam" ——
+    #    而本语言版正是 vi 最要紧的那一份（英文版只给 62,237，越南文版 56,502，
+    #    两边同量级）。只认拉丁词干 ⇒ **最关键的那一版整个漏掉**。
+    "vi": r"^vietnamese$|vietnam|wietnam|вьетнам|βιετναμ|越南|ベトナム|베트남|tiếng\s*việt",
 }
 
 ROW = re.compile(r'<a\s+href="([^"]+?)/index\.html"[^>]*>([^<]+?)\s*\((\d+)\s+senses\)', re.I)
