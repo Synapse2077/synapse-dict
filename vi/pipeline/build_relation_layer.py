@@ -165,9 +165,16 @@ def collect(wid, norm_exact, norm_any, s2id):
         out.append(r)
     rows = out
 
-    # ── B17：兜底 related 被语义更具体的 kind 吞掉 ⇒ hidden，**不删**
+    # ── 隐藏判据两条，**顺序有意义**：先 W9（目标压根不是越南语词），再 B17。
+    #    🔴 顺序的理由：W9 那批全是死链，它们**不该参与 B17 的"吞掉"判断** ——
+    #      一个死链目标不构成「读者在两个标题下看见同一个词」。
+    #      （`pairs` 在上面已经算完，这里只决定 hidden_why，所以两条不会互相污染。）
     final = []
     for r in rows:
+        if S6.non_quoc_ngu_letters(r[3]):
+            # W9：目标含非国语字字母 ⇒ 不是越南语词形，实测 2,238 行全部死链
+            final.append(r + (S6.HIDDEN_TARGET_FOREIGN,))
+            continue
         hid = (r[2] == "related" and bool(pairs[(r[0], norm_vi(r[3]))] & S6.SUBSUME))
         final.append(r + (S6.HIDDEN_REDUNDANT_RELATED if hid else None,))
     rows = final
@@ -198,7 +205,11 @@ def main():
     naive = sum(1 for v in pairs.values() if "related" in v and len(v) > 1)
     right = sum(1 for v in pairs.values() if "related" in v and (v & S6.SUBSUME))
     pub = [r for r in rows if r[7] is None]
-    print("\n■ 关系 %s 行（可出版 %s ／ B17 隐藏 %s）；(词,目标) 对 %s"
+    # 🔴 标签改过：隐藏现在有**两个原因**（B17 ＋ W9），印成「B17 隐藏」会误导下一个人
+    import collections as _c
+    _why = _c.Counter(r[7] for r in rows if r[7])
+    print("\n■ 关系 %s 行（可出版 %s ／ 隐藏 %s：" % (F(len(rows)), F(len(pub)), F(len(rows) - len(pub)))
+          + "、".join("%s=%s" % (k, F(v)) for k, v in _why.most_common()) + "）；(词,目标) 对 %s"
           % (F(len(rows)), F(len(pub)), F(len(rows) - len(pub)), F(len(pairs))))
     for k, v in sorted(stat.items(), key=lambda x: -x[1]):
         print("   %-44s %8s" % (k, F(v)))

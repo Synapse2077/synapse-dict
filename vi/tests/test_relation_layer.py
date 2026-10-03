@@ -128,6 +128,16 @@ CHECKS = [
     ("R17", "隐藏的都写了为什么", lambda c: c.execute(
         "SELECT COUNT(*) FROM sense_relation WHERE hidden=1 AND "
         "(hidden_why IS NULL OR TRIM(hidden_why)='')").fetchone()[0], 0),
+    # 🔴🔴 **2026-10-03 补的，而它缺席被逮到的方式是：我往 `hidden_why` 加了一个新值
+    #    （W9 的 `target-not-quoc-ngu`，2,238 行），例句层闸的 X13 当场判红，
+    #    而这道闸**照样报绿** —— 因为它只有 R17「隐藏的都写了为什么」，
+    #    没有一条查「写的那个为什么在不在值域里」。
+    #    `[[decision-not-propagated-across-editions]]` 的同语言版本：
+    #    **同一条检查在一层有、在另一层没有，而两层各自都是绿的。**
+    ("R22", "hidden_why 都在值域里（例句层有 X13，这里原先没有）", lambda c: c.execute(
+        "SELECT COUNT(*) FROM sense_relation WHERE hidden_why IS NOT NULL "
+        "AND hidden_why NOT IN (%s)" % ",".join("'%s'" % w for w in sorted(
+            (S6.HIDDEN_REDUNDANT_RELATED, S6.HIDDEN_TARGET_FOREIGN)))).fetchone()[0], 0),
     ("R18", "🔴 十二份切片都有关系落进来", lambda c: c.execute(
         "SELECT COUNT(DISTINCT src) FROM sense_relation").fetchone()[0], SRC_COUNT),
     # 🔴🔴 关系目标**不许是汉字/喃字** —— 汉字词头有意不进 dict ⇒ 必然死链。
@@ -142,7 +152,7 @@ CHECKS = [
     ("R20", "🔴 kind 真的分了 18 种（塌成一种也会「表非空」）", lambda c: c.execute(
         "SELECT COUNT(DISTINCT kind) FROM sense_relation").fetchone()[0], KIND_COUNT),
 ]
-ROSTER = tuple("R%d" % i for i in range(1, 22))
+ROSTER = tuple("R%d" % i for i in range(1, 23))
 UNMUTABLE = {
     "R1": "要变异就得清空整张表；它拦的是「表空了而所有 0 值检查全绿」。",
     "R2": "同上，`noun_classifier` 这一侧。",
@@ -219,6 +229,11 @@ MUTATIONS = [
      {"R15": "行数掉到 2,875 ⇒ 覆盖率不变，但这条声明一下更诚实"}),
     ("R17", "隐藏一条而不写为什么",
      "UPDATE sense_relation SET hidden=1, hidden_why=NULL "
+     "WHERE id=(SELECT MIN(id) FROM sense_relation)", {}),
+    # 🔴 R22 的变异：写一个值域外的 hidden_why。R17 认的是「**没写**为什么」，
+    #    它对「写了但写了个没登记的值」结构性失明 —— 那正是 R22 存在的理由。
+    ("R22", "写一个值域外的 hidden_why（R17 对这一类失明）",
+     "UPDATE sense_relation SET hidden=1, hidden_why='mutant-reason' "
      "WHERE id=(SELECT MIN(id) FROM sense_relation)", {}),
     ("R18", "🔴 把一整版的关系删掉（跨版收割缩水）",
      "DELETE FROM sense_relation WHERE src='ru-edition'", {}),

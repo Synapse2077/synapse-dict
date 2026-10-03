@@ -22,3 +22,4 @@ export * from './de.js';
 export * from './en.js';
 export * from './ja.js';
 export * from './ko.js';
+export * from './vi.js';

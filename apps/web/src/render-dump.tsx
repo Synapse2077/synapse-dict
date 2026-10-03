@@ -22,7 +22,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
 import { ItalianEntryView, SpanishEntryView, FrenchEntryView, PortugueseEntryView,
          GermanEntryView, EnglishEntryView, JapaneseEntryView,
-         KoreanEntryView } from './App';
+         KoreanEntryView, VietnameseEntryView } from './App';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
@@ -67,6 +67,7 @@ const VIEWS = {
   it: [ItalianEntryView, 'it-IT'], fr: [FrenchEntryView, 'fr-FR'],
   pt: [PortugueseEntryView, 'pt-BR'], de: [GermanEntryView, 'de-DE'],
   ja: [JapaneseEntryView, 'ja-JP'], ko: [KoreanEntryView, 'ko-KR'],
+  vi: [VietnameseEntryView, 'vi-VN'],
 } as Record<string, [unknown, string]>;
 if (!VIEWS[lang]) {
   console.error(`🔴 认不出语种 ${JSON.stringify(lang)}。登记了的：`

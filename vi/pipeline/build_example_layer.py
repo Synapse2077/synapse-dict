@@ -105,6 +105,16 @@ def collect(wid, s2id, groups):
                     if not t:
                         stat["文本空 ⇒ 不入库"] += 1
                         continue
+                    # 🔴🔴 **按版切掉挤在同一格里的外语译文**（ko 版 1,655 条内嵌韩语）。
+                    #    阶段 9 把例句渲染出来才看见的 —— 数据层五道闸全绿，
+                    #    而页面上印着 `Em nuôi 2 con chó . 나는 개를 두마리 기르고 있다.`
+                    #    ⚠️ 顺序要紧：**切完再判 hidden_why**，否则那 45 条韩语标签行
+                    #      会以「有国语字母」的身份穿过去（`같은 말 : yêu thương`）。
+                    if src in S6.TRANSLATION_INSIDE_TEXT:
+                        cut = S6.strip_foreign_translation(t)
+                        if cut != t:
+                            stat["切掉内嵌的外语译文（%s）" % ed] += 1
+                        t = cut or t      # 全切空时留原文，交给 hidden_why 判掉
                     k = (ed, w, pos, etym, si)
                     sense_id = s2id.get(k)
                     if sense_id is not None:
@@ -120,6 +130,12 @@ def collect(wid, s2id, groups):
                     tr = (x.get("translation") or x.get("english") or "").strip()
                     if ref_from_tr and tr and not ref:
                         ref = tr
+                    # 🔴 出处对中文读者完全不可读 ⇒ 不发布（679 条韩语圣经章节号）。
+                    #    ⚠️ 判据是「一个拉丁字母都没有」，**不是「含韩文就切」** ——
+                    #      后者会截断 56 条以拉丁为主、夹着原文人名的正当引文。
+                    if ref and S6.ref_is_unreadable(ref):
+                        stat["出处不可读（无拉丁字母）⇒ 不发布（%s）" % ed] += 1
+                        ref = None
                     gloss = None
                     if tr_lang and tr:
                         gloss = (tr_lang, tr)
@@ -162,6 +178,15 @@ def gloss_rows(rows):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
+    # 🔴 本层是**纯派生层**（全部从 dump 重算，无付费数据）⇒ 重跑＝清空再建。
+    #    没有这个开关就只能手动清表，而**手动清表不留痕、不走闸门**
+    #    （关系层/词源层/汉字层 2026-10-01 已各补一个，这里 2026-10-03 补上）。
+    #    ⚠️ `example_gloss` 有外键指向 `example` ⇒ **先删 gloss 再删 example**。
+    #    ⚠️ 等 6e 跑完之后这个开关就**不许再用**：那时 `example_gloss` 里有
+    #      7.6 万条花钱买来的模型译文，重建会把它们一起删掉
+    #      （`[[enrich-not-rebuild]]`：给已含付费数据的库加字段别重建）。
+    ap.add_argument("--rebuild", action="store_true",
+                    help="清空 example/example_gloss 再建（纯派生层；6e 之后禁用）")
     a = ap.parse_args()
 
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
@@ -195,11 +220,29 @@ def main():
         print("\n(干跑。确认后 --apply)")
         return
 
+    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    old_x = con.execute("SELECT COUNT(*) FROM example").fetchone()[0]
+    old_g = con.execute("SELECT COUNT(*) FROM example_gloss").fetchone()[0]
+    con.close()
+    if old_x and not a.rebuild:
+        raise SystemExit("🔴 example 已有 %s 行 —— 纯派生层，重跑要加 `--rebuild`。" % F(old_x))
+    # 🔴 6e 的保险：模型译文一旦落库，`--rebuild` 会把它们删掉 ⇒ 当场拦住。
+    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    paid = con.execute("SELECT COUNT(*) FROM example_gloss WHERE src LIKE 'model%'").fetchone()[0]
+    con.close()
+    if paid:
+        raise SystemExit("🔴🔴 `example_gloss` 里有 %s 条**花钱买来的**模型译文（6e）——"
+                         "`--rebuild` 会删掉它们。改成原地补列，别重建"
+                         "（`[[enrich-not-rebuild]]`）。" % F(paid))
     with dbtool.session(
             "build-vi-example-layer",
-            expect={"__rows__": 0, "#example": len(rows), "#example_gloss": len(gl)},
+            expect={"__rows__": 0, "#example": len(rows) - old_x,
+                    "#example_gloss": len(gl) - old_g},
             invalidates=["例句层落第一行 ⇒ `example`/`example_gloss` 从 UNCLAIMED 里拿出来，"
                          "例句层闸必须登记并跑绿（`vi/tests/test_example_layer.py`）"]) as s:
+        if a.rebuild:
+            s.execute("DELETE FROM example_gloss")   # 先删子表（外键）
+            s.execute("DELETE FROM example")
         s.executemany(
             "INSERT INTO example (word_id, sense_id, text, ref, hidden, hidden_why, "
             "src, src_ref) VALUES (?,?,?,?,?,?,?,?)",

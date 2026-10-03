@@ -12,6 +12,7 @@ import { GermanDictService } from './german.js';
 import { EnglishDictService } from './english.js';
 import { JapaneseDictService } from './japanese.js';
 import { KoreanDictService } from './korean.js';
+import { VietnameseDictService } from './vietnamese.js';
 export * from './italian.js';
 export * from './spanish.js';
 export * from './french.js';
@@ -369,6 +370,10 @@ export const LANGUAGES: LanguageMeta[] = [
   { code: 'de', label: 'Deutsch', name: '德语', speak: 'de-DE' },
   { code: 'ja', label: '日本語', name: '日语', speak: 'ja-JP' },
   { code: 'ko', label: '한국어', name: '韩语', speak: 'ko-KR' },
+  // 🔴 `speak` 是 Web Speech 的 locale。越南语两种常见写法里用 `vi-VN`
+  //    （`vi` 裸码在 Safari 上命中不了语音）。⚠️ 发音优先走 Commons 真人录音，
+  //    TTS 只是兜底 —— `[[audio-from-commons-not-tts]]`。
+  { code: 'vi', label: 'Tiếng Việt', name: '越南语', speak: 'vi-VN' },
   // 后续：no(Norsk/nb-NO)
 ];
 
@@ -461,7 +466,8 @@ export function ttsDirFor(code: string): string {
 
 type AnyService = DictionaryService | SpanishDictService | ItalianDictService
   | FrenchDictService | PortugueseDictService | GermanDictService
-  | EnglishDictService | JapaneseDictService | KoreanDictService;
+  | EnglishDictService | JapaneseDictService | KoreanDictService
+  | VietnameseDictService;
 const serviceCache = new Map<string, AnyService>();
 
 export function getService(code: string): AnyService {
@@ -476,6 +482,7 @@ export function getService(code: string): AnyService {
     else if (lang === 'de') svc = new GermanDictService(dbPathFor('de'));   // 德语专属服务
     else if (lang === 'ja') svc = new JapaneseDictService(dbPathFor('ja')); // 日语专属服务
     else if (lang === 'ko') svc = new KoreanDictService(dbPathFor('ko'));   // 韩语专属服务
+    else if (lang === 'vi') svc = new VietnameseDictService(dbPathFor('vi')); // 越南语专属服务
     else svc = new EnglishDictService(dbPathFor('en'));                     // 英语（含未知回退）
     serviceCache.set(lang, svc);
   }
@@ -486,3 +493,4 @@ export function closeAllServices() {
   for (const svc of serviceCache.values()) svc.close();
   serviceCache.clear();
 }
+export * from './vietnamese.js';

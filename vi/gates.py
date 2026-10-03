@@ -129,6 +129,79 @@ GATES = [
             "⚠️ 依赖里带 `han_spelling` 是**有意的** —— Y5 的变异拿表记当素材。",
     ),
     dict(
+        name="查询计划闸",
+        cmd="python3 -u vi/probes/query_plans.py",
+        file="vi/probes/query_plans.py",
+        deps=frozenset({"dict", "entry", "sense", "sense_gloss", "sense_relation",
+                        "pronunciation", "etymology", "example", "example_gloss",
+                        "audio", "han_spelling", "nom_spelling", "noun_classifier",
+                        "sense_src"}),
+        why="**展示层真正跑的 15 条查询，走的是索引还是全表扫**。判据从 "
+            "`vietnamese.ts` **原文抠**（抠不到或多出来没登记都直接红 —— 闸自己的闸）。"
+            "🔴 它当场逮到两个真缺陷：**W15 的指针查询 `SCAN sense_src`**（136,034 行，"
+            "每开一个词条页跑一次，14.40 ms ＝ 同页其余五条的 100 倍）／"
+            "**词源查询 `SCAN etymology`**（36,089 行）—— 两处都是「建表时没人按 word_id 查它」，"
+            "热路径是阶段 9 才出现的。加索引后 14.40 → **0.018 ms**。"
+            "🔴🔴 **vi 的结论与 ko 相反**：ko 是「`ANALYZE` 一条就够、加索引计划器不肯用」，"
+            "vi 实测**索引是全部功劳、`ANALYZE` 之后没有可测变化** ⇒ 别把别门的结论当结论。"
+            "⚠️ 它自己的两条判据**都按含义改写过**：①`stats` 的 `COUNT(*)` 扫全表是"
+            "工作本身，不是缺陷；②临时 B 树的代价取决于**排序的行数**（门槛 200 行）——"
+            "第一版把 15 条里的 9 条判红，而它们排的是 10–200 行、热态 0.015–0.8 ms。"
+            "改成白名单登记那 9 条就是 `[[gate-registers-status-quo-as-spec]]`。"
+            "🔴 **NOCASE 审计的判据也收窄过**：第一版在 DDL 文本里找 `NOCASE` 字样，"
+            "把 `dict` 那条「**有意不带** COLLATE NOCASE」的注释判成了违规 ⇒ 先剥注释再找。"
+            "⚠️ 入口 `npm run gate:vi-plans`（B15）。5 条变异全过。",
+    ),
+    dict(
+        name="展示层契约闸",
+        cmd="npm run gate:vi-display",
+        file="apps/web/src/contract-check-vi.tsx",
+        deps=frozenset({"dict", "entry", "sense", "sense_gloss", "sense_relation",
+                        "pronunciation", "etymology", "example", "example_gloss",
+                        "audio", "han_spelling", "nom_spelling", "noun_classifier",
+                        "sense_src"}),
+        why="**把 `VietnameseEntryView` 渲染成静态 HTML，断言可见文字**。"
+            "⭐ `[[it-display-layer-stage8]]`：接上展示层是独立一道闸 —— "
+            "vi 这一轮它当天兑现了 8 次，全是数据层十一道闸报绿时逮到的。"
+            "🔴 最狠的四个：查 `mai`（清晨/梅）显示的是 `Mai`（姓氏，`word_norm` 冲突 1,263 组，"
+            "**1,291 页打不开且内容是错的**）／例句里印着韩语（1,655 条内嵌译文）／"
+            "关系里印着波兰语 `kościół`（2,238 行非国语字目标，全死链）／"
+            "关系目标印成 `hoahòahọahỏa`×3（缺分隔符＋缺去重）。"
+            "⭐ 它同时是**五条欠账的读者口径**：W6 不许把按码位猜的表记印成「汉越字」／"
+            "W7 拼的音标要标注／W10 `ref` 印「出处：」／W13 折叠但**不隐藏**／"
+            "W15 没有可出版义项时印指针。"
+            "⭐ **值域覆盖跨全库查，不只查抽样词**（关系 18 种／方言 13／词性 27／"
+            "词源类型 5／来源版 4，全部有中文名）—— 抽样扫不到的值一样会印给读者。"
+            "🔴🔴 它自己的判据**收窄过两次**：①关系徽标只看 `vi-rel-kind` 那一格，"
+            "查整页会把英文释义里的 `related to` 当成原码漏出（ko 那份第一版报过 14 处假阳）；"
+            "②韩文只盯**例句正文**，查整页会误伤 7 条以拉丁为主、夹着原文人名的正当引文"
+            "（`Hồng Lâu Mộng, Tào Tuyết Cần 홍루몽, 조설근`）。"
+            "⚠️ 依赖几乎是全表：它渲染整页，任何一层变了渲染结果就变。"
+            "⚠️ 入口是 `npm run gate:vi-display`（B15：闸有文件而没人跑得动它＝没有闸）。",
+    ),
+    dict(
+        name="回归闸",
+        cmd="python3 -u vi/tests/test_no_regression.py",
+        file="vi/tests/test_no_regression.py",
+        deps=frozenset({"dict", "entry", "sense", "sense_src", "sense_gloss",
+                        "sense_relation", "pronunciation", "etymology", "example",
+                        "example_gloss", "audio", "han_spelling", "nom_spelling"}),
+        why="**过去每一个修复现在还在不在**（18 条，14 条变异全过）。"
+            "⭐ 它与层闸的分工：层闸查**不变量**（多半是「= 0」）、要手动跑；"
+            "回归闸查**修复**，**每次写库由 `dbtool._regression_check()` 自动跑**，"
+            "而且它锁**非零的已接受基线**（B17 的 1,460／西贡音 86,535／指针证据 33,361／"
+            "空白页 222）—— 那是层闸干不了的事。"
+            "🔴 用户 2026-08-11 的原话：「同一个问题你修了，隔天修其他问题，"
+            "你又发现之前的问题又出现了。」es 上已知三次，三次全是事后偶然撞见的。"
+            "🔴🔴 **R1 的空白页分两个数**：总数 222 是基线，而「源头也没给」必须是 0 —— "
+            "实测 222 个在证据层**都有指针义项**（`UBND`=Ủy ban Nhân dân、`ôtô`、`São Tomé`），"
+            "源头给了而我们没印 ⇒ 欠账 **W15**。`[[dont-say-source-lacks-what-we-skipped]]`："
+            "只报一个总数的话，「我们没印」会被当成「源头没有」。"
+            "⚠️ **「读取路径」那一半现在是空的**（展示层 `vietnamese.ts` 还不存在）——"
+            "但那是**带锁的豁免**：`R0` 一旦发现那个文件出现而 `READ_PATH` 还空着，当场判红。"
+            "⚠️ 依赖带 `dict` 是有意的偏宽（动词形会变空白页和 `word_norm` 那两条的答案）。",
+    ),
+    dict(
         name="外锚闸·例句/关系/词源/录音/量词",
         cmd="python3 -u vi/pipeline/verify_layers_vs_dump.py",
         file="vi/pipeline/verify_layers_vs_dump.py",

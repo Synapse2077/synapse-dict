@@ -122,6 +122,48 @@ HIDDEN_NO_LATIN = "nom-script-quotation"     # 喃字/汉字正文，国语字�
 HIDDEN_SAME_AS_WORD = "same-as-headword"     # 整条就是该词本身，零信息
 HIDDEN_TOO_SHORT = "too-short"
 HIDDEN_SRC_CHINESE = "source-says-chinese"   # 源头自己标了 Traditional-Chinese/Pinyin
+# 🔴🔴 2026-10-03 **阶段 9 把例句渲染出来才看见的**（数据层五道闸全绿）：
+#    ko 版 1,718 条可出版例句里 **1,655 条（96.3%）的 `text` 内嵌着韩语译文**，
+#    源头把两者挤在同一格、**没有独立译文字段**（只有 `bold_text_offsets`）——
+#    与 ko 那门「中文译文用全角空格挤在 text 同一格」是**同一个形状的镜像**。
+#    三语方针（中＋英＋越）下韩语不该出现在页面上，而它占了正文一半长度。
+#    ⇒ 切掉韩语那半（见 `strip_foreign_translation`）。
+#    ⚠️ 切完**剩不下越南语**的 45 条，根本不是例句：
+#        `같은 말 : yêu thương`（同义词）／`비슷한말:`（近义词）／`비교 :`（比较）／
+#        `고유명사는 Nhật 참조`（专有名词参见）——**是关系数据和元说明**。
+#      与 ko 自己记的「韩文版 examples 里混着 3,267 行关系数据」同形，
+#      而 vi 从 ko 版收割所以照样中。⇒ 隐藏它们，并记欠账（那批关系我们没收）。
+HIDDEN_KO_LABEL = "ko-edition-label-line"    # 整条是韩语标签/关系数据，不是例句
+
+# 哪些版把**译文挤在 `text` 同一格里**。⚠️ 这是**按版登记**，不是形状判据 ——
+#    别写成「只要含韩文就切」：那会在哪天 en 版引用一句韩语时把它切掉。
+TRANSLATION_INSIDE_TEXT = {"ko-edition"}
+_HANGUL = ((0xAC00, 0xD7A3), (0x1100, 0x11FF), (0x3130, 0x318F))
+
+
+def _is_hangul(ch):
+    o = ord(ch)
+    return any(lo <= o <= hi for lo, hi in _HANGUL)
+
+
+def strip_foreign_translation(text):
+    """把挤在同一格里的韩语译文切掉，只留越南语。→ 切完的串（可能是空的）。
+
+    🔴 **不是「从第一个韩文字符截断」那么简单**：源头有一格里越南语与韩语
+       **交替出现多次**的形状 ——
+           `Bây giờ là mấy giờ ? 지금은 몇 시입니까? / Hai giờ . 두 시요. / Hai giờ rồi à ? …`
+       整串从第一个韩文字符截断，会把后面两句越南语一起丢掉。
+    ⇒ 判据：**按 ` / ` 分段，每段各自从它自己的第一个韩文字符起丢掉**。
+      实测 1,655 条里 1,610 条（97.3%）切完仍有越南语；剩 45 条一个字母都不剩
+      ⇒ 那 45 条本来就不是例句（`HIDDEN_KO_LABEL`）。
+    """
+    out = []
+    for seg in (text or "").split(" / "):
+        i = next((k for k, ch in enumerate(seg) if _is_hangul(ch)), None)
+        kept = (seg[:i] if i is not None else seg).strip()
+        if kept:
+            out.append(kept)
+    return " / ".join(out)
 
 # 越南语字母表（含全部带调元音）。🔴 **不手抄「拉丁基本区」** ——
 #    `ă đ ơ ư` 与所有带调元音都在扩展区，手抄会把越南语自己的字母删掉。
@@ -138,6 +180,25 @@ def _has_quoc_ngu(t):
     return bool(_VI_LETTER.search(ud.normalize("NFD", t or "")))
 
 
+def ref_is_unreadable(ref):
+    """这条出处对中文读者**完全不可读** ⇒ 不发布。→ True/False
+
+    🔴🔴 **2026-10-03 展示层契约闸逮到的，而它逮到的是「判据漏用」**：
+       切掉内嵌韩语译文那一步我只用在 `text` 上，`ref` 漏了 ⇒ `ăn` 页面上
+       印着「出处：창세기 2장 9절」（创世记 2 章 9 节）。
+    ⚠️ **判据不是「含韩文就切」** —— 我的第一反应是把 `strip_foreign_translation`
+       也套在 `ref` 上，量过之后发现那会**截断 56 条正当引文**：
+           `2021 [2016], Han Kang, "Mưa tuyết", in Hà Linh …`
+       英文版的引文里带韩国作者名的原文，从第一个韩文字符截断 ⇒ 引文断在中间，
+       **一条截断的引文比一条读不懂的引文更坏**（它看起来是完整的）。
+    ⇒ 判据按「可读性」写：**一个拉丁字母都没有**就不可读（679 条，全是韩语版的圣经章节号）；
+      以拉丁为主、夹着原文人名的那 56 条**原样保留**。
+      `[[criteria-narrower-than-you-think]]` 的正面用法：先量，再定宽窄。
+    """
+    t = (ref or "").strip()
+    return bool(t) and not _has_quoc_ngu(t)
+
+
 def example_hidden_why(text, word, tags=()):
     """→ `hidden_why` 或 None（None ＝ 可出版）。"""
     t = (text or "").strip()
@@ -145,6 +206,11 @@ def example_hidden_why(text, word, tags=()):
         return None                       # 空文本不入库，调用方跳过（不是隐藏）
     if not _has_quoc_ngu(t):
         return HIDDEN_NO_LATIN
+    # 🔴 切掉韩语译文之后一个国语字字母都不剩 ⇒ 整条是韩语标签/关系数据，不是例句。
+    #    ⚠️ 判据顺序要紧：放在 `_has_quoc_ngu` **之后** —— 否则喃字正文那批
+    #      （1,208 条，有它们自己的原因 `nom-script-quotation`）会被这一条抢走。
+    if not _has_quoc_ngu(strip_foreign_translation(t)):
+        return HIDDEN_KO_LABEL
     if set(tags) & {"Traditional-Chinese", "Simplified-Chinese", "Pinyin"}:
         return HIDDEN_SRC_CHINESE
     if norm_vi(t.rstrip(".!?…：:；;")) == norm_vi(word or ""):
@@ -152,6 +218,42 @@ def example_hidden_why(text, word, tags=()):
     if len(t) < 3:
         return HIDDEN_TOO_SHORT
     return None
+
+
+# ── 关系目标的**正字法判据**（欠账 W9 的落点）───────────────────────────────
+# 🔴🔴 **2026-10-03 阶段 9 把关系渲染出来才看见的**：`nhà` 的「相关」里印着
+#    `kościół`（波兰语「教堂」）。W9 记的正是这一类 ——
+#    「整段标签/释义塞进 target」此前只在**含韩文/假名**的那批里量过（已丢 108 行），
+#    而同样的污染出现在**纯拉丁文本**里时，`has_non_vietnamese_script` 一条都抓不到，
+#    **而我当时没有量过它有多少**。
+#
+# 实测：出版层 143,625 行关系里 **2,238 行**的 target 含非国语字字母，
+# 而它们的 `target_id` 解析得上的是 **0 行** —— 全部是死链。逐类读过：
+#     1,690+ 行  en 版**字母条目**的 Unicode 变体（`o` 的 `Ø ø Ǿ ɵ ⱺ ᴏ Ｏ Ꜵ`、`s` 的 `ſ`）
+#       某些行  **整段词源正文塞进 target**：`đâu. 3 From earlier *C-raː`  ← W9 描述的形状
+#       某些行  带汉字表记的整串：`vô tuyến truyền hình [無線傳形`
+#       31 行   ru/de/pl/fr 版的外语词（`kościół`）
+#
+# ⇒ 判据：**基字母（NFD 去掉组合符之后）不是 a–z 的，就不是国语字**。
+#   🔴 **不手抄「越南语字母表」** —— `ă â ê ô ơ ư` 和全部带调元音都在扩展区，
+#     手抄必然漏，而漏了就会把越南语自己的词判成外语（`[[criteria-narrower-than-you-think]]`）。
+#     交给 Unicode 答：拆 NFD、丢组合符、看基字母。`đ` 是唯一需要显式放过的例外
+#     （它的"横杠"不是组合符，是字母本身的一部分）。
+# ⚠️ **用 `hidden` 不用丢**（照 B17 的先例）：万一哪天收词把其中某个词形收进来了，
+#   一条 UPDATE 就能放出来；丢掉就只能重建整层。`[[prefer-reversible-designs]]`。
+HIDDEN_TARGET_FOREIGN = "target-not-quoc-ngu"
+
+
+def non_quoc_ngu_letters(t):
+    """→ 这串里**不属于国语字**的字母集合（空集 ＝ 全是国语字）。"""
+    bad = set()
+    for ch in t or "":
+        if not ch.isalpha() or ch in "\u0111\u0110":     # đ / Đ
+            continue
+        base = "".join(x for x in ud.normalize("NFD", ch) if not ud.combining(x))
+        if not re.fullmatch(r"[A-Za-z]", base):
+            bad.add(ch)
+    return bad
 
 
 # ══════════════════════════════════════════════════════════════════════════

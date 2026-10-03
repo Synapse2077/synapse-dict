@@ -17,6 +17,8 @@ import {
   jaVclassLabel, mostSpecificTopics,
   KO_POS_LABELS, KO_RELATION_LABELS, KO_ANNOTATION_KINDS, koRelationTagLabels,
   KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE,
+  VI_POS_LABELS, VI_RELATION_LABELS, VI_DIALECT_LABELS, VI_ETYM_TYPE_LABELS,
+  VI_SPELLING_RULE, VI_EDITION_LABELS, viEditionRank,
 } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
@@ -651,7 +653,7 @@ type JaEntry = {
 //    但如果新类型恰好与某个旧类型形状接近，它会**静默通过**并在运行时读到 undefined。
 //    ⇒ `scripts/contract/service_api.ts` 那道闸盯的是服务层，这里盯的是展示层。
 type AnyEntry = EnEntry | SpanishEntry | ItEntry | FrEntry | PtEntry | DeEntry | JaEntry
-  | KoEntry;
+  | KoEntry | ViEntry;
 
 // 'rate' = throttled by the API (429/503); 'network' = anything else went wrong.
 type FetchError = 'rate' | 'network';
@@ -686,6 +688,15 @@ export const EXAMPLES: Record<string, string[]> = {
   pt: ['olá', 'falar', 'livro', 'bonito', 'pão', 'saudade'],
   de: ['Haus', 'gehen', 'ankommen', 'gut', 'Frau', 'schön'],
   ja: ['猫', '桜', '食べる', '痛い', '勉強', '時間'],
+  // 🔴 六个各带一类 vi 特有现场（逐个回库验过「点进去真有料」，
+  //    那正是 `examplesGuard()` 的判据）：
+  //    ăn    录音 2 条 ＋ 义项 44 ＋ `codepoint-v1` 表记（**W6 现场**）
+  //    nhà   表记 6 条（含按码位推定的）＋ 关系 114 ＋ 量词 4
+  //    con   词条 4 个 ＋ 义项 33 ＋ 例句 82 ＋ 录音 2（同形异源的典型）
+  //    hóa   拼出来的音标 6 条（**W7 现场**）＋ 例句 13
+  //    công nhân  中文释义＝汉字表记（**W13 现场**，`zhSameAsSpelling`）
+  //    mai   同形词（`Mai` 姓氏）＋ paronym 18 条（**「不打符号会撞上」现场**）
+  vi: ['ăn', 'nhà', 'con', 'hóa', 'công nhân', 'mai'],
   // 韩语六个，各带一类**本语种特有**的字段（照 ja 那行的口径挑，逐个回库验过）：
   //   사랑  跨三版背书的读音 sʰa̠ɾa̠ŋ、12 条例句、两个词条（第二个汉字表记 舍廊）
   //   읽다  **发音形谚文** `익따`（读作"익따"不读"읽다"）—— 拉丁七门全无这一层
@@ -1807,6 +1818,9 @@ export default function App() {
           <JapaneseEntryView entry={entry as JaEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
+        {entry && entry.lang === 'vi' && (
+          <VietnameseEntryView entry={entry as ViEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+        )}
         {entry && entry.lang === 'ko' && (
           <KoreanEntryView entry={entry as KoEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
@@ -5877,6 +5891,424 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
               ))}
             </ul>
           </details>
+        </section>
+      )}
+    </article>
+  );
+}
+
+// ============================================================================
+// 越南语词条页。2026-10-03（阶段 9）。
+//
+// 🔴🔴 **这个视图是五条欠账的落点，不是"把字段摆上去"**：
+//    W6  `codepoint-v1` 的表记（14,327 行，实测只有 70.8% 对）**不许印成「汉越字」**
+//    W7  `compose:` 的音标（96,267 行，我们按音节拼的）必须带标注
+//    W10 `example.ref` 是**出处**不是译文，不许排在译文位置
+//    W13 中文释义与同页汉字表记逐字相同的 1,183 条，**折叠不隐藏**
+//    W15 **16,305 个词形唯一的"释义"是一条指针**（`UBND` = Ủy ban Nhân dân）
+//        —— 源头给了而出版层没有，没有可出版义项时必须印它
+// ============================================================================
+type ViPointer = { lang: string; text: string; src: string };
+type ViSpelling = { text: string; script: 'han' | 'nom'; ruleVer: string; trusted: boolean };
+type ViPron = { ipa: string; dialect: string; src: string; composed: boolean };
+type ViRelation = {
+  senseId: number | null; kind: string; target: string;
+  targetId: number | null; zh: string | null;
+};
+type ViSense = {
+  id: number; rank: number; etymNo: number | null; pos: string | null;
+  zh: string | null; zhSrc: string | null; en: string | null; vi: string | null;
+  zhSameAsSpelling: boolean;
+};
+type ViExample = {
+  senseId: number | null; text: string; ref: string | null;
+  zh: string | null; en: string | null;
+};
+type ViEntry = {
+  lang: 'vi';
+  id: number; word: string; isLemma: boolean; syllables: number;
+  entries: Array<{ pos: string | null; etymNo: number | null; etymType: string | null; src: string }>;
+  senses: ViSense[];
+  pronunciations: ViPron[];
+  spellings: ViSpelling[];
+  classifiers: Array<{ classifier: string; classifierId: number | null; note: string | null }>;
+  senseRelations: ViRelation[];
+  entryRelations: ViRelation[];
+  examples: ViExample[];
+  etymologies: Array<{ etymNo: number; text: string; src: string }>;
+  audios: Array<{ url: string; dialect: string; commonsKey: string }>;
+  pointers: ViPointer[];
+  homographs: Array<{ id: number; word: string }>;
+};
+
+/** 词性徽标。🔴 覆盖层返回 `''` ＝**有意不印**，与 undefined 要分开。 */
+function viPosLabel(pos: string | null): string | null {
+  if (!pos) return null;                      // null ＝ 这条义项挂不上 entry（8.9%）
+  const over = VI_POS_LABELS[pos];
+  if (over !== undefined) return over || null; // `''` ⇒ 有意不印
+  return POS_LABELS[pos] ?? null;              // 🔴 查不到就**不印**，不落回英文原码
+}
+
+function viRelLabel(kind: string): string | null {
+  return VI_RELATION_LABELS[kind] ?? REL_LABELS[kind] ?? null;
+}
+
+/**
+ * 🔴 **按方言归组**的音标行。W7 的标注在这里。
+ *
+ * ═══ 为什么不是一行一条（第一版就是，渲染出来才看见）═══
+ * `ăn` 排出 **11 个播放按钮**，其中 `/ʔan˧˧/ 河内音` 出现两次、`/an˧˧/ 河内音` 一次
+ * —— 读者分不清该点哪个。实测 319,818 个 (词形, 方言) 组里：
+ *     **11,215 组（3.5%）同一个 IPA 存了多行**     ← 不同语言版给了一样的转写，纯重复
+ *     **42,510 组（13.3%）IPA 不同**               ← 阶段 3b 量过的「三版转写约定不同」
+ *                                                   （词首 ʔ：英 18.7%／越 0.0%／中 19.5%）
+ * ⇒ 按方言归一行、组内按 IPA 去重。
+ * ⚠️ **不许只留一条**：转写不同不等于读音不同，但也不等于我们有资格裁决哪个对
+ *   —— 留着两种写法是诚实的（`[[dont-recast-deliverables-as-junk]]`：
+ *   别把源头的差异替它抹平）。
+ * ⚠️ `composed` 按**组内有没有拼的**算：一个方言下只要有一条是拼的就要标注，
+ *   否则读者会以为整组都是源头写的。
+ */
+function ViPronGroup({ dialect, items, onSpeak }: {
+  dialect: string; items: ViPron[]; onSpeak: () => void;
+}) {
+  const label = VI_DIALECT_LABELS[dialect];
+  const seen = new Set<string>();
+  const ipas = items.filter((p) => (seen.has(p.ipa) ? false : (seen.add(p.ipa), true)));
+  const anyComposed = ipas.some((p) => p.composed);
+  return (
+    <span className="vi-pron">
+      <button type="button" className="vi-pron-play" onClick={onSpeak} aria-label="朗读">▶</button>
+      {/* 音标裸存（八语种统一约定）⇒ 定界符在展示层加 */}
+      {ipas.map((p, i) => (
+        <span key={p.ipa}>
+          {i > 0 ? <span className="vi-sep">、</span> : null}
+          <span className="vi-ipa">/{p.ipa}/</span>
+        </span>
+      ))}
+      {label ? <span className="vi-pron-dialect">{label}</span> : null}
+      {/* 🔴 W7：96,267 行是阶段 3b 按音节拼的。不标出来就是拿我们算的冒充源头写的。 */}
+      {anyComposed ? <span className="vi-pron-composed" title="由音节规则拼出，非源头标注">按音节拼写</span> : null}
+    </span>
+  );
+}
+
+export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
+  entry: ViEntry; speakLocale: string; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
+}) {
+  // 按「词性 ＋ 词源号」断组 —— 与前八门同一条规矩。
+  const groups: Array<{ key: string; pos: string | null; etymNo: number | null; senses: ViSense[] }> = [];
+  for (const s of entry.senses) {
+    const key = `${s.pos ?? ''}|${s.etymNo ?? ''}`;
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.senses.push(s);
+    else groups.push({ key, pos: s.pos, etymNo: s.etymNo, senses: [s] });
+  }
+  const startsEtym = groups.map((g, i) => i === 0 || groups[i - 1].etymNo !== g.etymNo);
+  // 🔴🔴 **B18 的形状在这里会复发，而它是量出来的**：词源只在「某个义项组的
+  //    `etymNo` 对得上」时才印，而实测 **407 个词形（有词源的 1.6%）对不上** ——
+  //      56 个：所有可出版义项都挂不上词条（9,116 条义项的 `entry_id` 是 NULL）
+  //           ⇒ `etymNo` 全是 null，`etymText.has(null)` 永远假
+  //     351 个：义项挂上了词条，但**词源号与词源行的 etym_no 对不上**
+  //    ⇒ 它们的词源**一个字都印不出来**，而库里有（`biên phòng` 页面上就是这样）。
+  //    B18 原话：「`<EtymologyNote>` 被套在 `etymHeadOf(…) &&` 里面，
+  //    而它在单词源时返回 null」—— **同一个形状，换了个条件**。
+  //    ⇒ 记下印了哪些，剩下的在义项之后**单独成区**。
+  //    ⚠️ 这不是「体面兜底」：它印的是**库里真实存在、源头给的**内容；
+  //      体面兜底是拿别的东西填上缺口（`|| g.kind` 那种）。
+  const printedEtym = new Set<number>();
+  // 🔴 词源**按来源语言版分段并标注**，中文排最前。不标的话 `ăn` 的三段
+  //    （英/越/中各一段，讲的是同一件事）读起来像三个不同的词源 ——
+  //    实测 7,661 个词形（有词源的 29.5%）会看到两三段。一段都不丢。
+  const etymText = new Map<number, Array<{ text: string; src: string }>>();
+  for (const e of entry.etymologies) {
+    const a = etymText.get(e.etymNo);
+    if (a) a.push({ text: e.text, src: e.src });
+    else etymText.set(e.etymNo, [{ text: e.text, src: e.src }]);
+  }
+  for (const a of etymText.values()) a.sort((x, y) => viEditionRank(x.src) - viEditionRank(y.src));
+
+  const bySense = new Map<number, ViExample[]>();
+  const entryLevelEx: ViExample[] = [];
+  for (const x of entry.examples) {
+    if (x.senseId === null) entryLevelEx.push(x);
+    else {
+      const a = bySense.get(x.senseId);
+      if (a) a.push(x); else bySense.set(x.senseId, [x]);
+    }
+  }
+  const relBySense = new Map<number, ViRelation[]>();
+  for (const r of entry.senseRelations) {
+    const a = relBySense.get(r.senseId!);
+    if (a) a.push(r); else relBySense.set(r.senseId!, [r]);
+  }
+
+  // 🔴🔴 W15：**没有可出版义项时，指针就是这一页的全部内容。**
+  //    16,305 个词形走这条路（`UBND` / `Tobago` / `ôtô`）。
+  //    ⚠️ 优先印中文那条（zh 版给的），其次英文 —— 三语方针下中文对读者最有用。
+  const showPointers = entry.senses.length === 0 && entry.pointers.length > 0;
+  const pointerSorted = [...entry.pointers].sort(
+    (a, b) => (a.lang === 'zh' ? -1 : 0) - (b.lang === 'zh' ? -1 : 0),
+  );
+
+  // 🔴🔴 **分组 ＋ 渲染期去重**。2026-10-03 第一版两样都缺，渲染出来当场看见：
+  //    `hóa` 的「相关」印成 `hoahòahọahỏahoahòahọahỏahoahòahọahỏa`
+  //    —— 同一批目标**重复三遍**（同一个词形有三个词条，每个都带同一组关系），
+  //    而且目标之间**没有分隔符**，十二个词粘成一个串，读者根本读不出是几个词。
+  //    ⚠️ 两个缺陷叠在一起，只修一个仍然不可读：去重之后还是 `hoahòahọahỏa`。
+  //    ⇒ 去重键是 **(kind, target)** 不是只看 target：`run → antonym: rise` 与
+  //      `run → hypernym: rise` 是两句不同的话（`relations.ts` 的同一条判据）。
+  //    ⚠️ 只在**渲染**时去重，不动数据：「哪条义项有这个关系」是源头给的事实。
+  const grouped = (rels: ViRelation[]) => {
+    const m = new Map<string, ViRelation[]>();
+    const shown = new Set<string>();
+    for (const r of rels) {
+      const key = `${r.kind}\u0000${r.target}`;
+      if (shown.has(key)) continue;
+      shown.add(key);
+      const a = m.get(r.kind);
+      if (a) a.push(r); else m.set(r.kind, [r]);
+    }
+    return [...m.entries()];
+  };
+
+  return (
+    <article className="vi-entry">
+      <header className="vi-head">
+        <h2 className="vi-word">{entry.word}</h2>
+        <button type="button" className="vi-speak" onClick={() => speak(entry.word, speakLocale)}>🔊</button>
+        {entry.syllables > 1 ? <span className="vi-syllables">{entry.syllables} 音节</span> : null}
+        {!entry.isLemma ? <span className="vi-notlemma">非词元</span> : null}
+      </header>
+
+      {/* ── 汉字/喃字表记。🔴 W6：按码位推定的那批必须说清「未经核实」 ── */}
+      {entry.spellings.length > 0 && (
+        <section className="vi-spellings">
+          <h3 className="vi-sec-title">汉字表记</h3>
+          {entry.spellings.map((sp, i) => {
+            const rule = VI_SPELLING_RULE[sp.ruleVer];
+            return (
+              <span key={`${sp.script}-${sp.text}-${sp.ruleVer}`}
+                className={`vi-spelling ${sp.trusted ? 'vi-spelling-ok' : 'vi-spelling-guess'}`}>
+                {i > 0 ? <span className="vi-sep">／</span> : null}
+                <span className="vi-spelling-text">{sp.text}</span>
+                {/* 🔴 W6：`codepoint-v1` 实测只有 70.8% 对 ⇒ 不许与权威来源印成一样。
+                    ⚠️ 这里**不印「汉越字」/「喃字」这个结论**，只印凭据 —— 因为
+                    那个结论正是码位判据算错的那一个。 */}
+                <span className="vi-spelling-why">{rule ? rule.label : sp.ruleVer}</span>
+                {sp.trusted ? <span className="vi-spelling-kind">
+                  {sp.script === 'han' ? '汉越字' : '喃字'}
+                </span> : null}
+              </span>
+            );
+          })}
+        </section>
+      )}
+
+      {/* ── 读音 ── */}
+      {entry.pronunciations.length > 0 && (
+        <section className="vi-prons">
+          {(() => {
+            // 按方言归组，**保持服务层给的顺序**（它已把源头写的排在拼的前面）
+            const byDialect = new Map<string, ViPron[]>();
+            for (const p of entry.pronunciations) {
+              const a = byDialect.get(p.dialect);
+              if (a) a.push(p); else byDialect.set(p.dialect, [p]);
+            }
+            return [...byDialect.entries()].map(([d, items]) => (
+              <ViPronGroup key={d} dialect={d} items={items}
+                onSpeak={() => speak(entry.word, speakLocale)} />
+            ));
+          })()}
+        </section>
+      )}
+      {entry.audios.length > 0 && (
+        <section className="vi-audios">
+          {entry.audios.map((a) => (
+            <audio key={a.commonsKey} controls preload="none" src={a.url} className="vi-audio">
+              <track kind="captions" />
+            </audio>
+          ))}
+        </section>
+      )}
+
+      {/* ── 量词（loại từ）── */}
+      {entry.classifiers.length > 0 && (
+        <section className="vi-classifiers">
+          <h3 className="vi-sec-title">量词</h3>
+          {entry.classifiers.map((c, i) => (
+            <span key={c.classifier} className="vi-classifier">
+              {i > 0 ? <span className="vi-sep">、</span> : null}
+              {c.classifierId
+                ? <button type="button" className="vi-link" onClick={() => onWord(c.classifier)}>{c.classifier}</button>
+                : <span className="vi-nolink">{c.classifier}</span>}
+              {c.note ? <span className="vi-classifier-note">{c.note}</span> : null}
+            </span>
+          ))}
+        </section>
+      )}
+
+      {/* ── 🔴🔴 W15：指针。没有可出版义项时，这是这一页的全部内容 ── */}
+      {showPointers && (
+        <section className="vi-pointers">
+          <h3 className="vi-sec-title">这个词形指向</h3>
+          {pointerSorted.map((p) => (
+            <p key={`${p.src}-${p.text}`} className="vi-pointer">
+              <span className="vi-pointer-text">{p.text}</span>
+              <span className="vi-pointer-src">{p.lang === 'zh' ? '中文版' : p.lang === 'en' ? '英文版' : p.lang}</span>
+            </p>
+          ))}
+          {/* ⚠️ 诚实地说出这一页为什么没有释义，**不要用体面的兜底盖住** */}
+          <p className="vi-pointers-note">
+            源头把这个词形记成了另一个词的异写或缩写，没有单独给释义。
+          </p>
+        </section>
+      )}
+
+      {/* ── 义项 ── */}
+      {groups.map((g, gi) => (
+        <section key={g.key + gi} className="vi-group">
+          {/* 词源正文在词性**之上** —— 源头层级是 词源 > 词性 > 义项（ko 的 9b 教训） */}
+          {startsEtym[gi] && g.etymNo !== null && etymText.has(g.etymNo)
+            && (printedEtym.add(g.etymNo), true) && (
+            <div className="vi-etym">
+              <h3 className="vi-sec-title">{etymText.size > 1 ? `词源 ${g.etymNo + 1}` : '词源'}</h3>
+              {etymText.get(g.etymNo)!.map((t) => (
+                <p key={`${t.src}-${t.text.slice(0, 20)}`} className="vi-etym-text">
+                  {/* 🔴 来源标注：不标就分不出这是三段不同的词源还是同一件事的三种语言 */}
+                  <span className="vi-etym-src">{VI_EDITION_LABELS[t.src] ?? t.src}</span>
+                  {t.text}
+                </p>
+              ))}
+            </div>
+          )}
+          {(() => {
+            const et = entry.entries.find((e) => e.etymNo === g.etymNo)?.etymType;
+            const lab = et ? VI_ETYM_TYPE_LABELS[et] : null;
+            return lab ? <span className="vi-etym-type">{lab}</span> : null;
+          })()}
+          {viPosLabel(g.pos) ? <span className="vi-pos">{viPosLabel(g.pos)}</span> : null}
+          <ol className="vi-senses">
+            {g.senses.map((s) => (
+              <li key={s.id} className="vi-sense">
+                {/* 🔴 W13：中文释义与同页汉字表记逐字相同 ⇒ **折叠不隐藏**。
+                    隐藏＝这 1,183 个词一条中文释义都没有，严格更差。 */}
+                {s.zh && !s.zhSameAsSpelling ? <span className="vi-zh">{s.zh}</span> : null}
+                {s.zh && s.zhSameAsSpelling
+                  ? <span className="vi-zh vi-zh-same" title="与上方汉字表记相同">同汉字表记</span>
+                  : null}
+                {s.vi ? <span className="vi-vi">{s.vi}</span> : null}
+                {s.en ? <span className="vi-en">{s.en}</span> : null}
+                {(bySense.get(s.id) ?? []).map((x) => (
+                  <div key={x.text} className="vi-example">
+                    <span className="vi-example-text">{x.text}</span>
+                    {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
+                    {x.en ? <span className="vi-example-en">{x.en}</span> : null}
+                    {/* 🔴🔴 W10：`ref` 是**出处**。vi 版 709 条 translation 里一条真译文都没有
+                        （214 条整串是 `.`）。排在译文位置就是印「译文：.」。 */}
+                    {x.ref ? <span className="vi-example-ref">出处：{x.ref}</span> : null}
+                  </div>
+                ))}
+                {grouped(relBySense.get(s.id) ?? []).map(([kind, items]) => (
+                  <div key={kind} className="vi-rel">
+                    <span className="vi-rel-kind">{viRelLabel(kind) ?? kind}</span>
+                    {items.map((r, i) => (
+                      <span key={`${r.kind}-${r.target}`}>
+                        {i > 0 ? <span className="vi-rel-sep">、</span> : null}
+                        {r.targetId
+                          ? <button type="button" className="vi-link"
+                            onClick={() => onWord(r.target)}>{r.target}</button>
+                          : <span className="vi-nolink">{r.target}</span>}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ))}
+
+      {/* ── 🔴🔴 B18：有词源而上面一段都没印出来的，单独成区（实测 407 个词形） ── */}
+      {(() => {
+        const left = [...etymText.entries()].filter(([no]) => !printedEtym.has(no));
+        if (left.length === 0) return null;
+        return (
+          <section className="vi-etym vi-etym-orphan">
+            <h3 className="vi-sec-title">词源</h3>
+            {left.flatMap(([no, items]) => items.map((t) => (
+              <p key={`${no}-${t.src}-${t.text.slice(0, 20)}`} className="vi-etym-text">
+                <span className="vi-etym-src">{VI_EDITION_LABELS[t.src] ?? t.src}</span>
+                {t.text}
+              </p>
+            )))}
+          </section>
+        );
+      })()}
+
+      {/* ── 词条级例句 ── */}
+      {entryLevelEx.length > 0 && (
+        <section className="vi-examples-entry">
+          <h3 className="vi-sec-title">例句</h3>
+          {entryLevelEx.map((x) => (
+            <div key={x.text} className="vi-example">
+              <span className="vi-example-text">{x.text}</span>
+              {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
+              {x.en ? <span className="vi-example-en">{x.en}</span> : null}
+              {x.ref ? <span className="vi-example-ref">出处：{x.ref}</span> : null}
+            </div>
+          ))}
+        </section>
+      )}
+
+      {/* ── 词条级关系。🔴 `paronym` 单开一区，**不许混在语义关系里** ── */}
+      {entry.entryRelations.length > 0 && (() => {
+        const ortho = entry.entryRelations.filter((r) => r.kind === 'paronym');
+        const semantic = entry.entryRelations.filter((r) => r.kind !== 'paronym');
+        const block = (title: string, rels: ViRelation[], cls: string) => (rels.length > 0 ? (
+          <section className={cls}>
+            <h3 className="vi-sec-title">{title}</h3>
+            {grouped(rels).map(([kind, items]) => (
+              <div key={kind} className="vi-rel">
+                <span className="vi-rel-kind">{viRelLabel(kind) ?? kind}</span>
+                {/* 🔴 `join` 在 JSX 里不管用（元素不是字符串）⇒ 显式插分隔符。
+                    不靠 CSS 的 `::after`：那在 `render-dump` / 契约闸的
+                    `renderToStaticMarkup` 里不存在，而那正是验收读的东西。 */}
+                {items.map((r, i) => (
+                  <span key={`${r.kind}-${r.target}`}>
+                    {i > 0 ? <span className="vi-rel-sep">、</span> : null}
+                    {r.targetId
+                      ? <button type="button" className="vi-link"
+                        onClick={() => onWord(r.target)}>{r.target}</button>
+                      : <span className="vi-nolink">{r.target}</span>}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </section>
+        ) : null);
+        return (
+          <>
+            {block('语义关系', semantic, 'vi-rels-semantic')}
+            {/* 🔴🔴 17,637 行。实测它是「去掉全部附加符号后拼写相同」（99.9%），
+                不是语义关系也不是"近音"（`đ` /ɗ/ 与 `d` /z/ 差得远）。
+                印在语义关系下，读者会以为 `mai` 与 `mại` 意思相关。 */}
+            {block('不打符号时会撞上的词', ortho, 'vi-rels-ortho')}
+          </>
+        );
+      })()}
+
+      {/* ── 同形词：归一之后撞在一起的别的词（1,263 组）── */}
+      {entry.homographs.length > 0 && (
+        <section className="vi-homographs">
+          <h3 className="vi-sec-title">同形词</h3>
+          {entry.homographs.map((h, i) => (
+            <span key={h.id}>
+              {i > 0 ? <span className="vi-sep">、</span> : null}
+              <button type="button" className="vi-link" onClick={() => onWord(h.word)}>{h.word}</button>
+            </span>
+          ))}
         </section>
       )}
     </article>

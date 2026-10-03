@@ -87,8 +87,13 @@ CHECKS = [
     ("X13", "hidden_why 都在值域里", lambda c: c.execute(
         "SELECT COUNT(*) FROM example WHERE hidden_why IS NOT NULL AND hidden_why NOT IN "
         "(%s)" % ",".join("'%s'" % w for w in sorted(
+            # 🔴 2026-10-03 加 `HIDDEN_KO_LABEL`：ko 版 45 条韩语标签行
+            #    （`같은 말 : yêu thương` ＝「同义词」，是**关系数据**不是例句）。
+            #    ⭐ **这一条当场判红了**，而它正是为此存在的 ——
+            #      新值域不登记就不许落库（与 `classify()` 的 unknown-value 同一条规矩）。
             (S6.HIDDEN_NO_LATIN, S6.HIDDEN_SAME_AS_WORD,
-             S6.HIDDEN_TOO_SHORT, S6.HIDDEN_SRC_CHINESE)))).fetchone()[0], 0),
+             S6.HIDDEN_TOO_SHORT, S6.HIDDEN_SRC_CHINESE,
+             S6.HIDDEN_KO_LABEL)))).fetchone()[0], 0),
     # 🔴 出版层的例句**不许整条就是该词本身**（零信息，判据的落点）
     ("X14", "🔴 出版的例句不是该词本身", lambda c: c.execute(
         "SELECT COUNT(*) FROM example e JOIN dict d ON d.id=e.word_id "

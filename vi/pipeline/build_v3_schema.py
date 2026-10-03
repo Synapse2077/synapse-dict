@@ -140,6 +140,16 @@ DDL = [
       src_ref   TEXT NOT NULL,
       UNIQUE(src_ref)
     )"""),
+    # 🔴🔴 **2026-10-03 阶段 9 的查询计划闸逮到的**：展示层的 W15 指针查询
+    #    （`WHERE word_id = ? AND sense_id IS NULL`）在**每开一个词条页**都跑，
+    #    而这张表上一个索引都没有（只有 `UNIQUE(src_ref)` 的自动索引）⇒
+    #    `EXPLAIN QUERY PLAN` 报 **SCAN sense_src**，实测 **14.40 ms**，
+    #    是同一页其余五条查询（0.07–1.15 ms）的 **100 倍**。
+    #    ⚠️ 这条热路径是**阶段 9 才出现的** —— 建表的时候 `sense_src` 只是证据层、
+    #      没人按 `word_id` 查它。`[[query-perf-collation-traps]]`：
+    #      **性能要等数据长大、或等读取路径出现才咬人。**
+    ("idx_sense_src_word", "CREATE INDEX IF NOT EXISTS idx_sense_src_word "
+                           "ON sense_src(word_id)"),
     ("sense", """
     CREATE TABLE IF NOT EXISTS sense (
       id        INTEGER PRIMARY KEY,
@@ -266,6 +276,10 @@ DDL = [
       src_ref  TEXT NOT NULL,
       UNIQUE(src_ref)
     )"""),
+    # 🔴 **2026-10-03 查询计划闸逮到的第二个**：展示层按 `word_id` 查词源
+    #    （每开一个词条页一次），而这张表 36,089 行上一个索引都没有 ⇒ `SCAN etymology`。
+    #    与 `idx_sense_src_word` 同一天、同一个成因：**建表时没人按 word_id 查它**。
+    ("idx_etym_word", "CREATE INDEX IF NOT EXISTS idx_etym_word ON etymology(word_id)"),
     ("etymology_gloss", """
     CREATE TABLE IF NOT EXISTS etymology_gloss (
       id           INTEGER PRIMARY KEY,

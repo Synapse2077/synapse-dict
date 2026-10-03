@@ -194,7 +194,14 @@ FILES = {
     # 阶段 8。🔴 外锚闸登记在这里**而不是阶段 6/7** —— 它是阶段 8 的交付物，
     #    锚的是五层。登记它之后 `gates.self_check()` 第③条才不报红（两边互相当闸：
     #    2026-10-02 建完闸没登记，**V9 当场逮到**）。
-    "8": [("外锚闸·五层 vs dump", "vi/pipeline/verify_layers_vs_dump.py")],
+    "8": [("外锚闸·五层 vs dump", "vi/pipeline/verify_layers_vs_dump.py"),
+          ("回归闸", "vi/tests/test_no_regression.py"),
+          ("空白页判据唯一的家", "vi/pipeline/coverage.py")],
+    # 阶段 9：展示层。🔴 三件都登记 —— 服务层/映射表/视图任意一个被删掉都该有人说话。
+    "9": [("服务层", "packages/dict-core/src/vietnamese.ts"),
+          ("映射表唯一的家", "packages/dict-labels/src/vi.ts"),
+          ("展示层契约闸", "apps/web/src/contract-check-vi.tsx"),
+          ("查询计划闸", "vi/probes/query_plans.py")],
 }
 
 # 「库里查得到 ≠ 读者看得见」——声明 ✅ 的阶段，代码里必须真有那句话
@@ -422,14 +429,22 @@ def v7():
     🔴 `[[top-level-backlog]]`：建顶层账本之前六门六种格式，
        「这仓库总共欠什么」没人答得出。
     """
-    others = ("es ", "it ", "fr ", "pt ", "de ", "ja ", "ko ", "en ", "ru ",
-              "八门", "六门", "跨门", "跨语种")
+    # 🔴🔴 **判据收窄过一次（2026-10-03），而逮到它的是一条正当的行文。**
+    #    第一版是**子串**匹配 `"de "` —— 于是 W9 行里的「Unico**de** 变体」被判成
+    #    「这一行带着 de（德语）的账」。`[[criteria-narrower-than-you-think]]`：
+    #    判据比它要描述的东西宽。⇒ 语种码必须是**独立的词**（前面不是字母）。
+    #    ⚠️ 收窄之后仍然逮得到它要治的东西：`es 那边也有这个毛病` 里的 `es` 在词边界上
+    #      （M7 那条变异就是这个形状，收窄后实测照样红）。
+    _LANGS = ("es", "it", "fr", "pt", "de", "ja", "ko", "en", "ru", "nl", "pl")
+    others = re.compile(r"(?<![A-Za-z])(%s)(?=[\s　])" % "|".join(_LANGS))
+    groups = ("八门", "六门", "跨门", "跨语种")
     bad = []
     for num, ln in _sheet_rows():
         # 「对照」「同形」这类是**引用别门的教训**，不是别门的账，要放过
         if any(x in ln for x in ("对照", "同形", "教训", "与 ko", "与 ja", "ko 的", "ja 的")):
             continue
-        hit = [o for o in others if o in ln]
+        m = others.search(ln)
+        hit = ([m.group(1)] if m else []) + [g for g in groups if g in ln]
         if hit:
             bad.append(("V7", "欠账 %s 这一行带着「%s」—— 别门/跨门的账要去 "
                               "`docs/BACKLOG.md`，各门计划表只记自己的"
