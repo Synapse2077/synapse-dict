@@ -199,11 +199,569 @@ def ref_is_unreadable(ref):
     return bool(t) and not _has_quoc_ngu(t)
 
 
-def example_hidden_why(text, word, tags=()):
-    """→ `hidden_why` 或 None（None ＝ 可出版）。"""
+# ══════════════════════════════════════════════════════════════════════════
+# ⑤ **2026-10-03：阶段 6e 开跑前逮到的四类「这行根本不是例句」。**
+#
+# 🔴🔴 **这是「花钱之前先逮到本层的缺陷」第二次兑现**（ko 的 1% 定价切片逮到 K15
+#    把 385 条谚语成分拆解当例句收了）。这一次**连切片都还没跑** —— 因为 6e 要买的
+#    就是「把 `text` 译成中文」，所以开跑前必须先问一句「`text` 里装的真是例句吗」。
+#    ⇒ ⭐ **要花钱加工某一列之前，先把那一列本身量一遍。**
+#
+# ⚠️ 这四条**都不是「例句质量」判据**，与上面 ④ 同一条纪律：只认「形式上根本不成例句」。
+#
+# 📋 **有意不处理、已记欠账 W16**：「越南语 + ` : ` + 法语释义」挤一格 31 条
+#    （`Nắng to : il fait grand soleil.`，fr 版 30 ／ en 版 1）。它需要一个
+#    **政策决定**（法语尾巴是丢掉还是留在证据层），而三语方针说页面上不该有法语。
+#    那一条不在用户 2026-10-03 批准的范围里（批准的是「越南语正文缺失」那批），
+#    所以 `is_not_vietnamese` **显式把它放过**，见函数里的 `_mixed_vi_head`。
+
+HIDDEN_META_NOT_EXAMPLE = "metadata-not-example"   # 近义词表／交叉引用注，不是例句
+HIDDEN_CITATION_ONLY = "citation-only"             # 整条只有出处，正文缺失
+HIDDEN_NO_VIETNAMESE = "source-has-no-vietnamese"  # 外语原文，源头没给越南语正文
+
+# ── ⑤a 近义词/反义词元数据 ──────────────────────────────────────────────
+# 实测 52 条：`Near-synonym: sự` / `Near-synonyms: trong, trong vắt, …`
+# 🔴 源头把 `synonyms` 那一族塞进了 `examples`，与 ko 版那 45 条韩语标签行
+#    （`같은 말 :` / `비슷한말:`）是**同一个形状，不同的语言** ——
+#    `HIDDEN_KO_LABEL` 只靠「切完韩语不剩字母」抓得住，英文版这批**一个韩文字都没有**，
+#    所以那条判据在这里结构性失明。⇒ 必须单列一条。
+# ⚠️ 判据钉在行首，不是「含 synonym 就算」：`Near-synonyms` 出现在例句正文里是正常的。
+# 📋 这批关系数据我们**没有收**（与 ko 的同一笔欠账同形），记在 W17。
+#
+# 🔴🔴 **2026-10-03 第二次收：第一版这张表漏了一半，是付费跑批的产物报出来的。**
+#    全量 76,028 条译文里「没有一个汉字（多半没翻译）」22 条，逐条读下去是：
+#        `Coordinate term: mi` ×27     关系元数据（最大的一漏）
+#        `level tone: y` / `high rising: ý` ×18  **声调范式表**（字母条目 `y`/`ơ`/`ô`
+#                                       列它那个元音的六个声调），是音系元数据不是例句
+#        `Meronyms: tàu hoả (…)` ×1 ／ `cf: đồng cảm` ×2
+#    ⭐ **模型拒绝翻译它们**（原样返回）—— 它看出那不是句子，而我的判据没看出来。
+#      这是「花钱之后才逮到」的那一类，与 ko 的 K15（385 条谚语成分拆解）同形。
+# ⇒ 判据改成**登记表**：kaikki 把关系字段压进 `examples` 时用的那套英文显示名，
+#   加上越南语的六个声调名。`[[criteria-from-meaning-not-form]]`：
+#   这批东西的本质是**源头的一张标签表**，就该用枚举而不是形状去对。
+# 🔴 什么会推翻：源头新增一种关系字段名（查法：`probes/probe_stage6.py` 的行首标签普查）。
+_META_LABELS = (
+    # ① kaikki 的关系字段显示名（单复数都要，源头两种都出现过）
+    "synonym", "synonyms", "near-synonym", "near-synonyms",
+    "antonym", "antonyms", "near-antonym", "near-antonyms",
+    "hypernym", "hypernyms", "hyponym", "hyponyms",
+    "meronym", "meronyms", "holonym", "holonyms",
+    "coordinate term", "coordinate terms", "comeronym", "comeronyms",
+    "troponym", "troponyms", "derived term", "derived terms",
+    "related term", "related terms", "see also", "cf",
+    # ② 越南语六声的英文名 —— 字母条目的声调范式表，不是例句
+    "level tone", "high rising", "high rising glottalized",
+    "low", "low falling", "low glottalized", "dipping-rising", "falling",
+)
+_META_LINE = re.compile(
+    r"^\s*(?:%s)\s*:\s" % "|".join(re.escape(x) for x in _META_LABELS), re.I)
+# `For examples of this term in chữ Nôm, see 𤈜, 奵.` —— 交叉引用注，实测 1 条
+_XREF_LINE = re.compile(r"For examples of this term in chữ Nôm")
+
+
+def is_meta_not_example(text):
+    """这条是**元数据/交叉引用注**，不是例句。→ True/False"""
+    t = (text or "").strip()
+    return bool(_META_LINE.search(t) or _XREF_LINE.search(t))
+
+
+# ── ⑤b 出处 ───────────────────────────────────────────────────────────
+# 源头把引文的出处行塞进了 `text`，而 kaikki 的 `ref` 字段是空的。两种后果：
+#   ⑤b-1 多行：出处在**首行**，越南语正文在后面 ⇒ **可修**，首行搬进 `ref`（201 条）
+#   ⑤b-2 单行：整条**只有**出处，正文根本不在 ⇒ 隐藏（24 条）
+# 实测两类的 `ref` **200/201 与 24/24 都是空的**，搬过去不会覆盖任何东西。
+# 🔴🔴 **2026-10-03 第二次收：第一版漏了 36 条，也是付费跑批报出来的。**
+#    全量里「行数不对」30 条，大半根因是**出处还留在 `text` 首行**，模型把它
+#    当正文译了或原样返回：
+#        `c. 11th - 7th century BCE, Classic of Poetry, free 2003 translation by Tạ Quang Phát`
+#        `1932: Lệ Xuân, "Nhà đại ký-giả thời-sự", Phụ Nữ Tân Văn, issue 150, page 12 http://…`
+#        `19th century, Nguyễn Đình Chiểu, Tale of Lục Vân Tiên, 1916 Nôm version, lines 443-444`
+#    我第一版只认 `English/Vietnamese translation` / `, transl.` / `; quoted in` ——
+#    而 `free 2003 translation by` 不含 `English`，`1932: …` 一个关键词都没有。
+# ⇒ 判据改成**出处的本质特征：以年份/世纪开头**。引文出处几乎一律先写时间，
+#   而越南语例句正文**不会**以「四位数年份＋标点」开头。
+#   ⚠️ 仍然要与「越南语音节率 < 0.6」**同时成立**（见 `is_citation_line`）——
+#     单靠年份会咬到正文里真的以年份开头的句子。
+#
+# 🔴🔴🔴 **第三次收窄（同一天）—— 这一次是分支写错了，不是漏了关键词。**
+#    `thối` 的那条例句：原文 4 行、译文 3 行，而首行是
+#        `1939: Ngô Tất Tố, Lều chõng`
+#    —— 一条**用越南语写的出处**。它被漏掉的原因不是关键词不够，而是
+#    `is_citation_line` 要求「越南语音节率 < 0.6」，**而越南语写的出处音节率是 1.00**。
+#    ⇒ 那道音节门对「关键词」那一支是对的（防「正文里引到 English translation」），
+#      对「年份开头」那一支**正好是反的**：它恰恰把越南文献的出处全挡住了。
+#    ⭐ 这是 vi 阶段 7 那一课的重演：**同一个形式判据在两个地方意思相反**
+#      （「整段都是表意文字」用在词头上是「这是表记」、用在词源段上却可能正是中文词源）。
+#      ⇒ 判据按**分支**写，不共用安全网。
+#    实测放开后多出 **82 条**（多行首行 65 ＋ 整条就是出处 17），**逐条读完全是真出处**。
+# ⚠️ 年份那一支换一个**结构**安全信号（不是音节）：出处是参考文献不是句子 ⇒
+#    「不以句末标点结尾」**或**「有文献式结构（≥2 个逗号／带引号书名）」。
+#    两条各自漏 4 / 3 条，并起来正好覆盖 82 条。
+#    🔴 什么会推翻：出现以 `1945,` 开头、带两个逗号、不以句号结尾的**真句子**
+#      （查法：把 `_CITATION_YEAR` 的命中集重读一遍）。
+_CITATION_KW = re.compile(
+    r"(English|Vietnamese|vietnamienne?)\s+translation"   # `; English translation by …`
+    r"|\btransl(ation|ated)?\b\s+(by|from|of)\b"          # `free 2003 translation by …`
+    r"|,\s*transl\."                                      # `in Nguyễn Thành Long, transl.,`
+    r"|;\s*quoted (and translated )?in ")                 # `; quoted and translated in …`
+_CITATION_YEAR = re.compile(
+    r"^\s*(c?\.?\s*\d{3,4}\s*(\[\d{3,4}\])?\s*[,:]"       # `1932: …` / `2012 [1943], …`
+    r"|\d{1,2}(st|nd|rd|th)\s+century\b"                  # `19th century, Nguyễn Đình Chiểu…`
+    r"|c\.\s*\d+.{0,24}\bBCE\b)")                         # `c. 11th - 7th century BCE, …`
+_SENTENCE_END = re.compile(r"[.!?…。！？]\s*$")
+
+
+def is_citation_line(line, syllables):
+    """这一行是**出处**不是正文。→ True/False
+
+    **两支，各带各自的安全网** —— 见 `_CITATION_YEAR` 上方那段（第三次收窄的理由）。
+
+    ① 关键词支（`English translation by` / `, transl.` / `; quoted in`）：
+       🔴 必须再满足「越南语音节率 < 0.6」。只看关键词 ⇒ 越南语**正文**里
+          引到「English translation」的句子会被当出处。
+    ② 年份支（`1939:` / `19th century,` / `c. 11th … BCE,`）：
+       🔴 **不许用音节率当安全网** —— 越南语写的出处音节率是 1.00，那道门把它们全挡了。
+          换成**结构**信号：出处是参考文献不是句子 ⇒ 不以句末标点结尾，
+          或带文献式结构（≥2 个逗号／引号书名）。
+    """
+    t = (line or "").strip()
+    if _CITATION_KW.search(t) and vi_syllable_rate(t, syllables) < 0.60:
+        return True
+    if _CITATION_YEAR.match(t):
+        return (not _SENTENCE_END.search(t)
+                or t.count(",") >= 2 or '"' in t or "“" in t)
+    return False
+
+
+def split_citation_prefix(text, syllables):
+    """多行例句的首行是出处 ⇒ 切出来。→ (出处 或 None, 正文)
+
+    ⚠️ **只切首行**。源头的形状是「出处 ⏎ 正文 ⏎ 正文…」，而出处行**只有一行**；
+       写成「把所有像出处的行都切掉」会咬掉正文里的作者引语。
+    """
+    lines = [l.strip() for l in (text or "").split("\n") if l.strip()]
+    if len(lines) > 1 and is_citation_line(lines[0], syllables):
+        return lines[0], "\n".join(lines[1:])
+    return None, "\n".join(lines)
+
+
+# ── ⑤c 越南语音节率：判据**用我们自己的 `dict` 当词表，不手抄字母表** ──────
+# 🔴🔴 第一版判据是「NFD 之后没有组合符 ⇒ 不是越南语」，它漏掉了**带 `é` 的法语、
+#    全部俄语/文言文/德语/拉丁语**（`Credo in Deum Patrem omnipotentem` 出现 3 次）。
+#    换成「例句里有多少 token 是 `dict` 里的越南语单音节」之后那些全被逮到。
+# ⭐ 这是 `[[criteria-from-meaning-not-form]]` 的正面用法：
+#    「这是不是越南语」的含义是「它的词是不是越南语词」，而我们手上**正好有一张
+#    30 万词形的越南语词表** —— 不必、也不该去手抄哪些字母算越南语。
+# ⚠️ 它依赖 `dict` 的内容 ⇒ **收词变了这个数会变**。所以它不适合锁成常量，
+#    回归闸锁的是「命中这条的行数」而不是「音节表有多大」。
+
+
+def vi_syllables(src):
+    """越南语单音节词形表（判据的唯一来源）。→ set[str]
+
+    `src` 可以是**数据库连接/游标**，也可以是**词形的可迭代物** ——
+    🔴 两种入口一个实现。收割器手上只有 `wid` 这个 dict、闸手上是连接，
+       而我第一版给收割器手抄了一遍 `{w.lower() for w in wid if " " not in w}` ——
+       **同一条判据的第二份实现**，正是 `[[refactor-mindset-code-quality]]` 和
+       vi 阶段 6 那一跤（同一个谓词两份实现只修了一份 ⇒ 155 个汉字词头躺在 dict 里）。
+
+    ⚠️ 只取**不含空格**的词形：多音节词的每个音节几乎都单独成词，
+       而把多音节词整条放进表里会让 token 级的比对永远不命中。
+    """
+    words = ((w for (w,) in src.execute("SELECT word FROM dict"))
+             if hasattr(src, "execute") else src)
+    return {w.lower() for w in words if w and " " not in w}
+
+
+_TOKEN = re.compile(r"[^\W\d_]+", re.UNICODE)
+
+
+def vi_syllable_rate(text, syllables):
+    """这串里有多少比例的 token 是越南语音节。→ 0.0–1.0（无可判 token 时返 1.0）
+
+    单字母 token 不参与（`I` `a` `à` 在两种语言里都成立，是噪声不是信号）。
+    """
+    toks = [t.lower() for t in _TOKEN.findall(text or "")]
+    toks = [t for t in toks if len(t) > 1]
+    if not toks:
+        return 1.0
+    return sum(1 for t in toks if t in syllables) / len(toks)
+
+
+_VI_MARK_D = "đĐ"
+_SEP_GLOSS = re.compile(r"\s+[:：—―]\s+|\s*[:：]\s+")
+
+
+def vi_mark_count(text):
+    """越南语标记数（组合声调符 ＋ `đ`）。0 ⇒ 这串里**一个越南语专有符号都没有**。"""
+    n = ud.normalize("NFD", text or "")
+    return (sum(1 for c in n if ud.combining(c))
+            + sum(1 for c in (text or "") if c in _VI_MARK_D))
+
+
+_EN_STOP = frozenset("""the of and in to is was that with for have has their they this
+    which from are were it as by not but he she you your his her its be been at on or
+    we there""".split())
+_FR_STOP = frozenset("""le la les de des du et est que qui dans pour une un il elle ne
+    pas avec sur au aux ou se son sa ses en par plus""".split())
+
+
+def _foreign_by_stopwords(text):
+    """判据 A：**一个越南语专有符号都没有**，且含 ≥2 个英/法虚词。
+
+    ⚠️ 单独用它召回不全（带 `é` 的法语、俄语、文言文全漏），所以它只是并集的一半。
+    """
+    if vi_mark_count(text) > 0:
+        return False
+    ws = [t.lower() for t in _TOKEN.findall(text or "")]
+    return (sum(1 for w in ws if w in _EN_STOP) >= 2
+            or sum(1 for w in ws if w in _FR_STOP) >= 2)
+
+
+def _mixed_vi_head(text, word, syllables):
+    """句首那段是越南语（且含词头）、分隔符后面才是外语释义 ⇒ **不属于「正文缺失」**。
+
+    📋 2026-10-03 建它时只为一件事：把 W16 那一族从 `is_not_vietnamese` 手里**放过**。
+    ✅ 2026-10-05 它有了第二个调用方：`split_edition_gloss()` 拿它当**结构安全网**。
+       ⭐ 「词头必须出现在头里」这一条看着不起眼，却是**唯一**能把
+            `Người linh mục nói : cha cầu Chúa cho các con`（词头 `cha` 在**尾巴**里）
+         这种整句越南语从「词条:释义」里分出来的判据 —— 音节率、变音符都分不开
+         （法语与越南语共用组合变音符，见 §⑥）。
+    ⚠️ 两个调用方口径必须一致：一个说「这不是正文缺失」、另一个说「所以尾巴是释义」，
+       说的是同一件事。**所以只能有这一份实现。**
+    """
+    if not _SEP_GLOSS.search(text or ""):
+        return False
+    head = _SEP_GLOSS.split(text, 1)[0]
+    wl = (word or "").lower()
+    return (vi_syllable_rate(head, syllables) >= 0.5
+            and bool(wl) and wl in head.lower())
+
+
+def is_not_vietnamese(text, word, syllables):
+    """整条例句**不是越南语** —— 源头给了外语原文而越南语正文缺失。→ True/False
+
+    🔴🔴🔴 **2026-10-03 实测 112 条可出版例句落在这里**，而五道数据层闸全绿：
+        `tử ngữ`（死语）页上印着一整段《美丽新世界》的**英文**散文
+        `tìm kiếm` 页上是《小王子》的**法语**原文
+        还有俄语（`Подо́бно Петру́ I, большевики́…`）、文言文（`至周莊王時…`）、
+        德语（`Der Mensch ist im wörtlichsten Sinn…`）、拉丁语（《使徒信经》×3）
+    回 dump 核过 —— **源头自己就没有越南语正文**：
+        tử ngữ  ref  : …Hiếu Tân, transl., Thế giới mới tươi đẹp, translation of Brave New World
+                text : The Director interrupted himself. "You know what Polish is, I suppose?"…
+                bold_text_offsets [[75, 88]]   ← 指向英文里的 "A dead language"
+    `ref` 承诺的越译本在 dump 里**根本不存在**，词头的引证是靠英文成立的。
+    ⇒ **这不是我们漏抽，是源头缺**（`[[dont-say-source-lacks-what-we-skipped]]`）——
+      但它作为**越南语**例句不可出版：读者在越南语词头下看到的是一段英文散文。
+      隐藏，证据层一行不动；哪天源头补了越南语正文就能放回来。
+
+    ⭐ **两条独立判据的并集，各自都漏**（`[[verification-gates-not-sampling]]`）：
+       A 符号判据（无声调符 ＋ 英/法虚词）：漏掉带 `é` 的法语和全部非拉丁文字
+       B 音节判据（越南语音节率 < 0.30，≥6 个 token）：补上了 A 漏的那些
+       两条交叉读过 84／124 两批，A 的 2 条误伤正是 B 帮着认出来的。
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _mixed_vi_head(t, word, syllables):
+        return False                       # W16 那一族，有意放过
+    if _foreign_by_stopwords(t):
+        return True
+    toks = [x for x in _TOKEN.findall(t) if len(x) > 1]
+    return len(toks) >= 6 and vi_syllable_rate(t, syllables) < 0.30
+
+
+# ── ⑤d 内嵌英译行：**搬进 `example_gloss`，不是删** ────────────────────
+# 实测 281 条多行例句的 `text` 里夹着英译行，而其中 **262 条库里没有英译**
+# ⇒ 🔴 剥掉就**丢了英译**。正确动作是搬进 `example_gloss(lang='en')`，顺手白捡 262 条。
+#   剩 19 条已有 `example_gloss(en)` ⇒ 内嵌那行是重复，剥掉不丢数据。
+#
+# 🔴🔴 **不能复用 `strip_foreign_translation`**（韩语那条）：它靠「字符是不是韩文」
+#    切，而英语和越南语**共用拉丁字母**，字形上分不开。⇒ 必须换一条判据。
+# ⚠️ 判据按**行**走，不按 ` / ` 分段：源头这一族的形状是「越南语行 ⏎ 英译行」，
+#    与 ko 那族「同一行里交替」正相反。同一个病在两个版里形状不同，
+#    这正是 `TRANSLATION_INSIDE_TEXT` **按版登记而不写成形状判据**的理由。
+_EN_WORD = re.compile(r"[A-Za-z]{2,}")
+
+# 哪些版把**英译**按行塞在 `text` 里。🔴 **按版登记，不是形状判据** ——
+#    与 `TRANSLATION_INSIDE_TEXT` 同一条规矩，而这次是**当场栽进去的**：
+#    第一版没有这张表，于是 `nl` 版的 2 行**荷兰语**被判成英译、存成 `lang='en'`：
+#        text  `#*: Chuyện ấy xảy ra từ bao giờ? – Wanneer is dat gebeurd?`
+#        存进去 gloss[en] = `naar een tijdstip in het verleden als aan het eind van de zin`
+#    ⚠️ 它**绕过了三语闸 X9**（X9 查 `lang NOT IN ('zh','en','vi')`，
+#      而荷兰语被贴上了 `en` 的标签）⇒ 形状判据配上「贴错标签」就对闸隐身。
+#    ⇒ 判据问登记表。荷兰语与英语共用拉丁字母，字形上永远分不开。
+# 🔴 什么会推翻：别的版也开始按行塞英译（查法：`collect()` 的
+#    「内嵌英译行搬进译文（<版>）」统计项出现新的版名）。
+INLINE_EN_IN_TEXT = {"en-edition"}
+
+
+def split_inline_english(text):
+    """切出夹在多行例句里的英译行。→ (越南语正文, [英译行…])
+
+    判据：**整块里至少有一行带越南语标记**（否则这是 `is_not_vietnamese` 的事，
+    不是本函数的事），而**这一行一个越南语标记都没有且有 ≥4 个英文词**。
+    ⚠️ `≥4 个词` 这道门槛挡的是 `Sao?` `[...]` 这种短行 —— 它们不是英译，
+      切掉会把正文弄残。实测 384 行命中，逐条读过零误伤
+      （`The little guerrilla damsel holds her rifle high.`）。
+    """
+    lines = [l.strip() for l in (text or "").split("\n") if l.strip()]
+    if not any(vi_mark_count(l) for l in lines):
+        return "\n".join(lines), []        # 整块无越南语 ⇒ 不是本函数的事
+    body, en = [], []
+    for l in lines:
+        if not vi_mark_count(l) and len(_EN_WORD.findall(l)) >= 4:
+            en.append(l)
+        else:
+            body.append(l)
+    return "\n".join(body), en
+
+
+# ── ⑤e 标记残渣：**出版正文里不许留 wiki 标记** ────────────────────────
+# 🔴 这一族是 `INLINE_EN_IN_TEXT` 那个洞**顺带照出来的**（nl 版那 2 行一看就是
+#    `#*: Chuyện ấy xảy ra từ bao giờ? – Wanneer is dat gebeurd?`）。
+#    ⭐ 一个缺陷的修复过程照出另一个缺陷，是「把数据渲染/打印出来读」的红利。
+#
+# 三族，实测落点都在**可出版**正文里（读者看得见）：
+#     `#*: ` 行首 wiki 标记              2 条（nl 版）
+#     落单的 `]]` / `[[`                  6 条（vi 版，`Cá cắn câu]].`）
+#     `^([sic])` 上标               45＋13 处（kaikki 把上标渲染成 `^(…)`）
+#
+# 🔴🔴 **`[sic]` 不许删，只许改成可读的。** `[[source-typo-fix-ours-not-quote]]`：
+#    源头本身写错时，改我们的出版文本，**引文与证据层一个字不动**。而 `[sic]`
+#    正是「这个错在原文里就有」的编辑标记 —— 删掉它就等于把引文改成没错过。
+#    ⇒ `^([sic – meaning tổ])` → `[sic – meaning tổ]`，内容一字不丢，只去掉 `^(` `)`。
+#
+# 📋 **有意不在这里处理、记欠账 W18**：
+#    `ref` 里的 93 处 `^(https://vi.wikisource.org/…)`（Truyện Kiều 的 wikisource 链接）
+#    以及 `sense_gloss` 46 行 / `etymology` 3 行里的同族残渣。
+#    理由：它们**不在 6e 的付费载荷里**（6e 只翻 `example.text`），
+#    而 `ref` 里的 URL 该不该上页面是另一个问题。⚠️ 不是「不存在」，是「另一笔」。
+
+# `#*: ` —— 要求有 `#`，或 `*`/`:` 至少两个。**不写成 `^[#*:]+`**：
+#   单个 `:` 或 `*` 开头在正文里是可能的（对白、项目符号），一刀切会削掉正文第一个字。
+_WIKI_PREFIX = re.compile(r"^[ \t]*(?:#[#*:]*|[*:]{2,})[ \t]*", re.M)
+_STRAY_LINK = re.compile(r"\[\[|\]\]")
+# `^([sic])` → `[sic]`。**只认方括号那一族** —— `^(https://…)` 是另一回事（W18），
+#   而且它在 `ref` 里不在正文里。
+_SUPERSCRIPT_NOTE = re.compile(r"\^\((\[[^\]]*\])\)")
+
+
+def clean_markup(text):
+    """去掉出版正文里的 wiki 标记残渣。→ 清洗后的串
+
+    ⚠️ 三条都是**纯标记**或**渲染错误**，没有一条在删内容：
+       `[sic]` 的字一个不少，只是不再带着 `^(` `)`。
+
+    🔴🔴 **空白归一只作用在它自己改过的那些行上。** 第一版无条件 `" ".join(l.split())`
+       收尾，实测 **267 条改动里 212 条是空白改的** —— 四倍于它要修的那个缺陷，
+       而且其中有 `c.\\u200911th`（窄空格，引文里的字符）被换成普通空格。
+       `[[criteria-narrower-than-you-think]]`：函数叫 `clean_markup`，
+       空白不在它的名字里；**不在名字里的副作用，量级还比主作用大，就是个洞**。
+       ⇒ 删标记之后那一行可能留下双空格或行首空白（是我弄出来的）⇒ 只收拾那一行。
+    """
+    out = []
+    for line in (text or "").split("\n"):
+        new = _STRAY_LINK.sub("", _WIKI_PREFIX.sub("", _SUPERSCRIPT_NOTE.sub(r"\1", line)))
+        if new != line:                      # 只有被我改过的行才整理空白
+            new = " ".join(new.split())
+        out.append(new)
+    return "\n".join(l for l in out if l.strip())
+
+
+# ── ⑥ 本版自己的释义语言挤在同一格里（W16）────────────────────────────
+# 🔴 **先把「法语和越南语关系密切」这件事摘清楚**（用户 2026-10-05 问的就是这个）：
+#    关系是真的 —— 实测 **1,115 个词形有法语来源的词源**，页面上印着：
+#        cao su ← Từ tiếng Pháp caoutchouc  ／ phim ← film  ／ ban ← balle
+#    但那件事的家是**词源层**，而且早就收齐了，不欠账。
+# ⚠️ 本节这批法语**不是那个东西**：fr 版维基词典本身是一部**越→法双语词典**，
+#    它的 `examples` 一格里装的是「越南语搭配 ＋ 它的法语译文」：
+#        Nắng to : il fait grand soleil.
+#    这里的法语是**那一版的释义语言**，不是越南语里的法语借词。
+#    ⇒ 与 ko 版那 1,655 条内嵌韩语译文**同一个形状**（`TRANSLATION_INSIDE_TEXT`）。
+#
+# ═══ 为什么它曾经是个「政策决定」，以及为什么已经不是 ═══
+# 📋 W16 挂了两天没动，理由是「法语尾巴丢掉还是留着，要用户拍板」。
+# 🔴🔴 而 2026-10-05 一量才发现**阶段 6e 已经花钱把法语尾巴也译成中文了**，
+#    52 条里译出四种结果，两种是读者看得见的错：
+#        ①两半都译 ⇒ **中文说两遍**        18  `大官：大人物，大人物。` `大树：一棵大树。`
+#        ②尾巴没译 ⇒ **法语漏进中文列**     4  `网球：balle de tennis。`
+#      🔴③头没译 ⇒ **越南语漏进中文列**     2  `Ang nước：水罐。`（方向反过来，更坏）
+#        ④模型自己丢了尾巴（对的）           7  `制动鼓`
+#    ⭐ 所以「要不要留」这个问题本身是过期的 —— **钱已经花在它身上了**，
+#      而花出去的那一列正在印错东西。`[[frozen-is-not-an-excuse]]`。
+#
+# ═══ 判据：按版登记分隔符，**不写成形状判据** ═══
+# 与 `TRANSLATION_INSIDE_TEXT` / `INLINE_EN_IN_TEXT` 同一条规矩，而这次**必须**如此：
+# 🔴🔴 **`vi_mark_count` 分不开法语和越南语。** 我第一版拿「尾巴越南语音节率 < 0.34
+#    且一个越南语标记都没有」当安全网，于是 26 条**法语尾巴被判成「尾巴也是越南语」**：
+#        Vải to : toile grossière.      ← `grossière` 的 `è` 被算成越南语声调符
+#        Để tang : prendre le deuil     ← `le`/`de` 都在越南语音节表里
+#    文件里早写过荷兰语那一课（「与英语共用拉丁字母，字形上永远分不开」），
+#    **法语更严重：它与越南语共用组合变音符本身。** ⇒ 安全网必须换掉。
+#
+# 真正管用的是两条**结构**安全网，它们刚好拦下我逐条读 54 条读出来的那两条：
+#   ⓐ 尾巴**整段都是越南语音节** ⇒ 这是越南语引文不是外语释义
+#        biển  `Một cái biển có ghi : " Nhà cho thuê "`（招牌上写着「房屋出租」）
+#   ⓑ 切完之后**头部括号/引号不配对** ⇒ 冒号在括号里面，切了就残
+#        mò    `Mò mò (redoublement : sens plus fort).` → `Mò mò (redoublement`
+#      🔴 这与阶段 9b 刚写下的那一课同形：**一条截断的引文比一条读不懂的更坏，
+#        因为它看起来是完整的**。
+# ⚠️ 两条网各自只拦 1 条、合起来 2 条，**别的 52 条一条没动**（反向控制）。
+# 🔴 什么会推翻：fr/nl 版换了分隔符，或别的版也开始这么挤
+#    （查法：`probes/probe_stage6.py` 的按版分隔符普查）。
+EDITION_GLOSS_SEP = {
+    # fr 版：`越南语搭配 : 法语释义。` —— 空格冒号空格，46 条候选
+    "fr-edition": (re.compile(r"\s+:\s+"), "fr"),
+    # nl 版：`Hôm qua — gisteren.` —— em/en dash
+    "nl-edition": (re.compile(r"\s+[—–]\s+"), "nl"),
+    # en 版：`đốt mía ― internode of a sugarcane` —— U+2015 HORIZONTAL BAR
+    # ⚠️ **只登记这一个分隔符，不登记冒号**。en 版的冒号是正常句读：
+    #   `Tổng thống duy nhất chưa bao giờ lấy vợ: James Buchanan.`
+    #   （唯一没结过婚的总统：James Buchanan.）整句都是越南语，切了就残。
+    #   —— 这条是我第一版的误伤，**按版登记顺手把它排除掉了**，
+    #   而形状判据（「冒号后面没有越南语音节」）会照样咬住它。
+    "en-edition": (re.compile(r"\s+―\s+"), "en"),
+}
+
+# 释义语种在三语方针（中＋英＋越）之内 ⇒ 尾巴**搬进 `example_gloss`**；
+# 之外 ⇒ 只从出版正文里摘掉，证据层 `example.text` 一个字不动（用户 2026-10-05 定）。
+GLOSS_LANG_PUBLISHABLE = frozenset(("zh", "en", "vi"))
+
+# 🔴 **全角那一族不是可选项。** 只写半角时 `轻飘飘――失重（字面意思` 被判成「配对」
+#    ⇒ 安全网形同不存在。中文译文里括号引号**全是全角**，而这个函数两边都要用。
+_BRACKET_PAIRS = (("(", ")"), ("«", "»"), ("[", "]"), ("“", "”"), ("‘", "’"),
+                  ("（", "）"), ("「", "」"), ("『", "』"), ("〔", "〕"),
+                  ("【", "】"), ("《", "》"), ("〈", "〉"))
+
+
+def brackets_balanced(s):
+    """括号/引号成对。切点落在括号里面时这个会是 False。
+
+    🔴🔴 **两个方向都要用它，而我第一版只装了一个方向。**
+       源头侧装上之后（`split_edition_gloss` 的安全网ⓑ），中文侧忘了装 ⇒
+           `轻飘飘――失重（字面意思：“非常轻”）`  →  `轻飘飘――失重（字面意思`
+       模型在括号**里面**又写了一个 `：`，我按它切就留下一个不配对的括号。
+       ⭐ 这正是 `[[criteria-narrower-than-you-think]]` 的孪生形态：
+         判据对了，**施用点漏了一个**。所以它必须是公开函数、两处都 import，
+         而不是各自写一遍（`vi/fixes/fix_w16_edition_gloss.py` 用的就是这一个）。
+    """
+    for a, b in _BRACKET_PAIRS:
+        if s.count(a) != s.count(b):
+            return False
+    return s.count('"') % 2 == 0 and s.count("'") % 2 == 0
+
+
+def split_edition_gloss(text, word, src, syllables):
+    """切开「越南语词条 ＋ 本版分隔符 ＋ 本版释义」。→ (出版正文, 释义, 释义语种)
+
+    不该切时返回 `(text, None, None)` —— **调用方据第二项是不是 None 判断**，
+    不许自己再比一次字符串（那就是第二份实现）。
+    """
+    t = (text or "").strip()
+    reg = EDITION_GLOSS_SEP.get(src)
+    if not reg or not t or "\n" in t:
+        return t, None, None            # 多行例句不是这一族（这一族都是单行词条）
+    sep, lang = reg
+    if not sep.search(t):
+        return t, None, None
+    # 结构要求：头是越南语、**且词头出现在头里** ⇒ 这才是「词条:释义」而不是整句带冒号
+    if not _mixed_vi_head(t, word, syllables):
+        return t, None, None
+    head, tail = sep.split(t, 1)
+    if vi_syllable_rate(tail, syllables) >= 1.0:
+        return t, None, None            # ⓐ 尾巴整段是越南语 ⇒ 引文，不是释义
+    if not brackets_balanced(head):
+        return t, None, None            # ⓑ 切点在括号里 ⇒ 切了就残
+    return head.strip(), tail.strip(), lang
+
+
+# ── ⑦ 同一格里跨版重复的例句（W24）──────────────────────────────────────
+# 🔴🔴🔴 **这笔账我第一次报的数错了 3.8 倍，而且量的是另一件事。**
+#    第一版按 `(word_id, text_pub)` 分组 ⇒ 1,569 组／多余 1,616 行／1,054 个词形。
+#    但**展示层把带义项的例句印在各自的义项下面**、`sense_id IS NULL` 的印在末尾的
+#    「例句」区 ⇒ 「同一个词形下文本相同」**不等于读者看见重复**。
+#    按读者口径（分组键带 `sense_id`）重量：**417 组／多余 429 行／235 个词形**。
+#    ⭐ `[[measure-landing-not-source]]`／「报数前先问这个数量的是哪件事」。
+#
+# ⚠️ 差额那 1,374 组**不是本节的事，而且去重会让它更糟**：同一句挂在两个**不同**
+#    已出版义项上，而读那些义项一眼就看出是**同一个义项被两版各描述了一遍**：
+#        qua   义项「幸存」[en 版]        ／ 义项「脱离死亡」[vi 版]
+#        be    义项「撑开袋口以便装满」[en] ／ 义项「用手抬高斗口以量得更多」[vi]
+#    ⇒ 根因在**义项层没有跨版合并**，例句重复只是症状。把例句去掉一条，
+#      读者仍然看见两个几乎一样的义项，而其中一个变成**没有例句**（更糟）。
+#      📋 单独记账（W25），不在本节处理。
+#
+# ═══ 归一到什么程度 ═══
+# 精确匹配只逮到 211 组；加「压空白＋去首尾标点＋小写」到 417 组。
+# 🔴 小写是有风险的一步（越南语专名靠大小写区分），所以**单独量了它**：
+#    只靠小写才合并的 136 组，逐条读过 10 组全是源头自己写了两遍
+#    （`có mùi thúi` / `Có mùi thúi.`；`Khổng Tử san kinh thi.` / `… Kinh Thi.`）。
+#    唯一看着像专名的 `siêu nhân` / `Siêu Nhân` —— **同版、同义项、译文都是「超人」**
+#    ⇒ 源头自己写了两遍，不是两个词。
+#
+# ═══ 留哪一行：五条优先级，每一条都量过它实际决定多少组 ═══
+#    ① **没有源头 zh 译文的优先**（15＋6＝21 组决定）——源头侧的 zh 是**中文版白送的
+#      繁体**（`開庭/審判`，681 条全部来自 `zh-edition-*`），而另一条带的是 6e 买的
+#      简体。留错了就是把繁体留在页面上、把买来的简体删掉。
+#    ② **有源头英译的优先**（11＋6 组决定）
+#    ③ **有出处的优先**（5 组决定）—— 并且**出处还会被并到留下来那行**（见 ④）
+#    ④ `EDITIONS` 登记顺序（371 组走到这里，它们每行都没有源头 gloss ⇒ 任选皆可，
+#       要的只是**确定性**：不确定的话每次重跑隐藏的是不同的行）
+#    ⑤ `src_ref` 字典序（纯兜底）
+# ⚠️ **并，不是丢**：留下来那行缺出处时从被隐藏的行搬过来 ⇒ 源头给的信息一条不丢。
+#    这件事必须在 `collect()` 里做，不能在修复脚本里 —— 否则外锚闸第③向
+#    （键对上而内容不一样）会判红，而它会是对的（W16 刚栽过一次同形的）。
+#
+# 🔴 被隐藏那行的**付费中文译文会被删掉**（闸 X8：隐藏的不许带译文）。
+#    这是可以接受的，理由必须写明：417 组的**每一行都有中文**，所以留下来那行
+#    一定有一条有效译文；删掉的是**同一句话的另一种措辞**（197 组措辞完全相同，
+#    220 组措辞不同但逐条读过都成立）。原文在答案文件 `all.jsonl` 里
+#    （`[[answer-file-is-the-ledger]]`），重算得回来。
+# 🔴 什么会推翻：读者口径的重复组数不再是 417（闸 X15 锁它），
+#    或者出现「留下来那行没有中文」的组（闸 X16 查这个，期望 0）。
+HIDDEN_DUP_IN_CELL = "duplicate-in-same-cell"
+
+_DUP_STRIP = " .。!！?？:：;；,，、…　"
+EDITION_RANK = {s: i for i, (s, _l) in enumerate(EDITIONS)}
+
+
+def example_dup_key(text_pub):
+    """同一格里「读者看作同一句」的归一键。→ 字符串
+
+    ⚠️ **只归一「源头写法不一致」那几种差异**：空白、首尾标点、大小写。
+       不碰内部标点、不去声调符（声调是辨义的 —— 剥声调会把 `má`/`mà` 并成一组）。
+    """
+    return re.sub(r"\s+", " ", (text_pub or "")).strip().strip(_DUP_STRIP).lower()
+
+
+def dup_survivor_rank(gloss_lang, has_ref, src, src_ref):
+    """重复组里**留哪一行**的排序键（越小越先留）。见 §⑦ 的五条优先级。
+
+    ⚠️ 参数是**显式的四个事实**而不是一个行元组 —— 这样闸可以用同一个函数，
+       而不必知道收割器的元组布局（那布局变过一次，W16 把 `pub` 挂在末位就是为此）。
+    """
+    return (1 if gloss_lang == "zh" else 0,    # ① 源头 zh ＝ 白送的繁体 ⇒ 最后留
+            0 if gloss_lang == "en" else 1,    # ② 带源头英译的优先
+            0 if has_ref else 1,               # ③ 带出处的优先
+            EDITION_RANK.get(src, 99),         # ④ 登记顺序（确定性）
+            src_ref or "")                     # ⑤ 兜底
+
+
+def example_hidden_why(text, word, tags=(), syllables=None):
+    """→ `hidden_why` 或 None（None ＝ 可出版）。
+
+    ⚠️ `syllables` 省略时 **⑤c／⑤b 两条判据整个不参与** —— 它们需要越南语音节表。
+       收割阶段（阶段 6）拿不到建好的 `dict`，所以那两条是**阶段 6e 开跑前**
+       由 `vi/fixes/fix_example_defects.py` 补判的。
+       🔴 这个「有条件生效」本身是个洞：收词变了之后新收的例句不会被重判。
+          ⇒ 回归闸 R23/R24 锁住命中行数，收词一变就红。
+    """
     t = (text or "").strip()
     if not t:
         return None                       # 空文本不入库，调用方跳过（不是隐藏）
+    if is_meta_not_example(t):
+        return HIDDEN_META_NOT_EXAMPLE
     if not _has_quoc_ngu(t):
         return HIDDEN_NO_LATIN
     # 🔴 切掉韩语译文之后一个国语字字母都不剩 ⇒ 整条是韩语标签/关系数据，不是例句。
@@ -217,6 +775,27 @@ def example_hidden_why(text, word, tags=()):
         return HIDDEN_SAME_AS_WORD
     if len(t) < 3:
         return HIDDEN_TOO_SHORT
+    if syllables is not None:
+        # ⚠️ 顺序要紧：⑤b-2「整条只有出处」要排在 ⑤c「不是越南语」**前面**。
+        #    出处行本来就以英文为主（`Analects, 7.34; 1861 English translation by
+        #    James Legge`）⇒ 两条都会命中，而「正文缺失」是更准确的那个原因。
+        lines = [l.strip() for l in t.split("\n") if l.strip()]
+        if len(lines) == 1 and is_citation_line(lines[0], syllables):
+            return HIDDEN_CITATION_ONLY
+        # 🔴🔴 **「不是越南语」必须判在切干净的正文上，不是判在原始块上。**
+        #    2026-10-03 第一版判在原始块上，当场差点隐藏一条好例句：
+        #        id=12702 `Xa-tan`
+        #          行0 `Matthew 4:10; 2011 Vietnamese translation from KPA version; …`（出处）
+        #          行1 `Xa-tan kia, xéo đi !`                                      ← 越南语正文**在**
+        #          行2 `Away with you, Satan!`                                      （英译）
+        #    越南语只有 5 个 token，被首行出处和末行英译的 token 压到音节率 0.2 以下
+        #    ⇒ 整块判成「源头没给越南语」。**而它给了。**
+        #    这是 `[[criteria-narrower-than-you-think]]` 的第 N 次：判据对的是「正文」，
+        #    那就必须先有「正文」—— 把出处和英译切掉之后剩下的才是它。
+        body = split_citation_prefix(t, syllables)[1]
+        body = split_inline_english(body)[0]
+        if not body.strip() or is_not_vietnamese(body, word, syllables):
+            return HIDDEN_NO_VIETNAMESE
     return None
 
 

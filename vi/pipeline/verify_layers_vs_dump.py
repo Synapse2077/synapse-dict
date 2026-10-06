@@ -50,6 +50,7 @@ import sys as _sys
 import pathlib as _pl
 _sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent))
 _sys.path.insert(0, str(_pl.Path(__file__).resolve().parent))
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent / "fixes"))
 
 import argparse                                                    # noqa: E402
 import collections                                                 # noqa: E402
@@ -62,6 +63,8 @@ import build_relation_layer as BRE                                 # noqa: E402
 import build_etymology_layer as BET                                # noqa: E402
 import build_audio_layer as BAU                                    # noqa: E402
 import build_classifier_layer as BCL                               # noqa: E402
+# 🔴 W17 那 30 行的第二个锚（见 `layer_relation`）。判据 import 不重写。
+import collect_w17_relations as W17                                # noqa: E402
 
 F = lambda n: format(n, ",")                                       # noqa: E731
 QUIET = False   # 变异验证期间把层内的报数行闭嘴（否则 10 条变异刷满屏）
@@ -134,9 +137,14 @@ def layer_example(show=0):
     s2id, groups = BEX.sense_index(con)
     rows, stat = _h("example", lambda: BEX.collect(wid, s2id, groups))
     # 内容元组：挂靠、正文、出处、隐藏原因、源 —— 全是「后续某一步可能改掉」的列
-    want = {r[6]: (r[1], r[2], r[3], r[4], r[5]) for r in rows}
-    have = {ref: (sid, t, rf, why, src) for ref, sid, t, rf, why, src in con.execute(
-        "SELECT src_ref, sense_id, text, ref, hidden_why, src FROM example")}
+    # 🔴 `text_pub`（W16 的出版正文）**也进恒等式**。它是派生列，但正因为是派生列
+    #    才最容易被某一步悄悄改掉而无人察觉 —— 而第③向（键对上而内容不一样）
+    #    就是为这种事存在的。回归闸 P18 查同一件事，两道闸从不同方向各查一次
+    #    （`[[correct-steps-can-compose-a-hole]]`）。
+    want = {r[6]: (r[1], r[2], r[3], r[4], r[5], r[8]) for r in rows}
+    have = {ref: (sid, t, rf, why, src, pub)
+            for ref, sid, t, rf, why, src, pub in con.execute(
+                "SELECT src_ref, sense_id, text, ref, hidden_why, src, text_pub FROM example")}
     bad = _diff(want, have, "X源", show)
     # ── 译文侧：**只管源头给的那批**，模型译文按 src 排除（6e 的那一刀）
     # 🔴 `want` 必须用收割器自己的 `gloss_rows()`，不许在这里重写条件 ——
@@ -175,10 +183,31 @@ def layer_relation(show=0):
     wid, nx, na, s2id, _tot = BRE.index(con)
     rows, stat, _pairs, unknown = _h("relation", lambda: BRE.collect(wid, nx, na, s2id))
     want = {r[6]: (r[1], r[2], r[3], r[4], r[5], r[7]) for r in rows}
-    have = {ref: (sid, k, t, tid, src, why) for ref, sid, k, t, tid, src, why
-            in con.execute("SELECT src_ref, sense_id, kind, target, target_id, src, "
-                           "hidden_why FROM sense_relation")}
+    # 🔴🔴 **W17 那 30 行不是这个收割器的产物，所以要给它第二个锚，不是排除它。**
+    #    源头把那批关系数据挤进了 `examples[].text`，**没有结构字段可读**
+    #    ⇒ `build_relation_layer.collect()` 永远产不出它们
+    #    ⇒ 2026-10-05 它们一落库，本闸当场报「库里有 30 条追不回源头」—— **而它是对的**。
+    # ⚠️ 两条路：① 把 `src='w17-from-examples'` 从恒等式里排除 ② 给它一个锚。
+    #    选 ② —— 排除就是造一个洞，而这个洞恰好开在「我刚手工插进去的 30 行」上
+    #    （`[[gate-registers-status-quo-as-spec]]`：闸一旦如实登记现状就不再问它对不对）。
+    #    这 30 行解析自 `example.text`，而 `example` 由本文件的 `layer_example()`
+    #    锚到 dump ⇒ **传递地锚住了**，这里只要确认「库里的 ≡ 重算一遍的」。
+    # ⚠️ `W17.parse()` 是为此从 `plan()` 里拆出来的：`plan()` 会把「关系层已经有的」
+    #    跳掉，插库之后再调它返回 0 行 —— **那样的真值是空的，恒等式恒成立**。
+    w17_want = {W17.src_ref(wid, kind, tgt): (None, kind, tgt, tid, W17.SRC, None)
+                for wid, kind, tgt, tid, _n in W17.parse(con)[0]}
+    have_all = {ref: (sid, k, t, tid, src, why) for ref, sid, k, t, tid, src, why
+                in con.execute("SELECT src_ref, sense_id, kind, target, target_id, src, "
+                               "hidden_why FROM sense_relation")}
+    have = {r: v for r, v in have_all.items() if v[4] != W17.SRC}
+    w17_have = {r: v for r, v in have_all.items() if v[4] == W17.SRC}
     bad = _diff(want, have, "R源", show)
+    bad += _diff(w17_want, w17_have, "R17源", show)
+    stat_extra_src = {v[4] for v in have_all.values()} - {s for s, _l in S6.EDITIONS} \
+        - {W17.SRC}
+    if stat_extra_src:
+        bad.append(("R源⑤", "🔴🔴 `sense_relation.src` 里有既不是切片、也没在本闸登记的"
+                            "写入方：%s —— 它们一行都没有锚" % sorted(stat_extra_src)))
     if unknown:
         bad.append(("R源④", "🔴🔴 源头长出 %d 种值域外的关系字段：%s —— "
                             "`stage6_sources.KINDS` 要先扩" % (len(unknown), dict(unknown))))
@@ -389,6 +418,27 @@ def mutate():
                       "UPDATE sense_relation SET hidden=0, hidden_why=NULL WHERE id=?", (rel[0],)),
                   lambda c: c.execute(
                       "UPDATE sense_relation SET hidden=1, hidden_why=? WHERE id=?", (rel[1], rel[0])))
+    # ⑥b W17 那 30 行的第二个锚（2026-10-05）。**两条，一条验锚本身一条验登记表。**
+    _w17 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True).execute(
+        "SELECT id, target FROM sense_relation WHERE src=? ORDER BY id LIMIT 1",
+        (W17.SRC,)).fetchone()
+    ok &= _inject("relation", "R17源③",
+                  "🔴 改掉一条 W17 关系的目标（它走的是第二个锚，不是收割器）",
+                  lambda c: c.execute("UPDATE sense_relation SET target='mutant' WHERE id=?",
+                                      (_w17[0],)),
+                  lambda c: c.execute("UPDATE sense_relation SET target=? WHERE id=?",
+                                      (_w17[1], _w17[0])))
+    # 🔴🔴 **这一条验的是「排除法钉住了没有第三类」。** 把 `src` 洗成一个没登记的值
+    #    之后：它从 W17 那一堆里消失（R17源①）、也进不了切片那一堆 ⇒ R源②，
+    #    而 R源⑤ 是那个**点名报出来**的检查。三条一起响才说明排除法是封闭的。
+    #    ⚠️ 不声明连带的话这条会报「连带未声明」——而那三条**本来就该一起响**。
+    ok &= _inject("relation", "R源⑤",
+                  "🔴🔴 把一条关系的 `src` 洗成没登记的写入方（排除法有没有钉住第三类）",
+                  lambda c: c.execute("UPDATE sense_relation SET src='mutant-writer' "
+                                      "WHERE id=?", (_w17[0],)),
+                  lambda c: c.execute("UPDATE sense_relation SET src=? WHERE id=?",
+                                      (W17.SRC, _w17[0])),
+                  also=("R17源①", "R源②"))
     # ⑦ 词源层：锚的是**写进别的表**的派生值 `entry.etym_type`
     #    ⚠️ `entry` 是索引表，但 `etym_type` 这一列**不参与收割** ⇒ 缓存仍然有效。
     ok &= _inject("etymology", "Y型③", "🔴 改掉一条 `entry.etym_type`（派生值写在别的表上）",

@@ -45,7 +45,8 @@ sys.path.insert(0, str(HERE))
 import dbtool                                                     # noqa: E402
 import paths                                                      # noqa: E402
 import stage6_sources as S6                                       # noqa: E402
-from criteria import is_han_headword, norm_vi                      # noqa: E402
+from criteria import (is_han_headword, norm_vi,                    # noqa: E402
+                      merged_sense_map)   # 🔴 W25 折叠解析，见例句层同一处注释
 
 PATH_OF = {
     "en-edition": paths.KK, "vi-edition": paths.EDITION,
@@ -86,10 +87,13 @@ def index(con):
         norm_exact.setdefault(w, i)
         norm_any.setdefault(wn, i)
     # 义项级关系只有 en 版有 ⇒ 只给 en 版建 (词,词性,词源号,义序) → sense_id
+    # 🔴 W25：与例句层同一道折叠解析（53 条义项级关系挂在被折叠的义项上）
+    merged = merged_sense_map(con)
     s2id = {}
     for ref, sid in con.execute("SELECT src_ref, sense_id FROM sense_src ORDER BY id"):
         if not ref.startswith("sense:en:") or sid is None:
             continue
+        sid = merged.get(sid, sid)
         body = ref[len("sense:"):]
         _ed, rest = body.split(":", 1)
         rest, _gi = rest.rsplit(":", 1)
@@ -181,6 +185,39 @@ def collect(wid, norm_exact, norm_any, s2id):
     return rows, stat, pairs, unknown
 
 
+def _sync(rows):
+    """原地把 `sense_relation.sense_id` 同步到 `collect()` 的产出。行数一行不变。
+
+    🔴 W25 折叠义项之后那 53 条义项级关系要跟着改指向 —— 而**不能走 `--rebuild`**
+       （它会删掉 W17 手工收的 30 条，见 `--sync` 的参数注释）。
+    ⚠️ 只同步 `sense_id` 这一列：别的列若也漂了，说明判据变了，那该走重建而不是偷偷改。
+    """
+    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    have = dict(con.execute("SELECT src_ref, sense_id FROM sense_relation"))
+    con.close()
+    upd, miss = [], 0
+    for r in rows:
+        ref = r[6]
+        if ref not in have:
+            miss += 1
+            continue
+        if have[ref] != r[1]:
+            upd.append((r[1], ref))
+    print("\n■ `--sync`：`sense_id` 要改 %s 行（收割器有而库里没有的键 %s 个）"
+          % (F(len(upd)), F(miss)))
+    if miss:
+        # 🔴 **大声报，不静默** —— 键对不上意味着判据或收词变了，那是另一件事。
+        print("   ⚠️ 有 %s 个键在库里不存在。`--sync` 只改已有行，"
+              "行数要变得走重建。" % F(miss))
+    if not upd:
+        print("   库已经与 `collect()` 一致，什么都不做。")
+        return
+    with dbtool.session("sync-vi-relation-sense-id",
+                        expect={"__rows__": 0, "sense_relation.sense_id": None},
+                        invalidates=[]) as s:
+        s.executemany("UPDATE sense_relation SET sense_id=? WHERE src_ref=?", upd)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
@@ -188,6 +225,13 @@ def main():
     #    没有这个开关就只能手动清表，而**手动清表不留痕、不走闸门**。
     ap.add_argument("--rebuild", action="store_true",
                     help="清空 sense_relation 再建（纯派生层，可重算）")
+    # 🔴🔴 **2026-10-05（W25）补：只改 `sense_id` 的原地同步。**
+    #    W25 折叠了 1,631 条义项，53 条义项级关系挂在被折的那些上 ⇒ 要重新指向。
+    #    ⚠️ 不能走 `--rebuild`：它会**删掉 W17 手工收回来的 30 条**
+    #      （`src='w17-from-examples'`，收割器永远产不出它们）。
+    #      与例句层的付费数据保险同一个形状 —— 下面那道保险就是为此加的。
+    ap.add_argument("--sync", action="store_true",
+                    help="只把已有行的 sense_id 同步到 collect() 的产出（不增删行）")
     a = ap.parse_args()
 
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
@@ -208,9 +252,18 @@ def main():
     # 🔴 标签改过：隐藏现在有**两个原因**（B17 ＋ W9），印成「B17 隐藏」会误导下一个人
     import collections as _c
     _why = _c.Counter(r[7] for r in rows if r[7])
-    print("\n■ 关系 %s 行（可出版 %s ／ 隐藏 %s：" % (F(len(rows)), F(len(pub)), F(len(rows) - len(pub)))
-          + "、".join("%s=%s" % (k, F(v)) for k, v in _why.most_common()) + "）；(词,目标) 对 %s"
-          % (F(len(rows)), F(len(pub)), F(len(rows) - len(pub)), F(len(pairs))))
+    # 🔴🔴 **这一行原先是坏的，而它坏了多久没人知道**：`%` 的优先级高于 `+`，
+    #    所以末尾那 4 个参数只喂给了最后一个字面量 `"）；(词,目标) 对 %s"`
+    #    ⇒ `TypeError: not all arguments converted`。
+    #    ⭐ **没人发现是因为 `main()` 从来没被跑过** —— 关系层建好之后就没再重跑，
+    #      而两道闸只 import `index()`/`collect()`，碰不到 `main()`。
+    #      这正是 `[[lesson-must-become-mechanism]]` 那一课的又一例：
+    #      「代码存在」与「代码被跑过」是两件事，而只有后者能证明它是对的。
+    #    ⇒ 2026-10-05 加 `--sync` 时第一次跑 `main()`，当场炸出来。
+    print("\n■ 关系 %s 行（可出版 %s ／ 隐藏 %s：%s）；(词,目标) 对 %s"
+          % (F(len(rows)), F(len(pub)), F(len(rows) - len(pub)),
+             "、".join("%s=%s" % (k, F(v)) for k, v in _why.most_common()),
+             F(len(pairs))))
     for k, v in sorted(stat.items(), key=lambda x: -x[1]):
         print("   %-44s %8s" % (k, F(v)))
     print("\n■ B17 两种判据（**差 %.1f 倍**，差的全是 `paronym+related`）"
@@ -237,9 +290,25 @@ def main():
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     old = con.execute("SELECT COUNT(*) FROM sense_relation").fetchone()[0]
     con.close()
+    if a.sync:
+        _sync(rows)
+        return
     if old and not a.rebuild:
-        raise SystemExit("🔴 sense_relation 已有 %s 行 —— 纯派生层，重跑要加 `--rebuild`。"
-                         % F(old))
+        raise SystemExit("🔴 sense_relation 已有 %s 行 —— 纯派生层，重跑要加 `--rebuild`，"
+                         "或用 `--sync` 只同步列。" % F(old))
+    # 🔴 **第二个写入方的保险**：`--rebuild` 清表会连 W17 手工收回来的那批一起删掉，
+    #    而收割器永远产不出它们（源头把那批关系数据挤进了 `examples`，没有结构字段）。
+    #    与例句层的付费数据保险同一条规矩（`[[enrich-not-rebuild]]`）。
+    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    foreign = {s_: n for s_, n in con.execute(
+        "SELECT src, COUNT(*) FROM sense_relation WHERE src NOT IN (%s) GROUP BY 1"
+        % ",".join("'%s'" % x for x, _l in S6.EDITIONS))}
+    con.close()
+    if foreign and a.rebuild:
+        raise SystemExit(
+            "🔴🔴 `sense_relation` 里有**别的写入方**插的行：%s —— `--rebuild` 会删掉它们，"
+            "而收割器产不出来。改用 `--sync`，或先确认那批能重放再手动清。"
+            % foreign)
     with dbtool.session(
             "build-vi-relation-layer",
             expect={"__rows__": 0, "#sense_relation": len(rows) - old},

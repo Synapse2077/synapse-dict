@@ -33,7 +33,8 @@ sys.path.insert(0, str(HERE.parent / "pipeline"))
 import paths                                              # noqa: E402
 from build_sense_layer import (HIDDEN_SPELLING, HIDDEN_POINTER,   # noqa: E402
                                HIDDEN_NOT_GLOSS)
-from criteria import gloss_has_content, is_vi_markup_gloss, norm_vi  # noqa: E402
+from criteria import (gloss_has_content, is_vi_markup_gloss,       # noqa: E402
+                      norm_vi, dup_sense_groups, DUP_SENSE_WHY)
 
 _ABBREV = re.compile(r"^[A-Za-zÀ-ỹ]{1,5}\.$")
 # 🔴 上界按 2026-10-02 实测写死：形式判据命中 30 条，其中 25 条进了枚举表、
@@ -83,6 +84,65 @@ def _cover(c):
         "JOIN sense_gloss g ON g.sense_id=s.id WHERE s.hidden=0").fetchone()[0]
     t = c.execute("SELECT COUNT(*) FROM dict").fetchone()[0]
     return 100.0 * n / max(t, 1)
+
+
+# 🔴 `sense.hidden_why` 的值域。**三个值各自指向一笔账**，加新值不登记就判红。
+#    W12 的两个 ＋ W25 的一个。
+HIDDEN_WHY_DOM = ("gloss-is-punctuation-only",      # W12：整串是标点的释义
+                  "gloss-is-source-markup",         # W12：源头的词典标记缩写
+                  DUP_SENSE_WHY)                    # W25：同一个义项被两版各描述一遍
+
+
+def _dup_senses(c):
+    """W25 残留：同一个 entry 内还有没有「中文逐字相同」而都可出版的义项。
+
+    判据 `criteria.dup_sense_groups()` **import，不重写** —— 它四次收窄的那些
+    排除条件（跨 entry 正当／两条不同英文不许折）必须与填充器完全一致，
+    否则闸会把「有意不折的 72 组」报成残留。
+    """
+    groups, _stat = dup_sense_groups(c)
+    return sum(len(d) for _k, d in groups)
+
+
+def _mute_duplicate_senses(c):
+    """中文与同 entry 另一条相同、而**自己没有任何别的释义**的可出版义项。→ 条数
+
+    这种义项在页面上只印一行中文，而那行中文旁边那条也印着同一行 ⇒
+    读者看到两行一模一样的字，**没有任何线索能区分**。
+    ⚠️ 判据有意**不**调 `dup_sense_groups()`：那个函数把这批算进「可折」，
+       而本条要查的是「库里还有没有」—— 两者是生成侧与落点侧，不是同一个问题。
+       （这也是为什么它能当 W26 那条否定结论的推翻条件。）
+    """
+    import collections as _c
+    zh = _c.defaultdict(list)
+    for wid, sid, eid, t in c.execute(
+            "SELECT s.word_id, s.id, s.entry_id, g.text FROM sense s "
+            "  JOIN sense_gloss g ON g.sense_id = s.id AND g.lang = 'zh' "
+            " WHERE s.hidden = 0 AND s.entry_id IS NOT NULL"):
+        zh[(wid, eid, (t or "").strip())].append(sid)
+    dup = [s for v in zh.values() if len(v) > 1 for s in v]
+    if not dup:
+        return 0
+    other = {s for (s,) in c.execute(
+        "SELECT DISTINCT sense_id FROM sense_gloss WHERE lang IN ('en','vi') "
+        "AND TRIM(text) <> '' AND sense_id IN (%s)" % ",".join(map(str, dup)))}
+    return sum(1 for s in dup if s not in other)
+
+
+def _merged_into_visible(c):
+    """`merged_into` 指向的那条必须是**可见**义项。
+
+    🔴 不查这一步的话，例句会从一个看不见的义项搬到**另一个看不见的义项** ——
+       页面上一样是消失，而 P26 那条「例句不许挂在隐藏义项上」会在
+       `merged_sense_map()` 把它解析成词条级之后**变绿**（因为解析器兜住了），
+       于是「折叠指向了一个隐藏义项」这件事本身没人管。
+    """
+    cols = {r[1] for r in c.execute("PRAGMA table_info(sense)")}
+    if "merged_into" not in cols:
+        return 0
+    return c.execute(
+        "SELECT COUNT(*) FROM sense a JOIN sense b ON b.id = a.merged_into "
+        " WHERE a.merged_into IS NOT NULL AND b.hidden = 1").fetchone()[0]
 
 
 CHECKS = [
@@ -186,12 +246,46 @@ CHECKS = [
                           "AND src='model:deepseek-v4-flash'").fetchone()[0] > 50000
                 and c.execute("SELECT COUNT(*) FROM sense_gloss WHERE lang='zh' "
                               "AND src LIKE 'zh-%'").fetchone()[0] > 5000), True),
+    # ── 🔴🔴 **E16：`hidden_why` 值域 —— 这一条本该三天前就有。** ──
+    #    例句层有 **X13**、关系层有 **R22**（R22 当初就是因为「同一条检查在一层有、
+    #    在另一层没有，而两层各自都是绿的」补的），**唯独义项层没有**。
+    #    ⇒ 2026-10-05 我往 `sense.hidden_why` 写了一个全新的值
+    #      （W25 的 `duplicate-sense-in-entry`，1,631 行），**三道闸一道都没响**。
+    #    ⭐ `[[decision-not-propagated-across-editions]]` 的同语言版第二例：
+    #      一层做对了，别的层照旧缺着，而每层自己都是绿的。
+    ("E16", "🔴 hidden_why 都在值域里（例句层有 X13、关系层有 R22，这里原先没有）",
+     lambda c: c.execute(
+         "SELECT COUNT(*) FROM sense WHERE hidden_why IS NOT NULL AND hidden_why "
+         "NOT IN (%s)" % ",".join("'%s'" % w for w in sorted(HIDDEN_WHY_DOM))
+     ).fetchone()[0], 0),
+    # ── 🔴 **E17：读者口径 —— 同一个 entry 内不许有两条中文一模一样的可出版义项。** ──
+    #    这是 W25 的残留型断言：判据再跑一遍，还能命中的必须是 0。
+    #    ⭐ 残留型比基线型强两点：期望值天然是 0（不用我去推）；
+    #      它与填充器**调同一个函数**，判据被删掉它当场变红。
+    ("E17", "🔴 W25：同一个 entry 内没有中文逐字相同的可出版义项（残留）", _dup_senses, 0),
+    # ── 🔴 E18：折叠的去向必须是可见义项（见函数注释里那条「解析器会把它兜绿」）──
+    ("E18", "🔴 W25：`merged_into` 指向的是**可见**义项", _merged_into_visible, 0),
+    # ── 🔴🔴 **E19：W26 的否定结论做成闸。** ──
+    # 用户 2026-10-05 问「是之前翻译质量不行吗」—— **不是**。`理发` 翻
+    # `to give a haircut` 和 `to get a haircut` 都对，中文的「理发」本身覆盖两边；
+    # 而**页面上已经分得开**（展示层印 `vi-en`，`công quốc` 连例句「摩纳哥／卢森堡
+    # 大公国」都把区别点明了）⇒ 76 组不用花钱，W26 是一条**否定结论**。
+    # ⭐ 而「什么会推翻它」是**可查的**：只要每条义项除了那条共享中文之外
+    #   还有**至少一个**能区分的释义（英文或越南语），读者就分得开。
+    #   ⇒ 否定结论因此变成一条闸，而不是一句话（`[[record-the-negative-decision]]`：
+    #     否定结论光落账不够，而**闸天然管不到否定结论** —— 除非像这样把它翻译成断言）。
+    # 🔴 建这条闸的时候当场逮到 **3 条**违例（`tiếng Việt`/`đá lửa`/`bảng cửu chương`，
+    #    全来自中文版 —— 它只给中文）⇒ 已折进有区别的那条。
+    ("E19", "🔴 W26：中文相同的可出版义项，每条都要有能区分它的释义（否则读者分不开）",
+     _mute_duplicate_senses, 0),
     ("E11", "src_ref 唯一", lambda c: c.execute(
         "SELECT COUNT(*) FROM (SELECT src_ref FROM sense_src GROUP BY src_ref "
         "HAVING COUNT(*)>1)").fetchone()[0], 0),
 ]
 ROSTER = ("E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "E10", "E11",
-          "E12", "E12b", "E13", "E14", "E15", "E9b")
+          "E12", "E12b", "E13", "E14", "E15", "E9b",
+          # 2026-10-05：E16 值域（本该三天前就有）／E17 W25 残留型／E18 折叠去向
+          "E16", "E17", "E18", "E19")
 UNMUTABLE = {
     "E1": "要变异就得清空整张表；它拦的是「表空了而所有 0 值检查全绿」。",
     "E11": "DDL 上有 `UNIQUE(src_ref)`，注不进去（与骨架闸 S2 同一情形，恒绿已登记）。",
@@ -229,7 +323,12 @@ MUTATIONS = [
      "UPDATE sense_gloss SET text='' WHERE id=(SELECT MIN(id) FROM sense_gloss)",
      {"E12": "空串也「没有内容」—— E4 ⊂ E12，这是包含关系不是重复"}),
     ("E5", "⭐ 把九成义项隐藏掉（模拟判据写太宽）",
-     "UPDATE sense SET hidden=1 WHERE id % 10 <> 0", {}),
+     "UPDATE sense SET hidden=1 WHERE id % 10 <> 0",
+     # 🔴 2026-10-05 新出现的连带，**而它是真的**：九成义项被隐藏之后，
+     #    一批折叠的去向（`merged_into`）也跟着成了隐藏义项 ⇒ E18 报出来。
+     #    ⭐ 这正是 E18 存在的意义 —— 它不只盯「我这次折得对不对」，
+     #      还盯「后来有人把去向弄没了」。
+     {"E18": "九成义项被隐藏 ⇒ 一批 merged_into 指向了隐藏义项"}),
     ("E6", "让一条 sense_src 指向不存在的 dict",
      "UPDATE sense_src SET word_id=99999999 WHERE id=(SELECT MIN(id) FROM sense_src)", {}),
     ("E7", "🔴 把被隐藏的证据**删掉**（＝证据层被编辑了）",
@@ -259,7 +358,39 @@ MUTATIONS = [
      "  JOIN sense s2 ON s2.id=sense_gloss.sense_id WHERE h.word_id=s2.word_id LIMIT 1) "
      "WHERE lang='zh' AND src='model:deepseek-v4-flash' AND EXISTS("
      "  SELECT 1 FROM han_spelling h JOIN sense s2 ON s2.id=sense_gloss.sense_id "
-     "  WHERE h.word_id=s2.word_id)", {}),
+     "  WHERE h.word_id=s2.word_id)",
+     # 🔴 2026-10-05 新出现的连带，**而它是真的**：把大批译文改成同一个表记串，
+     #    当然会造出「同一个 entry 内中文逐字相同」的义项 ⇒ E17 报残留。
+     #    ⭐ **连带声明要跟着检查表一起长。**
+     {"E17": "大批译文变成同一个表记串 ⇒ 中文相同的义项成片出现"}),
+    # ── 🔴 三条新检查的变异（2026-10-05，W25）──
+    ("E16", "🔴 往 `sense.hidden_why` 写一个值域外的值（X13/R22 早就有、这里刚补）",
+     "UPDATE sense SET hidden=1, hidden_why='mutant-reason' "
+     "WHERE id=(SELECT MIN(id) FROM sense WHERE hidden=0)",
+     # 隐藏一条可出版义项 ⇒ E5 的读者口径覆盖降一点点（不至于破下限）；
+     # 它若带中文，E14「没有一条可出版义项缺中文」不受影响（它是被隐藏了不是缺中文）
+     {}),
+    ("E17", "🔴 把一条被折叠的义项放回出版层（W25 的判据被关掉的样子）",
+     "UPDATE sense SET hidden=0, hidden_why=NULL "
+     "WHERE id=(SELECT MIN(id) FROM sense WHERE hidden_why='duplicate-sense-in-entry')",
+     # ⚠️ **有意不清 `merged_into`** —— 放回出版层而去向还指着别人，
+     #    正好同时验到 E18 那条「折叠的去向必须是可见义项」的反面：
+     #    这里 `merged_into` 指向的仍是可见义项，所以 E18 不该响。
+     {}),
+    ("E19", "🔴 放回一条「只有共享中文、别的一个字都没有」的义项（W26 的推翻条件）",
+     "UPDATE sense SET hidden=0, hidden_why=NULL, merged_into=NULL WHERE id="
+     "(SELECT a.id FROM sense a JOIN sense b ON b.id=a.merged_into "
+     "  WHERE a.hidden_why='duplicate-sense-in-entry' "
+     "    AND NOT EXISTS(SELECT 1 FROM sense_gloss g WHERE g.sense_id=a.id "
+     "                   AND g.lang IN ('en','vi') AND TRIM(g.text)<>'') LIMIT 1)",
+     # ⚠️ 放回来之后它既是「中文重复又没有区分释义」（E19），又重新可出版（E5 的覆盖
+     #    动一点点、E17 报它可折）。两条都声明。
+     {"E17": "放回来的那条中文与同 entry 另一条相同 ⇒ 它又成了「可折的残留」"}),
+    ("E18", "🔴 让一条折叠的去向指向**隐藏的**义项（例句会搬到另一个看不见的地方）",
+     "UPDATE sense SET merged_into=(SELECT MIN(id) FROM sense WHERE hidden=1 "
+     "  AND hidden_why='gloss-is-punctuation-only') "
+     "WHERE id=(SELECT MIN(id) FROM sense WHERE hidden_why='duplicate-sense-in-entry')",
+     {}),
     ("E14", "⭐ 删掉一条机器译文（义项又缺中文了）",
      "DELETE FROM sense_gloss WHERE lang='zh' AND src='model:deepseek-v4-flash' "
      "AND id=(SELECT MIN(id) FROM sense_gloss WHERE lang='zh' "

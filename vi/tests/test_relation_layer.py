@@ -45,7 +45,23 @@ B17_HIDDEN_FLOOR = 1200     # 实测隐藏 1,460 行
 B17_HIDDEN_CEIL = 5000      # 🔴 上限：naive 判据会隐藏 14,547 对 ⇒ 超过就是判据被放宽了
 KIND_COUNT = 18             # 实测库里 18 种 kind（源头给了 19 种字段，`instance` 一条都没有）
 SRC_COUNT = 12
+# 🔴🔴 **不是所有关系都来自某一版切片。** 2026-10-05 W17 加了第二个写入方
+#    （从 `examples` 里收回来的 30 条关系元数据 —— 源头把它们挤进了例句字段，
+#    **没有结构字段可读**，所以它不属于任何一版的收割）。
+#    ⇒ **R18 当场判红（13 ≠ 12），而它是对的** —— 这就是它存在的意义。
+# ⚠️ 修法是**登记**而不是把 12 改成 13：ko 的 **K14** 正是栽在
+#    「两个写入方在 `src` 列分不开」上。登记之后 R18 问的是
+#    「十二版的关系都在」＋「没有第三个没登记的写入方」**两件事**，
+#    而「13」只答得了一件，并且下一个写入方出现时它又会被人随手改成 14。
+#    `[[gate-registers-status-quo-as-spec]]`：闸「如实登记现状」之后就不再问现状对不对。
+NON_EDITION_SRC = {
+    "w17-from-examples": "W17：源头把关系数据挤进 `examples` 字段，没有结构字段可读 ⇒ "
+                         "解析例句文本收回来的 30 条（`vi/fixes/collect_w17_relations.py`）",
+}
 _KIND_DOM = ",".join("'%s'" % k for k in sorted(set(S6.KINDS.values())))
+# 🔴 十二版的 `src` 值域 —— **从登记表取**，不靠 `LIKE '%-edition'`
+#    （中文版叫 `zh-edition-trad`/`-simp`，后缀不在末尾）
+_EDITION_DOM = ",".join("'%s'" % s for s, _l in S6.EDITIONS)
 
 
 # 🔴 判据 import，不重写。`[[criteria-narrower-than-you-think]]`、ko 的 K10。
@@ -138,8 +154,22 @@ CHECKS = [
         "SELECT COUNT(*) FROM sense_relation WHERE hidden_why IS NOT NULL "
         "AND hidden_why NOT IN (%s)" % ",".join("'%s'" % w for w in sorted(
             (S6.HIDDEN_REDUNDANT_RELATED, S6.HIDDEN_TARGET_FOREIGN)))).fetchone()[0], 0),
+    # 🔴🔴 **「哪些 src 是切片」问登记表 `S6.EDITIONS`，不写成形状。**
+    #    我第一版写 `src LIKE '%-edition'`，当场得到 **10 而不是 12** ——
+    #    中文版有两份，叫 `zh-edition-trad` / `zh-edition-simp`，**后缀不在末尾**。
+    #    ⚠️ 这一跤项目里已经记过一次（外锚闸的 `src.endswith('-edition')`
+    #      认不出 `zh-edition-trad`）⇒ 第二次犯，而第二次是**在同一句话里**
+    #      一边写注释说「判据要问登记表不写形状」一边写了形状判据。
     ("R18", "🔴 十二份切片都有关系落进来", lambda c: c.execute(
-        "SELECT COUNT(DISTINCT src) FROM sense_relation").fetchone()[0], SRC_COUNT),
+        "SELECT COUNT(DISTINCT src) FROM sense_relation WHERE src IN (%s)"
+        % _EDITION_DOM).fetchone()[0], SRC_COUNT),
+    # 🔴 **第二个写入方必须登记。** 不登记的话 R18 只能被改成 13，
+    #    而那就把「现状」写成了「规格」（见 `NON_EDITION_SRC` 上方那段）。
+    ("R18b", "🔴 没有未登记的非切片写入方（K14：两个写入方要在 `src` 列分得开）",
+     lambda c: c.execute(
+         "SELECT COUNT(DISTINCT src) FROM sense_relation WHERE src NOT IN (%s)"
+         % ",".join([_EDITION_DOM] + ["'%s'" % s for s in sorted(NON_EDITION_SRC)])
+     ).fetchone()[0], 0),
     # 🔴🔴 关系目标**不许是汉字/喃字** —— 汉字词头有意不进 dict ⇒ 必然死链。
     #    **判据 import，不在 SQL 里手写近似版。**
     #    第一版写的是 `target GLOB '*[一-鿿]*' AND NOT target GLOB '*[a-zA-Z]*'`，
@@ -152,7 +182,9 @@ CHECKS = [
     ("R20", "🔴 kind 真的分了 18 种（塌成一种也会「表非空」）", lambda c: c.execute(
         "SELECT COUNT(DISTINCT kind) FROM sense_relation").fetchone()[0], KIND_COUNT),
 ]
-ROSTER = tuple("R%d" % i for i in range(1, 23))
+# 🔴 R18b 是 2026-10-05 加的（W17 的第二个写入方）⇒ **花名册要跟着长**，
+#    否则它的自检会说「多了一条没登记的」—— 而那条自检正是这么用的。
+ROSTER = tuple("R%d" % i for i in range(1, 23)) + ("R18b",)
 UNMUTABLE = {
     "R1": "要变异就得清空整张表；它拦的是「表空了而所有 0 值检查全绿」。",
     "R2": "同上，`noun_classifier` 这一侧。",
@@ -237,6 +269,14 @@ MUTATIONS = [
      "WHERE id=(SELECT MIN(id) FROM sense_relation)", {}),
     ("R18", "🔴 把一整版的关系删掉（跨版收割缩水）",
      "DELETE FROM sense_relation WHERE src='ru-edition'", {}),
+    # 🔴 R18b 的变异：**第三个写入方悄悄出现**。R18 对这一类结构性失明 ——
+    #    它只数 `%-edition`，一个叫 `mutant-writer` 的新写入方它一眼看不见。
+    #    ⚠️ 不能用「把 W17 那个值改掉」来验：那样 R18b 响的理由是「登记的那个没了」，
+    #      而它要拦的是「没登记的那个来了」。方向反了就验错了东西。
+    ("R18b", "🔴 悄悄出现第三个写入方（R18 只数登记在 `S6.EDITIONS` 里的，对它失明）",
+     "INSERT INTO sense_relation(word_id,kind,target,hidden,src,src_ref) "
+     "SELECT word_id,'related','mutant',0,'mutant-writer','relmut:1' "
+     "FROM sense_relation LIMIT 1", {}),
     ("R19", "🔴 塞一条纯汉字目标（必然死链）",
      "INSERT INTO sense_relation(word_id,kind,target,hidden,src,src_ref) "
      "SELECT MIN(id),'derived','兵馬',0,'en-edition','mut:r19' FROM dict", {}),

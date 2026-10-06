@@ -2376,3 +2376,390 @@ button.rel-link {
   color: var(--text-tertiary);
   white-space: nowrap;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   越南语（vi）—— 第九门。2026-10-03
+   ══════════════════════════════════════════════════════════════════════════
+   🔴🔴 **这一整块曾经完全不存在。** 阶段 9 的视图写完、契约闸 23 条全绿、
+      回归闸的读者口径也全绿，而 `styles.css` 里 **55 个 `vi-*` 类名零条规则** ——
+      所有 `<span>` 都是 inline、彼此之间没有任何分隔，读者看到的是一团连排文字。
+   ⚠️ 契约闸查不出这件事：它读 `renderToStaticMarkup` 的**文本内容**，
+      而「有没有样式」在文本里不留痕迹。逮到它的是 `gate:css-audit`，
+      而那道闸**此前从没覆盖过 vi** —— 它的自检当场报出 `VietnameseEntryView`
+      没登记进 `VIEWS`。`[[lesson-must-become-mechanism]]`：
+      「闸存在／有入口／覆盖这门语言／真被跑」是四道独立关卡。
+
+   ⭐ 色相：vi 要与 en 蓝 / es 琥珀 / it 绿 / fr 紫 / de 绛红拉开 ⇒ 取**青**。
+   ⚠️ 只给这门语言**真的不一样**的东西写规则，能用共用件的（`.badge` / `.sec-title`）
+      不另起一份（`[[dict-labels-package]]` 同一条规矩的 CSS 版）。 */
+:root,
+:root[data-theme='light'] {
+  --vi-accent: #0e7490;   /* 源语言标识：VI 青，与前五门六向拉开 */
+  --vi-soft: rgba(14, 116, 144, 0.12);
+}
+
+:root[data-theme='dark'] {
+  --vi-accent: #38bdf8;
+  --vi-soft: rgba(56, 189, 248, 0.16);
+}
+
+.vi-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  /* 汉字/喃字表记要上衬线体：喃字笔画比汉字更密，无衬线里糊成一团 */
+  --vi-han-font: 'Noto Serif CJK SC', 'Songti SC', serif;
+}
+
+/* ---- 词头 ---- */
+.vi-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.vi-word {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 650;
+  color: var(--text);
+  /* 🔴 声调符**不许被行高压掉**：`ạ` 的点在基线下、`ấ` 的两层符号在上方，
+     越南语的字形上下都比拉丁语高一截，行高给紧了会被裁掉半个符号。 */
+  line-height: 1.45;
+}
+
+.vi-speak,
+.vi-pron-play {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 2px 7px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.vi-speak:hover,
+.vi-pron-play:hover {
+  background: var(--surface-hover);
+  color: var(--vi-accent);
+}
+
+.vi-syllables,
+.vi-notlemma {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+/* ---- 区块标题（汉字表记 / 读音 / 例句 / 词源 / 量词 / 指针）---- */
+.vi-sec-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.vi-spellings,
+.vi-prons,
+.vi-audios,
+.vi-classifiers,
+.vi-pointers,
+.vi-examples-entry,
+.vi-etym {
+  display: block;
+}
+
+/* 列表里的分隔符（`、` / `／`）。视图已经在数据侧插了它们 ——
+   这里只负责**别让它们贴死**，并且比内容淡一档，视线落在词上不落在符号上。 */
+.vi-sep,
+.vi-rel-sep {
+  color: var(--text-tertiary);
+  padding: 0 2px;
+}
+
+/* ---- 汉字/喃字表记 ---- */
+.vi-spelling-text {
+  font-family: var(--vi-han-font);
+  font-size: 19px;
+  color: var(--vi-accent);
+}
+
+/* 每一条表记是一格（文字 ＋ 来源规则 ＋ 可信标记）。
+   `.vi-spelling-ok` 有意**不加任何视觉**：可信是默认，只有「未经核实」才该跳出来 ——
+   两边都加标记等于两边都不显眼。 */
+.vi-spelling {
+  display: inline-flex;
+  align-items: baseline;
+  margin-right: 10px;
+}
+
+.vi-spelling-ok {
+  /* 有意为空：可信是默认态，见上。 */
+}
+
+/* 🔴 **「未经核实」必须看得出来，而且不能看成错误。** W6：按码位推定的那
+   14,327 条实测只有 70.8% 对。⇒ 用警示色但低饱和（与 ko 的 `.badge.src-note`
+   同一条道理：它是限定条件不是错误），并且**降低表记本身的对比度** ——
+   读者在扫视时就能分出「这条是源头说的」和「这条是我们推的」。 */
+.vi-spelling-guess .vi-spelling-text {
+  color: var(--text-secondary);
+  border-bottom: 1px dashed #d9822b;
+}
+
+.vi-spelling-why,
+.vi-spelling-kind,
+.vi-pron-dialect,
+.vi-pron-composed,
+.vi-etym-src,
+.vi-etym-type,
+.vi-pointer-src,
+.vi-classifier-note {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: 5px;
+  white-space: nowrap;
+}
+
+.vi-spelling-guess .vi-spelling-why,
+.vi-pron-composed {
+  color: #d9822b;
+}
+
+/* ---- 读音 ---- */
+.vi-pron {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-right: 14px;
+}
+
+.vi-ipa {
+  font-family: 'Charis SIL', 'Doulos SIL', 'Gentium Plus', serif;
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+
+.vi-audio {
+  height: 32px;
+  max-width: 260px;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
+/* ---- 义项 ---- */
+.vi-group {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.vi-group:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.vi-pos {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vi-accent);
+  background: var(--vi-soft);
+  border-radius: 5px;
+  padding: 1px 7px;
+  margin-bottom: 8px;
+}
+
+.vi-senses {
+  margin: 0;
+  padding-left: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.vi-sense {
+  /* 🔴 释义三语各占一行 —— **不是 inline**。
+     源头一条义项常有中/英/越三份释义，inline 排下来会连成
+     `水water nước` 这种读不断句的东西。 */
+  line-height: 1.6;
+}
+
+.vi-zh,
+.vi-vi,
+.vi-en {
+  display: block;
+}
+
+.vi-zh {
+  color: var(--text);
+  font-size: 15px;
+}
+
+/* 「同汉字表记」—— W13：汉越词的正确对译就是它的汉字表记，
+   折叠成一句话而**不是隐藏**（隐藏反而更差，这一页仍然有中文释义）。
+   ⇒ 排成灰色小字，它是**说明**不是释义。 */
+.vi-zh-same {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.vi-en {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.vi-vi {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+/* ---- 例句 ---- */
+.vi-example {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.vi-example-text,
+.vi-example-zh,
+.vi-example-en,
+.vi-example-ref {
+  display: block;
+}
+
+/* 🔴🔴 **`pre-line` 不是排版偏好，是正确性。** 阶段 6e 的 prompt 规矩 2 要求
+   「原文几行、译文几行」，回归闸 P13 盯着它，`normalize_zh` 还为它做了确定性归一 ——
+   而 HTML 默认把 `\n` 塌成空格。少了这一条，670 条多行诗文（《翘传》的对句、
+   民歌的上下句、法条的分款）在页面上全是连排的一长串，**行对行的对应关系整个看不见**，
+   前面那一串功夫一点都落不到读者身上。 */
+.vi-example-text,
+.vi-example-zh {
+  white-space: pre-line;
+}
+
+.vi-example-text {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.vi-example-zh {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.vi-example-en {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: pre-line;
+}
+
+/* 出处（W10）。**不许排在译文的位置上** —— 它是文献来源不是释义，
+   所以比译文更小更淡，并且另起一行。 */
+.vi-example-ref {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+/* ---- 语义关系 ---- */
+.vi-rel {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.vi-rel-kind {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  margin-right: 6px;
+}
+
+.vi-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.vi-link:hover {
+  text-decoration: underline;
+}
+
+/* 🔴 源头引用了我们没收的词 ⇒ 如实印成**纯文本不是链接**。
+   `[[dont-say-source-lacks-what-we-skipped]]`：点下去是空白页比不能点更坏。 */
+.vi-nolink {
+  color: var(--text-secondary);
+}
+
+/* ---- 词源 ---- */
+.vi-etym-text {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+/* B18 的落点：词源号与义项组对不上的 407 个词形，词源单独成区印在义项之后。
+   ⇒ 与上文拉开，并且不带「词源 N」的编号（那个号对不上，印出来会误导）。 */
+.vi-etym-orphan {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+/* ---- 指针（W15）---- */
+.vi-pointer {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.vi-pointer-text {
+  color: var(--text);
+}
+
+/* 🔴 这一页没有可出版义项时，**诚实说明为什么** —— 不是留一片空白。
+   实测 222 个空白页里 222 个在证据层都有指针义项（源头说了「X 是 Y 的异写」），
+   真正「源头也没给」的是 0 个。 */
+.vi-pointers-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ---- 量词（loại từ）---- */
+.vi-classifier {
+  font-size: 14px;
+}
+
+/* ---- 同形词出口 ---- */
+.vi-homographs {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 560px) {
+  .vi-word {
+    font-size: 25px;
+  }
+
+  .vi-audio {
+    max-width: 100%;
+  }
+}
+
+/* W15 的指针跳转按钮。⚠️ 与关系链接同用 `.vi-link` 的颜色和交互，
+   这里只加一点间距 —— `styles.css` 的总规矩：同一个视觉角色只许有一份声明。 */
+.vi-pointer-go {
+  margin-left: 6px;
+}

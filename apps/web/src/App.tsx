@@ -696,7 +696,13 @@ export const EXAMPLES: Record<string, string[]> = {
   //    hóa   拼出来的音标 6 条（**W7 现场**）＋ 例句 13
   //    công nhân  中文释义＝汉字表记（**W13 现场**，`zhSameAsSpelling`）
   //    mai   同形词（`Mai` 姓氏）＋ paronym 18 条（**「不打符号会撞上」现场**）
-  vi: ['ăn', 'nhà', 'con', 'hóa', 'công nhân', 'mai'],
+  //    thối  🔴🔴 **多行例句 6 条带中文译文**（阶段 6e 现场）——
+  //          2026-10-03 加的，而加它的原因是一条**本来空过的**契约检查：
+  //          「多行例句的译文行数与原文一致」挂在 `mai` 上，而**上面六个词
+  //          一条多行例句都没有** ⇒ `bad.length === 0` 是白捡的，它永远绿。
+  //          `[[permanently-red-gate-masks-real-reds]]` 的镜像：恒绿的检查信号量是零。
+  //          ⇒ 样本词表不只是「好看的词」，它**决定哪些代码路径被走到**。
+  vi: ['ăn', 'nhà', 'con', 'hóa', 'công nhân', 'mai', 'thối'],
   // 韩语六个，各带一类**本语种特有**的字段（照 ja 那行的口径挑，逐个回库验过）：
   //   사랑  跨三版背书的读音 sʰa̠ɾa̠ŋ、12 条例句、两个词条（第二个汉字表记 舍廊）
   //   읽다  **发音形谚文** `익따`（读作"익따"不读"읽다"）—— 拉丁七门全无这一层
@@ -5908,7 +5914,9 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
 //    W15 **16,305 个词形唯一的"释义"是一条指针**（`UBND` = Ủy ban Nhân dân）
 //        —— 源头给了而出版层没有，没有可出版义项时必须印它
 // ============================================================================
-type ViPointer = { lang: string; text: string; src: string };
+type ViPointer = { lang: string; text: string; src: string;
+  // 源头 `form_of`/`alt_of` 的目标词形 ＋ 它在 `dict` 里的 id（不在就是 null）
+  target: string | null; targetId: number | null };
 type ViSpelling = { text: string; script: 'han' | 'nom'; ruleVer: string; trusted: boolean };
 type ViPron = { ipa: string; dialect: string; src: string; composed: boolean };
 type ViRelation = {
@@ -6156,6 +6164,16 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
           {pointerSorted.map((p) => (
             <p key={`${p.src}-${p.text}`} className="vi-pointer">
               <span className="vi-pointer-text">{p.text}</span>
+              {/* 🔴🔴 **目标在 `dict` 里才可点** —— 这是关系层 `targetId` 为 NULL 时的
+                  既有约定，不是新政策：点下去是空白页比不能点更坏（W9 那 2,238 行死链）。
+                  ⚠️ 实测只有指针的 16,305 个词形里 **1,376 个（8.4%）** 跳得动；
+                  剩下 91% 的目标是 `Sino-Vietnamese reading of 海` 这类**汉字**，
+                  而汉字按用户 2026-09-28 的决定不进 `dict` ⇒ 它们本来就跳不动。
+                  ⭐ 但 **222 个真空白页里 160 个（72%）跳得动** —— 那是回报最高的一块。 */}
+              {p.targetId !== null && p.target
+                ? <button type="button" className="vi-link vi-pointer-go"
+                    onClick={() => onWord(p.target as string)}>→ {p.target}</button>
+                : null}
               <span className="vi-pointer-src">{p.lang === 'zh' ? '中文版' : p.lang === 'en' ? '英文版' : p.lang}</span>
             </p>
           ))}

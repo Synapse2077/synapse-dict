@@ -109,6 +109,26 @@ DELIVERABLE = {
           #    全是 codepoint-v1 就说明四个源白收了
           ("rule_ver 真的分了档（不是只有码位）",
            "SELECT COUNT(DISTINCT rule_ver)-1 FROM han_spelling")],
+    # ⭐ **阶段 6e 的三条，每条都是「这一层真的到位了」而不是「表非空」。**
+    #    🔴 V2 当场判红过：6e 声明 ✅ 而这里一条交付物都没登记 ——
+    #      正是 ko 阶段 5/6/7 与 ja 词源层那种「阶段表对没列进去的层结构性失明」。
+    # ⭐ **阶段 6e 的三条，每条都是「这一层真的到位了」而不是「表非空」。**
+    #    🔴 V2 当场判红过：6e 声明 ✅ 而这里一条交付物都没登记 ——
+    #      正是 ko 阶段 5/6/7 与 ja 词源层那种「阶段表对没列进去的层结构性失明」。
+    #    ⚠️ 每条都写成「判据式」SQL（返回真/假），与阶段 6/7 现有那几条同一写法。
+    "6e": [("花钱买来的例句中文译文 > 7 万条",
+            "SELECT (SELECT COUNT(*) FROM example_gloss "
+            "        WHERE lang='zh' AND src LIKE 'model%') > 70000"),
+           # 🔴 **读者口径**，不是「表里有多少行」
+           ("读者口径：可出版例句里有中文译文的 ≥ 97%",
+            "SELECT 100.0 * (SELECT COUNT(DISTINCT g.example_id) FROM example_gloss g "
+            " JOIN example e ON e.id=g.example_id WHERE e.hidden=0 AND g.lang='zh') "
+            " / (SELECT COUNT(*) FROM example WHERE hidden=0) >= 97.0"),
+           # 🔴 **反向断言**：隐藏的例句上不许有花钱买的译文（与例句层闸 X8 同一条规矩）
+           ("隐藏的例句上没有付费译文",
+            "SELECT (SELECT COUNT(*) FROM example_gloss g JOIN example e "
+            "        ON e.id=g.example_id WHERE e.hidden=1 "
+            "        AND g.src LIKE 'model%') = 0")],
     "6": [("example 例句层", "SELECT COUNT(*) FROM example"),
           ("sense_relation 关系层", "SELECT COUNT(*) FROM sense_relation"),
           ("noun_classifier 量词层", "SELECT COUNT(*) FROM noun_classifier"),
@@ -161,6 +181,10 @@ FILES = {
           ("闸名单", "vi/gates.py"),
           ("闸的跑批入口", "vi/run_gates.py")],
     "4": [("收词脚本", "vi/pipeline/ingest_editions.py")],
+    "6e": [("例句翻译跑批", "vi/pipeline/translate_examples.py"),
+           ("DeepSeek 跑批器（带定价窗口无条件播报）", "vi/pipeline/ds_batch.py"),
+           ("答案文件（第一版全量）", "data/work/vi/example_zh/all.jsonl"),
+           ("答案文件（判据收窄后的补跑）", "data/work/vi/example_zh/redo2.jsonl")],
     "6": [("阶段 6 判据唯一的家", "vi/pipeline/stage6_sources.py"),
           ("阶段 6 裁决探针", "vi/probes/probe_stage6.py"),
           ("裁决存档", "data/work/vi/probe/probe_stage6.txt"),
@@ -219,6 +243,20 @@ CODE = {
           ("控制组覆盖每一种坏法", "vi/pipeline/translate_glosses.py", "PROBE"),
           ("释义有没有内容的判据在 criteria 里", "vi/pipeline/criteria.py",
            "def gloss_has_content")],
+    "6e": [# 🔴 开跑前量 `example.text` 自己的那四条判据，一条都不许消失
+           ("不是例句：元数据按登记表判", "vi/pipeline/stage6_sources.py", "_META_LABELS"),
+           ("不是例句：源头没给越南语正文", "vi/pipeline/stage6_sources.py",
+            "def is_not_vietnamese"),
+           ("出处判据**按分支**写、不共用安全网", "vi/pipeline/stage6_sources.py",
+            "_CITATION_YEAR"),
+           ("内嵌英译**按版登记**，不写成形状判据", "vi/pipeline/stage6_sources.py",
+            "INLINE_EN_IN_TEXT"),
+           # 🔴 6e 之后例句层只能原地同步 —— `--rebuild` 会删掉付费数据
+           ("6e 之后的原地同步路径", "vi/pipeline/build_example_layer.py", "def _sync"),
+           ("回收顺序即优先级（新版本压住旧的）", "vi/pipeline/translate_examples.py",
+            "replace=rep"),
+           ("行数归一在代码里做、不靠 prompt", "vi/pipeline/translate_examples.py",
+            "src_lines == 1")],
     "6": [("译文语种按版定、不按字段名定", "vi/pipeline/stage6_sources.py", "TR_LANG"),
           ("B17 的 SUBSUME 有意排除 paronym", "vi/pipeline/stage6_sources.py", "SUBSUME"),
           ("B12 用八门共用那一份归一键", "vi/pipeline/build_audio_layer.py", "commons_key"),
@@ -435,13 +473,33 @@ def v7():
     #    判据比它要描述的东西宽。⇒ 语种码必须是**独立的词**（前面不是字母）。
     #    ⚠️ 收窄之后仍然逮得到它要治的东西：`es 那边也有这个毛病` 里的 `es` 在词边界上
     #      （M7 那条变异就是这个形状，收窄后实测照样红）。
+    # 🔴🔴 **第二次收窄（2026-10-03）**：`fr 版` 被判成「这一行带着 fr 的账」，
+    #    而在 vi 的语境里 **`<lang> 版` 指的是「那个语言的维基版本」** —— 我们收割
+    #    十二个版本，谈论 `fr 版`/`ko 版`/`nl 版` **正是 vi 自己的事**，不是别门的账。
+    #    ⚠️ 两次收窄是同一个病的两种形状：第一次 `de ` 匹配到了**单词内部**
+    #      （Unico**de**），这一次匹配到了**正当的语义单位**（`fr 版`）。
+    #      `[[criteria-narrower-than-you-think]]`：判据比它要描述的东西宽，又一次。
+    #    ⇒ 语种码后面跟着 `版` / `-edition` / `版的` 的，一律放过。
     _LANGS = ("es", "it", "fr", "pt", "de", "ja", "ko", "en", "ru", "nl", "pl")
-    others = re.compile(r"(?<![A-Za-z])(%s)(?=[\s　])" % "|".join(_LANGS))
+    others = re.compile(r"(?<![A-Za-z])(%s)(?=[\s　])(?!\s*(版|-edition))"
+                        % "|".join(_LANGS))
     groups = ("八门", "六门", "跨门", "跨语种")
     bad = []
     for num, ln in _sheet_rows():
-        # 「对照」「同形」这类是**引用别门的教训**，不是别门的账，要放过
-        if any(x in ln for x in ("对照", "同形", "教训", "与 ko", "与 ja", "ko 的", "ja 的")):
+        # 「对照」「同形」这类是**引用别门的教训**，不是别门的账，要放过。
+        # 🔴🔴 **第三次收窄（2026-10-05）：豁免表原先硬编码 `与 ko`/`ja 的` 两个语种**
+        #    ⇒ 2026-10-05 写 W27 时引用的是 **en** 那边的一个 bug
+        #      （「与 en 那边 `sense.rank=0` 哨兵的 bug **不是同一件事**」），当场判红。
+        #    ⚠️ 这是**枚举式豁免的通病**：它对「同一种写法、换个语种」结构性失明，
+        #      而被咬的时候人的第一反应是去改自己的行文（我差点就那么做了）。
+        #    ⇒ 按**含义**改：`与 <语种>` / `<语种> 的` / `<语种> 那边` 都是**引用**，
+        #      而真正的别门账长成「es 那边也有这个毛病」（V7 的变异就是这一句）——
+        #      区别在于引用里那个语种码后面跟的是「的」「那边」「同形」这类**指代词**。
+        #    ⚠️ 收窄之后变异仍然红（跑过 `--mutate` 确认），所以不是把闸拆松了。
+        if any(x in ln for x in ("对照", "同形", "教训")):
+            continue
+        if any("与 %s" % lg in ln or "%s 的" % lg in ln or "%s 那边的" % lg in ln
+               for lg in _LANGS):
             continue
         m = others.search(ln)
         hit = ([m.group(1)] if m else []) + [g for g in groups if g in ln]
@@ -535,8 +593,24 @@ COVERAGE = {
         "SELECT COUNT(DISTINCT s.word_id) FROM sense s JOIN sense_gloss g "
         "ON g.sense_id=s.id WHERE s.hidden=0 AND g.lang='zh'",
         "SELECT COUNT(*) FROM dict", 73.0),
-    # ⚠️ 例句的中文译文**不在这张表里，而是在 `COVERAGE_PENDING` 里带锁地豁免** ——
-    #    理由见那边。此处不许再写成注释（2026-10-02 的教训就是注释版）。
+    # ⭐⭐ **阶段 6e 的落点，2026-10-03 从 `COVERAGE_PENDING` 搬过来的。**
+    #    搬家不是我想起来的，是 **V11 的带锁豁免当场判红**逼的：
+    #      「豁免项『例句中文（读者口径）』已经到 99.98%（门槛 50.0%）——
+    #        把它从 `COVERAGE_PENDING` 搬进 `COVERAGE` 并锁下限，豁免不许当 V10 的后门」
+    #    ⇒ 这条机制是 2026-10-02 **因为同一笔账差点整个消失**才建的（当时阶段 6e
+    #      在阶段表/欠账表/本表里三处一致地不存在），**建好的第二天它就兑现了一次**。
+    #      `[[lesson-must-become-mechanism]]` 的正面例子。
+    # ⚠️ 下限 **97.5**：实测 99.98%（76,658 / 76,670），差的 12 条逐条读过 ——
+    #    🔴 我第一版写 96.0，**V10 当场判红**（超出下限 4.0 点 > SLACK 3.0）——
+    #      「松弛会把退化藏起来」。留 2.5 个点给源头增量，不留更多。
+    #    3 条是 fr 版漏进来的 JavaScript 代码、4 条不是例句、
+    #    5 条本来就没什么可译的（`Ú, liu, cống, xê, xang, xừ.` 是越南传统音名、
+    #    `Win XP`、`Lôm lốp` 叠音形式）。留 4 个点的余量给源头增量，不留更多
+    #    （`[[ship-dont-measure-in-circles]]`：松弛会把退化藏起来，V10 盯着这件事）。
+    "例句中文（读者口径）": (
+        "SELECT COUNT(DISTINCT g.example_id) FROM example_gloss g "
+        "JOIN example e ON e.id=g.example_id WHERE e.hidden=0 AND g.lang='zh'",
+        "SELECT COUNT(*) FROM example WHERE hidden=0", 97.5),
 }
 SLACK = 3.0
 
@@ -560,15 +634,12 @@ SLACK = 3.0
 #      ——「跑完了却没人把下限锁上」正是 V10 要治的那种松弛，豁免不该成为它的后门。
 #
 # 写法：名字 → (分子 SQL, 分母 SQL, 门槛%, 欠账编号)
-COVERAGE_PENDING = {
-    "例句中文（读者口径）": (
-        "SELECT COUNT(DISTINCT g.example_id) FROM example_gloss g "
-        "JOIN example e ON e.id=g.example_id WHERE e.hidden=0 AND g.lang='zh'",
-        "SELECT COUNT(*) FROM example WHERE hidden=0",
-        # 门槛 50%：zh 版白送的那 690 条（0.90%）之上再无免费路径，
-        # 过半只可能是 6e 真跑了 ⇒ 那时必须进 `COVERAGE`。
-        50.0, "W14"),
-}
+# ⭐ **2026-10-03：这张表现在是空的，而它空着本身是一条记录。**
+#    唯一的住户「例句中文（读者口径）」在 6e 跑完之后被 V11 判红、搬进了 `COVERAGE`
+#    （下限 96.0）。⚠️ **不要因为空了就把这套机制删掉** —— 它从建成到兑现只隔了一天，
+#    而它要治的那个病（「有意不量」的理由在局部成立、于是永不被质疑）是反复发作的。
+#    下一个「现在只能写 0 所以先不进 COVERAGE」的东西，登记到这里来。
+COVERAGE_PENDING: dict[str, tuple[str, str, float, str]] = {}
 
 
 def v11(con):
@@ -777,12 +848,17 @@ def mutate():
     finally:
         del DELIVERABLE["99"]
     # M2 把一个**没登记交付物**的阶段声明成 ✅ → V2 红（ko 的结构性失明）
-    # ⚠️ 用阶段 9：它在 DELIVERABLE/FILES/CODE 里**一条都没登记**，正是 V2 要拦的形状。
-    #    （这条顺带也会让 V4 红 —— 阶段 5 没完成而 9 标 ✅。两条都该响。）
-    assert not (DELIVERABLE.get("9") or FILES.get("9") or CODE.get("9")), \
-        "阶段 9 已经登记了交付物 ⇒ 这条变异验不到 V2 了，换一个没登记的阶段"
-    expect("V2", "🔴 把阶段 9（一条交付物都没登记）改成 ✅",
-           _set_stage_mark(orig, "9", "✅ 已完成"))
+    # 🔴🔴 **第一版拿阶段 9 当「没登记交付物的阶段」，而 2026-10-03 阶段 9/6e 都登记了
+    #    交付物 ⇒ 这条变异再也验不到 V2。** 当场是这条 `assert` 拦住的（它比沉默好，
+    #    但它只能告诉我「坏了」不能替我修）。
+    # ⚠️ 这是**前提过期**，与 V4 第一版、与回归闸 R0 的变异是同一个病：
+    #    变异把前提**寄托在现状**上，而现状正是它要验的东西在推进。
+    #    ⇒ 和 V1 那条一样，**注入一个全新的阶段号**：它定义上就没有交付物登记，
+    #      前提**不可能**过期（锚是表头那一行，它是表的结构不是某个阶段的状态文字）。
+    assert "98" not in declared_done(), "阶段 98 居然存在？换一个号"
+    expect("V2", "🔴 插一条没登记任何交付物的新阶段并声明 ✅（前提不会过期）",
+           _mutate_plan(orig, _HDR,
+                        _HDR + "\n| **98** | 变异用的假阶段（没登记交付物）| ✅ 已完成 | — | — |"))
     # M3 欠账表之后塞一条游离记账 → V3 红
     expect("V3", "在欠账表之后塞一条游离的 📋",
            orig + "\n\n📋 新记一笔：这条没进表，V3 必须逮到。\n")
@@ -794,8 +870,17 @@ def mutate():
     expect("V4", "依赖倒挂①：把阶段 5 按回 ⬜ 而阶段 9 标 ✅（自己造出前提）",
            _set_stage_mark(_set_stage_mark(orig, "5", "⬜ 未开始") or orig,
                            "9", "✅ 已完成"))
-    expect("V4", "依赖倒挂②：阶段 8 未完成（🔄）而阶段 9 标 ✅",
-           _set_stage_mark(orig, "9", "✅ 已完成"))
+    # 🔴🔴🔴 **同一个病的第二条也中了，而且是前一条的注释正下方。**
+    #    ①修好之后②还写着「阶段 8 未完成（🔄）」—— 它**寄托在现状上**：
+    #    2026-10-05 把阶段 8 的状态文字从过期的 🔄 改成 ✅ 之后，这条变异只改阶段 9，
+    #    **造不出任何倒挂** ⇒ V4 当场「没逮到」。
+    # ⚠️ 代价是它**只在事情做对之后才发作** —— 把过期的状态文字订正成真实状态，
+    #    是一次纯粹的改进，而它悄悄把一条变异变成了空操作。
+    #    这是 48 小时内的**第五次**（V4①／R0／V2／V11／这一条）⇒ 顶层 **B20**。
+    # ⇒ 规矩写死：**每条变异都要把自己的前提一起注入**，一个 `现状` 字都不许依赖。
+    expect("V4", "依赖倒挂②：把阶段 8 按回 🔄 而阶段 9 标 ✅（自己造出前提）",
+           _set_stage_mark(_set_stage_mark(orig, "8", "🔄 进行中") or orig,
+                           "9", "✅ 已完成"))
     # M5 加一条没有推翻条件的否定结论 → V5 红
     expect("V5", "加一条「有意不做」而不写推翻条件",
            orig + "\n\n- 这一层**有意不做**。\n")
@@ -806,11 +891,29 @@ def mutate():
     expect("V7", "把一条 `es ` 的账塞进欠账表",
            _mutate_plan(orig, "| **W1** |", "| **W9** | es 那边也有这个毛病 | — | — | — |\n| **W1** |"))
     # M7b/M7c 带锁的豁免，**两头各验一次**（单向的锁只是个下限）
-    _W14 = "| **W14** | 🔴 **新开**"
-    expect("V11", "账那头：把 W14 标成已结清，而例句中文还是 0.90%",
-           _mutate_plan(orig, _W14, "| **W14** | ✅ **已结清** 占位"))
-    expect("V11", "账那头：把 W14 整行从欠账表里删掉（豁免失去它的账）",
-           _mutate_plan(orig, _W14, "| **W99** | 占位"))
+    #
+    # 🔴🔴🔴 **第一版锚在真实的 W14 上，而 6e 跑完之后 W14 结清、
+    #    `COVERAGE_PENDING` 清空 ⇒ 三条 V11 变异全部锚失效。**
+    #    这是**同一个病今天第三次**（回归闸 R0、本闸 V2，现在 V11），
+    #    加上 2026-10-02 的 V4 是第四次。形状完全一样：
+    #      **变异把自己的前提寄托在现状上，而现状正是它要验的东西在推进。**
+    #    ⇒ ⭐ **变异必须自带前提**：临时往 `COVERAGE_PENDING` 注入一个**假的**豁免项
+    #      （指向一个假的欠账号），再对那一条做两头的变异。
+    #      这样它与「6e 做完没做完」「W14 结清没结清」**彻底脱钩**。
+    _FK = "变异用的假豁免项"
+    COVERAGE_PENDING[_FK] = (
+        "SELECT COUNT(*) FROM example WHERE hidden=0",     # 分子＝分母 ⇒ 100%
+        "SELECT COUNT(*) FROM example WHERE hidden=0",
+        999.0,          # 门槛设得极高 ⇒ 数据那头**不会**响，只验账那头
+        "W97")
+    _FAKE_ROW = "| **W97** | 🔴 **新开**：变异用的假欠账 | — | — | — |\n"
+    _withfake = _mutate_plan(orig, "| **W1** |", _FAKE_ROW + "| **W1** |")
+    try:
+        expect("V11", "账那头：豁免指着的欠账被标成已结清，而现状还在门槛以下（自带前提）",
+               _withfake.replace("| **W97** | 🔴 **新开**", "| **W97** | ✅ **已结清**"))
+        expect("V11", "账那头：豁免指着的欠账整行不见了（自带前提）", orig)
+    finally:
+        del COVERAGE_PENDING[_FK]
     con.close()
 
     # M7d 数据那头：现状爬过门槛而没搬进 `COVERAGE` ⇒ V11 必须红。
@@ -819,11 +922,14 @@ def mutate():
     #    代价与它验的东西不成比例。M1 注入 `DELIVERABLE["99"]`、M9 弹掉 `CHECKS`
     #    是同一种做法。**等价性**：V11 判的是 `pct >= until`，压门槛与抬覆盖率
     #    走的是同一个分支、同一条消息。
-    _K = "例句中文（读者口径）"
-    _saved = COVERAGE_PENDING[_K]
-    COVERAGE_PENDING[_K] = _saved[:2] + (0.5, _saved[3])
+    # ⚠️ 同样**自带前提**：注入一个门槛压到 0 的假豁免项，它一定爬过门槛。
+    #    等价性：V11 判的是 `pct >= until`，压门槛与抬覆盖率走同一个分支、同一条消息。
+    _K = "变异用的假豁免项（数据那头）"
+    COVERAGE_PENDING[_K] = (
+        "SELECT COUNT(*) FROM example WHERE hidden=0",
+        "SELECT COUNT(*) FROM example WHERE hidden=0", 0.5, "W15")
     hit11 = any(c == "V11" for c, _ in check_brief())
-    COVERAGE_PENDING[_K] = _saved
+    del COVERAGE_PENDING[_K]
     ok &= hit11
     print("   %s V11  数据那头：现状爬过门槛而没搬进 `COVERAGE`"
           % ("✅" if hit11 else "🔴 没逮到"))

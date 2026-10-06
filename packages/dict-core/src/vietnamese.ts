@@ -109,6 +109,13 @@ export type VietnamesePointer = {
   lang: string;
   text: string;
   src: string;
+  /** 源头 `form_of`/`alt_of` 给的目标词形；源头没给结构字段时是 null。
+   *  🔴 **不许在展示层从 `text` 里用正则抠** —— `text` 是自由文本
+   *  （`initialism of Hoa Kỳ (= United States): a country in North America: US`）。 */
+  target: string | null;
+  /** 目标在 `dict` 里才可点。🔴 这是关系层 `targetId` 为 NULL 时的既有约定：
+   *  点下去是空白页比不能点更坏（W9 那 2,238 行死链）。 */
+  targetId: number | null;
 };
 
 export type VietnameseEntryView = {
@@ -267,8 +274,18 @@ export class VietnameseDictService {
       `),
 
       // 🔴 W10：`ref` 是**出处**。端成独立字段，与译文分开。
+      // 🔴🔴 W16：读的是 `text_pub`（**出版正文**），不是 `text`（证据层）。
+      //    fr 版是一部越→法双语词典，它的例句一格里装着「越南语搭配 : 法语释义」：
+      //        Nắng to : il fait grand soleil.
+      //    法语是**那一版的释义语言**，三语方针（中＋英＋越）说页面上不该有它，
+      //    而它在 `example_gloss` 里没有家（那张表只收三语）⇒ 只能留在 `text` 里。
+      //    用户 2026-10-05 定的口径：**页面不印、证据层原样保留**。52 条。
+      // ⚠️ **不许写 `COALESCE(x.text_pub, x.text)`。** 那是本仓库反复栽的「体面兜底」
+      //    （`[[it-display-layer-stage8]]`：`|| g.kind` 把缺失的中文名伪装成英文内容）——
+      //    重建时忘填这一列，兜底会让页面看起来完全正常，而我们永远发现不了。
+      //    回归闸 **P17** 查「可出版行的 `text_pub` 全部非空」，忘填就判红。
       examples: this.db.prepare(`
-        SELECT x.sense_id AS senseId, x.text, x.ref,
+        SELECT x.sense_id AS senseId, x.text_pub AS text, x.ref,
                (SELECT text FROM example_gloss WHERE example_id = x.id AND lang='zh') AS zh,
                (SELECT text FROM example_gloss WHERE example_id = x.id AND lang='en') AS en
         FROM example x
@@ -287,9 +304,20 @@ export class VietnameseDictService {
       `),
 
       // 🔴 W15：证据层的指针义项。**只在没有可出版义项时才印**（调用方判断）。
+      // 🔴🔴 **`ptr_class = 'pointer'` 这一条是 W15 的真修复。**
+      //    第一版没有它 ⇒ 读者在「这个词形指向」标题下看到的 17,418 行里
+      //    **13,887 条（79.7%）整段只是这个词自己的汉字表记**（`nhất vị` → `一味`），
+      //    而同一页上方已经有「汉字表记」区印着同一串字。
+      //    ⭐ 那是 W2 的病在第三个地方复发（义项释义 / 词源正文 / 指针区），
+      //      判据 `criteria.pointer_class()`，派生列 `sense_src.ptr_class`。
+      // 🔴 `LEFT JOIN` 不是 `JOIN`：目标不在 `dict` 里时**仍然要印这一行**
+      //    （照原文印成纯文本），只是不可点 —— 丢掉它等于把源头说过的话吞掉。
       pointers: this.db.prepare(`
-        SELECT lang, text, src FROM sense_src
-        WHERE word_id = ? AND sense_id IS NULL ORDER BY id
+        SELECT s.lang, s.text, s.src, s.pointer_target AS target, d.id AS targetId
+        FROM sense_src s
+        LEFT JOIN dict d ON d.word = s.pointer_target
+        WHERE s.word_id = ? AND s.sense_id IS NULL AND s.ptr_class = 'pointer'
+        ORDER BY s.id
       `),
     };
   }

@@ -59,6 +59,11 @@ const VIEWS: Array<[string, string]> = [
   ['en', 'EnglishEntryView'], ['es', 'SpanishEntryView'], ['it', 'ItalianEntryView'],
   ['fr', 'FrenchEntryView'], ['pt', 'PortugueseEntryView'], ['de', 'GermanEntryView'],
   ['ja', 'JapaneseEntryView'], ['ko', 'KoreanEntryView'],
+  // 🔴 2026-10-03 补登记。**这道闸的自检当场就逮到它没登记** ——
+  //    而它在 vi 的阶段 9 里从头到尾没被跑过一次。
+  //    `[[lesson-must-become-mechanism]]`：「闸存在／有入口／覆盖这门语言／真被跑」
+  //    是**四道独立关卡**，vi 过了前两道就被当成过了四道。
+  ['vi', 'VietnameseEntryView'],
 ];
 
 // 🔴 登记表与源码对账：漏登记一个视图，本闸会把它的类名算到别人头上。
