@@ -41,7 +41,7 @@
  * 用法（仓库根目录）：
  *     npx tsx --tsconfig apps/web/tsconfig.json apps/web/src/dispatch-audit.ts
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = process.cwd();
@@ -126,22 +126,66 @@ if (missing.length) {
     + `\n      ${missing.join('、')}`);
 }
 
-// ── ③ 这道闸自己的闸：登记表与 `getService` 的口径对账 ──────────────────
-// 🔴 `SERVICES` 是手写的登记表 ⇒ 它自己也会漏。拿 API 那边的语种名单对一次。
-const apiPath = join(ROOT, 'apps/api/src/index.ts');
-if (existsSync(apiPath)) {
-  const api = stripComments(readFileSync(apiPath, 'utf8'));
-  const apiLangs = new Set([...api.matchAll(/['"]([a-z]{2})['"]\s*:/g)].map((m) => m[1])
-    .filter((l) => /^(en|es|it|fr|pt|de|ja|ko|vi)$/.test(l)));
-  const declared = new Set(SERVICES.map(([l]) => l));
-  const unlisted = [...apiLangs].filter((l) => !declared.has(l));
-  if (unlisted.length) {
-    bad += unlisted.length;
-    console.log(`\n   🔴 API 认识而本闸的 \`SERVICES\` 没登记的语种：${unlisted.join(' ')}`
-      + '\n      —— 漏登记一门，这道闸就对那一门结构性失明。');
+// ── ③ 这道闸自己的闸：登记表与**运行时注册表**对账 ─────────────────────
+// 🔴 `SERVICES` 是手写的登记表 ⇒ 它自己也会漏。
+//
+// 🔴🔴🔴 **2026-10-07（开 ru 第一天）发现：这条自检从 10-06 建起就是空过的。**
+//    原来它读 `apps/api/src/index.ts`、用 `/['"]([a-z]{2})['"]\s*:/` 找语种码，
+//    再用写死的 `/^(en|es|it|fr|pt|de|ja|ko|vi)$/` 过滤。而**API 里根本没有语种表**
+//    （`langs` 是从 dict-core 的 health 探活结果算出来的）⇒ `apiLangs` 恒为空集
+//    ⇒ `unlisted` 恒为空 ⇒ **永远印 ✅**。
+//    ⚠️ 逮到它的方式只有一个：**变异验证** —— 从 `SERVICES` 里摘掉 `vi`，
+//      它照样印「✅ 本闸登记 8 门，API 认识的都在里面」。
+//    ⭐ 两条教训在同一行代码上叠着：
+//      · `[[expectation-must-be-declared]]`：两边同时为空的 `A ⊆ B` 恒真，信号量为零；
+//      · 写死的九门白名单＝`[[gate-registers-status-quo-as-spec]]`，
+//        第十门出现时它会把 ru **筛掉**，于是连「漏登记」都报不出来。
+//      ⇒ 修的不是白名单，是**锚**：换到真正握着名单的那个文件上。
+//
+// ⇒ 真正的登记表是 `packages/dict-core/src/index.ts` 的 `LANGUAGES`（前端语种列表）
+//   ＋ `getService()` 的 `lang === 'xx'` 链（谁有专属服务）。两份都查，口径不同：
+//     · `LANGUAGES` 少登记一门 ⇒ 这道闸对它失明（本条要治的就是这个）
+//     · `getService` 有专属服务而 `SERVICES` 没登记 ⇒ ②（lang 字段）漏查那一门
+const corePath = join(CORE, 'index.ts');
+if (!existsSync(corePath)) {
+  bad += 1;
+  console.log(`\n   🔴 找不到语种注册表 ${corePath} —— 本自检的锚没了，`
+    + '**这不是「通过」**。');
+} else {
+  const core = stripComments(readFileSync(corePath, 'utf8'));
+  const inLanguages = [...core.matchAll(/\bcode:\s*'([a-z]{2})'/g)].map((m) => m[1]);
+  const inGetService = [...core.matchAll(/lang\s*===\s*'([a-z]{2})'/g)].map((m) => m[1]);
+  const registry = new Set([...inLanguages, ...inGetService]);
+  // 🔴 **一个都没找到就判红。** 空结果不是证据 —— 上面那段就是栽在这儿。
+  if (registry.size === 0) {
+    bad += 1;
+    console.log('\n   🔴 在 `dict-core/index.ts` 里一个语种码都没认出来 ——'
+      + '\n      注册表的写法变了？**本自检的判据要跟着改，不许当成「全都登记了」。**');
   } else {
-    console.log(`\n   ✅ 登记表自检：本闸登记 ${declared.size} 门，API 认识的都在里面`);
+    const declared = new Set(SERVICES.map(([l]) => l));
+    const unlisted = [...registry].filter((l) => !declared.has(l));
+    console.log(`\n   登记表自检：\`LANGUAGES\` ${inLanguages.length} 门 ／ `
+      + `\`getService\` 专属服务 ${new Set(inGetService).size} 门 ／ 本闸登记 ${declared.size} 门`);
+    if (unlisted.length) {
+      bad += unlisted.length;
+      console.log(`   🔴 注册表认识而本闸的 \`SERVICES\` 没登记的语种：${unlisted.join(' ')}`
+        + '\n      —— 漏登记一门，这道闸就对那一门结构性失明。');
+    } else {
+      console.log('   ✅ 注册表里的每一门都在 `SERVICES` 里');
+    }
   }
+  // ── 第三个锚：**磁盘**。仓库里有 `<xx>/paths.py` 的目录就是一门在做的语言。
+  //    它与上面两条的分工：注册表回答「上线了几门」，磁盘回答「在做几门」。
+  //    🔴 差额**不判红** —— 正在做而还没上线是正常状态（ru 今天就是）。
+  //    但必须**印出来**：ja 的词源层缺席三个月、ko 的 3 道闸从没人跑过，
+  //    都是「没人把在做的那门和上线的那门摆在一起看」。
+  const langDirs = readdirSync(ROOT, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && /^[a-z]{2}$/.test(d.name)
+      && existsSync(join(ROOT, d.name, 'paths.py')))
+    .map((d) => d.name).sort();
+  const notLive = langDirs.filter((l) => !SERVICES.some(([s]) => s === l));
+  console.log(`   磁盘上在做 ${langDirs.length} 门（${langDirs.join(' ')}）`
+    + (notLive.length ? `；其中**还没有服务**的：${notLive.join(' ')}（在做中，不判红）` : ''));
 }
 
 console.log(bad ? `\n🔴 ${bad} 处` : `\n✅ ${SERVICES.length} 门：分发都走得到、服务都返回 lang`);

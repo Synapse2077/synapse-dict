@@ -26,7 +26,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LANGS = ("en", "es", "it", "fr", "pt", "de", "ja", "ko", "vi")
+LANGS = ("en", "es", "it", "fr", "pt", "de", "ja", "ko", "vi", "ru")
 
 
 def _discover():

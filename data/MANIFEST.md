@@ -3,10 +3,10 @@
 > 由 `scripts/gen_manifest.py` 生成。事实自动扫，**来历与用途**在该脚本的 `NOTES` 里手工维护。
 > 数据有增减时重跑：`python3 scripts/gen_manifest.py > data/MANIFEST.md`
 
-生成时间：2026-09-28 13:55
+生成时间：2026-10-07 12:28
 
 
-## 成品库 `data/db/` —— 12 个文件，15.6 GB
+## 成品库 `data/db/` —— 13 个文件，15.8 GB
 
 | 文件 | 大小 | 修改日 | 是什么 | 来历 |
 |---|---|---|---|---|
@@ -19,11 +19,12 @@
 | `db/synapse-dict-ko.sqlite` | 633.6 MB | 2026-09-27 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/synapse-dict-ja.sqlite` | 470.9 MB | 2026-09-20 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/ecdict.sqlite` | 322.4 MB | 2026-05-16 | ECDICT 原始库 | en 的基座（译文/词频/考试标签），第三方数据集 |
-| `db/synapse-dict-en.sqlite-shm` | 32 KB | 2026-09-28 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `db/synapse-dict-vi.sqlite` | 193.0 MB | 2026-10-06 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `db/synapse-dict-en.sqlite-shm` | 32 KB | 2026-10-07 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `db/en.db` | 0 B | 2026-09-07 | — | — |
 | `db/synapse-dict-en.sqlite-wal` | 0 B | 2026-09-18 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 
-## 原始 dump `data/dumps/` —— 53 个文件，11.8 GB
+## 原始 dump `data/dumps/` —— 60 个文件，12.2 GB
 
 | 文件 | 大小 | 修改日 | 是什么 | 来历 |
 |---|---|---|---|---|
@@ -39,22 +40,29 @@
 | `dumps/dewiktionary.jsonl.gz` | 286.5 MB | 2026-08-01 | kaikki 各语言版**整包** | https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4 |
 | `dumps/stardict.csv` | 221.9 MB | 2025-01-02 | ECDICT 原始 CSV | 同上，建库源 |
 | `dumps/zhwiktionary.jsonl.gz` | 215.1 MB | 2026-08-01 | kaikki 各语言版**整包** | https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4 |
+| `dumps/kaikki.org-ruwiktionary-Russian.jsonl.gz` | 192.9 MB | 2026-10-07 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-dictionary-Korean.jsonl` | 191.6 MB | 2026-09-20 | kaikki 英文版 per-language 切片 | https://kaikki.org/dictionary/<Language>/ —— 六个库的**建库基准**；释义为英文 |
 | `dumps/kaikki.org-jawiktionary-Japanese.jsonl` | 181.3 MB | 2026-09-15 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-kowiktionary-Korean.jsonl` | 140.6 MB | 2026-09-20 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/eswiktionary.jsonl.gz` | 95.8 MB | 2026-08-01 | kaikki 各语言版**整包** | https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4 |
+| `dumps/kaikki.org-dictionary-Russian.jsonl.gz` | 86.1 MB | 2026-10-07 | kaikki 英文版 per-language 切片 | https://kaikki.org/dictionary/<Language>/ —— 六个库的**建库基准**；释义为英文 |
 | `dumps/kaikki.org-frwiktionary-Italian.jsonl.gz` | 61.7 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/itwiktionary.jsonl.gz` | 38.0 MB | 2026-08-01 | kaikki 各语言版**整包** | https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4 |
 | `dumps/ptwiktionary.jsonl.gz` | 33.6 MB | 2026-08-01 | kaikki 各语言版**整包** | https://kaikki.org/<xx>wiktionary/ —— ⚠️ 是**多语种**整包（fr 版法语只占 28.4%、zh 版中文占 9.9%），按 lang_code 筛。今后应下 per-language 切片而非整包，见 docs/FRAMEWORK.md §2.4 |
+| `dumps/kaikki.org-frwiktionary-Russian.jsonl.gz` | 15.8 MB | 2026-10-07 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-dictionary-Vietnamese.jsonl.gz` | 12.1 MB | 2026-09-28 | kaikki 英文版 per-language 切片 | https://kaikki.org/dictionary/<Language>/ —— 六个库的**建库基准**；释义为英文 |
+| `dumps/kaikki.org-zhwiktionary-Russian-trad.jsonl.gz` | 8.3 MB | 2026-10-07 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-viwiktionary-Vietnamese.jsonl.gz` | 7.6 MB | 2026-09-28 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-zhwiktionary-Italian-trad.jsonl.gz` | 7.6 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-zhwiktionary-Korean-simp.jsonl.gz` | 6.2 MB | 2026-09-20 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
+| `dumps/kaikki.org-zhwiktionary-Russian-simp.jsonl.gz` | 5.3 MB | 2026-10-07 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-trwiktionary-French.jsonl.gz` | 4.7 MB | 2026-08-21 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-nlwiktionary-French.jsonl.gz` | 3.6 MB | 2026-08-21 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-elwiktionary-French.jsonl.gz` | 3.4 MB | 2026-08-21 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
+| `dumps/kaikki.org-viwiktionary-Russian.jsonl.gz` | 3.4 MB | 2026-10-07 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-ruwiktionary-French.jsonl.gz` | 3.3 MB | 2026-08-21 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-zhwiktionary-Korean-trad.jsonl.gz` | 2.9 MB | 2026-09-20 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
+| `dumps/kaikki.org-plwiktionary-Russian.jsonl.gz` | 2.7 MB | 2026-10-07 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-elwiktionary-Italian.jsonl.gz` | 2.7 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-zhwiktionary-Vietnamese-trad.jsonl.gz` | 2.5 MB | 2026-09-28 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
 | `dumps/kaikki.org-trwiktionary-Italian.jsonl.gz` | 2.4 MB | 2026-08-12 | kaikki **非英文版** per-language 切片 | https://kaikki.org/<xx>wiktionary/<本地语种名>/ —— 已按语种切好，无需按 lang_code 筛；取数依据见 data/work/it/probe/ 的探测存档，各版本负责哪些字段见 docs/lang/<xx>-CONVENTIONS.md |
@@ -92,7 +100,7 @@
 | `refs/jlpt-waller/n5.csv` | 23 KB | 2026-09-19 | JLPT N5–N1 词表（民间重建） | https://github.com/stephenmk/yomitan-jlpt-vocab 的 original_data/，原作者 Jonathan Waller，**CC BY**。🔴 JLPT 官方 2010 年后**不再公布词汇表**，此表是 educated guess ⇒ **只当内部尺子（`dict.core_level`），不作读者可见的难度标签**；署名义务见该目录 README |
 | `refs/jlpt-waller/README.md` | 2 KB | 2026-09-19 | JLPT N5–N1 词表（民间重建） | https://github.com/stephenmk/yomitan-jlpt-vocab 的 original_data/，原作者 Jonathan Waller，**CC BY**。🔴 JLPT 官方 2010 年后**不再公布词汇表**，此表是 educated guess ⇒ **只当内部尺子（`dict.core_level`），不作读者可见的难度标签**；署名义务见该目录 README |
 
-## 写库备份 `data/backups/` —— 28 个文件，22.7 GB
+## 写库备份 `data/backups/` —— 30 个文件，23.1 GB
 
 | 文件 | 大小 | 修改日 | 是什么 | 来历 |
 |---|---|---|---|---|
@@ -119,13 +127,15 @@
 | `backups/synapse-dict-it.pre-keep-v3-entry-20260813-102957.bak` | 202.3 MB | 2026-08-12 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-it.pre-keep-v2-dropcols-20260812-222701.bak` | 201.9 MB | 2026-08-12 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-es.pre-keep-ipanorm-20260801-160542.bak` | 200.4 MB | 2026-08-01 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-vi.pre-sync-vi-example-layer-20261005-151611.bak` | 193.0 MB | 2026-10-05 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
+| `backups/synapse-dict-vi.pre-vi-w20-js-residue-20261006-135730.bak` | 193.0 MB | 2026-10-06 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-it.pre-keep-v2-schema-20260812-222550.bak` | 148.2 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-de.pre-keep-v3-schema-20260831-210922.bak` | 111.1 MB | 2026-08-10 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-pt.pre-keep-v3-schema-20260829-175040.bak` | 109.2 MB | 2026-08-29 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-en.pre-ipanorm-20260801-193715.bak-shm` | 32 KB | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 | `backups/synapse-dict-en.pre-ipanorm-20260801-193715.bak-wal` | 0 B | 2026-08-11 | 六语种成品库 | 各语种 build.py 从 dumps/kaikki.org-dictionary-* 建，后经 enrich/翻译/修复多轮 |
 
-## 过程产物 `data/work/` —— 3785 个文件，2.7 GB
+## 过程产物 `data/work/` —— 3806 个文件，2.7 GB
 
 | 语种 | 文件数 | 大小 |
 |---|---|---|
@@ -138,7 +148,8 @@
 | ja | 12 | 12.3 MB |
 | ko | 39 | 6.7 MB |
 | pt | 26 | 43.8 MB |
-| vi | 4 | 34 KB |
+| ru | 3 | 65 KB |
+| vi | 22 | 9.6 MB |
 
 过程产物按语种分放；具体文件类型的来历见下表。
 
@@ -173,4 +184,4 @@
 
 ---
 
-**合计 55.2 GB**。全部 gitignore，不进版本库：源数据靠下载、产物靠脚本重生成、备份靠本地保管。
+**合计 56.1 GB**。全部 gitignore，不进版本库：源数据靠下载、产物靠脚本重生成、备份靠本地保管。
