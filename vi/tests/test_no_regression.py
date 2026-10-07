@@ -35,6 +35,7 @@ vi 的展示层（`packages/dict-core/src/vietnamese.ts`）**还不存在** ⇒ 
     python3 vi/tests/test_no_regression.py
     python3 vi/tests/test_no_regression.py --mutate
 """
+import re
 import sys
 from pathlib import Path
 
@@ -51,6 +52,10 @@ import stage6_sources as S6                                        # noqa: E402
 # 🔴 W16 的中文列判据住在填充器里（`_decide`），**这里 import 它不重写** ——
 #    第三份实现就是第三种口径，而外锚闸今天刚栽过「闸自己重写判据」那一跤。
 import fix_w16_edition_gloss as FIXW16                             # noqa: E402
+# 🔴 W23 的判据（越南语六声的英文名）住在 W17 的收割器里 —— 同样 import 不重抄：
+#    手抄一份「六声的英文名」清单是这仓库最熟悉的那种自伤
+#    （`[[criteria-narrower-than-you-think]]`：判据比它要描述的东西更宽/更窄）。
+from collect_w17_relations import TONE_LABELS                      # noqa: E402
 from criteria import (gloss_has_content, is_han_headword,           # noqa: E402
                       is_vi_markup_gloss, norm_vi, DUP_SENSE_WHY)
 
@@ -84,7 +89,10 @@ READ_PATH = [
 
     ("P2", "例句：写入列 vs 展示层（`x.hidden = 0`）",
      "SELECT COUNT(*) FROM example",
-     "SELECT COUNT(*) FROM example WHERE hidden = 0", 2057,
+     "SELECT COUNT(*) FROM example WHERE hidden = 0", 2059,
+     "🔴 **基线 2,057 → 2,059（2026-10-06，W20 结清）**：fr 版 2 条 JS 实参残渣"
+     "（`','vietphap','on')\"morale`）隐藏。它们 `hidden=0` 在页面上躺了三天 —— "
+     "2026-10-03 量到就只落了账，而账上写的结清条件是「锁住 3 条」。见 **P33**。"
      "差额 1,514 ＝ 喃字正文 1,210 ＋ 整条就是词本身 71 ＋ **ko 版韩语标签行 45** ＋ 2 "
      "＋ **6e 清洗的 256**（源头没给越南语 110 ＋ 元数据 103 ＋ 整条只有出处 43）。"
      "🔴 **基线 2,011 → 2,057（2026-10-05，W25 的连带）**：折叠义项之后，两条义项的例句并到了同一格 ⇒ W24 的去重判据跟着生效，**又隐藏 46 条**。⭐ 这不是新缺陷，是 W24 的判据在新的数据上继续起作用 —— 而「折叠会制造新的同格重复」这件事我是从 `--sync` 报的「变成隐藏 46」里看出来的，**没有那一行输出我不会想到去查**。"
@@ -686,6 +694,139 @@ def py_checks(con):
                 "⚠️ `near-synonym` 那 52 条**有意不收**：`KINDS` 里没有这个 kind，"
                 "塞进 `synonym` 等于改写源头的分级，而它们的目标**全部已在关系层**"))
 
+    # ══════════════════════════════════════════════════════════════════════
+    # 🔴🔴🔴 **2026-10-06：给「开着而没有闸盯着」的那几笔账各配一道闸。**
+    #
+    # 当天用户问「vi 完成度多少了」，我去量了一遍，量出来的事实是：
+    #     29 笔账结清 19、开着 10 —— 而**开着的 10 笔里只有 2 笔有闸**（W11→Y17、W21→P16）。
+    # 🔴 而我**第一次量还量错了一次**：正则把 `**W3**` 自己当成了闸名
+    #    （「闸 W3」），于是 10 笔全报「有闸」。**改掉正则才看见真相。**
+    #    `[[criteria-narrower-than-you-think]]` 的镜像：判据太宽 ⇒ 全绿是假的。
+    # ⚠️ 顺带纠正我自己在同一轮对话里说过的一句错话：「剩下的欠账都有闸盯着」。
+    #    W8 确实有（A6 两头都查 ＋ P4 锁 7），但那是 10 笔里的个别。
+    #
+    # ⭐ 为什么「开着的账」也必须有闸：`[[fix-regression-and-gate]]` ——
+    #   量过、写进账本、然后就没人再看了，是这仓库最常见的一种失明。
+    #   账上的数字**没有任何东西数过**，所以它既不会因为变大而红（源头长出新的），
+    #   也不会因为变小而红（有人用删数据来「修」欠账）。
+    # ── W18：`^(…)` 上标残渣在**别的三列**上（2026-10-06 配闸）──────────
+    # ⚠️ 判据**残留型**：`S6.sup_residue()` 先跑一遍 `clean_markup` 再问「还留着吗」。
+    #    于是两个方向都有信号 —— 清洗伸到这三列上 ⇒ 数字掉 ⇒ 红；
+    #    `_SUPERSCRIPT_NOTE` 被删掉 ⇒ 例句正文那 58 处又冒出来 ⇒ 红。
+    #    写成 `LIKE '%^(%'` 的话第一个方向就哑了（判据与被判的东西脱钩）。
+    _w18 = {}
+    for _tag, _t, _c, _want in (("P29", "example", "ref", 90),
+                                ("P30", "sense_gloss", "text", 46),
+                                ("P31", "etymology", "text", 2)):
+        _vals = [v for (v,) in con.execute("SELECT %s FROM %s" % (_c, _t)) if v]
+        _w18[_tag] = (sum(1 for v in _vals if S6.sup_residue(v)),
+                      sum(1 for v in _vals if "^(" in v), _want)
+    out.append(("P29", "W18：`example.ref` 里残留的 `^(…)` 上标（残留型）",
+                _w18["P29"][0], 90,
+                "🔴 **已接受基线 90**（原始计数 93，差的 3 条是 `clean_markup` 现成就能"
+                "修的方括号那一族）。`^(https://vi.wikisource.org/wiki/Truyện_Kiều_…)` ——"
+                "Truyện Kiều 的 wikisource 链接。有意不在 6e 那一轮处理："
+                "它们**不在付费载荷里**（6e 只翻 `example.text`），"
+                "而「`ref` 里的 URL 该不该上页面」是另一个问题。"
+                "⚠️ **这个数掉下去也要红** —— 掉了说明清洗伸过来了，那时账要跟着改"))
+    out.append(("P30", "W18：`sense_gloss.text` 里残留的 `^(…)` 上标（残留型）",
+                _w18["P30"][0], 46,
+                "46 行。与 P29 同一族、不同列。⚠️ 三列分开锁不合成一个总数："
+                "`[[dont-say-source-lacks-what-we-skipped]]` 的同一个道理 ——"
+                "合成总数之后「某一列整个被清空」和「另一列长出同样多」互相抵消，"
+                "而那两件事一个是修复一个是回归"))
+    out.append(("P31", "W18：`etymology.text` 里残留的 `^(…)` 上标（残留型）",
+                _w18["P31"][0], 2,
+                "2 行（原始计数 3）。量级最小的一列，而它**必须单独有一条** ——"
+                "W18 的结清动作是「`clean_markup` 施用到三列上」，三列各一条"
+                "才分得出「做了一列」和「三列都做了」"))
+    out.append(("P32", "W18：`clean_markup` 还没有被施用到这三列上（原始−残留）",
+                sum(raw - res for res, raw, _w in _w18.values()), 4,
+                "🔴🔴 **这一条锁的是「这笔账还开着」本身。** 4 ＝ `ref` 3 ＋ "
+                "`etymology` 1 ＝ 现成的 `_SUPERSCRIPT_NOTE`（方括号那一族）"
+                "**已经能修而还没有被调用**的那部分。"
+                "⇒ 哪天有人把 `clean_markup` 接到这三列上，这个差额归 0 ⇒ 当场红 ⇒ "
+                "**逼人回来把 W18 划掉**。`[[lesson-must-become-mechanism]]`："
+                "「结清条件写在账上」不是机制，「做完了会有东西红」才是。"
+                "⭐ 它与 P29–P31 响的是**两件不同的事**："
+                "P29–P31 红＝有人写了 URL 版的清洗；P32 红＝有人把现成的清洗接过来了"))
+    # ── W20：fr 版的 JS 实参残渣（2026-10-06 当天结清）────────────────
+    out.append(("P33", "🔴 W20：出版层没有整条只是 JS 标记残渣的例句",
+                sum(1 for (t,) in con.execute(
+                    "SELECT text FROM example WHERE hidden = 0") if S6.is_js_residue(t)), 0,
+                "法语维基的 `onclick=\"javascript:…('morale','vietphap','on')\"` 漏进 "
+                "`examples` ⇒ `phá hoại` 和 `nhũng` 的页面上印着 "
+                "`','vietphap','on')\"morale`。"
+                "🔴🔴 **2026-10-03 就量到了，只落账没动手，而它们 `hidden=0` ——"
+                "三天里一直在页面上。** 2026-10-06 配闸时才看见这件事，"
+                "⇒ 没有照账上写的「锁住 3 条」办：那等于把读者看得见的缺陷登记成规格"
+                "（`[[gate-registers-status-quo-as-spec]]`），改成当天清掉、闸锁 **0**。"
+                "⚠️ 判据按**结构**写不按词表写（匹配 HTML 属性值的实参列表边界 `','…')\"`），"
+                "写成 `'vietphap'` 的话换个法语模板名就一条都抓不到。"
+                "🔴 而它**必须比「有残渣」更窄**：同一版另有 4 条**带可读内容**的"
+                "同源残渣（`'tỉnh, province` 是 W16 那一族、`'chuồng ngựa` 只是多个引号）——"
+                "一起判成「不是例句」会删掉可读的内容，而那比留着残渣更坏"))
+    # ── W23：声调范式表（2026-10-06 配闸，结论＝有意不收进关系层）──────
+    _tone = 0
+    for (_t,) in con.execute("SELECT text FROM example WHERE hidden = 1 AND hidden_why = ?",
+                             (S6.HIDDEN_META_NOT_EXAMPLE,)):
+        if ":" in _t and _t.split(":", 1)[0].strip().lower() in TONE_LABELS:
+            _tone += 1
+    out.append(("P34", "W23：声调范式表还在库里、还是隐藏的（属音标层，不进关系层）",
+                _tone, 18,
+                "`level tone: y` ／ `high rising: ý` ／ `low falling: ỳ` …… "
+                "字母条目（`y`/`ơ`/`ô`）列出那个元音的**六个声调**，是音系元数据不是例句。"
+                "⚠️ 判据 `TONE_LABELS` **import 自 W17 的收割器**，不在这里手抄 ——"
+                "手抄一份「六声的英文名」是这仓库最熟悉的那种自伤。"
+                "⭐ 两头都查的意思：量级掉了＝有人把它们删了（证据丢失，不可逆）；"
+                "量级涨了＝源头又给了新的字母条目，那时要回来确认它们也是元数据。"
+                "📋 **归属的否定结论**：它们**有意不进关系层**（W17 那 30 条进了，这 18 条不进）——"
+                "收进音标层要先回答「越南语六声在 `pronunciation` 里怎么表示」"
+                "（新 `kind`？新表？），那是一个独立的建模问题。"
+                "🔴 什么会推翻：音标层出现了「声调」这一维（比如要印每个字的调类），"
+                "那时这 18 条是现成的真值集"))
+    # ── W27：`sense.rank` 恒 0（2026-10-06：**带锁的豁免**）────────────
+    # 🔴🔴 这两条是一对，缺一条就不是机制：
+    #    P35 红 ＝ 有人给 `rank` 填了值（那就该把它放回 ORDER BY）
+    #    P36 红 ＝ `rank` 还是恒 0 而 ORDER BY 里又出现了它（哨兵回来了）
+    #    ⚠️ 只有 P35 的话，「rank 恒 0 而查询里写着它」会一直绿 —— 而那正是 W27 本身。
+    #    ⚠️ 只有 P36 的话，「给 rank 填了值而没人用」会一直绿。
+    #    与账的闸 **V11**（`COVERAGE_PENDING` 双向锁）同一个形状。
+    _rank_nz = con.execute("SELECT COUNT(*) FROM sense WHERE rank <> 0").fetchone()[0]
+    out.append(("P35", "W27：`sense.rank` 仍然一条都没有值（＝我们有意不排序）",
+                _rank_nz, 0,
+                "102,673 条全是 0。**不是 bug 是没做**：阶段 5a 建表时留了这一列而"
+                "vi **没有排序依据**（`dict.freq_zipf` 也是 0 条，越南语没有频次数据）。"
+                "⇒ 2026-10-06 的决定：**有意不排**，并把 `s.rank` 从展示层的 ORDER BY 里"
+                "**去掉**（留着一个恒 0 的排序键会让下一个人以为它在起作用 ——"
+                "`[[gate-registers-status-quo-as-spec]]` 的形状）。"
+                "🔴 什么会推翻：①源头 `senses` 的原始次序被证明有意义（现在 `id` 就是"
+                "收割顺序：en 版先、vi 版后、zh 版最后，**那是「哪一版先被抽」不是「哪个更常用」**）；"
+                "②vi 拿到频次数据；③按义项带的例句数排（**但那是我们造的信号不是源头的**）。"
+                "⚠️ 与 en 那边 `sense.rank=0` 哨兵的 bug **不是同一件事**："
+                "那边是有值而被哨兵吞了，这里是从来没写过"))
+    # 🔴 **先去注释再查，而我第一版忘了** —— 它当场红，而红的原因是我自己在
+    #    `vietnamese.ts` 里写的那句解释（「原先四处 SQL 写着 `ORDER BY …, s.rank, s.id`」）。
+    #    ⭐ 同一种自伤项目里记过：`korean.ts` 的 SQL 模板串注释里用反引号当场截断字符串。
+    #    ⚠️ 不去注释的话这条闸会**永远红**，而一条永远红的闸信号量是零
+    #      （`[[permanently-red-gate-masks-real-reds]]`），还会掩盖真红。
+    _src = DISPLAY.read_text(encoding="utf-8") if DISPLAY.exists() else ""
+    _src = re.sub(r"/\*[\s\S]*?\*/", "", _src)          # /* … */
+    _src = re.sub(r"^[ \t]*//.*$", "", _src, flags=re.M)  # 整行 //
+    _src = re.sub(r"^[ \t]*--.*$", "", _src, flags=re.M)  # SQL 的整行 --
+    _order_has_rank = bool(re.search(r"ORDER\s+BY[^;'\"`]*\brank\b", _src, re.I))
+    out.append(("P36", "🔴 W27：`rank` 恒 0 的前提下，展示层的 ORDER BY 里不许出现它",
+                1 if (_rank_nz == 0 and _order_has_rank) else 0, 0,
+                "展示层原先写 `ORDER BY CAST(e.etym_no AS INTEGER), s.rank, s.id` ——"
+                "`rank` 全 0 ⇒ 实际排序是 `(词源号, id)`，而 `id` 是收割顺序。"
+                "**那句 SQL 在说一件它没有在做的事。**"
+                "⚠️ 这一条是**代码侧**断言（读 `vietnamese.ts` 源码），与 R0 同一个做法："
+                "有些事只在源码里看得见，库里查不到。"
+                "⭐ 前提写进了判据本身（`_rank_nz == 0 and …`）⇒ 哪天 `rank` 真有值了，"
+                "这条自己让路、不拦着人把它放回去。"
+                "`[[dont-gate-facts-on-my-uncertainty]]` 的反面用法：把「前提」写进 if，"
+                "而不是把「结论」写进 if"))
+
     # R2 纯表意词头（用户 2026-09-28 的决定）
     n = sum(1 for (w,) in con.execute("SELECT word FROM dict") if is_han_headword(w))
     out.append(("R2", "`dict` 里没有纯表意（汉字/喃字）词头", n, 0,
@@ -793,6 +934,12 @@ ROSTER = (
     # 2026-10-05 W25：P26 是这一轮最重要的一条（它逮到 W12 留下的洞）／
     #   P27 是它的关系层那一半／P28 基线 1,631 ／P25 是「删付费数据」那个决定的不变量。
     "P22", "P23", "P24", "P25", "P26", "P27", "P28",
+    # 2026-10-06 给「开着而没有闸盯着」的那几笔账配闸：
+    #   W18 → P29/P30/P31（三列各一条，残留型）＋ **P32**（锁「这笔账还开着」本身）
+    #   W20 → P33（当天结清，锁 0 不锁 3）
+    #   W23 → P34（残留型，判据 import 自 W17 的收割器）
+    #   W27 → P35/P36（**一对**，带锁的豁免；缺一条就不是机制）
+    "P29", "P30", "P31", "P32", "P33", "P34", "P35", "P36",
 )
 
 
@@ -880,6 +1027,20 @@ def _pick_unrecoverable_example(con):
             " ORDER BY e.id"):
         if i not in have:
             return i
+    return None
+
+
+def _pick_tone_row(con):
+    """挑一条声调范式表的例句（给 P34 的变异当锚）。→ (id, hidden, hidden_why) 或 None
+
+    ⚠️ 判据与 P34 **用同一个** `TONE_LABELS` ⇒ 判据被改之后锚会跟着失效并大声报
+    （`assert`），而不是静默挑中一条不该挑的行（B20 那一族）。
+    """
+    for i, t, h, w in con.execute(
+            "SELECT id, text, hidden, hidden_why FROM example "
+            " WHERE hidden = 1 AND hidden_why = ? ORDER BY id", (S6.HIDDEN_META_NOT_EXAMPLE,)):
+        if ":" in t and t.split(":", 1)[0].strip().lower() in TONE_LABELS:
+            return (i, h, w)
     return None
 
 
@@ -1000,6 +1161,24 @@ def mutate():
             " WHERE e.hidden=0 AND EXISTS(SELECT 1 FROM example x WHERE x.word_id=e.word_id "
             "   AND x.hidden=1 AND x.hidden_why=? AND x.text_pub=e.text_pub) "
             " ORDER BY e.id LIMIT 1", (S6.HIDDEN_DUP_IN_CELL,)).fetchone(),
+        # ── 2026-10-06 给「开着而没有闸盯着」的账配闸，这一批的锚 ──
+        # 🔴 **一律在 `con` 关掉之前取齐**（P23/P24/P25 三次都栽在这上面）。
+        # ⚠️ W18 那三条的锚要求「这一格里**现在没有** `^(`」—— 往已经有残渣的格里
+        #    再塞一个，残留计数**不变** ⇒ 那是 B20 记的那种**空操作变异**：
+        #    什么都没注入而检查「通过」。
+        "p29": con.execute("SELECT id, ref FROM example WHERE ref IS NOT NULL "
+                           "AND instr(ref,'^(')=0 ORDER BY id LIMIT 1").fetchone(),
+        "p30": con.execute("SELECT id, text FROM sense_gloss WHERE instr(text,'^(')=0 "
+                           "ORDER BY id LIMIT 1").fetchone(),
+        "p31": con.execute("SELECT id, text FROM etymology WHERE instr(text,'^(')=0 "
+                           "ORDER BY id LIMIT 1").fetchone(),
+        # 🔴 P32 的锚要**另一条** ref（与 p29 不同的行）—— 同一行两次变异会互相干扰。
+        "p32": con.execute("SELECT id, ref FROM example WHERE ref IS NOT NULL "
+                           "AND instr(ref,'^(')=0 ORDER BY id DESC LIMIT 1").fetchone(),
+        "p33": con.execute("SELECT id, hidden, hidden_why FROM example WHERE hidden_why=? "
+                           "ORDER BY id LIMIT 1", (S6.HIDDEN_JS_RESIDUE,)).fetchone(),
+        "p35": con.execute("SELECT id, rank FROM sense ORDER BY id LIMIT 1").fetchone(),
+        "p34": _pick_tone_row(con),
         "p14": con.execute("SELECT g.id, g.example_id, g.text, g.src FROM example_gloss g "
                            "JOIN example e ON e.id=g.example_id "
                            "WHERE g.lang='zh' AND g.src LIKE 'model%' AND e.hidden=0 "
@@ -1348,6 +1527,94 @@ def mutate():
                   "INSERT INTO example_gloss (example_id, lang, text, src) "
                   "VALUES (?,'en','mutant','model:mutant')", (_e25,)),
               lambda c: c.execute("DELETE FROM example_gloss WHERE src='model:mutant'"))
+
+    # ══ 2026-10-06：给那几笔「开着而没有闸盯着」的账配的闸，逐条验它逮得到东西 ══
+    # ⚠️ 没有这一段，上面那八条 ✅ 只说明「检查还在」，不说明「检查逮得到东西」。
+    #    `[[lesson-must-become-mechanism]]`：**变异验证是闸的闸**。
+    # ── W18 四条 ──
+    _k29 = pick["p29"]
+    ok &= one("P29", "往一条 `ref` 里塞 `^(…)` 上标残渣（URL 那一族，清洗够不到）",
+              lambda c: c.execute("UPDATE example SET ref=? WHERE id=?",
+                                  ((_k29[1] or "") + " ^(https://x/y)", _k29[0])),
+              lambda c: c.execute("UPDATE example SET ref=? WHERE id=?", (_k29[1], _k29[0])))
+    _k30 = pick["p30"]
+    ok &= one("P30", "往一条释义里塞 `^(…)` 上标残渣",
+              lambda c: c.execute("UPDATE sense_gloss SET text=? WHERE id=?",
+                                  (_k30[1] + " ^(https://x/y)", _k30[0])),
+              lambda c: c.execute("UPDATE sense_gloss SET text=? WHERE id=?",
+                                  (_k30[1], _k30[0])))
+    _k31 = pick["p31"]
+    ok &= one("P31", "往一段词源里塞 `^(…)` 上标残渣",
+              lambda c: c.execute("UPDATE etymology SET text=? WHERE id=?",
+                                  (_k31[1] + " ^(https://x/y)", _k31[0])),
+              lambda c: c.execute("UPDATE etymology SET text=? WHERE id=?",
+                                  (_k31[1], _k31[0])))
+    # 🔴🔴 P32 的变异必须注入**方括号那一族**（`^([sic])`），不是 URL 那一族 ——
+    #    它量的是「原始 − 残留」，而 URL 两边各加 1、差额不变 ⇒ **空操作变异**。
+    #    ⭐ 这正是 B20 那一族的形状：变异要动**判据真正读的那个量**。
+    _k32 = pick["p32"]
+    ok &= one("P32", "🔴 往一条 `ref` 里塞 `^([sic])`（现成清洗能修的那一族 ⇒ 差额变 5）",
+              lambda c: c.execute("UPDATE example SET ref=? WHERE id=?",
+                                  ((_k32[1] or "") + " ^([sic])", _k32[0])),
+              lambda c: c.execute("UPDATE example SET ref=? WHERE id=?", (_k32[1], _k32[0])))
+    # ── W20：把那 2 条 JS 残渣之一放回出版层 ──
+    _k33 = pick["p33"]
+    assert _k33 is not None, "库里找不到 `js-markup-residue` 的行 —— W20 的落点变了，重瞄"
+    ok &= one("P33", "🔴 把一条 JS 标记残渣放回出版层（三天里页面上就是这个样子）",
+              lambda c: c.execute("UPDATE example SET hidden=0, hidden_why=NULL WHERE id=?",
+                                  (_k33[0],)),
+              lambda c: c.execute("UPDATE example SET hidden=?, hidden_why=? WHERE id=?",
+                                  (_k33[1], _k33[2], _k33[0])),
+              also=("P2",))     # 放回一条 ⇒ 「写入 vs 展示」的差额少 1
+    # ── W23：把一条声调范式表当例句放回出版层 ──
+    _k34 = pick["p34"]
+    assert _k34 is not None, ("库里找不到声调范式表的行 —— 要么它们被删了（那本身是缺陷），"
+                             "要么 `TONE_LABELS` 被改了。两种都该大声报，不许静默跳过")
+    ok &= one("P34", "🔴 把一条声调范式表当例句放回出版层（`level tone: y` 印成例句）",
+              lambda c: c.execute("UPDATE example SET hidden=0, hidden_why=NULL WHERE id=?",
+                                  (_k34[0],)),
+              lambda c: c.execute("UPDATE example SET hidden=?, hidden_why=? WHERE id=?",
+                                  (_k34[1], _k34[2], _k34[0])),
+              also=("P2",))
+    # ── W27 一对：P35 给 `rank` 填值；P36 是代码侧，见下 ──
+    _k35 = pick["p35"]
+    ok &= one("P35", "给一条义项的 `rank` 填上值（＝「有意不排序」这个前提被推翻）",
+              lambda c: c.execute("UPDATE sense SET rank=7 WHERE id=?", (_k35[0],)),
+              lambda c: c.execute("UPDATE sense SET rank=? WHERE id=?", (_k35[1], _k35[0])))
+    # 🔴🔴 P36 是**代码侧**变异（与 R0 同一个做法）：换掉 `DISPLAY` 指向一个
+    #    写着 `ORDER BY …, s.rank, s.id` 的临时文件。
+    # ⚠️ **前提要么注入、要么大声报**（B20：变异把前提寄托在现状上 ⇒ 现状推进后静默失效）。
+    #    P36 的前提是「`rank` 全 0」—— 它不是我能注入的（那要把 10 万行改回去），
+    #    ⇒ 用 `assert` 把它钉住：哪天 `rank` 真有值了，这里会**炸**而不是印「没逮到」。
+    global DISPLAY
+    _con36 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    _nz36 = _con36.execute("SELECT COUNT(*) FROM sense WHERE rank <> 0").fetchone()[0]
+    _con36.close()
+    assert _nz36 == 0, ("P36 的前提（`rank` 恒 0）已经不成立了 —— 那意味着 W27 有了"
+                        "排序依据，`rank` 该回到 ORDER BY 里，而这条变异要重写")
+    import tempfile as _tf
+    _saved36 = DISPLAY
+    _tmp36 = Path(_tf.mkdtemp()) / "vietnamese.ts"
+    _tmp36.write_text("const q = `SELECT s.id FROM sense s "
+                      "ORDER BY CAST(e.etym_no AS INTEGER), s.rank, s.id`;\n",
+                      encoding="utf-8")
+    try:
+        DISPLAY = _tmp36
+        hit36 = {r[0] for r in check_brief()}
+    finally:
+        DISPLAY = _saved36
+        _tmp36.unlink()
+    good36 = "P36" in hit36
+    ok &= good36
+    print("   %s P36   展示层的 ORDER BY 里又出现了恒 0 的 `rank`（哨兵回来了）%s"
+          % ("✅" if good36 else "🔴 没逮到",
+             ("   🔴 **未声明的连带 %s**" % "、".join(sorted(hit36 - {"P36"})))
+             if hit36 - {"P36"} else ""))
+    # ⭐ 反控制：真文件（已经去掉 `rank`）必须**不**让它响，否则这条是恒红的。
+    good36b = "P36" not in {r[0] for r in check_brief()}
+    ok &= good36b
+    print("   %s P36   反控制：真的 `vietnamese.ts` 不该让它响"
+          % ("✅" if good36b else "🔴 恒红"))
 
     # R0：展示层的带锁豁免 —— **代码侧变异**（真去建那个文件代价太大且会污染仓库）
     # 🔴🔴 **2026-10-03：这条变异的前提过期了，而它报的是「没逮到」。**

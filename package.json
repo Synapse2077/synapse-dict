@@ -31,6 +31,7 @@
     "gate:etym-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-etym.tsx",
     "gate:layout": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-layout.tsx",
     "gate:css-audit": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/css-audit.ts",
+    "gate:dispatch-audit": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/dispatch-audit.ts",
     "gate:audio-dup": "python3 scripts/test_audio_dup_gate.py"
   },
   "devDependencies": {

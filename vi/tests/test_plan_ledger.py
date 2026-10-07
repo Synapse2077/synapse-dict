@@ -220,12 +220,28 @@ FILES = {
     #    2026-10-02 建完闸没登记，**V9 当场逮到**）。
     "8": [("外锚闸·五层 vs dump", "vi/pipeline/verify_layers_vs_dump.py"),
           ("回归闸", "vi/tests/test_no_regression.py"),
-          ("空白页判据唯一的家", "vi/pipeline/coverage.py")],
+          ("空白页判据唯一的家", "vi/pipeline/coverage.py"),
+          # 🔴🔴 2026-10-06 补：**账的闸自己从来不在任何名单里。**
+          #    它每次写库由 `dbtool` 自动跑（所以「真被跑」那一关它一直过），
+          #    但它**不在 `gates.GATES` 里** ⇒ ①`run_gates.py --all` 跑不到它
+          #    ②W19 新建的变异档机制覆盖不到它的 13 条变异
+          #    ③它被删掉，`gates.self_check` ③ 也不会说话（那条查的是反方向）。
+          ("账的闸", "vi/tests/test_plan_ledger.py")],
     # 阶段 9：展示层。🔴 三件都登记 —— 服务层/映射表/视图任意一个被删掉都该有人说话。
     "9": [("服务层", "packages/dict-core/src/vietnamese.ts"),
           ("映射表唯一的家", "packages/dict-labels/src/vi.ts"),
           ("展示层契约闸", "apps/web/src/contract-check-vi.tsx"),
-          ("查询计划闸", "vi/probes/query_plans.py")],
+          ("查询计划闸", "vi/probes/query_plans.py"),
+          # 🔴🔴 2026-10-06 补。这两道闸**一直存在**，但此前既不在
+          #    `vi/run_gates.py --all` 的名单里、也不在本表里 ⇒ 没人逼人跑、
+          #    删掉也没人说话。补进 `gates.GATES` 之后 **V9 当场判红**
+          #    （「不在账的闸的交付物名单里」），两边互相当闸。
+          ("样式孤儿闸", "apps/web/src/css-audit.ts"),
+          # 🔴🔴🔴 分发闸：用户 2026-10-06 看越南语页只看到 `🧩 「」的展示层还没接上`。
+          #    `VietnameseEntryView` **一次都没渲染过**（服务不返回 `lang`），
+          #    而契约闸直接渲染视图、绕过分发 ⇒ 它绿着。
+          #    ⇒ 「视图对不对」和「视图被调到没」是两件事，各要一道闸。
+          ("分发闸·页面真的走到视图", "apps/web/src/dispatch-audit.ts")],
 }
 
 # 「库里查得到 ≠ 读者看得见」——声明 ✅ 的阶段，代码里必须真有那句话
@@ -701,9 +717,91 @@ def v10(con):
     return bad
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴🔴 **V12：会过期的结论，它的复查命令必须还跑得起来。2026-10-06（W3 的闸）。**
+#
+# `[[external-anchor-gates]]`：**锚外部 dump 的闸永不过期，锚自己上一版的必然过期。**
+# W3 属于第三种，而项目里此前没有为它准备位置：
+#     「es/it/el/tr/cs 五个版本**没有越南语**」—— 这条结论锚在 kaikki 索引页的
+#     **当下状态**。源头会变（哪天 es 版收了越南语词条，这条就不再成立），
+#     而它的唯一推翻路径是**重跑那条探测命令**。
+#
+# 🔴 所以这一笔账的危险不是「结论错了」，是**复查命令烂掉而没人知道** ——
+#    那时结论就变成了不可反驳的（unfalsifiable），而不可反驳的结论在这个项目里
+#    与「没量过」等价（`[[verify-before-claiming-confirmed]]`）。
+# ⭐ 实测这个担心不是假想的：W3 行里写的是 `probe_editions.py`，而那个文件
+#    **不在 `vi/` 下，在 `scripts/`** —— 账上的路径按字面跑不起来。
+#
+# ⇒ V12 查三件事，都是「这条命令还能把那个结论推翻吗」的组成部分：
+#    ① 脚本还在（路径写全）
+#    ② 目标语种还登记着（`--lang vi` 不会 argparse 报错 —— ko 那门真栽过这一跤：
+#      「开做韩语时表里压根没有 ko，`--lang ko` 直接报错」，那句话就写在脚本里）
+#    ③ 结论点名的那几个版本**每一个都还在版本表里**
+#      —— 少一个，重跑出来的 0 就只覆盖了四个版本，而**那个 0 长得一模一样**
+#      （`[[expectation-must-be-declared]]`：少一条和全部通过，输出上分不开）。
+# ⚠️ V12 **不去跑**那条命令（要联网，而闸不许依赖网络 —— 恒红的闸信号量是零）。
+#    它查的是「推翻路径还通着」，不是「结论还成立」。两者分开，是有意的。
+EXPIRING_CONCLUSIONS = {
+    "W3": dict(
+        what="es/it/el/tr/cs 五个版本没有越南语（锚在索引页的当下）",
+        script="scripts/probe_editions.py",
+        recheck="python3 scripts/probe_editions.py --lang vi",
+        lang="vi",
+        editions=("es", "it", "el", "tr", "cs"),
+    ),
+}
+
+
+def v12():
+    """会过期的结论：复查命令必须还跑得起来（W3）。"""
+    bad = []
+    for num, c in sorted(EXPIRING_CONCLUSIONS.items()):
+        # ⓪ 这笔账还在表里吗 —— 划掉了就该从这张登记表里删掉（别留个空转的检查）
+        rows = dict(_sheet_rows())
+        if num not in rows:
+            bad.append(("V12", "🔴 `EXPIRING_CONCLUSIONS` 里登记着 **%s**，"
+                               "而欠账表里没有这个编号 —— 结清了就把登记删掉，"
+                               "否则这条检查在空转（`[[permanently-red-gate-masks-real-reds]]` "
+                               "的镜像：恒绿的检查信号量也是零）" % num))
+            continue
+        p = ROOT / c["script"]
+        if not p.exists():
+            bad.append(("V12", "🔴🔴 **%s 的复查命令跑不起来：`%s` 不存在。** "
+                               "这条结论锚在源头的当下状态（%s），"
+                               "而它唯一的推翻路径就是那条命令 —— "
+                               "命令烂掉之后结论就不可反驳了，那与没量过等价"
+                        % (num, c["script"], c["what"])))
+            continue
+        src = p.read_text(encoding="utf-8", errors="replace")
+        # ① 目标语种还登记着（`--lang vi` 不会 argparse 报错）
+        if not re.search(r"['\"]%s['\"]\s*:" % re.escape(c["lang"]), src):
+            bad.append(("V12", "🔴 %s：`%s` 的 `NAMES` 里找不到 `%s` ⇒ "
+                               "`--lang %s` 会 argparse 报错，复查路径断了"
+                        % (num, c["script"], c["lang"], c["lang"])))
+        # ② 结论点名的版本，每一个都还在版本表里
+        miss = [e for e in c["editions"]
+                if not re.search(r"['\"]%s['\"]" % re.escape(e), src)]
+        if miss:
+            bad.append(("V12", "🔴🔴 %s：结论点名的版本 %s **已经不在 `%s` 的版本表里** ⇒ "
+                               "重跑得到的 0 只覆盖剩下那几版，而**那个 0 和原来的 0 "
+                               "长得一模一样**（少一条检查与全部通过，输出上分不开）"
+                        % (num, "、".join(miss), c["script"])))
+        # ③ 账上要**逐字写着那条可跑的命令** —— 账与机制对不上也要红。
+        #    ⚠️ W3 那一行原先写的是 `probe_editions.py`（没写 `scripts/`），
+        #      照字面敲进终端是跑不起来的，而「结清条件照字面跑不起来」就是本条要治的事。
+        #    🔴 比的是 `recheck`（整条命令）**不是 `script`** —— 两个理由：
+        #      ①读者敲的是命令不是路径；②变异验证要能**把①②分支和这一条分开验**
+        #      （把 `script` 临时指到别处时，这一条不该跟着红，否则一条变异会命中两个
+        #       分支而我分不出哪一个真的在起作用 —— `[[residual-bucket-is-not-evidence]]`）。
+        if c["recheck"] not in rows[num]:
+            bad.append(("V12", "🔴 %s 的欠账行里没有逐字写着可跑的复查命令 `%s` —— "
+                               "照字面敲跑不起来" % (num, c["recheck"])))
+    return bad
+
+
 CHECKS = [("V1", v1), ("V2", v2), ("V3", v3), ("V4", v4), ("V5", v5),
           ("V6", v6), ("V7", v7), ("V8", v8), ("V9", v9), ("V10", v10),
-          ("V11", v11)]
+          ("V11", v11), ("V12", v12)]
 
 # ── 跳号：**必须带一个会自己到期的条件**，否则就是永久豁免 ──────────────────
 # 🔴 `[[record-the-negative-decision]]`：否定结论必须写什么会推翻它。
@@ -734,7 +832,9 @@ def _skip_expired(con):
 # 🔴🔴 **花名册。别拿「编号连不连续」推。**
 #    ko 实测：第一版写「编号从 1 起连续」，变异当场证明它**逮不到删掉最后一条** ——
 #    删掉最后一条之后上界跟着降，缺口自己消失了。而最后一条最容易被手滑删掉。
-ROSTER = ("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10", "V11")
+ROSTER = ("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10", "V11",
+          # 2026-10-06：V12 ＝ 会过期的结论的复查路径还通着（W3 的闸）
+          "V12")
 
 
 def v0(con):
@@ -944,6 +1044,62 @@ def mutate():
     con2.close()
     ok &= hit8
     print("   %s V8   手建 `inflection`（有意不建的表）" % ("✅" if hit8 else "🔴 没逮到"))
+
+    # ══ M10–M13（2026-10-06）：V12 —— 会过期结论的**复查路径**，四个断法各验一遍 ══
+    # ⚠️ 四条变异对着 V12 的四个分支，**一条都不能省** —— 其中第③条是最隐蔽的：
+    #   版本表里少一个版本，重跑得到的仍然是 0，**而那个 0 和原来的 0 长得一模一样**。
+    # 🔴 变异**不碰 `scripts/probe_editions.py` 本身**（那是跨九门共用的文件，
+    #   而铁律是只动当前这门语言）⇒ 复制一份到临时目录，让登记表临时指向副本。
+    import shutil as _sh
+    import tempfile as _tf
+    _w3 = EXPIRING_CONCLUSIONS["W3"]
+    _real = ROOT / _w3["script"]
+    _saved_script = _w3["script"]
+
+    def _with_script(cid, name, make):
+        """把 W3 的脚本临时换成 `make(原文)` 写出来的副本，看 V12 响不响。
+
+        ⚠️ 用**绝对路径**（`ROOT / 绝对路径` 在 pathlib 里就等于那个绝对路径）——
+           不去动 `scripts/probe_editions.py` 本身：它是跨九门共用的文件，
+           而铁律是只动当前这门语言。
+        """
+        nonlocal ok
+        d = _tf.mkdtemp()
+        tmp = Path(d) / "probe_editions.py"
+        src = make(_real.read_text(encoding="utf-8"))
+        if src is None:
+            ok = False
+            print("   🔴🔴 %-4s %s —— **锚失效，什么都没注入**" % (cid, name))
+            _sh.rmtree(d, ignore_errors=True)
+            return
+        tmp.write_text(src, encoding="utf-8")
+        try:
+            _w3["script"] = str(tmp)
+            hit = any(c == cid for c, _ in check_brief())
+        finally:
+            _w3["script"] = _saved_script
+            _sh.rmtree(d, ignore_errors=True)
+        ok &= hit
+        print("   %s %-4s %s" % ("✅" if hit else "🔴 没逮到", cid, name))
+
+    # M10 ① 脚本不存在 → V12 红（账上写的那条命令照字面跑不起来）
+    _w3["script"] = "scripts/probe_editions_RENAMED.py"
+    hitA = any(c == "V12" for c, _ in check_brief())
+    _w3["script"] = _saved_script
+    ok &= hitA
+    print("   %s V12  复查脚本被改名/挪走（结论从此不可反驳）"
+          % ("✅" if hitA else "🔴 没逮到"))
+    # M11 ② `NAMES` 里没有 vi → `--lang vi` argparse 报错
+    _with_script("V12", "脚本的 `NAMES` 里没了 `vi`（`--lang vi` 直接报错）",
+                 lambda s: s.replace('"vi":', '"XX":', 1) if '"vi":' in s else None)
+    # M12 ③ 版本表里少一个结论点名的版本 —— **最隐蔽的那条**
+    _with_script("V12", "🔴🔴 版本表里少了 `cs`（重跑仍是 0，而那个 0 只覆盖四版）",
+                 lambda s: s.replace('"cs"', '"ZZ"', 1) if '"cs"' in s else None)
+    # M13 ④ 欠账行里不再写全复查命令的路径（照字面敲跑不起来）
+    expect("V12", "W3 行里的复查命令丢了路径（照字面敲跑不起来）",
+           orig.replace("`python3 scripts/probe_editions.py --lang vi`",
+                        "`python3 probe_editions.py --lang vi`")
+           if "`python3 scripts/probe_editions.py --lang vi`" in orig else None)
 
     # M9 花名册缺口 → V0 红
     saved = CHECKS.pop()

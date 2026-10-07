@@ -303,9 +303,21 @@ def mutate():
            orig.replace("      pointers: this.db.prepare(",
                         "      mutantQ: this.db.prepare('SELECT 1'),\n      pointers: this.db.prepare(", 1))
     # ③ **大表全表扫**：把 `pointers` 的 WHERE 去掉 word_id ⇒ SCAN sense_src
+    # 🔴🔴 **2026-10-06：这条变异从 10-05 起一直是空操作，而它看起来是绿的。**
+    #    原来的锚是字面量 `"WHERE word_id = ? AND sense_id IS NULL"`，
+    #    而 W15 结清那天这条查询加了表别名和一个条件，变成
+    #        `WHERE s.word_id = ? AND s.sense_id IS NULL AND s.ptr_class = 'pointer'`
+    #    ⇒ `str.replace` **什么都没替换**，`expect()` 照样跑、照样报结果。
+    # ⭐ 逮到它的是 W19 新建的那档「变异台账」**第一次强制跑**（`run_gates.py --mutate`）——
+    #   `expect()` 本来就会把 `None` 印成「🔴🔴 锚失效，什么都没注入」，
+    #   **而在那之前没有任何东西逼人跑这条路**。这正是 W19 那笔账的全部内容。
+    # ⇒ 锚从**字面量**改成**结构**：在 `pointers` 那一块里找「`…word_id = ? AND`」
+    #   并整段去掉（别名有没有都认），替换后与原文相同就返回 None ⇒ 大声报锚失效。
+    _ptr = re.sub(r"(pointers: this\.db\.prepare\(`[\s\S]{0,400}?WHERE\s+)"
+                  r"[A-Za-z_]*\.?word_id\s*=\s*\?\s+AND\s+",
+                  r"\1", orig, count=1)
     expect("pointers", "🔴 去掉 `pointers` 的 `word_id = ?` 条件 ⇒ 大表全表扫",
-           orig.replace("WHERE word_id = ? AND sense_id IS NULL",
-                        "WHERE sense_id IS NULL AND ? IS NOT NULL", 1))
+           _ptr if _ptr != orig else None)
     # ④ 索引侧的变异：删掉 `idx_sense_src_word` ⇒ pointers 变 SCAN
     con = sqlite3.connect(paths.DB)
     con.execute("DROP INDEX IF EXISTS idx_sense_src_word")

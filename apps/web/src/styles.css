@@ -2545,6 +2545,23 @@ button.rel-link {
   color: var(--text-secondary);
 }
 
+/* 🔴 挂在方言行上的录音：比独立成区的那个窄，别把一行挤爆。
+   `[[display-extremes-doc]]`：一个词最多 5 个方言行，每行都可能带录音。 */
+.vi-audio-inline {
+  height: 26px;
+  max-width: 190px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* 没标方言的录音那一区的小标签 —— ⚠️ **不是装饰**：
+   不写这句，读者会以为这些录音就是上面某个方言的。 */
+.vi-audio-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-right: 8px;
+}
+
 .vi-audio {
   height: 32px;
   max-width: 260px;

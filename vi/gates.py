@@ -38,6 +38,7 @@ GATES = [
     dict(
         name="骨架闸",
         cmd="python3 -u vi/tests/test_skeleton.py",
+        mutate="python3 -u vi/tests/test_skeleton.py --mutate",
         file="vi/tests/test_skeleton.py",
         deps=frozenset({"dict", "entry"}),
         why="阶段 1 的 15 条不变量。**它们原本只写在 `build.py --apply` 分支里** ——"
@@ -47,6 +48,7 @@ GATES = [
     dict(
         name="汉字层闸",
         cmd="python3 -u vi/tests/test_han_layer.py",
+        mutate="python3 -u vi/tests/test_han_layer.py --mutate",
         file="vi/tests/test_han_layer.py",
         deps=frozenset({"dict", "entry", "han_spelling", "nom_spelling"}),
         why="阶段 2 的 9 条不变量。⭐ 其中 **H6 盯的是我的判据会不会过期** —— "
@@ -57,6 +59,7 @@ GATES = [
     dict(
         name="音标层闸",
         cmd="python3 -u vi/tests/test_pron_layer.py",
+        mutate="python3 -u vi/tests/test_pron_layer.py --mutate",
         file="vi/tests/test_pron_layer.py",
         deps=frozenset({"dict", "pronunciation"}),
         why="阶段 3 的 10 条不变量。⭐ 其中 **P5 是读者口径的覆盖率下限**，"
@@ -67,6 +70,7 @@ GATES = [
     dict(
         name="义项层闸",
         cmd="python3 -u vi/tests/test_sense_layer.py",
+        mutate="python3 -u vi/tests/test_sense_layer.py --mutate",
         file="vi/tests/test_sense_layer.py",
         deps=frozenset({"dict", "entry", "sense", "sense_src", "sense_gloss",
                         "han_spelling", "nom_spelling"}),
@@ -79,6 +83,7 @@ GATES = [
     dict(
         name="例句层闸",
         cmd="python3 -u vi/tests/test_example_layer.py",
+        mutate="python3 -u vi/tests/test_example_layer.py --mutate",
         file="vi/tests/test_example_layer.py",
         deps=frozenset({"dict", "sense", "example", "example_gloss"}),
         why="阶段 6a 的 14 条不变量。🔴 **X7 是这一层最该守的那条**："
@@ -92,6 +97,7 @@ GATES = [
     dict(
         name="关系与量词闸",
         cmd="python3 -u vi/tests/test_relation_layer.py",
+        mutate="python3 -u vi/tests/test_relation_layer.py --mutate",
         file="vi/tests/test_relation_layer.py",
         deps=frozenset({"dict", "sense", "sense_relation", "noun_classifier"}),
         why="阶段 6b/6c 的 20 条不变量。🔴 **R8/R9/R10 三条一起守 B17**，而守的是"
@@ -105,6 +111,7 @@ GATES = [
     dict(
         name="录音层闸",
         cmd="python3 -u vi/tests/test_audio_layer.py",
+        mutate="python3 -u vi/tests/test_audio_layer.py --mutate",
         file="vi/tests/test_audio_layer.py",
         deps=frozenset({"dict", "audio"}),
         why="阶段 6d 的 12 条不变量。🔴🔴 **A4 是这道闸存在的理由**："
@@ -117,6 +124,7 @@ GATES = [
     dict(
         name="词源层闸",
         cmd="python3 -u vi/tests/test_etymology_layer.py",
+        mutate="python3 -u vi/tests/test_etymology_layer.py --mutate",
         file="vi/tests/test_etymology_layer.py",
         deps=frozenset({"dict", "entry", "etymology", "etymology_gloss", "han_spelling"}),
         why="阶段 7a 的 17 条不变量。🔴🔴 **Y5 是这道闸存在的理由**："
@@ -131,6 +139,7 @@ GATES = [
     dict(
         name="查询计划闸",
         cmd="python3 -u vi/probes/query_plans.py",
+        mutate="python3 -u vi/probes/query_plans.py --mutate",
         file="vi/probes/query_plans.py",
         deps=frozenset({"dict", "entry", "sense", "sense_gloss", "sense_relation",
                         "pronunciation", "etymology", "example", "example_gloss",
@@ -155,6 +164,8 @@ GATES = [
     dict(
         name="展示层契约闸",
         cmd="npm run gate:vi-display",
+        mutate=None,
+        mutate_why="⚠️ **有意没有 `--mutate` 档，而这是一笔明写的欠账而不是「不需要」。** 它的 32 条断言是 tsx，变异要动的是**库**（让某条断言该红）—— 技术上做得到，代价是给 tsx 加一套 do/undo，而 Node 侧没有 `dbtool` 的备份保护。📋 它的变异至今是**手动**做的（W28 那次：把 `lang: 'vi',` 从返回对象里删掉），手动做过的那几次都逮到了东西 —— 但「手动做过」不是机制。",
         file="apps/web/src/contract-check-vi.tsx",
         deps=frozenset({"dict", "entry", "sense", "sense_gloss", "sense_relation",
                         "pronunciation", "etymology", "example", "example_gloss",
@@ -182,6 +193,7 @@ GATES = [
     dict(
         name="回归闸",
         cmd="python3 -u vi/tests/test_no_regression.py",
+        mutate="python3 -u vi/tests/test_no_regression.py --mutate",
         file="vi/tests/test_no_regression.py",
         deps=frozenset({"dict", "entry", "sense", "sense_src", "sense_gloss",
                         "sense_relation", "pronunciation", "etymology", "example",
@@ -204,6 +216,7 @@ GATES = [
     dict(
         name="外锚闸·例句/关系/词源/录音/量词",
         cmd="python3 -u vi/pipeline/verify_layers_vs_dump.py",
+        mutate="python3 -u vi/pipeline/verify_layers_vs_dump.py --mutate",
         file="vi/pipeline/verify_layers_vs_dump.py",
         deps=frozenset({"dict", "entry", "sense_src", "example", "example_gloss",
                         "sense_relation", "etymology", "audio", "noun_classifier"}),
@@ -221,9 +234,31 @@ GATES = [
             "动了它们恒等式的答案就变。⚠️ 跑一趟要扫 12 份 dump × 5 层（分钟级）—— "
             "**所以它不在写库后自动跑的那几道里**，靠 `gates.mark()` 记账＋账的闸拦着（ko 的 K31 机制）。",
     ),
+    # 🔴🔴 **2026-10-06 补登记：账的闸自己从来不在这张名单里。**
+    #    它每次写库由 `dbtool._ledger_check()` 自动跑，所以「真被跑」那一关它一直过 ——
+    #    而正因为如此，**它从没有被当成一道闸来管**：
+    #      ① `run_gates.py --all` 跑不到它（换台机器时「全跑一遍」漏掉它）
+    #      ② W19 新建的**变异档机制覆盖不到它的 13 条变异**（含今天新加的 V12 四条）
+    #    ⇒ 登记。`deps=None` 并说明：它读库（V1/V8/V10/V11 都查表），但判的是
+    #      「计划表/欠账表与库和代码对不对得上」—— 那是**写库这个动作**本身弄脏的，
+    #      而 `dbtool` 已经在每次写库时跑它了，不需要再靠 deps 记一次账。
+    dict(
+        name="账的闸",
+        cmd="python3 -u vi/tests/test_plan_ledger.py",
+        mutate="python3 -u vi/tests/test_plan_ledger.py --mutate",
+        file="vi/tests/test_plan_ledger.py",
+        deps=None,
+        why="V0–V12 ＋ 花名册自检。**每次写库由 `dbtool` 自动跑**，登记进这张名单"
+            "为的是另两件事：`--all` 跑得到它、以及**变异档有人逼着跑**（W19）。"
+            "⚠️ 写 `deps=None` 而不是列表：它的「过期」由写库这个动作本身触发，"
+            "而那条路已经有人走了 —— 再按表记一次账只会让欠账表天天非空"
+            "（`[[permanently-red-gate-masks-real-reds]]`：恒红等于没有信号）。",
+    ),
     dict(
         name="表结构闸",
         cmd="python3 -u vi/pipeline/build_v3_schema.py --check",
+        mutate=None,
+        mutate_why="⚠️ **有意没有**：它比的是 DDL（25 个对象在不在），变异＝真去 DROP 一张表，而那不可逆（表里有 6e 买来的数据）。⇒ 这一道的「变异」是 `--check` 自己：少一个对象它当场红，而「少一个对象」正是唯一能让它漏报的改动。",
         file="vi/pipeline/build_v3_schema.py",
         deps=None,
         why="⚠️ **有意没有数据依赖**：它比的是 DDL（25 个对象在不在、"
@@ -232,6 +267,48 @@ GATES = [
             "⇒ 它进这张名单不是为了「写库后跑」，而是为了 `run_gates.py --all` "
             "和 `self_check()` 管得到它。写成 `deps=None` 而不是空集合，"
             "是为了让「想过了」和「忘了填」分得开。",
+    ),
+    # 🔴🔴 **2026-10-06 补登记两道「本来就存在、而 vi 从没把它们纳入 `--all`」的闸。**
+    #    `[[lesson-must-become-mechanism]]`：「闸存在／有入口／覆盖这门语言／真被跑」
+    #    是四道独立关卡 —— 这两道都过了前三道，**第四道一直靠我手动跑**。
+    dict(
+        name="样式孤儿闸",
+        cmd="npm run --silent gate:css-audit",
+        mutate=None,
+        mutate_why="⚠️ **有意没有 `--mutate` 档**：它读的是源码（类名 vs CSS 规则），变异＝删一条 CSS 规则再还原，代价是改仓库里的文件。📋 手动做过一次并逮到东西（55 个 `vi-*` 类名零条规则时它判红）。与契约闸同一笔欠账。",
+        file="apps/web/src/css-audit.ts",
+        deps=None,
+        why="视图里用到的每个 className，`styles.css` 里必须真有规则。"
+            "⚠️ **有意没有数据依赖**：它只读源码。"
+            "🔴 它逮到过 vi 的 **55 个零规则类名，而当时契约闸 23 条全绿** ——"
+            "契约闸读文本、**看不见样式**。而那次它能逮到的前提是 vi 先被登记进它的 "
+            "`VIEWS`（在此之前 vi 从没被它覆盖过）。"
+            "🔴 本行补登记的理由：它从 2026-10-03 起就覆盖 vi，"
+            "但 **`vi/run_gates.py --all` 的 13 道里没有它**，每次都靠我手动跑 ——"
+            "而「靠人记得」正是这一课说不管用的那种。",
+    ),
+    dict(
+        name="分发闸",
+        cmd="npm run --silent gate:dispatch-audit",
+        mutate=None,
+        mutate_why="⚠️ **有意没有 `--mutate` 档**，但它是四道里唯一**变异验证真的起过作用**的：2026-10-06 建它时第一版判据 `lang:\\s*'vi'` 把**类型声明也算上了**，于是把 `lang: 'vi',` 从返回对象里删掉之后它照样绿 —— **是手动变异当场报出来的**，才拆成 `inType`/`inObject` 两条。⇒ 这一道的变异必须做成机制，记在 W19 的残留里。",
+        file="apps/web/src/dispatch-audit.ts",
+        deps=None,
+        why="🔴🔴🔴 **页面真的走到那个视图了吗。** 2026-10-06 用户看越南语词条页，"
+            "上面只有一行 `🧩 「」的展示层还没接上` —— 而 `「」` 是空的。"
+            "根因两个：`vietnamese.ts` 的类型和 `getEntry()` 返回对象**都没有 `lang`**"
+            "（`korean.ts`/`japanese.ts` 都有）⇒ `entry.lang === 'vi'` 永远为假、"
+            "**`VietnameseEntryView` 一次都没渲染过**；外加兜底白名单里没有 `vi`。"
+            "⚠️ **当时三道闸全绿，每道都有结构性理由看不见它**："
+            "契约闸**直接 `createElement(VietnameseEntryView, …)`**、从不走 `App.tsx` 的分发"
+            "（它测「视图对不对」不测「视图被调到没」）；`css-audit` 只问「视图登记了没」；"
+            "TypeScript 抓不到，因为 `App.tsx` 本地的 `ViEntry` 是**手抄的镜像**、"
+            "声明了 `lang: 'vi'`，而分发处是 `entry as ViEntry` 强转。"
+            "⇒ 那四道关卡之后还有**第五道：页面真的走到它**。"
+            "🔴 它自己的判据**第一版就宽了**：`lang:\\s*'vi'` 把**类型声明**也算上"
+            "（`lang: 'vi';` 分号 vs `lang: 'vi',` 逗号），而本次缺陷恰恰是"
+            "「类型声明了、返回对象没给」⇒ 删掉返回对象里那行它照样绿。"
+            "**是变异验证当场报出来的**，已拆成两条分别查。3 个变异全过。",
     ),
 ]
 
@@ -292,6 +369,97 @@ def dirty(d, extra_tables=()):
     out = [g["name"] for g in GATES
            if g["deps"] is not None and (g["deps"] & touched)]
     return sorted(out), touched
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔴🔴🔴 **变异欠账：W19 的结清交付物。2026-10-06。**
+#
+# W19 记的那件事是：回归闸的变异验证**整个跑不起来，而它看起来是绿的**
+# （`check_brief()` 从 2 元组改成 3 元组，`mutate()` 里三处解包没跟着改；
+#  而那个 for 循环只在基线不绿时才执行，于是一直没人踩到）。
+# 解包当天就修了，**而账上剩下的那一句一直开着**：
+#     「`run_gates.py` 里加一档「跑变异」，让『谁逼人跑变异』也成为机制。」
+#
+# ⭐ `[[lesson-must-become-mechanism]]`：**变异验证是闸的闸** —— 它不跑，
+#   上面那一长串 ✅ 只说明「检查还在」，不说明「检查逮得到东西」。
+#   而「存在／有入口／覆盖这门语言／真被跑」是四道独立关卡，变异档卡在**第四关**。
+#
+# ═══ 判据：**闸的文件变了就必须重跑它的变异** ═══
+# 🔴 不是「每次写库都跑」（变异动真库，代价太大，而数据变了不代表判据变了）；
+#    也不是「每天跑一次」（时间不是判据，`[[external-anchor-gates]]`）。
+#    真正会让变异失效的事件只有一个：**有人动了那道闸的代码**
+#    —— 改断言、改基线、整段替换（而我 2026-10-05 就是这么把 P12/P13 切掉的，
+#       正常跑报「全绿」，**只有 `--mutate` 报了出来**）。
+# ⇒ 记下每道闸**上次跑变异时那个文件的 sha256**；对不上就是欠一次变异。
+# ⚠️ 这条判据也认「文件改回去了」：sha 一样就不欠 —— 它锚的是内容不是时间。
+MUTLOG = paths.DATA / "db" / ".vi-mutations.json"
+
+
+def file_sha(g):
+    """→ 这道闸的闸文件内容 sha256（前 16 位）；文件不在返回 None。"""
+    import hashlib
+    p = ROOT / g["file"]
+    if not p.exists():
+        return None
+    return hashlib.sha256(p.read_bytes()).hexdigest()[:16]
+
+
+def mutation_log():
+    """→ {闸名: {"sha":…, "when":…, "ok": bool}}。读不动就抛（不许静默当空）。"""
+    if not MUTLOG.exists():
+        return {}
+    try:
+        return json.loads(MUTLOG.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise SystemExit("🔴 变异台账读不动：%s（%s）—— 别当成「没欠」" % (MUTLOG, e))
+
+
+def record_mutation(name, ok):
+    log = mutation_log()
+    log[name] = {"sha": file_sha(by_name(name)), "ok": bool(ok),
+                 "when": datetime.datetime.now().isoformat(timespec="seconds")}
+    MUTLOG.parent.mkdir(parents=True, exist_ok=True)
+    MUTLOG.write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def mutation_debt():
+    """→ [(闸名, 原因)]。空 ＝ 每一道有变异档的闸，都在**当前这版代码**上跑绿过。"""
+    log = mutation_log()
+    out = []
+    for g in GATES:
+        if not g.get("mutate"):
+            # 🔴 `mutate=None` 的必须写明为什么 —— 与 `deps=None` 同一条规矩：
+            #    「想过了」和「忘了填」要在结构上分得开。
+            if not g.get("mutate_why", "").strip():
+                out.append((g["name"], "🔴 `mutate=None` 而没写 `mutate_why`"))
+            continue
+        rec = log.get(g["name"])
+        sha = file_sha(g)
+        if rec is None:
+            out.append((g["name"], "从没在这套机制下跑过变异"))
+        elif not rec.get("ok"):
+            out.append((g["name"], "上次跑变异是**红的**（%s）" % rec.get("when", "?")))
+        elif rec.get("sha") != sha:
+            out.append((g["name"], "闸文件改过了（上次跑变异时 sha=%s，现在 %s）"
+                        % (rec.get("sha"), sha)))
+    return out
+
+
+def run_mutation(name, verbose=True):
+    """跑一道闸的变异档。→ True/False。**跑绿才记台账**（与 `run()` 同一条规矩）。"""
+    g = by_name(name)
+    if g is None:
+        raise SystemExit("🔴 没有这道闸：%r" % name)
+    if not g.get("mutate"):
+        raise SystemExit("🔴 %s 没有变异档（理由：%s）" % (name, g.get("mutate_why", "没写")))
+    if verbose:
+        print("\n── %s（变异）\n   $ %s" % (name, g["mutate"]))
+    r = subprocess.run(g["mutate"], shell=True, cwd=str(ROOT))
+    ok = r.returncode == 0
+    record_mutation(name, ok)
+    if verbose:
+        print("   %s %s 变异（退出码 %d）" % ("✅" if ok else "🔴", name, r.returncode))
+    return ok
 
 
 # ── 欠账状态 ────────────────────────────────────────────────────────────────
@@ -437,6 +605,28 @@ def self_check():
                                % (g["name"], key))
     except Exception as e:                       # noqa: BLE001
         bad.append("读不到 package.json（%s）" % e)
+
+    # ⑤ **登记的变异档 vs 闸文件里真的有没有那条路**（W19，2026-10-06）
+    # 🔴 两个方向都查，而第二个方向才是值钱的那个：
+    #    · 登记了 `mutate=` 而文件里没有 `--mutate` 的分支 ⇒ 跑它等于跑一遍普通档，
+    #      **退出码 0、台账记绿，而一条变异都没跑过** —— 一道「看起来跑过」的空档。
+    #    · 文件里有 `--mutate` 而登记表里是 `None` ⇒ 这道闸有变异而没人逼人跑它，
+    #      那正是 W19 本身。
+    # ⚠️ 判据**问登记表也问文件**，不靠我记得（`[[gate-registers-status-quo-as-spec]]`：
+    #    闸「如实登记现状」之后就再也不会问现状对不对）。
+    for g in GATES:
+        p = ROOT / g["file"]
+        has = p.exists() and "--mutate" in p.read_text(encoding="utf-8", errors="replace")
+        if g.get("mutate") and not has:
+            bad.append("🔴🔴 %s 登记了 `mutate=%r`，而 `%s` 里**没有 `--mutate` 这条路** ——"
+                       "跑它会静默退 0 并把台账记成绿的" % (g["name"], g["mutate"], g["file"]))
+        if (not g.get("mutate")) and has:
+            bad.append("🔴 %s 的文件里有 `--mutate` 而登记表写着没有变异档 —— "
+                       "那就是 W19 本身：有变异而没有任何东西逼人跑它" % g["name"])
+        if (not g.get("mutate")) and not g.get("mutate_why", "").strip():
+            bad.append("%s 没有变异档也没写 `mutate_why` —— "
+                       "「想过了」和「忘了填」要分得开（与 `deps=None` 同一条规矩）"
+                       % g["name"])
     return bad
 
 

@@ -213,6 +213,49 @@ const CHECKS: Check[] = [
         : `${gone.length}/${withSense.length} 条挂在义项上的例句一个字都没印出来：${gone[0].text.slice(0, 30)}`;
     } },
 
+  // ── 🔴🔴 W29（2026-10-06）：**按方言的播放按钮必须名副其实** ──
+  //    用户 2026-10-06：「为什么音标有这么多方框」—— 指的是读音区 5 个带边框的 `▶`。
+  //    而真正的缺陷不是「框多」：那 5 个按钮**行为完全一样**（全是
+  //    `speak(entry.word, speakLocale)`，而 `speakLocale` 整页一个值 `vi-VN`），
+  //    越南语的 Web Speech **做不出方言差异** ⇒ 承诺「听河静音」而播的是通用音。
+  //    ⭐ `[[dict-framework-doc]]`：**错比缺更伤权威**。
+  //    ⇒ 去掉按方言的 TTS；该方言**真有真人录音**时才给播放器（4,177 组对得上）。
+  //
+  // 🔴 这一条断言的是「页面上没有按方言的 TTS 按钮」。样本词 `công nhân` 有 **5 个方言行、
+  //    0 条录音** —— 正是最该不出现按钮的那种。
+  { word: 'công nhân', name: '🔴🔴 W29：没有录音的方言行不许有播放按钮',
+    hit: (t, e) => {
+      const dialects = new Set((e.pronunciations as any[]).map((p) => p.dialect));
+      if (dialects.size < 2) return '`công nhân` 的方言行少于 2 ⇒ 这条检查空过了，换样本词';
+      if ((e.audios as any[]).length > 0) return '`công nhân` 现在有录音了 ⇒ 换一个没录音的样本词';
+      // `▶` 是那个按方言 TTS 按钮的字面量。它一回来，这条就红。
+      const n = (t.match(/▶/g) ?? []).length;
+      return n === 0 ? null
+        : `读音区有 ${n} 个 ▶ 按钮，而这个词一条录音都没有 —— 它们读的是同一个通用 TTS`;
+    } },
+  // 🔴 另一个方向：**有录音的方言行必须给得出播放器**。
+  //    只断言「没录音时没按钮」的话，「永远不给按钮」也能满足它 —— 那就把 4,177 组
+  //    真人录音藏起来了（`[[dont-recast-deliverables-as-junk]]`：录音是珍贵资产）。
+  // 🔴🔴 **这一条的第一版判据是错的，而它当场判红把我揪回来了。**
+  //    我写的是「在渲染文本里找 `upload.wikimedia.org`」—— 可 `<audio src="…">` 的 URL
+  //    在**属性**里，而契约闸给 `hit` 的第一个参数是**去掉标签的可见文本**，
+  //    属性当然不在里面 ⇒ 它报「一个播放器都没有」而页面上其实有两个。
+  //    ⭐ 与 `css-audit` 文件头记的是同一条：**文本导出器在原理上看不见属性和样式**。
+  //    ⇒ 用第三个参数 `html`（原始 HTML）—— 播放器是**元素**不是文字。
+  { word: 'và', name: '🔴 W29：有录音的方言行给得出播放器（别把录音藏起来）',
+    hit: (_t, e, html) => {
+      const matched = (e.audios as any[]).filter(
+        (a) => (e.pronunciations as any[]).some((p) => p.dialect === a.dialect));
+      if (matched.length === 0) return '`và` 没有方言对得上的录音 ⇒ 这条检查空过了，换样本词';
+      // 🔴 **挂在方言行上**才算（`vi-audio-inline`）；落到下面「没标方言」那一区不算，
+      //    否则「全部塞进那一区」也能满足这条断言。
+      const inline = (html.match(/class="vi-audio vi-audio-inline"/g) ?? []).length;
+      const missing = matched.filter((a: any) => !html.includes(a.url));
+      if (inline === 0) return `${matched.length} 条方言对得上的录音，方言行上一个播放器都没有`;
+      return missing.length === 0 ? null
+        : `${missing.length}/${matched.length} 条录音的 url 没出现在页面上：${missing[0].url.slice(0, 50)}`;
+    } },
+
   // 📋 **有意不写**「中文译文不许排进『出处：』那一格」这一条：我写了一版，
   //    **两个分支都 `return null`** —— 一条永远不会红的检查，信号量是零
   //    （恒绿和恒红一样没用：`[[permanently-red-gate-masks-real-reds]]` 的镜像）。

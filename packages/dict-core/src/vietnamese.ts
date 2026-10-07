@@ -84,7 +84,20 @@ export type VietnameseRelation = {
 
 export type VietnameseSense = {
   id: number;
-  rank: number;
+  // 🔴🔴 **`rank` 有意不端出来（W27，2026-10-06 的决定）。**
+  //    `sense.rank` **102,673 条全是 0** —— 不是 bug 是没做：阶段 5a 建表时留了这一列，
+  //    而 vi **没有排序依据**（`dict.freq_zipf` 也是 0 条，越南语没有频次数据）。
+  //    原先四处 SQL 写着 `ORDER BY …, s.rank, s.id` ⇒ 实际排序是 `(词源号, id)`，
+  //    而 `id` 是**收割顺序**（en 版先、vi 版后、zh 版最后）。
+  //    ⇒ **那几句 SQL 在说一件它们没有在做的事**，而下一个读它的人会当成真的 ——
+  //      `App.tsx` 里就真的写下了「义项顺序本身有意义（`sense.rank`）」。
+  //    `[[gate-registers-status-quo-as-spec]]`：留着一个恒 0 的排序键，
+  //    等于把「没做」登记成「做好了」。
+  // ⚠️ 去掉它**不改变任何一页的顺序**（恒 0 的键排不动任何东西）——
+  //    改变的是「这句 SQL 说了实话」。
+  // 🔴 回归闸 **P35/P36 是一对带锁的豁免**：
+  //      P35 红 ＝ 有人给 `rank` 填了值（那就该把它放回 ORDER BY）
+  //      P36 红 ＝ `rank` 还是恒 0 而 ORDER BY 里又出现了它
   etymNo: number | null;
   pos: string | null;
   zh: string | null;
@@ -126,6 +139,20 @@ export type VietnameseEntryView = {
 };
 
 export type VietnameseEntry = {
+  /** 🔴🔴🔴 **这一行漏了，而后果是整个展示层从第一天起就没被走到过。**
+   *  `App.tsx` 的分发写的是 `entry.lang === 'vi'` ⇒ `undefined === 'vi'` 为假
+   *  ⇒ `VietnameseEntryView` **一次都没渲染过**，页面上只有兜底那行
+   *  「`「」`的展示层还没接上」—— 而 `「」` 里是空的，**正因为 `entry.lang` 是 undefined**。
+   *  是用户 2026-10-06 截图问出来的。
+   *  ⚠️ `korean.ts` 有 `lang: 'ko'`、`japanese.ts` 有 `lang: 'ja'`，**vi 两处都漏**
+   *     （类型里和 `getEntry()` 的返回对象里）。
+   *  🔴 为什么三道闸全绿：展示层契约闸**直接渲染 `VietnameseEntryView`**，
+   *     从不走 `App.tsx` 的分发 ⇒ 它测的是「视图对不对」，不是「视图有没有被调到」；
+   *     `css-audit` 的自检只问「视图登记了没」；TypeScript 抓不到是因为
+   *     `App.tsx` 本地的 `ViEntry` 是**手抄的镜像**且声明了 `lang: 'vi'`，而服务侧用 `as` 强转。
+   *  ⇒ `[[lesson-must-become-mechanism]]` 那四道关卡之后还有第五道：
+   *    **页面真的走到它**。已做成跨九门的闸（`apps/web/src/dispatch-audit.ts`）。 */
+  lang: 'vi';
   id: number;
   word: string;
   isLemma: boolean;
@@ -185,7 +212,11 @@ export class VietnameseDictService {
         SELECT d.id, d.word,
                (SELECT g.text FROM sense s JOIN sense_gloss g ON g.sense_id = s.id
                  WHERE s.word_id = d.id AND s.hidden = 0 AND g.lang = 'zh'
-                 ORDER BY s.rank, s.id LIMIT 1) AS brief,
+                 -- 🔴 W27：原先是 ORDER BY s.rank, s.id —— rank 恒 0，去掉它（见类型声明）
+                 -- 🔴🔴 **这一行里不许出现反引号**：这是 SQL 模板串，反引号会当场截断字符串。
+                 --    korean.ts 的文件头把这一课写了两遍，而 2026-10-06 我又犯了一次（三处），
+                 --    npm run gate:vi-display 当场 TransformError。
+                 ORDER BY s.id LIMIT 1) AS brief,
                (SELECT e.pos FROM entry e WHERE e.word_id = d.id
                  AND e.pos IS NOT NULL AND e.pos <> 'unknown' LIMIT 1) AS pos
         FROM dict d
@@ -242,7 +273,7 @@ export class VietnameseDictService {
         --    折成 '' 之后，「没有 entry」和「entry 说 unknown」在调用方眼里一模一样。
         --    ⇒ 留 NULL，让展示层分得开（[[it-display-layer-stage8]]：
         --      兜底越体面，缺陷越难发现）。
-        SELECT s.id, s.rank, CAST(e.etym_no AS INTEGER) AS etymNo, e.pos AS pos,
+        SELECT s.id, CAST(e.etym_no AS INTEGER) AS etymNo, e.pos AS pos,
                (SELECT text FROM sense_gloss WHERE sense_id = s.id AND lang='zh'
                  ORDER BY id LIMIT 1) AS zh,
                (SELECT src  FROM sense_gloss WHERE sense_id = s.id AND lang='zh'
@@ -253,7 +284,10 @@ export class VietnameseDictService {
                  ORDER BY id LIMIT 1) AS vi
         FROM sense s LEFT JOIN entry e ON e.id = s.entry_id
         WHERE s.word_id = ? AND s.hidden = 0
-        ORDER BY CAST(e.etym_no AS INTEGER), s.rank, s.id
+        -- 🔴 W27：原先是 ORDER BY CAST(e.etym_no AS INTEGER), s.rank, s.id。
+        --    rank 恒 0 ⇒ 它一个义项都没排过，去掉之后**顺序一字不变**，
+        --    但这句 SQL 不再声称自己按常用度排序（见 VietnameseSense 的注释）。
+        ORDER BY CAST(e.etym_no AS INTEGER), s.id
       `),
 
       // 关系。一次取全，调用方按 senseId 分义项级/词级。
@@ -262,7 +296,9 @@ export class VietnameseDictService {
         SELECT r.sense_id AS senseId, r.kind, r.target, r.target_id AS targetId,
                (SELECT g.text FROM sense s2 JOIN sense_gloss g ON g.sense_id = s2.id
                  WHERE s2.word_id = r.target_id AND g.lang='zh' AND s2.hidden = 0
-                 ORDER BY s2.rank LIMIT 1) AS zh
+                 -- 🔴 W27：原先是 ORDER BY s2.rank —— **恒 0 ＝ 根本没有 ORDER BY**，
+                 --    取的是随便一条。改成 s2.id（确定的、可复现的那一条）。
+                 ORDER BY s2.id LIMIT 1) AS zh
         FROM sense_relation r
         WHERE r.word_id = ? AND r.hidden = 0
         ORDER BY r.kind, r.id
@@ -374,6 +410,8 @@ export class VietnameseDictService {
       Array<{ ipa: string; dialect: string; src: string }>;
 
     return {
+      // 🔴 见类型定义上方那段：漏了这一行，展示层整个走不到。
+      lang: 'vi',
       id,
       word: hit.word,
       isLemma: !!hit.isLemma,

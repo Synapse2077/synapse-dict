@@ -1838,7 +1838,11 @@ export default function App() {
             日语特有的假名/声调/字种等级则**静默消失**。
             `[[it-display-layer-stage8]]`：**兜底越体面，缺陷越难发现**。
             ⇒ 改成白名单：认识的走自己的视图，不认识的**明说没接**。 */}
-        {entry && !['en', 'it', 'fr', 'pt', 'de', 'ja', 'ko'].includes(entry.lang) && (
+        {/* 🔴🔴 2026-10-06 补 `vi`。漏登记的后果是**兜底与真视图同时渲染** ——
+            页面上既有越南语词条、又跟着一行「展示层还没接上」。
+            ⚠️ 这张白名单与上面那串 `entry.lang === 'xx'` 分发块是**两份名单**，
+              而在此之前**没有任何东西对账** ⇒ 已做成闸 `dispatch-audit.ts`。 */}
+        {entry && !['en', 'it', 'fr', 'pt', 'de', 'ja', 'ko', 'vi'].includes(entry.lang) && (
           entry.lang === 'es'
             ? <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
             : (
@@ -5924,7 +5928,11 @@ type ViRelation = {
   targetId: number | null; zh: string | null;
 };
 type ViSense = {
-  id: number; rank: number; etymNo: number | null; pos: string | null;
+  // 🔴 W27（2026-10-06）：`rank` **从服务层去掉了** —— 全库 102,673 条都是 0，
+  //    四处 `ORDER BY …, s.rank, s.id` 一个义项都没排过。
+  //    ⚠️ 这份类型是**手抄的镜像**（分发闸那一跤的根子），所以它必须跟着改：
+  //    留着一个服务层已经不端出来的字段，正是「镜像与真实形状没有对账」的那个洞。
+  id: number; etymNo: number | null; pos: string | null;
   zh: string | null; zhSrc: string | null; en: string | null; vi: string | null;
   zhSameAsSpelling: boolean;
 };
@@ -5977,8 +5985,26 @@ function viRelLabel(kind: string): string | null {
  * ⚠️ `composed` 按**组内有没有拼的**算：一个方言下只要有一条是拼的就要标注，
  *   否则读者会以为整组都是源头写的。
  */
-function ViPronGroup({ dialect, items, onSpeak }: {
-  dialect: string; items: ViPron[]; onSpeak: () => void;
+/**
+ * 一个方言一行。2026-10-06 改。
+ *
+ * 🔴🔴 **原先每一行都有一个 `▶`，而那 5 个按钮行为完全一样** ——
+ *    全是 `speak(entry.word, speakLocale)`，而 `speakLocale` 是整页一个值（`vi-VN`）。
+ *    越南语的 Web Speech 只有一个 `vi-VN` 声音，**做不出方言差异**
+ *    ⇒ 5 个按钮摆在 5 个方言旁边、读出来是同一个声音。
+ *    用户 2026-10-06：「为什么音标有这么多方框」—— 指的就是这 5 个带边框的按钮。
+ * ⭐ `[[dict-framework-doc]]`：**错比缺更伤权威**。一个承诺「听这个方言」而
+ *   播放通用 TTS 的按钮，比没有按钮更坏 —— 读者会以为自己听到的是河静音。
+ * ⇒ 去掉按方言的 TTS。整页只留词头旁边那一个 🔊（它读的就是这个词，名副其实）。
+ *
+ * ✅ 而**真人录音是带方言的**：`audio` 表的方言值是 ha-noi 1,859／sai-gon 555／
+ *   south-central-coast 3（外加 686 条 `unknown`），与音标方言**对得上的有 4,177 组**。
+ *   ⇒ 该方言真有录音时，把播放器放在**那一行**上 —— 这时按钮才名副其实。
+ *   ⚠️ 只有 **2,839 / 66,502（4.27%）** 的词形有任何录音 ⇒ 95.7% 的行**不该有按钮**，
+ *     这不是「功能缺失」而是如实：我们没有那个方言的录音。
+ */
+function ViPronGroup({ dialect, items, audios }: {
+  dialect: string; items: ViPron[]; audios: ViEntry['audios'];
 }) {
   const label = VI_DIALECT_LABELS[dialect];
   const seen = new Set<string>();
@@ -5986,7 +6012,6 @@ function ViPronGroup({ dialect, items, onSpeak }: {
   const anyComposed = ipas.some((p) => p.composed);
   return (
     <span className="vi-pron">
-      <button type="button" className="vi-pron-play" onClick={onSpeak} aria-label="朗读">▶</button>
       {/* 音标裸存（八语种统一约定）⇒ 定界符在展示层加 */}
       {ipas.map((p, i) => (
         <span key={p.ipa}>
@@ -5997,6 +6022,12 @@ function ViPronGroup({ dialect, items, onSpeak }: {
       {label ? <span className="vi-pron-dialect">{label}</span> : null}
       {/* 🔴 W7：96,267 行是阶段 3b 按音节拼的。不标出来就是拿我们算的冒充源头写的。 */}
       {anyComposed ? <span className="vi-pron-composed" title="由音节规则拼出，非源头标注">按音节拼写</span> : null}
+      {/* ✅ 这个方言**真有真人录音**时才给播放器 —— 按钮因此名副其实 */}
+      {audios.map((a) => (
+        <audio key={a.commonsKey} controls preload="none" src={a.url} className="vi-audio vi-audio-inline">
+          <track kind="captions" />
+        </audio>
+      ))}
     </span>
   );
 }
@@ -6124,20 +6155,34 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
               const a = byDialect.get(p.dialect);
               if (a) a.push(p); else byDialect.set(p.dialect, [p]);
             }
+            // ✅ 真人录音按方言分到对应那一行（4,177 组对得上）。
+            //    🔴 方言对不上的（`unknown` 686 条，以及音标里没有那个方言的）
+            //    **不许丢** —— 它们归到下面那个「没标方言」的区，
+            //    `[[dont-recast-deliverables-as-junk]]`：录音是珍贵资产。
+            const audioByDialect = new Map<string, ViEntry['audios']>();
+            for (const a of entry.audios) {
+              if (!byDialect.has(a.dialect)) continue;     // 没有对应的音标行 ⇒ 留给下面
+              const arr = audioByDialect.get(a.dialect);
+              if (arr) arr.push(a); else audioByDialect.set(a.dialect, [a]);
+            }
             return [...byDialect.entries()].map(([d, items]) => (
               <ViPronGroup key={d} dialect={d} items={items}
-                onSpeak={() => speak(entry.word, speakLocale)} />
+                audios={audioByDialect.get(d) ?? []} />
             ));
           })()}
         </section>
       )}
-      {entry.audios.length > 0 && (
+      {/* 🔴 挂不到任何音标行上的录音（方言是 `unknown`，或那个方言没有音标）。
+          **一条都不许丢**：实测 686 条 `unknown` ＋ 少量方言对不上的。 */}
+      {entry.audios.some((a) => !entry.pronunciations.some((p) => p.dialect === a.dialect)) && (
         <section className="vi-audios">
-          {entry.audios.map((a) => (
-            <audio key={a.commonsKey} controls preload="none" src={a.url} className="vi-audio">
-              <track kind="captions" />
-            </audio>
-          ))}
+          <span className="vi-audio-note">没标方言的录音</span>
+          {entry.audios.filter((a) => !entry.pronunciations.some((p) => p.dialect === a.dialect))
+            .map((a) => (
+              <audio key={a.commonsKey} controls preload="none" src={a.url} className="vi-audio">
+                <track kind="captions" />
+              </audio>
+            ))}
         </section>
       )}
 

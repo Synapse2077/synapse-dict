@@ -569,6 +569,73 @@ def clean_markup(text):
     return "\n".join(l for l in out if l.strip())
 
 
+# ── ⑤f 同一族残渣在**别的列**上：W18 的判据之家。2026-10-06 ──────────────
+# 📋 W18 这笔账开着两天，而**它一直没有一道闸** —— 账上写着「`ref` 93 处 ／
+#    `sense_gloss` 46 行 ／ `etymology` 3 行」，可那三个数没有任何东西数过。
+#    `[[fix-regression-and-gate]]`：量过、写进账本、**然后就没人再看了**，
+#    是这仓库最常见的一种失明。今天给它判据之家＋三个锁。
+#
+# ⚠️ 判据写成**残留型**（`[[proxy-metric-gets-optimized]]` 的反面）：
+#    它先跑一遍 `clean_markup` 再问「还留着吗」。于是两个方向都有信号 ——
+#      · 哪天 `clean_markup` 伸到这三列上 ⇒ 三个数掉下来 ⇒ 闸红 ⇒ **逼人回来改账**；
+#      · 哪天 `_SUPERSCRIPT_NOTE` 被删掉 ⇒ 例句正文那 58 处又冒出来 ⇒ 闸红。
+#    若写成裸正则 `LIKE '%^(%'`，第一个方向就哑了（判据和被判据的东西脱钩）。
+_SUP_LEFT = re.compile(r"\^\(")
+
+
+def sup_residue(text):
+    """→ True ＝ `clean_markup` 之后这一串里**还留着** `^(…)` 上标残渣（W18）。
+
+    kaikki 把维基的上标渲染成 `^(…)`。`clean_markup` 只认**方括号那一族**
+    （`^([sic])` → `[sic]`，因为 `[sic]` 的字一个都不许丢）；
+    `^(https://vi.wikisource.org/…)` 这类 URL 是另一回事，也在另外三列上。
+    """
+    return bool(_SUP_LEFT.search(clean_markup(text or "")))
+
+
+# ── ⑤g fr 版把 JavaScript 实参列表漏进例句正文：W20 的判据之家 ───────────
+# 🔴 法语维基词典的页面上有 `onclick="javascript:…('morale','vietphap','on')"`，
+#    kaikki 抽 `examples` 时把属性值的尾巴也带了进来：
+#        `','vietphap','on')"morale`      ← 整条**一个可读的越南语词都没有**
+#    ⭐ 逮到它的是**阶段 6e 的付费跑批**：模型拿到它没东西可译、原样返回，
+#      而「译文里没有一个汉字」这条异常检查把它捞了出来
+#      （`[[measure-landing-not-source]]` 的另一面：**跑批产物的异常输出是独立的缺陷探测器**）。
+#
+# ⚠️ 判据按**结构**写不按词表写：匹配的是「引号括起来的实参 ＋ 收尾的 `)"`」——
+#    HTML 属性值的边界。写成 `'vietphap'` 那种词表判据的话，
+#    换一个法语模板名就一条都抓不到（`[[criteria-from-meaning-not-form]]`）。
+# 🔴 **而它必须比「有残渣」更窄：是「整条只剩残渣」。** 同一版里还有四条
+#    **带着可读内容**的标记残渣（`'tỉnh, province` ／ `'huyện, division du phủ…`
+#    ／ `'chuồng ngựa` ／ `'âm hưởng' phòng hòa nhạc`，行首落单的单引号是同一个
+#    JS 调用被截断留下的）—— 那四条**不是 W20**：前两条是 fr 版的「越南语词＋法语释义」
+#    （W16 那一族，只是分隔符是逗号不是 ` : `），后两条是正文带个多余的引号。
+#    把它们一起判成「不是例句」会**删掉可读的内容**，而那比留着残渣更坏
+#    （`[[source-typo-fix-ours-not-quote]]`：一条被截断的引文看起来是完整的）。
+_JS_ARG_RESIDUE = re.compile(r"','[^']*'\)\"")
+
+HIDDEN_JS_RESIDUE = "js-markup-residue"   # 整条只是 JS 标记残渣，不是例句
+
+
+# ── ⑤h W22 的度量键：`example.text` 被原地改过的行数 ─────────────────────
+# 📋 W22 记的是一个**结构不一致**：例句层有五种清洗，**四种直接改 `text`**
+#    （ko 版内嵌韩语 1,655 条／出处串进首行 202 条／内嵌英译 282 行／标记残渣 55 条），
+#    第五种（W16 的本版释义尾巴）**不改 `text`**，只算一条派生的出版正文 `text_pub`。
+# 🔴 真实代价不是「风格不统一」，是**外锚闸的第③向（键对上而内容不一样）锚的是
+#    清洗后的 `text`** ⇒ 它问不了「源头原文是什么」，而那正是
+#    `[[external-anchor-gates]]` 要的那种锚（锚外部 dump 的闸永不过期）。
+# ⇒ 2026-10-06 的动作：**先把这件事变成一个会被数的数**，而不是一句话。
+#    收割器在末尾拿最终 `text` 与 dump 原文比一次，记在这个键上；
+#    外锚闸 `X源⑥` 锁住它。四种清洗哪天迁到 `text_pub`，它归 0 ⇒ 闸红 ⇒ 逼人划账。
+# ⚠️ 这不是结清 W22，是给它配一道闸（结清要做的是迁移，而迁移会动 7.8 万行的
+#    `text`，那是一次有付费数据在场的大改，要单独一轮）。
+TEXT_MUTATED_IN_PLACE = "🔴 W22：`text` 被原地改过（与 dump 原文逐字不同）"
+
+
+def is_js_residue(text):
+    """→ True ＝ 整条只是 JavaScript 标记残渣，不是例句（W20）。"""
+    return bool(_JS_ARG_RESIDUE.search(text or ""))
+
+
 # ── ⑥ 本版自己的释义语言挤在同一格里（W16）────────────────────────────
 # 🔴 **先把「法语和越南语关系密切」这件事摘清楚**（用户 2026-10-05 问的就是这个）：
 #    关系是真的 —— 实测 **1,115 个词形有法语来源的词源**，页面上印着：
@@ -760,6 +827,19 @@ def example_hidden_why(text, word, tags=(), syllables=None):
     t = (text or "").strip()
     if not t:
         return None                       # 空文本不入库，调用方跳过（不是隐藏）
+    # 🔴🔴 **W20 必须判在这里，而不是由 `fixes/` 脚本去 UPDATE。** 2026-10-06。
+    #    我第一版就是写了个 fix 脚本直接 `UPDATE example SET hidden=1` ——
+    #    **外锚闸当场报「2 条键对上了而内容不一样」，而它是对的**：
+    #    收割器 `collect()` 产不出这个 `hidden_why`，于是库不再是收割器的产物，
+    #    而 `--rebuild`／`--sync` 会把它冲掉。
+    #    ⭐ 这一跤项目里刚记过（6e 那轮）：**判据搬进收割器，不是搬进闸** ——
+    #      搬进闸则 `--rebuild` 会把脏数据写回而闸照样绿。这次是搬进 fix 脚本，同一个洞。
+    #    ⚠️ 排在最前：整条是 JS 残渣的行**不含越南语也不含汉字**，
+    #      放在后面会被 `HIDDEN_NO_LATIN`／`HIDDEN_TOO_SHORT` 之类先抢走，
+    #      那时页面上虽然也看不见它，**但原因是错的**（而原因是会被读的：X13 查值域、
+    #      P33 按这个原因计数、以后清洗这一族的人按这个原因找行）。
+    if is_js_residue(t):
+        return HIDDEN_JS_RESIDUE
     if is_meta_not_example(t):
         return HIDDEN_META_NOT_EXAMPLE
     if not _has_quoc_ngu(t):

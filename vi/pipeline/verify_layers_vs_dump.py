@@ -69,6 +69,12 @@ import collect_w17_relations as W17                                # noqa: E402
 F = lambda n: format(n, ",")                                       # noqa: E731
 QUIET = False   # 变异验证期间把层内的报数行闭嘴（否则 10 条变异刷满屏）
 
+# 🔴 W22 的已接受基线：`example.text` 与 dump 原文逐字不同的行数（见 `X源⑥`）。
+#    实测值由收割器给出（`stat[S6.TEXT_MUTATED_IN_PLACE]`）。
+#    ⚠️ 写成常量而不是「从现状读」：`[[expectation-must-be-declared]]` ——
+#      期望值必须独立声明，从现状推出来的期望逮不到任何东西。
+TEXT_MUTATED_BASELINE = 2041
+
 
 def ro():
     return sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
@@ -166,6 +172,27 @@ def layer_example(show=0):
         else:
             other[src] += 1
     bad += _diff(want_g, have_g, "X译", show)
+    # ══ 🔴🔴 X源⑥（W22，2026-10-06）：**这道闸锚的是清洗后的 `text`，不是 dump 原文** ══
+    # 📋 这是一条**把「我锚的是什么」写成断言**的检查。W22 记的那件事是：
+    #    例句层五种清洗里**四种直接改 `text`** ⇒ `example.text` 不逐字等于 dump，
+    #    而本闸第③向（键对上而内容不一样）比的是 `collect()` 的产出 ——
+    #    **收割器两边都用同一套清洗，所以它永远一致，也永远问不出「源头原文是什么」**。
+    # ⭐ 这正是 `[[gate-registers-status-quo-as-spec]]` 的形状：闸一致地绿着，
+    #   而它绿的原因是它比较的两边是同一个判据的两次运行。
+    # ⇒ 不装作它锚了原文；把**偏离的量级**锁住，并写明什么会推翻。
+    # ⚠️ 判据**在收割器里**（`stat[S6.TEXT_MUTATED_IN_PLACE]`，拿最终值与 dump 原文
+    #    逐字比一次）—— 不在这里重写，而且它是结构性的：以后新加的任何原地清洗
+    #    都会被数到，不靠作者记得报一笔。
+    n_mut = stat.get(S6.TEXT_MUTATED_IN_PLACE, 0)
+    if n_mut != TEXT_MUTATED_BASELINE:
+        bad.append(("X源⑥", "🔴 `example.text` 被原地改过的行数 %s ≠ 已接受基线 %s（W22）。"
+                            "**两个方向都要回来看**：涨了＝多了一种原地清洗（那时本闸锚的"
+                            "东西又远了一步）；归 0 ＝ 四种清洗迁去了 `text_pub`"
+                            "（**那就是 W22 结清了，回去划账并把这条基线改成 0**）"
+                    % (F(n_mut), F(TEXT_MUTATED_BASELINE))))
+    elif not QUIET:
+        print("   ⚠️ W22：`text` 原地改过 %s 行（本闸第③向锚的是**清洗后**的 text，"
+              "不是 dump 原文）" % F(n_mut))
     # 🔴 排除一类就必须钉住「没有第三类」
     if other:
         bad.append(("X译④", "🔴 `example_gloss.src` 出现既不是版本名也不是 `model*` 的值："
