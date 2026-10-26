@@ -19,6 +19,9 @@ import {
   KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE,
   VI_POS_LABELS, VI_RELATION_LABELS, VI_DIALECT_LABELS, VI_ETYM_TYPE_LABELS,
   VI_SPELLING_RULE, VI_EDITION_LABELS, viEditionRank,
+  RU_POS_LABELS, RU_RELATION_LABELS, RU_ASPECT_SUBKIND_LABELS, RU_FAMILY_POS_LABELS, RU_FAMILY_FORM_LABELS,
+  RU_ASPECT_LABELS, RU_GENDER_LABELS, RU_INFL_TAG_LABELS, RU_GRAMMAR_LABELS, RU_USAGE_LABELS,
+  RU_EDITION_LABELS, RU_DIALECT_LABELS, RU_ETYM_TYPE_LABELS,
 } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
@@ -1830,6 +1833,9 @@ export default function App() {
         {entry && entry.lang === 'ko' && (
           <KoreanEntryView entry={entry as KoEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
+        {entry && entry.lang === 'ru' && (
+          <RussianEntryView entry={entry as unknown as RuEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
+        )}
 
         {/* 🔴 **兜底只给 es，不再是「其余全部」。**
             2026-09-16 之前这一行写的是 `lang !== 'en' && !== 'it' && …` ——
@@ -1842,7 +1848,7 @@ export default function App() {
             页面上既有越南语词条、又跟着一行「展示层还没接上」。
             ⚠️ 这张白名单与上面那串 `entry.lang === 'xx'` 分发块是**两份名单**，
               而在此之前**没有任何东西对账** ⇒ 已做成闸 `dispatch-audit.ts`。 */}
-        {entry && !['en', 'it', 'fr', 'pt', 'de', 'ja', 'ko', 'vi'].includes(entry.lang) && (
+        {entry && !['en', 'it', 'fr', 'pt', 'de', 'ja', 'ko', 'vi', 'ru'].includes(entry.lang) && (
           entry.lang === 'es'
             ? <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
             : (
@@ -6374,6 +6380,388 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
           ))}
         </section>
       )}
+    </article>
+  );
+}
+
+// ============================================================================
+// 俄语（ru 阶段 9a，2026-10-25）
+// 类型是 `packages/dict-core/src/russian.ts` 的镜像 —— 前端不能 import dict-core（它依赖 node:sqlite）。
+// 🔴 vi 的分发 bug 就藏在「手抄镜像与服务侧没有对账」里 ⇒ 契约闸用**真服务数据**渲染这个视图，形状对不上会直接渲染错。
+// ============================================================================
+type RuGloss = { lang: string; text: string; src: string; model: boolean };
+type RuSense = { id: number; entryId: number; rank: number; glosses: RuGloss[]; tags: Array<{ bucket: string; value: string }> };
+type RuExample = { senseId: number | null; entryId: number; text: string; ref: string | null; zh: string | null;
+  zhSrc: string | null; en: string | null; src: string };
+type RuRelation = { entryId: number; senseId: number | null; kind: string; subkind: string | null;
+  relGroup: string | null; formGroup: string | null; target: string; targetId: number | null; src: string };
+type RuInfl = { entryId: number; form: string; stressed: string | null; tags: string[]; tableTag: string | null; src: string };
+type RuEntryPart = { id: number; pos: string; etymNo: number; etymSub: number; aspect: string | null;
+  gender: string | null; animacy: string | null; stressed: string | null; stressVariants: string[]; src: string };
+type RuEntry = {
+  lang: 'ru'; id: number; word: string; isLemma: boolean;
+  entries: RuEntryPart[]; senses: RuSense[];
+  pronunciations: Array<{ entryId: number | null; ipa: string; dialect: string; notation: string; src: string }>;
+  inflections: RuInfl[]; examples: RuExample[]; relations: RuRelation[];
+  etymologies: Array<{ entryId: number; etymNo: number; text: string; etymType: string | null; src: string }>;
+  audios: Array<{ entryId: number | null; url: string; commonsKey: string; src: string }>;
+  pointers: Array<{ entryId: number | null; lang: string; text: string; src: string; target: string | null; targetId: number | null }>;
+  homographs: Array<{ id: number; word: string }>;
+  yoVariants: Array<{ id: number; word: string }>;
+  foldedFrom: string | null;
+};
+
+// 版的展示顺序：中文版先（读者是中文读者）、俄文版次之（内容最全）、英文版再次
+const RU_EDITION_ORDER = ['zh-edition-trad', 'zh-edition-simp', 'ru-edition', 'en-edition', 'fr-edition', 'vi-edition', 'pl-edition'];
+const ruEdRank = (src: string) => { const i = RU_EDITION_ORDER.indexOf(src); return i < 0 ? 99 : i; };
+const RU_REL_ORDER = ['synonym', 'antonym', 'aspect_pair', 'hypernym', 'hyponym', 'coordinate', 'meronym', 'holonym',
+  'derived', 'word_family', 'related', 'proverb', 'abbreviation', 'paronym', 'descendant', 'troponym'];
+// 变位表标签的规范顺序（源头顺序不稳定：`nominative|singular` 与 `plural|prepositional` 都有）
+const RU_TAG_ORDER = ['infinitive', 'present', 'future', 'past', 'imperative', 'participle', 'adverbial', 'active', 'passive',
+  'short-form', 'comparative', 'superlative', 'first-person', 'second-person', 'third-person',
+  'masculine', 'feminine', 'neuter', 'singular', 'plural',
+  'nominative', 'genitive', 'dative', 'accusative', 'instrumental', 'prepositional', 'locative', 'vocative', 'partitive',
+  'count-form', 'animate', 'inanimate'];
+const RU_CASES = ['nominative', 'genitive', 'dative', 'accusative', 'instrumental', 'prepositional'];
+
+function ruPosLabel(pos: string): string {
+  return RU_POS_LABELS[pos] ?? POS_LABELS[pos] ?? pos;
+}
+function ruRelLabel(kind: string): string {
+  return RU_RELATION_LABELS[kind] ?? REL_LABELS[kind] ?? kind;
+}
+function ruTagLabel(tags: string[]): string {
+  const core = tags.filter((t) => t && !t.startsWith('src-'));
+  const ord = (t: string) => { const i = RU_TAG_ORDER.indexOf(t); return i < 0 ? 999 : i; };
+  return [...core].sort((a, b) => ord(a) - ord(b)).map((t) => RU_INFL_TAG_LABELS[t] ?? t).join(' ');
+}
+
+/** 一行是不是「格 ＋ 数」的变格表格子（可带动物性）。`dated` 另算（改革前正字法那一套）。 */
+function ruParadigmCell(r: RuInfl): { c: string; n: string; dated: boolean } | null {
+  const core = r.tags.filter((t) => t && !t.startsWith('src-') && t !== 'animate' && t !== 'inanimate');
+  const dated = core.includes('dated');
+  const rest = core.filter((t) => t !== 'dated');
+  const c = rest.find((t) => RU_CASES.includes(t));
+  const n = rest.find((t) => t === 'singular' || t === 'plural');
+  return rest.length === 2 && c && n ? { c, n, dated } : null;
+}
+
+function RuCaseTable({ rows, title }: { rows: RuInfl[]; title?: string }) {
+  const show = (r: RuInfl) => r.stressed || r.form;
+  const cell = (c: string, n: string) => [...new Set(rows.filter((r) => { const p = ruParadigmCell(r); return p && p.c === c && p.n === n; })
+    .map(show))];
+  return (
+    <table className="ru-infl-table">
+      <thead><tr><th>{title ?? ''}</th><th>单数</th><th>复数</th></tr></thead>
+      <tbody>
+        {RU_CASES.map((c) => (
+          <tr key={c}><th>{RU_INFL_TAG_LABELS[c]}</th>
+            <td>{cell(c, 'singular').join('，') || '—'}</td><td>{cell(c, 'plural').join('，') || '—'}</td></tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** 变化形式。🔴 en 版的「变位表」里混着四样东西（渲染 `вода` 才看见的）：
+ *    ① 真变格表（格×数）② 改革前正字法那一套（`водѣ`／`водамъ`，带 dated）
+ *    ③ 相关词（形容词 `водяной`、指小 `водичка`）④ 词头模板里的裸 `genitive`
+ *  第一版取「行最多的 entry」整张判，混进 ③④ 就认不出是名词表、只能印成列表。
+ *  ⇒ 变格表取**格×数行最多**的那个 entry；旧正字法单独一张；其余去重后并成「其他形式」。 */
+function RuInflection({ byEntry }: { byEntry: RuInfl[][] }) {
+  const show = (r: RuInfl) => r.stressed || r.form;
+  const modernOf = (rows: RuInfl[]) => rows.filter((r) => { const p = ruParadigmCell(r); return p && !p.dated; });
+  const datedOf = (rows: RuInfl[]) => rows.filter((r) => { const p = ruParadigmCell(r); return p && p.dated; });
+  const best = [...byEntry].sort((a, b) => modernOf(b).length - modernOf(a).length)[0] ?? [];
+  const modern = modernOf(best);
+  const dated = [...byEntry].map(datedOf).sort((a, b) => b.length - a.length)[0] ?? [];
+  // 「其他形式」：不是格×数格子的那些，跨 entry 去重。名词表成立时，裸 genitive 这类（④）是重复信息，不再印
+  const otherRows = byEntry.flat().filter((r) => !ruParadigmCell(r)
+    && !(modern.length >= 6 && r.tags.filter((t) => t && !t.startsWith('src-')).length === 1 && RU_CASES.includes(r.tags[0])));
+  const others = new Map<string, string[]>();
+  for (const r of otherRows) {
+    const k = ruTagLabel(r.tags) || '（无标签）';
+    const a = others.get(k);
+    if (a) { if (!a.includes(show(r))) a.push(show(r)); } else others.set(k, [show(r)]);
+  }
+  return (
+    <div>
+      {modern.length >= 6 ? <RuCaseTable rows={modern} /> : null}
+      {dated.length >= 6 ? <RuCaseTable rows={dated} title="旧正字法" /> : null}
+      {others.size > 0 ? (
+        <ul className="ru-infl-list">
+          {[...others.entries()].map(([k, forms]) => (
+            <li key={k}><span className="ru-infl-tag">{k}</span><span className="ru-infl-forms">{forms.join('，')}</span></li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function RuExamples({ items }: { items: RuExample[] }) {
+  if (!items.length) return null;
+  const one = (x: RuExample) => (
+    <div key={`${x.src}-${x.text.slice(0, 40)}`} className="ru-example">
+      <span className="ru-example-text">{x.text}</span>
+      {x.zh ? <span className="ru-example-zh">{x.zh}{x.zhSrc?.startsWith('model:') ? <span className="ru-mt">机翻</span> : null}</span> : null}
+      {x.en ? <span className="ru-example-en">{x.en}</span> : null}
+      {/* 🔴 ref 是**出处**不是译文（vi 的 W10），不许排在译文位 */}
+      {x.ref ? <span className="ru-example-ref">出处：{x.ref}</span> : null}
+    </div>
+  );
+  // 🔴 不擅自折叠信息（用户 2026-09-10）：超过 3 条收进可展开的区，**一条都不截**
+  return (
+    <div className="ru-examples">
+      {items.slice(0, 3).map(one)}
+      {items.length > 3 ? (
+        <details className="ru-more">
+          <summary>另外 {items.length - 3} 条例句</summary>
+          {items.slice(3).map(one)}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function RuRelations({ rels, onWord }: { rels: RuRelation[]; onWord: (w: string) => void }) {
+  // 渲染期去重：键是 (kind, target)（`relations.ts` 同一条判据）；数据不动
+  const seen = new Set<string>();
+  const byKind = new Map<string, RuRelation[]>();
+  for (const r of rels) {
+    const k = `${r.kind}\u0000${r.target}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const a = byKind.get(r.kind);
+    if (a) a.push(r); else byKind.set(r.kind, [r]);
+  }
+  const kinds = [...byKind.keys()].sort((a, b) => {
+    const ia = RU_REL_ORDER.indexOf(a); const ib = RU_REL_ORDER.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  const link = (r: RuRelation) => (r.targetId
+    ? <button type="button" className="ru-link" onClick={() => onWord(r.target)}>{r.target}</button>
+    : <span className="ru-nolink">{r.target}</span>);
+  return (
+    <div className="ru-rels">
+      {kinds.map((kind) => {
+        const items = byKind.get(kind)!;
+        if (kind === 'word_family') {
+          // 构词词族按词性分组（外审 doubao：中文学习者没有词根直觉，分组标题必须给）
+          const sub = new Map<string, RuRelation[]>();
+          for (const r of items) {
+            const g = r.relGroup ?? '';
+            const a = sub.get(g);
+            if (a) a.push(r); else sub.set(g, [r]);
+          }
+          return (
+            <details key={kind} className="ru-rel ru-family" open={items.length <= 30}>
+              <summary><span className="ru-rel-kind">{ruRelLabel(kind)}</span><span className="ru-count">{items.length}</span></summary>
+              {[...sub.entries()].map(([g, rs]) => (
+                <div key={g} className="ru-family-group">
+                  <span className="ru-family-pos">{g ? (RU_FAMILY_POS_LABELS[g] ?? g) : '未分组'}</span>
+                  {rs.map((r, i) => (
+                    <span key={r.target}>
+                      {i > 0 ? <span className="ru-sep">、</span> : null}
+                      {link(r)}
+                      {r.formGroup ? <span className="ru-chip">
+                        {r.formGroup.split('+').map((f) => RU_FAMILY_FORM_LABELS[f] ?? f).join('·')}</span> : null}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </details>
+          );
+        }
+        return (
+          <div key={kind} className="ru-rel">
+            <span className="ru-rel-kind">{ruRelLabel(kind)}</span>
+            {items.map((r, i) => (
+              <span key={r.target}>
+                {i > 0 ? <span className="ru-sep">、</span> : null}
+                {link(r)}
+                {r.subkind ? <span className="ru-chip">{r.subkind.split('+').map((x) => RU_ASPECT_SUBKIND_LABELS[x] ?? x).join('·')}</span> : null}
+              </span>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
+  entry: RuEntry; speakLocale: string; onWord: (w: string) => void;
+  speak: (word: string, locale: string) => void;
+}) {
+  // ① 按「词性 ＋ 带重音拼写」把 entry 归组。
+  //    🔴 只按词性归组的第一版，把 за́мок（城堡）与 замо́к（锁）并进一组：两个重音、两个读音并排，
+  //       下面「城堡、锁」混排 —— 读者分不出哪个重音配哪个意思（渲染出来读才看见的）。
+  //    ⚠️ 源头没给重音的 entry：该词性只有一个重音组时并进去；有多个时**单独成组不猜**。
+  const groups: Array<{ key: string; pos: string; entries: RuEntryPart[] }> = [];
+  const sorted = [...entry.entries].sort((a, b) => ruEdRank(a.src) - ruEdRank(b.src));
+  for (const e of sorted.filter((x) => x.stressed)) {
+    const key = `${e.pos}|${e.stressed}`;
+    const g = groups.find((x) => x.key === key);
+    if (g) g.entries.push(e); else groups.push({ key, pos: e.pos, entries: [e] });
+  }
+  for (const e of sorted.filter((x) => !x.stressed)) {
+    const same = groups.filter((x) => x.pos === e.pos);
+    const g = same.length === 1 ? same[0] : groups.find((x) => x.key === `${e.pos}|`);
+    if (g) g.entries.push(e); else groups.push({ key: `${e.pos}|`, pos: e.pos, entries: [e] });
+  }
+  const sensesOf = (ids: Set<number>) => entry.senses.filter((s) => ids.has(s.entryId));
+  // ② 指针：去重、中文优先（三语方针下中文对读者最有用）
+  const ptrSeen = new Set<string>();
+  const pointers = [...entry.pointers]
+    .sort((a, b) => (a.lang === 'zh' ? -1 : a.lang === 'ru' ? 1 : 0) - (b.lang === 'zh' ? -1 : b.lang === 'ru' ? 1 : 0))
+    .filter((p) => { const k = `${p.target}\u0000${p.text}`; if (ptrSeen.has(k)) return false; ptrSeen.add(k); return true; });
+  const audioSeen = new Set<string>();
+  const audios = entry.audios.filter((a) => (audioSeen.has(a.commonsKey) ? false : (audioSeen.add(a.commonsKey), true)));
+
+  return (
+    <article className="ru-entry">
+      <header className="ru-head">
+        <h2 className="ru-word">{entry.word}</h2>
+        <button type="button" className="ru-speak" onClick={() => speak(entry.word, speakLocale)}>🔊</button>
+        {!entry.isLemma ? <span className="ru-notlemma">变化形式</span> : null}
+        {entry.homographs.length > 0 ? (
+          <span className="ru-homographs">
+            同拼写：{entry.homographs.map((h) => (
+              <button key={h.id} type="button" className="ru-link" onClick={() => onWord(h.word)}>{h.word}</button>))}
+          </span>
+        ) : null}
+        {/* R30：只差 ё/е 的是**另一个词**（все／всё），印成「你可能找的是」，不合并 */}
+        {entry.yoVariants.length > 0 ? (
+          <span className="ru-homographs">
+            ё/е 写法不同的词：{entry.yoVariants.map((h) => (
+              <button key={h.id} type="button" className="ru-link" onClick={() => onWord(h.word)}>{h.word}</button>))}
+          </span>
+        ) : null}
+      </header>
+      {entry.foldedFrom ? (
+        <p className="ru-folded">没有「{entry.foldedFrom}」这个写法，按 ё 的写法找到 <b>{entry.word}</b>（俄语日常书写常把 ё 写成 е）</p>
+      ) : null}
+
+      {audios.length > 0 && (
+        <section className="ru-audios">
+          {audios.map((a) => (
+            <audio key={a.commonsKey} controls preload="none" src={a.url} className="ru-audio"><track kind="captions" /></audio>
+          ))}
+        </section>
+      )}
+
+      {pointers.length > 0 && (
+        <section className="ru-pointers">
+          <h3 className="ru-sec-title">{entry.isLemma ? '也是另一个词的变化形式' : '这个词形是'}</h3>
+          {pointers.map((p) => (
+            <p key={`${p.src}-${p.text}`} className="ru-pointer">
+              <span className="ru-pointer-text">{p.text}</span>
+              {/* 目标解析得到才可点（点下去是空白页比不能点更坏） */}
+              {p.targetId !== null && p.target
+                ? <button type="button" className="ru-link ru-pointer-go" onClick={() => onWord(p.target as string)}>→ {p.target}</button>
+                : null}
+              <span className="ru-src">{RU_EDITION_LABELS[p.src] ?? p.src}</span>
+            </p>
+          ))}
+        </section>
+      )}
+
+      {groups.map((g) => {
+        const ids = new Set(g.entries.map((e) => e.id));
+        const senses = sensesOf(ids).sort((a, b) => {
+          const ea = g.entries.find((e) => e.id === a.entryId)!; const eb = g.entries.find((e) => e.id === b.entryId)!;
+          return ruEdRank(ea.src) - ruEdRank(eb.src) || a.entryId - b.entryId || a.rank - b.rank;
+        });
+        const stressed = [...new Set(g.entries.flatMap((e) => (e.stressVariants.length ? e.stressVariants : e.stressed ? [e.stressed] : [])))];
+        const aspects = [...new Set(g.entries.map((e) => e.aspect).filter(Boolean))] as string[];
+        const genders = [...new Set(g.entries.map((e) => e.gender).filter(Boolean))] as string[];
+        const prons = [...new Map(entry.pronunciations.filter((p) => p.entryId !== null && ids.has(p.entryId))
+          .map((p) => [`${p.ipa}|${p.dialect}`, p])).values()];
+        // 变化形式：按 entry 分开交给 RuInflection（它自己挑变格表、拆旧正字法、并其他形式）
+        const inflBy = new Map<number, RuInfl[]>();
+        for (const r of entry.inflections) if (ids.has(r.entryId)) { const a = inflBy.get(r.entryId); if (a) a.push(r); else inflBy.set(r.entryId, [r]); }
+        const inflN = new Set([...inflBy.values()].flat().map((r) => `${r.tags.join('|')}\u0000${r.stressed || r.form}`)).size;
+        const exBySense = new Map<number, RuExample[]>();
+        const exEntry: RuExample[] = [];
+        for (const x of entry.examples) {
+          if (!ids.has(x.entryId)) continue;
+          if (x.senseId === null) exEntry.push(x);
+          else { const a = exBySense.get(x.senseId); if (a) a.push(x); else exBySense.set(x.senseId, [x]); }
+        }
+        const relSense = new Map<number, RuRelation[]>();
+        const relEntry: RuRelation[] = [];
+        for (const r of entry.relations) {
+          if (!ids.has(r.entryId)) continue;
+          if (r.senseId === null) relEntry.push(r);
+          else { const a = relSense.get(r.senseId); if (a) a.push(r); else relSense.set(r.senseId, [r]); }
+        }
+        const etSeen = new Set<string>();
+        const etyms = entry.etymologies.filter((y) => ids.has(y.entryId))
+          .sort((a, b) => ruEdRank(a.src) - ruEdRank(b.src))
+          .filter((y) => (etSeen.has(y.text) ? false : (etSeen.add(y.text), true)));
+        return (
+          <section key={g.key} className="ru-group">
+            <div className="ru-group-head">
+              <span className="ru-pos">{ruPosLabel(g.pos)}</span>
+              {genders.map((x) => <span key={x} className="ru-chip">{RU_GENDER_LABELS[x] ?? x}</span>)}
+              {aspects.map((x) => <span key={x} className="ru-chip">{RU_ASPECT_LABELS[x] ?? x}</span>)}
+              {stressed.length > 0 ? <span className="ru-stressed">{stressed.join(' ／ ')}</span> : null}
+              {/* 🔴 R21：词形页上读音与带重音拼写可能各属一个义项 ⇒ 不并排配对，读音单独一行 */}
+              {entry.isLemma && prons.length > 0 ? (
+                <span className="ru-prons">{prons.map((p) => (
+                  <span key={`${p.ipa}|${p.dialect}`} className="ru-ipa">/{p.ipa}/
+                    {RU_DIALECT_LABELS[p.dialect] ? <span className="ru-src">{RU_DIALECT_LABELS[p.dialect]}</span> : null}</span>))}
+                </span>
+              ) : null}
+            </div>
+            {!entry.isLemma && prons.length > 0 ? (
+              <div className="ru-prons ru-prons-form">读音：{prons.map((p) => <span key={p.ipa} className="ru-ipa">/{p.ipa}/</span>)}</div>
+            ) : null}
+            {senses.length > 0 && (
+              <ol className="ru-senses">
+                {senses.map((s) => {
+                  const zh = s.glosses.filter((x) => x.lang === 'zh');
+                  const orig = s.glosses.filter((x) => x.lang !== 'zh');
+                  const usage = s.tags.filter((t) => t.bucket === 'label').map((t) => RU_USAGE_LABELS[t.value] ?? null).filter(Boolean);
+                  const gram = s.tags.filter((t) => t.bucket === 'grammar').map((t) => RU_GRAMMAR_LABELS[t.value] ?? null).filter(Boolean);
+                  return (
+                    <li key={s.id} className="ru-sense">
+                      {[...usage, ...gram].map((t) => <span key={t as string} className="ru-chip">{t}</span>)}
+                      {zh.map((x) => <span key={x.text} className="ru-zh">{x.text}{x.model ? <span className="ru-mt">机翻</span> : null}</span>)}
+                      {orig.map((x) => <span key={x.text} className={x.lang === 'ru' ? 'ru-gloss-ru' : 'ru-gloss-en'}>{x.text}</span>)}
+                      <RuExamples items={exBySense.get(s.id) ?? []} />
+                      {(relSense.get(s.id) ?? []).length > 0 ? <RuRelations rels={relSense.get(s.id)!} onWord={onWord} /> : null}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+            {exEntry.length > 0 && (
+              <div className="ru-examples-entry"><h3 className="ru-sec-title">例句</h3><RuExamples items={exEntry} /></div>
+            )}
+            {relEntry.length > 0 && <RuRelations rels={relEntry} onWord={onWord} />}
+            {inflBy.size > 0 && (
+              <details className="ru-infl" open={inflN <= 60}>
+                <summary><span className="ru-sec-title">变化形式</span><span className="ru-count">{inflN}</span></summary>
+                <RuInflection byEntry={[...inflBy.values()]} />
+              </details>
+            )}
+            {etyms.length > 0 && (
+              <div className="ru-etym">
+                <h3 className="ru-sec-title">词源</h3>
+                {etyms.map((y) => (
+                  <p key={`${y.src}-${y.text.slice(0, 30)}`} className="ru-etym-text">
+                    <span className="ru-src">{RU_EDITION_LABELS[y.src] ?? y.src}</span>
+                    {y.etymType && RU_ETYM_TYPE_LABELS[y.etymType] ? <span className="ru-chip">{RU_ETYM_TYPE_LABELS[y.etymType]}</span> : null}
+                    {y.text}
+                  </p>
+                ))}
+              </div>
+            )}
+          </section>
+        );
+      })}
     </article>
   );
 }

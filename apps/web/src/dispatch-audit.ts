@@ -56,7 +56,7 @@ const body = stripComments(app);
 const SERVICES: Array<[string, string]> = [
   ['en', 'english.ts'], ['es', 'spanish.ts'], ['it', 'italian.ts'],
   ['fr', 'french.ts'], ['pt', 'portuguese.ts'], ['de', 'german.ts'],
-  ['ja', 'japanese.ts'], ['ko', 'korean.ts'], ['vi', 'vietnamese.ts'],
+  ['ja', 'japanese.ts'], ['ko', 'korean.ts'], ['vi', 'vietnamese.ts'], ['ru', 'russian.ts'],
 ];
 
 let bad = 0;

@@ -1,0 +1,13 @@
+{
+ "coverage": {
+  "lemma": 70.98,
+  "form": 75.86
+ },
+ "cross_none_pct": 1.362,
+ "cross": {
+  "match": 672591,
+  "none": 9284,
+  "na": 250072,
+  "none_pct": 1.3615398716773601
+ }
+}

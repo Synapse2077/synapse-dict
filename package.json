@@ -27,6 +27,8 @@
     "gate:ko-plans": "python3 ko/probes/query_plans.py",
     "gate:vi-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-vi.tsx",
     "gate:vi-plans": "python3 vi/probes/query_plans.py",
+    "gate:ru-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-ru.tsx",
+    "gate:ru-plans": "python3 ru/probes/query_plans.py",
     "gate:audio-labels": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-audio.tsx",
     "gate:etym-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-etym.tsx",
     "gate:layout": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-layout.tsx",

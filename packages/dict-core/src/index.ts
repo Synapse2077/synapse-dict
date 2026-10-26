@@ -13,6 +13,7 @@ import { EnglishDictService } from './english.js';
 import { JapaneseDictService } from './japanese.js';
 import { KoreanDictService } from './korean.js';
 import { VietnameseDictService } from './vietnamese.js';
+import { RussianDictService } from './russian.js';
 export * from './italian.js';
 export * from './spanish.js';
 export * from './french.js';
@@ -374,6 +375,8 @@ export const LANGUAGES: LanguageMeta[] = [
   //    （`vi` 裸码在 Safari 上命中不了语音）。⚠️ 发音优先走 Commons 真人录音，
   //    TTS 只是兜底 —— `[[audio-from-commons-not-tts]]`。
   { code: 'vi', label: 'Tiếng Việt', name: '越南语', speak: 'vi-VN' },
+  // 🔴 ru（2026-10-25，第十门）：发音优先走 Commons 真人录音（词元 6.26% 有），TTS 兜底用 ru-RU
+  { code: 'ru', label: 'Русский', name: '俄语', speak: 'ru-RU' },
   // 后续：no(Norsk/nb-NO)
 ];
 
@@ -429,6 +432,7 @@ const MAIN_TABLE: Record<string, string> = {
   //      但**保留它**：加语言时它仍是唯一的登记处。
   en: 'dict',
   es: 'dict', it: 'dict', fr: 'dict', pt: 'dict', de: 'dict', ja: 'dict', ko: 'dict',
+  vi: 'dict', ru: 'dict',
 };
 
 export function probeLanguages(): LanguageProbe[] {
@@ -467,7 +471,7 @@ export function ttsDirFor(code: string): string {
 type AnyService = DictionaryService | SpanishDictService | ItalianDictService
   | FrenchDictService | PortugueseDictService | GermanDictService
   | EnglishDictService | JapaneseDictService | KoreanDictService
-  | VietnameseDictService;
+  | VietnameseDictService | RussianDictService;
 const serviceCache = new Map<string, AnyService>();
 
 export function getService(code: string): AnyService {
@@ -483,6 +487,7 @@ export function getService(code: string): AnyService {
     else if (lang === 'ja') svc = new JapaneseDictService(dbPathFor('ja')); // 日语专属服务
     else if (lang === 'ko') svc = new KoreanDictService(dbPathFor('ko'));   // 韩语专属服务
     else if (lang === 'vi') svc = new VietnameseDictService(dbPathFor('vi')); // 越南语专属服务
+    else if (lang === 'ru') svc = new RussianDictService(dbPathFor('ru'));    // 俄语专属服务
     else svc = new EnglishDictService(dbPathFor('en'));                     // 英语（含未知回退）
     serviceCache.set(lang, svc);
   }
@@ -494,3 +499,4 @@ export function closeAllServices() {
   serviceCache.clear();
 }
 export * from './vietnamese.js';
+export * from './russian.js';

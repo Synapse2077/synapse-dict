@@ -113,28 +113,70 @@ TABLE = "dict"
 #      · **ё**：`word` 里带 ё 的词形要不要同时存一个 е 写法的检索别名 ——
 #        见 `norm_ru()` 的注释，**那是检索层的决定，不是归一层的**。
 TRACK = [
-    # ── 骨架层（阶段 0/1 建 `dict` 时就该有）。先只列这三个**现在就确定**的 ──
+    # ── 骨架层 ──
     # 检索归一键。🔴 它的生成函数 `norm_ru()` 带 import 时自检（NFD 禁区），
     #    而这一列盯的是「有没有人把它写空」。两件事都要有人管。
     'word_norm',
+    # R30（2026-10-25）：ё 召回键。掉空 ⇒ 省写 ё 的搜索又回到 0 条
+    'word_fold',
     'is_lemma',          # 词元 / 屈折形。俄语上这一列**决定一切覆盖率的分母**
-    'pos',
-    # ── 下面的列**等阶段 0 的 schema 定了当天往这儿加**，现在故意留空 ──
+    'pos', 'entry_type', 'freq_zipf',
+    # ── 阶段 0 建出来的列，**当天列进来**（2026-10-07）──
+    'entry.pos', 'entry.etym_no',
+    # 🔴 词源子编号：源头有 `1.1`/`1.2`，截断成 1 就是合并两支词源
+    'entry.etym_sub',
+    # 四个落列的语法字段，每个都量过「entry 内是不是单值」（RU_PLAN §6.1）
+    'entry.aspect', 'entry.gender', 'entry.animacy', 'entry.declension',
+    # 🔴 派生展示列：真值在 `stress` 表。盯它是因为「派生值没算」和「真值没有」
+    #    在页面上长得一样，而成因完全不同
+    'entry.stressed',
+    # 🆕 重音层（九门里第一次有这一层）
+    'stress.stressed', 'stress.is_primary',
+    # 屈折层。🔴 `stressed` 与 `form` 一起盯：重音在变格中移动，
+    #    它掉空 ⇒ 读者看到的是没有重音符的变位表，而那对学习者等于没有
+    'inflection.form', 'inflection.stressed',
+    # 读音：裸存，定界符是一个集合（含法语版的反斜杠）
+    'pronunciation.ipa',
+    # 🆕 阶段 4（RU_PLAN §11.3/11.4）：`entry_id` 掉空 ⇒ 同形异重音词（`подать`）又分不清
+    #    哪个读音对应哪个意思；`hidden_why` 掉空 ⇒ 「源头说错的读音」看不出为什么不印；
+    #    `tags` 掉空 ⇒ 质量标记／录音者所在地整批丢失。三个都只会**静默**坏掉。
+    'pronunciation.entry_id', 'pronunciation.tags', 'pronunciation.hidden_why',
+    # 词源正文抽自哪个字段（en 版单数 / ru·zh 版复数）—— 这一列空了就定位不了漏抽
+    'etymology.text', 'etymology.src_field',
+    # 指针义项的目标。🔴 判据读 `senses[].form_of`（382,715），
+    #    只读 `word.form_of`（28）会漏 99.99%
+    'sense_src.pointer_target',
+    # 关系层两个新 kind 带的列
+    'sense_relation.subkind', 'sense_relation.rel_group',
+    # B12：录音归一键，从第一天就存
+    'audio.commons_key',
+    # ── 阶段 5 释义中文覆盖：建出来当天加进来 ──
+    # ── 阶段 6（2026-10-23）：三张表当天补的列 ──
+    #    `text_pub` 掉空 ⇒ 读者看到 dump 原文（fr 版的法语尾巴、`◆` 前缀）；
+    #    `entry_id` 掉空 ⇒ 同形异义词的例句/关系/录音又分不清是谁的
+    'example.text_pub', 'example.entry_id', 'example.hidden_why',
+    'sense_relation.entry_id', 'sense_relation.form_group', 'sense_relation.target_id',
+    'audio.entry_id', 'audio.hidden_why',
+    # ── 阶段 7（2026-10-24）──
+    'etymology.text_pub', 'etymology.hidden_why', 'etymology.etym_type', 'etymology.entry_id',
+    # ── R29（2026-10-25）：中文出版正文（简体）—— 掉空 ⇒ 页面回到繁简混排 ──
+    'sense_gloss.text_pub', 'example_gloss.text_pub', 'sense_src.text_pub',
 ]
 TRACK_TABLES = [
-                # 🔴 这里列的是**出版层的表**，每张的行数都被逐张盯着。
-                #    ru 此刻一张都还没建 —— `snapshot()` 会跳过不存在的表，这是安全的；
-                #    但**建出一张就要当天列进来一张**，否则它被清空也不会有人说话。
-                #    ja 的 `etymology` 整层缺席三个月而阶段表全 ✅，就是这个形状：
-                #    **阶段表对没列进去的层结构性失明。**
-                #
-                # 🔴🔴 **这张名单也是空的，而且这是有意的。**
-                #    从 vi 拷过来会带着 `han_spelling`/`nom_spelling`/`noun_classifier`
-                #    三张**俄语根本不会有的表**，以及一条「`inflection` 有意不建」的否定结论
-                #    —— 那条结论在俄语上**正好相反**（`RU_PLAN` §0.5「别照搬的」）。
-                #    死条目的代价见 B7：ja/en/de/pt 四门的名单里躺着库里没有的
-                #    `pronunciation_entry`，行数闸对它完全失明。
-                #    ⇒ 阶段 0 建出 schema 的那一天，逐张往这儿加。
+                # 🔴 **阶段 0（2026-10-07）建出来当天全部列进来。**
+                #    `dbtool` 自己的规矩：建出一张就要当天列进来一张，
+                #    否则它被清空也不会有人说话（ja 的 `etymology` 整层缺席三个月
+                #    而阶段表全 ✅，就是这个形状）。
+                'entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag',
+                'sense_relation', 'etymology', 'etymology_gloss', 'pronunciation',
+                'example', 'example_gloss', 'audio', 'field_src',
+                # ── ru 独有的两张 ──
+                'stress',        # 🆕 重音层，九门里第一次
+                'inflection',    # 屈折层，预计九门里最大（vi 是**有意不建**，方向相反）
+                # 🔴 **`pronunciation_entry` 有意不在这张表里** —— 它**没建**：
+                #    阶段 4 量出 1.43%（< 5% 门槛）。同形异重音词改由
+                #    `pronunciation.entry_id` 列接住（RU_PLAN §11.3）。
+                #    列进来它会成为一个死条目，正是 B7 那个形状。
                 ]
 
 def _cols(conn, table=None):
@@ -229,6 +271,19 @@ def norm_ru(s):
     return strip_stress(s or "").lower()
 
 
+def fold_ru(s):
+    """**召回键**（R30，2026-10-25）：`norm_ru` 之后再把 `ё` 折成 `е`。
+
+    它不是身份键，**只许用来「多找到」，不许用来「认成同一个」**：
+    `все`/`всё` 在这把键上相同，而它们是两个词 —— 页面仍按 `word`/`word_norm` 认词，
+    这把键只回答「用户省写了 ё 时，还可能是谁」（俄语日常书写里 ё 普遍省写）。
+    实测：45,779 个带 ё 的词形里 **36,842 个**在省写 ё 时一个都搜不到（`елка` → 0 条）；
+    另 8,690 组折叠后撞在一起（`все`/`всё`、`-ен`/`-ён`）—— 那正是不能拿它当身份键的原因。
+    ⚠️ 只折 ё 一个字母：`й` 不是 `и` 的变体（`_NORM_MUST_DIFFER` 那条照旧成立）。
+    """
+    return norm_ru(s).replace("ё", "е")
+
+
 # ══════ 字符系统：俄语＝西里尔，中文＝表意文字，**两套不相交** ══════
 def is_cyrillic(c):
     """单个字符是不是西里尔字母。**原语，不是判据。**
@@ -314,7 +369,18 @@ _NORM_MUST_EQUAL = [
 ]
 
 
+# fold_ru：该撞的撞、不该撞的不撞（两个方向，理由同上）
+_FOLD_MUST_EQUAL = [("всё", "все"), ("Ёлка", "елка"), ("ёж", "еж")]
+_FOLD_MUST_DIFFER = [("мой", "мои"), ("всё", "вс")]
+
+
 def _norm_selfcheck():
+    for a, b in _FOLD_MUST_EQUAL:
+        if fold_ru(a) != fold_ru(b):
+            raise AssertionError("🔴 `fold_ru` 没把 %r 和 %r 折到一起（%r ≠ %r）" % (a, b, fold_ru(a), fold_ru(b)))
+    for a, b in _FOLD_MUST_DIFFER:
+        if fold_ru(a) == fold_ru(b):
+            raise AssertionError("🔴🔴 `fold_ru` 把 %r 和 %r 折到了一起 —— 只许折 ё" % (a, b))
     for a, b, why in _NORM_MUST_DIFFER:
         if norm_ru(a) == norm_ru(b):
             raise AssertionError(

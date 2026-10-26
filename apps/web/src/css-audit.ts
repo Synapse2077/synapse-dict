@@ -64,6 +64,7 @@ const VIEWS: Array<[string, string]> = [
   //    `[[lesson-must-become-mechanism]]`：「闸存在／有入口／覆盖这门语言／真被跑」
   //    是**四道独立关卡**，vi 过了前两道就被当成过了四道。
   ['vi', 'VietnameseEntryView'],
+  ['ru', 'RussianEntryView'],
 ];
 
 // 🔴 登记表与源码对账：漏登记一个视图，本闸会把它的类名算到别人头上。

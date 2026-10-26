@@ -2780,3 +2780,92 @@ button.rel-link {
 .vi-pointer-go {
   margin-left: 6px;
 }
+
+/* ============================================================================
+   俄语（ru 阶段 9a，2026-10-25）。53 个 `ru-*` 类名每个都有规则（css-audit 守着；vi 曾有 55 个零规则）。
+   ⭐ 色相：与 en 蓝／es 琥珀／it 绿／fr 紫／de 绛红／vi 青拉开 ⇒ 取**品红**。
+   ============================================================================ */
+:root,
+:root[data-theme='light'] {
+  --ru-accent: #a21caf;   /* 源语言标识：RU 品红 */
+  --ru-soft: rgba(162, 28, 175, 0.10);
+}
+:root[data-theme='dark'] {
+  --ru-accent: #f0abfc;
+  --ru-soft: rgba(240, 171, 252, 0.14);
+}
+.ru-entry { display: flex; flex-direction: column; gap: 18px; }
+.ru-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+.ru-word { margin: 0; font-size: 30px; font-weight: 650; color: var(--text); line-height: 1.35; }
+.ru-speak {
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary);
+  border-radius: 8px; padding: 2px 7px; font-size: 13px; cursor: pointer;
+}
+.ru-speak:hover { background: var(--surface-hover); color: var(--ru-accent); }
+.ru-notlemma {
+  font-size: 11px; color: var(--text-tertiary); border: 1px solid var(--border);
+  border-radius: 999px; padding: 1px 7px;
+}
+.ru-homographs { font-size: 12px; color: var(--text-secondary); display: inline-flex; gap: 6px; }
+.ru-folded { font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px; }
+.ru-sec-title { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-tertiary); }
+.ru-audios { display: flex; flex-wrap: wrap; gap: 6px; }
+.ru-audio { height: 32px; max-width: 260px; }
+.ru-pointers { display: block; }
+.ru-pointer { margin: 0 0 4px; font-size: 14px; line-height: 1.6; }
+.ru-pointer-text { color: var(--text); }
+.ru-pointer-go { margin-left: 8px; }
+.ru-src, .ru-count {
+  font-size: 11px; color: var(--text-tertiary); margin-left: 5px; white-space: nowrap;
+}
+.ru-group { border-top: 1px solid var(--border); padding-top: 14px; }
+.ru-group:first-of-type { border-top: 0; padding-top: 0; }
+.ru-group-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.ru-pos {
+  font-size: 11px; font-weight: 600; color: var(--ru-accent); background: var(--ru-soft);
+  border-radius: 5px; padding: 1px 7px;
+}
+.ru-chip {
+  display: inline-block; font-size: 11px; color: var(--text-secondary); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0 5px; margin: 0 4px 0 0; vertical-align: 1px;
+}
+/* 重音符是组合字符：字体缺字形时会画成方框 —— 用带完整西里尔扩展的字体栈 */
+.ru-stressed { font-size: 17px; color: var(--text); font-family: 'PT Serif', 'Noto Serif', Georgia, serif; }
+.ru-prons { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+.ru-prons-form { font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
+.ru-ipa { font-family: 'Charis SIL', 'Doulos SIL', 'Gentium Plus', serif; font-size: 15px; color: var(--text-secondary); }
+.ru-senses { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 12px; }
+.ru-sense { line-height: 1.6; }
+.ru-zh { color: var(--text); font-size: 15px; margin-right: 8px; }
+/* 「机翻」标注：模型中文与源头中文**必须**分得出（三语方针下中文多半是买的） */
+.ru-mt {
+  font-size: 10px; color: var(--ru-accent); border: 1px solid var(--ru-soft);
+  border-radius: 3px; padding: 0 3px; margin-left: 4px; vertical-align: 2px;
+}
+.ru-gloss-ru, .ru-gloss-en { display: block; font-size: 13px; color: var(--text-secondary); }
+.ru-examples, .ru-examples-entry { display: block; }
+.ru-example { margin: 8px 0 0; padding-left: 10px; border-left: 2px solid var(--border); }
+.ru-example-text { display: block; color: var(--text); white-space: pre-line; }
+/* 🔴 多行例句（诗/对白）的译文按行对齐 —— vi 6e：这条不是排版偏好，是正确性 */
+.ru-example-zh { display: block; color: var(--text-secondary); white-space: pre-line; }
+.ru-example-en { display: block; color: var(--text-tertiary); font-size: 13px; white-space: pre-line; }
+.ru-example-ref { display: block; color: var(--text-tertiary); font-size: 12px; }
+.ru-more summary, .ru-infl summary, .ru-family summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+.ru-rels { margin-top: 6px; }
+.ru-rel { margin-top: 6px; font-size: 13px; line-height: 1.7; }
+.ru-rel-kind { color: var(--text-tertiary); margin-right: 6px; font-size: 12px; }
+.ru-family-group { margin: 4px 0 0 1em; }
+.ru-family-pos { color: var(--text-tertiary); font-size: 12px; margin-right: 6px; }
+.ru-sep { color: var(--text-tertiary); padding: 0 2px; }
+.ru-link { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.ru-link:hover { text-decoration: underline; }
+.ru-nolink { color: var(--text); }
+.ru-infl { margin-top: 10px; }
+.ru-infl-table { border-collapse: collapse; font-size: 14px; margin-top: 6px; }
+.ru-infl-table th, .ru-infl-table td { border: 1px solid var(--border); padding: 3px 10px; text-align: left; }
+.ru-infl-table th { color: var(--text-tertiary); font-weight: 500; font-size: 12px; }
+.ru-infl-list { margin: 6px 0 0; padding-left: 1.2em; font-size: 14px; }
+.ru-infl-tag { color: var(--text-tertiary); font-size: 12px; margin-right: 8px; }
+.ru-infl-forms { color: var(--text); }
+.ru-etym { margin-top: 10px; }
+.ru-etym-text { margin: 0 0 6px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
