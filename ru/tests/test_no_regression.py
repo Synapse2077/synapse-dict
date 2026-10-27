@@ -68,8 +68,9 @@ CHECKS = [
      "源头 `неправильно`/proscribed 等；删掉就找不回，清零 hidden 就印给读者"),
     ("P4", "可出版义项", "SELECT COUNT(*) FROM sense WHERE hidden=0", 625800,
      "5a 落库 ＋ 5b 破例 11,496。`--rebuild` 改判据会动它"),
-    ("P5", "🔴 付费：5b 模型中文释义", "SELECT COUNT(*) FROM sense_gloss WHERE src='model:deepseek-v4-flash'", 331639,
-     "≈106 元。**少一条都是付费数据丢了**（答案文件在 `data/work/ru/gloss_zh/`，可按 id 回收）"),
+    ("P5", "🔴 付费：5b+5c 模型中文释义", "SELECT COUNT(*) FROM sense_gloss WHERE src='model:deepseek-v4-flash'", 515689,
+     "5b 331,639（≈106 元）＋ 5c 184,050（2026-10-26，≈59 元，答案 `ru-C1`/`en-C1`）。**少一条都是付费数据丢了**"
+     "（答案文件在 `data/work/ru/gloss_zh/`，可按 id 回收）"),
     ("P6", "破例义项", "SELECT COUNT(*) FROM sense s WHERE EXISTS (SELECT 1 FROM sense_src x WHERE x.sense_id=s.id "
      "AND x.lang IN ('fr','vi','pl'))", 11496, "用户 2026-10-23 拍板：fr/vi/pl 证据只在空白页词元上出版、只挂模型中文"),
     ("P7", "破例义项挂在没有字母的证据上", "SELECT COUNT(*) FROM sense_src x JOIN sense s ON s.id=x.sense_id "
@@ -105,12 +106,12 @@ CHECKS = [
     ("P21", "屈折层行数", "SELECT COUNT(*) FROM inflection", 6387251, "阶段 3；数变了 ⇒ 屈折判据或词元判据被动过"),
     ("P22", "R29：中文简体出版正文", "SELECT (SELECT COUNT(*) FROM sense_gloss WHERE text_pub IS NOT NULL)"
      "+(SELECT COUNT(*) FROM example_gloss WHERE text_pub IS NOT NULL)"
-     "+(SELECT COUNT(*) FROM sense_src WHERE text_pub IS NOT NULL)", 138136,
-     "2026-10-25 `zh_pub.py`：释义 25,868 ＋ 例句译文 16,883（R24 借来的 3806 ＋1）＋ 指针说明 95,385；掉了 ⇒ 页面回到繁简混排"),
+     "+(SELECT COUNT(*) FROM sense_src WHERE text_pub IS NOT NULL)", 138188,
+     "2026-10-25 `zh_pub.py`：释义 25,920（5c 新译文里模型漏转的繁体 ＋52）＋ 例句译文 16,883（R24 借来的 3806 ＋1）＋ 指针说明 95,385；掉了 ⇒ 页面回到繁简混排"),
     ("P23", "R29：「覆上」没被改成「复上」", "SELECT (SELECT COUNT(*) FROM sense_gloss WHERE lang='zh' AND "
      "COALESCE(text_pub,text) LIKE '%覆上%')+(SELECT COUNT(*) FROM example_gloss WHERE lang='zh' AND "
-     "COALESCE(text_pub,text) LIKE '%覆上%')", 69,
-     "6d 回收时整段 OpenCC t2s 把 23 条「覆上（盖）」改成「复上」（OpenCC 短语表的古义），已从答案文件改回；"
+     "COALESCE(text_pub,text) LIKE '%覆上%')", 92,
+     "6d 回收时整段 OpenCC t2s 把 23 条「覆上（盖）」改成「复上」（OpenCC 短语表的古义），已从答案文件改回；5c 新译文里又有 23 处正确的「覆上」（69→92）；"
      "少了 ⇒ 有人又整段 t2s 了"),
 ]
 # R0c：中文的读取路径必须读 `text_pub`（R29）—— 这几段在 russian.ts 里抠不到 ⇒ 展示层回到繁体原文

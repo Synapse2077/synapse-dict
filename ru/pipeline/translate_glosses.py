@@ -102,10 +102,42 @@ PROBE = {
     "__c4": {"w": "собака", "p": "noun", "g": "dog", "want": ("狗", "犬")},
 }
 
-SCOPES = ("S1", "S2", "S3")
+SCOPES = ("S1", "S2", "S3", "C1", "C2")
 
 
 def gap_rows(con, lang, scope="S1"):
+    if scope.startswith("C"):
+        return gap_rows_5c(con, lang, scope)
+    return _gap_rows_5b(con, lang, scope)
+
+
+def gap_rows_5c(con, lang, scope="C1"):
+    """**阶段 5c**（用户 2026-10-26 拍板做）：词形**已经有**可印的中文，而**这条义项自己没有**中文。
+
+    🔴 正是 5b 的 S1 有意排除的那一半（「这一页读者已经能看见中文」）—— 阶段 9 渲染 `вода` 才看见：
+       zh 版给的几条中文后面，ru/en 版的义项一长串只有俄文/英文。
+    C1 两组都翻；C2 en 只翻「这个词形没有可印 ru 义项」的（en 多半是 ru 的重述，同 S2 的理由）。
+    🔴 `s.hidden=0`、且**这条义项自己**没有 zh（按义项判，不再按词形判）。
+    """
+    sql = """
+        SELECT s.id, d.word, COALESCE(e.pos, '?'), g.text
+          FROM sense s
+          JOIN dict d  ON d.id = s.word_id
+     LEFT JOIN entry e ON e.id = s.entry_id
+          JOIN sense_gloss g ON g.sense_id = s.id AND g.lang = ?
+         WHERE s.hidden = 0
+           AND NOT EXISTS (SELECT 1 FROM sense_gloss gz WHERE gz.sense_id = s.id AND gz.lang = 'zh')
+           AND EXISTS (SELECT 1 FROM sense s2 JOIN sense_gloss g2 ON g2.sense_id = s2.id
+                        WHERE s2.word_id = s.word_id AND s2.hidden = 0 AND g2.lang = 'zh')"""
+    if scope == "C2" and lang == "en":
+        sql += """
+           AND NOT EXISTS (SELECT 1 FROM sense s3 JOIN sense_gloss g3 ON g3.sense_id = s3.id
+                            WHERE s3.word_id = s.word_id AND s3.hidden = 0 AND g3.lang = 'ru')"""
+    sql += " ORDER BY s.id"
+    return con.execute(sql, (lang,)).fetchall()
+
+
+def _gap_rows_5b(con, lang, scope="S1"):
     """缺中文、且有 `lang` 释义的**可出版**义项。口径只写一份。
 
     S1 两组都翻；S2 每词一组 ru 优先（en 只翻「这个词没有 ru 义项」的）；
@@ -255,6 +287,7 @@ def main():
     ap.add_argument("--retry-missing", action="store_true")
     ap.add_argument("--load", action="store_true", help="把答案文件写进库（默认干跑）")
     ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--load-tags", default="", help="逗号分隔的答案文件名（如 ru-C1,en-C1）；默认是 5b 那两份")
     ap.add_argument("--prune-xl", action="store_true", help="撤掉过不了 sense_hidden_why 的破例义项")
     a = ap.parse_args()
 
@@ -262,7 +295,11 @@ def main():
         prune_xl(dry=not a.apply)
         return 0
     if a.load:
-        load(dry=not a.apply)
+        if a.load_tags:
+            # 5c（2026-10-26）：只回收指定的答案文件，不碰破例那批（破例证据早已出版，再读一遍只是噪声）
+            load(dry=not a.apply, main_tags=tuple(a.load_tags.split(",")), xl_tag=None)
+        else:
+            load(dry=not a.apply)
         return 0
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     if a.exception:
@@ -483,7 +520,7 @@ def load(dry=True, main_tags=("ru-S1-slice2", "en-S1-slice2"), xl_tag="xl"):
                 have.add(sid)
                 main.append((sid, "zh", zh, SRC_MODEL))
                 st["主体：要写"] += 1
-    for xid, zh in _answers(OUT / ("%s.jsonl" % xl_tag)).items():
+    for xid, zh in (_answers(OUT / ("%s.jsonl" % xl_tag)) if xl_tag else {}).items():
         zh = normalize_zh(zh)
         if xid not in xl_ok:
             st["破例：证据已不在破例范围（已出版/非词元/有义项），跳过"] += 1
@@ -506,7 +543,7 @@ def load(dry=True, main_tags=("ru-S1-slice2", "en-S1-slice2"), xl_tag="xl"):
             "load-ru-zh-glosses",
             expect={"#sense_gloss": len(main) + len(xl_gloss), "#sense": len(new_sense)},
             invalidates=["sense", "sense_gloss",
-                         "🔴 中文覆盖率会从 23.89% 跳上去 ⇒ 义项闸 E12 的基线要在**确认落点之后**重锁"]) as s:
+                         "🔴 中文覆盖率会跳上去 ⇒ 义项闸 E12 与回归闸 P5 的基线要在**确认落点之后**重锁"]) as s:
         s.executemany("INSERT INTO sense_gloss(sense_id,lang,text,src) VALUES (?,?,?,?)", main)
         s.executemany("INSERT INTO sense(id,word_id,entry_id,rank,hidden,hidden_why) "
                       "VALUES (?,?,?,?,?,?)", new_sense)

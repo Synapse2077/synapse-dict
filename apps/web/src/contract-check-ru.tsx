@@ -21,6 +21,7 @@ import { POS_LABELS, REL_LABELS, RU_POS_LABELS, RU_RELATION_LABELS, RU_INFL_TAG_
   RU_ETYM_TYPE_LABELS, RU_EDITION_LABELS } from '@synapse-dict/dict-labels';
 
 const svc = getService('ru') as unknown as { getEntry(w: string): any;
+  search(p: string, l: number): Array<{ word: string }>;
   db: { prepare(s: string): { all(...a: unknown[]): unknown[] } } };
 
 /** C11：**全值域**标签覆盖。抽样页（L1–L10）只逮得到样本词碰巧用到的键 ——
@@ -118,6 +119,13 @@ const CHECKS: Check[] = [
   // ⑧ 张冠李戴的录音不播（`нога ⇐ Ru-ноги.ogg` 是 hidden）
   { id: 'C10', word: 'нога', name: '张冠李戴的录音不出现',
     hit: (_t, _e, h) => (h.includes('Ru-%D0%BD%D0%BE%D0%B3%D0%B8') || h.includes('Ru-ноги') ? '录的是复数的那条录音出现在词元页上' : null) },
+  // ⑧' R23：纸质词典的 `～` 原样印，但**每一个**都要带「它代的是谁」（不展开 —— 词干断点源头没给）
+  { id: 'C17', word: 'агентство', name: '`～` 每一个都带说明（代替词头 агентство）',
+    hit: (_t, _e, h) => {
+      const all = (h.match(/～/g) ?? []).length;
+      const tipped = (h.match(/<abbr class="ru-tilde" title="～ 代替词头「агентство」[^"]*">～<\/abbr>/g) ?? []).length;
+      return all === 0 ? '页面上没有 ～（样本失效）' : all - tipped * 2 === 0 ? null : `${all} 个 ～ 里 ${all - tipped * 2} 个没带说明`;
+    } },
   // ⑨' R29：繁体版的源头中文印成简体（`text_pub`）；繁体原文一个字都不许出现在页面上
   { id: 'C12', word: 'товарищ', name: '繁体版释义印成简体（同學→同学）',
     hit: (t) => (t.includes('同學') ? '页面上印的是繁体原文「同學」' : t.includes('同学') ? null : '看不到「同学」') },
@@ -194,6 +202,8 @@ if (!MUTATE) {
     ['C8', '构词示意式被放出来', (w, e) => { if (w === 'на-') e.examples.push({ senseId: null, entryId: e.entries[0].id, text: 'на- (na-) + идти́ (idtí, “to go”) → найти́', ref: null, zh: null, zhSrc: null, en: null, src: 'en-edition' }); return e; }],
     ['C9', '指针词源被放出来', (w, e) => { if (w === 'день') e.etymologies.push({ entryId: e.entries[0].id, etymNo: 0, text: 'See the etymology of the corresponding lemma form.', etymType: null, src: 'en-edition' }); return e; }],
     ['C10', '张冠李戴录音被放出来', (w, e) => { if (w === 'нога') e.audios.push({ entryId: null, url: 'https://upload.wikimedia.org/x/Ru-ноги.ogg', commonsKey: 'Ru-ноги.ogg', src: 'pl-edition' }); return e; }],
+    // 注入一处**不经 RuTilde 渲染**的 ～（出处位）⇒ 页面上出现一个光秃秃的 ～
+    ['C17', '一个 ～ 没带说明', (w, e) => { if (w === 'агентство' && e.examples[0]) e.examples[0].ref = 'торго́вое ～'; return e; }],
     ['C12', '释义回到繁体原文', (w, e) => { if (w === 'товарищ') e.senses.forEach((s: any) => s.glosses.forEach((g: any) => { g.text = g.text.replace('同学', '同學'); })); return e; }],
     ['C13', '指针说明回到繁体原文', (w, e) => { if (w === 'книгу') e.pointers.forEach((p: any) => { p.text = p.text.replace('宾格单数', '賓格單數'); }); return e; }],
     ['C14', 'ё 兜底丢了（说明不印）', (w, e) => { if (w === 'чес') e.foldedFrom = null; return e; }],

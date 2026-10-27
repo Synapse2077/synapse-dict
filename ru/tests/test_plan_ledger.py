@@ -131,6 +131,11 @@ DELIVERABLE = {
            # 破例（用户 2026-10-23）：fr/vi/pl 证据只在空白页词元上出版、只挂模型中文
            ("破例义项", "SELECT COUNT(*) FROM sense_src x JOIN sense s ON s.id=x.sense_id "
                       "WHERE x.lang IN ('fr','vi','pl')")],
+    # 5c（2026-10-26）：落点是「词形另有**源头**中文、而这条义项的中文是模型的」—— 正是 5b 的 S1 有意跳过的那一半
+    "5c": [("已有中文词形上的模型中文", "SELECT COUNT(*) FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
+                                  "WHERE g.src='model:deepseek-v4-flash' AND EXISTS (SELECT 1 FROM sense s2 "
+                                  "JOIN sense_gloss g2 ON g2.sense_id=s2.id WHERE s2.word_id=s.word_id "
+                                  "AND g2.lang='zh' AND g2.src NOT LIKE 'model:%')")],
     "6a": [("可出版例句", "SELECT COUNT(*) FROM example WHERE hidden=0"),
            # 出版正文与原文分两列（vi W22）：清洗真的只落在 text_pub
            ("出版正文清洗", "SELECT COUNT(*) FROM example WHERE text_pub IS NOT NULL"),
@@ -211,6 +216,10 @@ FILES = {
            ("主体答案 ru", "data/work/ru/gloss_zh/ru-S1-slice2.jsonl"),
            ("主体答案 en", "data/work/ru/gloss_zh/en-S1-slice2.jsonl"),
            ("破例答案", "data/work/ru/gloss_zh/xl.jsonl")],
+    "5c": [("翻译与回收（C1 范围）", "ru/pipeline/translate_glosses.py"),
+           # 🔴 答案文件就是账本 —— 5c 付费数据的唯一原件
+           ("5c 答案 ru", "data/work/ru/gloss_zh/ru-C1.jsonl"),
+           ("5c 答案 en", "data/work/ru/gloss_zh/en-C1.jsonl")],
     "6a": [("例句层收割器", "ru/pipeline/example_layer.py"),
            ("例句闸", "ru/tests/test_example.py"),
            ("阶段 6 探针", "ru/probes/probe_stage6.py"),
@@ -268,6 +277,9 @@ CODE = {
            ("父释义拼接", "ru/pipeline/criteria.py", "def sense_text"),
            ("zh 最小清洗", "ru/pipeline/criteria.py", "def zh_gloss_tidy"),
            ("按 sense_id 取证据的索引", "ru/pipeline/build_v3_schema.py", "idx_sense_src_sense")],
+    # 5c 的全部意义是「按**义项**判缺中文、不再按词形判」（5b 的 S1 按词形判 ⇒ 漏了已有中文词形上的 18.4 万条）
+    "5c": [("5c 范围按义项判", "ru/pipeline/translate_glosses.py", "def gap_rows_5c"),
+           ("回收时逮到的慰藉否决", "ru/pipeline/criteria.py", "ZH_SIMP_KEEP_PHRASE_PREV")],
     "6a": [("例句出版判据只有一个家", "ru/pipeline/criteria.py", "def example_hidden_why"),
            # 删节号不许剥 —— 第一版判据自己栽的那一跤
            ("只剥项目符号", "ru/pipeline/criteria.py", "_LEAD_MARK"),

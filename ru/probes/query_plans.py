@@ -279,7 +279,10 @@ def mutate():
     #   **而在那之前没有任何东西逼人跑这条路**。这正是 W19 那笔账的全部内容。
     # ⇒ 锚从**字面量**改成**结构**：在 `pointers` 那一块里找「`…word_id = ? AND`」
     #   并整段去掉（别名有没有都认），替换后与原文相同就返回 None ⇒ 大声报锚失效。
-    _ptr = re.sub(r"(pointers: this\.db\.prepare\(`[\s\S]{0,400}?WHERE\s+)"
+    # 🔴 2026-10-26 又失效一次：第二版锚是「prepare 之后 400 个字符内的 WHERE」，R29 给这条查询加了
+    #    `COALESCE(x.text_pub, x.text)` 之后 WHERE 落在第 400 字之外 ⇒ 空操作（这次是 `expect()` 当场报出来的）。
+    #    ⇒ 窗口不按字数，按**这条查询自己的反引号**（`[^`]` 不会跨进下一条查询，长度也不再是前提）
+    _ptr = re.sub(r"(pointers: this\.db\.prepare\(`[^`]*?WHERE\s+)"
                   r"[A-Za-z_]*\.?word_id\s*=\s*\?\s+AND\s+",
                   r"\1", orig, count=1)
     expect("pointers", "🔴 去掉 `pointers` 的 `word_id = ?` 条件 ⇒ 大表全表扫",

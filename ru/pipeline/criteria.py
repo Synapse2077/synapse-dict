@@ -21,7 +21,7 @@ vi 那门的结论是「**判据一律 import 不重写**」，而它是栽了�
 import re
 import unicodedata as ud
 
-RULE_VER = "ru-crit-18"           # 判据版本。改判据必须同时改它（ko 的 W1 教训）
+RULE_VER = "ru-crit-19"           # 判据版本。改判据必须同时改它（ko 的 W1 教训）
 #   v1 → v2（2026-10-07 同日）：`zh_gloss_kind` 从「按整条」改成**按行**判。
 #   v2 → v3（同日）：再从「按行」改成**按行内分段**判。
 #   🔴 同一条判据一天内三版，而**每一版都是抽样人读推翻的，不是想出来的**：
@@ -53,6 +53,7 @@ RULE_VER = "ru-crit-18"           # 判据版本。改判据必须同时改它�
 #   v13 → v14（同日，5b 开跑前量待译列）：ru 释义「只有语体/领域标签」⇒ 藏（198 条）。
 #   v14 → v15（同日，5b 切片照出来）：`is_inflected_form` 第六条路 —— 副动词页（词级 gerund ＋ 分类）。
 #   v17 → v18（2026-10-25，R29）：加 ⑮ 中文出版正文 `zh_simp`（安全的繁→简）。
+#   v18 → v19（2026-10-26，5c 回收逮到）：`zh_simp` 否决 `慰藉/狼藉/枕藉`（前一个字决定）；R24 `example_split_citation`。
 
 STRESS = "́"                # COMBINING ACUTE ACCENT
 
@@ -2302,6 +2303,10 @@ ZH_SIMP_NEVER = frozenset("薹")
 # OpenCC 短语表里有 `覆上→复上`／`覆住→复住`（古义「回复上级」），而我们的数据里这两个**全是「盖」**
 # （实测 56 处：`头发覆上了一片银白`、`使覆上`、`手覆住`）⇒ 否决这两条；`反覆/答覆/回覆→复` 照收。
 ZH_SIMP_KEEP_PHRASE = ("覆上", "覆住")
+# 🔴 2026-10-26（5c 回收时逮到）：`藉` 在 ALWAYS 里（`藉着→借着`、`藉口→借口`、`凭藉→凭借` 都对），
+#    而规范简体里 **`慰藉`／`狼藉`／`枕藉` 仍写「藉」**。OpenCC 把 `慰藉手段` 切出 `藉手→借手` ⇒ `慰借手段`。
+#    第一版只问了「藉 后面跟什么」（`覆上` 那条），这里是**前一个字**决定的 ⇒ 两个窗口都查。
+ZH_SIMP_KEEP_PHRASE_PREV = ("慰藉", "狼藉", "枕藉")
 
 
 def _gb(ch):
@@ -2349,7 +2354,8 @@ def _zh_simp_once(text, src):
         a != b and not _gb(a) for a, b in zip(text, out))
     res = []
     for i, (a, b) in enumerate(zip(text, out)):
-        if a == b or ord(b) > 0xFFFF or a in ZH_SIMP_NEVER or text[i:i + 2] in ZH_SIMP_KEEP_PHRASE:
+        if a == b or ord(b) > 0xFFFF or a in ZH_SIMP_NEVER or text[i:i + 2] in ZH_SIMP_KEEP_PHRASE \
+                or (i > 0 and text[i - 1:i + 1] in ZH_SIMP_KEEP_PHRASE_PREV):
             res.append(a)
             continue
         if _gb(a) and not (trad_row or a in ZH_SIMP_ALWAYS):

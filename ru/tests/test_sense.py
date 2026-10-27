@@ -46,6 +46,8 @@ ZH_SIMP_KNOWN = (
     (("麻鳽", "model:deepseek-v4-flash"), "麻鳽"),                              # 目标在扩展平面
     (("汉语姓氏 習 /习 (Xí) 的音译", "model:deepseek-v4-flash"), "汉语姓氏 習 /习 (Xí) 的音译"),  # 繁简对举
     (("主帆和後桅帆", "model:deepseek-v4-flash"), "主帆和后桅帆"),              # 简体文本里漏转的後
+    (("〈转〉令人安慰的事物；慰藉手段", "model:deepseek-v4-flash"), "〈转〉令人安慰的事物；慰藉手段"),  # OpenCC 切出 藉手→借手
+    (("以……為藉口", "zh-edition-trad"), "以……为借口"),                          # 同一个字，这里该转
     (("кни́га (kníga) 的賓格單數", "zh-edition-simp"), "кни́га (kníga) 的宾格单数"),
 )
 KNOWN = (

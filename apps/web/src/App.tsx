@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   GENDER_LABELS, POS_LABELS, REGISTER_LABELS, NUMBER_LABELS, TOPIC_LABELS,
   REL_LABELS, EXCHANGE_LABELS, TRANS_LABELS,
@@ -6499,12 +6499,29 @@ function RuInflection({ byEntry }: { byEntry: RuInfl[][] }) {
   );
 }
 
-function RuExamples({ items }: { items: RuExample[] }) {
+/** R23：纸质词典的「代词头」记号 `～`（zh-s 版例句 8,651／释义 1.2 万条）。
+ *  🔴 **不展开**：它有时代整个词头（`торго́вое ～`）、有时只代词干（`～ие мероприя́тия`），
+ *     词干在哪儿断源头没给（纸质词典靠 `|` 标，抄进维基时丢了）—— 展开就是猜。
+ *  ⇒ 原样印，只告诉读者它代的是谁。 */
+function RuTilde({ text, word }: { text: string; word: string }) {
+  if (!text.includes('～')) return <>{text}</>;
+  const parts = text.split('～');
+  const tip = `～ 代替词头「${word}」（或它的词干）—— 纸质词典的记号`;
+  return (
+    <>
+      {parts.map((p, i) => (
+        <Fragment key={i}>{p}{i < parts.length - 1 ? <abbr className="ru-tilde" title={tip}>～</abbr> : null}</Fragment>
+      ))}
+    </>
+  );
+}
+
+function RuExamples({ items, word }: { items: RuExample[]; word: string }) {
   if (!items.length) return null;
   const one = (x: RuExample) => (
     <div key={`${x.src}-${x.text.slice(0, 40)}`} className="ru-example">
-      <span className="ru-example-text">{x.text}</span>
-      {x.zh ? <span className="ru-example-zh">{x.zh}{x.zhSrc?.startsWith('model:') ? <span className="ru-mt">机翻</span> : null}</span> : null}
+      <span className="ru-example-text"><RuTilde text={x.text} word={word} /></span>
+      {x.zh ? <span className="ru-example-zh"><RuTilde text={x.zh} word={word} />{x.zhSrc?.startsWith('model:') ? <span className="ru-mt">机翻</span> : null}</span> : null}
       {x.en ? <span className="ru-example-en">{x.en}</span> : null}
       {/* 🔴 ref 是**出处**不是译文（vi 的 W10），不许排在译文位 */}
       {x.ref ? <span className="ru-example-ref">出处：{x.ref}</span> : null}
@@ -6728,9 +6745,9 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
                   return (
                     <li key={s.id} className="ru-sense">
                       {[...usage, ...gram].map((t) => <span key={t as string} className="ru-chip">{t}</span>)}
-                      {zh.map((x) => <span key={x.text} className="ru-zh">{x.text}{x.model ? <span className="ru-mt">机翻</span> : null}</span>)}
+                      {zh.map((x) => <span key={x.text} className="ru-zh"><RuTilde text={x.text} word={entry.word} />{x.model ? <span className="ru-mt">机翻</span> : null}</span>)}
                       {orig.map((x) => <span key={x.text} className={x.lang === 'ru' ? 'ru-gloss-ru' : 'ru-gloss-en'}>{x.text}</span>)}
-                      <RuExamples items={exBySense.get(s.id) ?? []} />
+                      <RuExamples items={exBySense.get(s.id) ?? []} word={entry.word} />
                       {(relSense.get(s.id) ?? []).length > 0 ? <RuRelations rels={relSense.get(s.id)!} onWord={onWord} /> : null}
                     </li>
                   );
@@ -6738,7 +6755,7 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
               </ol>
             )}
             {exEntry.length > 0 && (
-              <div className="ru-examples-entry"><h3 className="ru-sec-title">例句</h3><RuExamples items={exEntry} /></div>
+              <div className="ru-examples-entry"><h3 className="ru-sec-title">例句</h3><RuExamples items={exEntry} word={entry.word} /></div>
             )}
             {relEntry.length > 0 && <RuRelations rels={relEntry} onWord={onWord} />}
             {inflBy.size > 0 && (

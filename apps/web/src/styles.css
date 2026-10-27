@@ -2807,6 +2807,7 @@ button.rel-link {
   border-radius: 999px; padding: 1px 7px;
 }
 .ru-homographs { font-size: 12px; color: var(--text-secondary); display: inline-flex; gap: 6px; }
+.ru-tilde { text-decoration: underline dotted; cursor: help; }
 .ru-folded { font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px; }
 .ru-sec-title { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-tertiary); }
 .ru-audios { display: flex; flex-wrap: wrap; gap: 6px; }
