@@ -173,10 +173,11 @@ def checks(con):
 
     # ── Q5 dialect/hidden/hidden_why 从 tags 重算必须一致（判据 import）───────────
     bad5, eg5 = 0, []
-    for pid, tj, d, h, w in con.execute(
-            "SELECT id, tags, dialect, hidden, hidden_why FROM pronunciation"):
+    #    B10（2026-10-29）：重算要带上 `ipa` —— 内容不是 IPA 的也藏（`criteria.NOT_IPA`）。
+    for pid, tj, ipa, d, h, w in con.execute(
+            "SELECT id, tags, ipa, dialect, hidden, hidden_why FROM pronunciation"):
         t = json.loads(tj) if tj else {"tags": [], "raw_tags": []}
-        if criteria.pronunciation_status(t["tags"], t["raw_tags"]) != (d, h, w):
+        if criteria.pronunciation_status(t["tags"], t["raw_tags"], ipa) != (d, h, w):
             bad5 += 1
             if len(eg5) < 5:
                 eg5.append("#%d %s/%s/%s" % (pid, d, h, w))
@@ -328,6 +329,9 @@ def _mutations():
          # Q12：**这正是它存在的理由** —— 判据整个坏掉时 Q5 会与它一致，只有已知答案拦得住
          {"Q12"},
          ["UPDATE pronunciation SET hidden=0, hidden_why=NULL"]),
+        ("Q5", "把一条可见读音改成 X-SAMPA、hidden 不动（B10）", set(),
+         ["UPDATE pronunciation SET ipa='ˈv0' WHERE id=(SELECT MIN(id) FROM pronunciation "
+          "WHERE hidden=0)"]),
         ("Q6", "往 notation 塞一个值域外的值", set(),
          ["UPDATE pronunciation SET notation='«变异»' WHERE id=(SELECT MIN(id) FROM pronunciation)"]),
         ("Q7", "删掉 vi 版全部读音（少收一版）",

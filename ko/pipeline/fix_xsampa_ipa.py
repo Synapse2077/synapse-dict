@@ -33,6 +33,16 @@ IPA **不使用** ASCII 数字、反引号、反斜杠、下划线；X-SAMPA 这
 实测：**98 行，全部 `src='ja-edition'`，逐条打出来看过，零假阳性**；
 **删掉之后没有一个词会失去读音**（98 个词形都另有正确的 IPA 行）。
 
+═══ 第二轮（2026-10-29，B10 用统一判据回扫十门时逮到）═══
+🔴 **上面那条判据窄了：只查数字/反引号/反斜杠/下划线，不查 ASCII 大写。** X-SAMPA 用大写表
+   一大批 IPA 符号（`M`＝ɯ、`O`＝ɔ、`N`＝ŋ/撥音），于是 `는 → nMn`、`과연 → kwajOn`、
+   `뻔뻔하다 → ˀpOnˀpOnhada` 这 32 行（日文版）躺了一个月；另 3 行是**汉字词上挂的日语读音**
+   （`細菌 → saikʲiN`、`十四 → ʥɯːjoN/ʥɯːɕi`，韩语版）—— 与 K22 清掉的那批张冠李戴同一类。
+   fr 那轮用的恰恰是「大写」这一半，ko 用了「数字」那一半 ⇒ 两门各修一半，**各自的闸都绿**。
+⇒ 判据并成 es/it/pt/de 那一份（大写 ∪ 数字/符号 ∪ HTML 实体），外锚闸 import 的也是这个 `BAD`。
+⚠️ **删完会没有读音的词照删、名单落盘**（第一轮遇到就中止）：剩下那条本来就不是韩语的 IPA，
+   **印一个错的读音比不印更伤权威**（`docs/FRAMEWORK.md`，es/it/pt/de 同一处置）。
+
 跑（在仓库根）：
     python3 -u ko/pipeline/fix_xsampa_ipa.py
     python3 -u ko/pipeline/fix_xsampa_ipa.py --apply
@@ -50,9 +60,14 @@ import paths
 
 f = lambda n: format(n, ",")
 
-# 🔴 用 GLOB，不用 LIKE（见文件头）。字符类里是**只可能是 X-SAMPA 的字符**。
-WHERE = "ipa GLOB '*[0-9`\\_]*'"
-BAD = re.compile(r"[0-9`\\_]")
+# 字符类里是**IPA 一个都不会合法出现的 ASCII**（IPA 的小型大写是单独码位：ʀ ɪ ʏ ʁ ɢ ʟ ɴ ʙ ʜ）。
+# 第二轮起在 Python 里判（第一轮的 SQL `GLOB` 写法见文件头；`LIKE` 的 `_` 是通配符）。
+BAD = re.compile(r"[A-Z0-9`\\_]")
+ENTITY = re.compile(r"&(#\d+|#x[0-9a-fA-F]+|[a-z]+);")
+
+
+def is_bad(ipa):
+    return bool(ipa) and bool(BAD.search(ipa) or ENTITY.search(ipa))
 
 
 def main():
@@ -61,16 +76,16 @@ def main():
     a = ap.parse_args()
 
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
-    rows = con.execute(
+    rows = [r for r in con.execute(
         "SELECT p.id, d.word, p.ipa, p.src FROM pronunciation p "
-        "JOIN dict d ON d.id = p.word_id WHERE " + WHERE).fetchall()
+        "JOIN dict d ON d.id = p.word_id") if is_bad(r[2])]
     # 🔴 写之前验**反向**：删了之后这个词还有没有读音
     orphan = []
     for pid, w, ipa, src in rows:
         others = [r[0] for r in con.execute(
             "SELECT ipa FROM pronunciation p JOIN dict d ON d.id=p.word_id "
             "WHERE d.word=? AND p.id<>?", (w, pid))]
-        if not [o for o in others if not BAD.search(o)]:
+        if not [o for o in others if not is_bad(o)]:
             orphan.append((w, ipa, src))
     n_before = con.execute("SELECT COUNT(*) FROM pronunciation").fetchone()[0]
     srcs = sorted({r[3] for r in rows})
@@ -82,15 +97,19 @@ def main():
           % ("✅" if not orphan else "🔴", f(len(orphan))))
     for x in orphan[:10]:
         print("      %s" % (x,))
-    if orphan:
-        raise SystemExit("🔴 有词会因此没有读音 —— 先想清楚怎么办，别直接删")
-    print("\n■ 抽样（逐条看过全部 %d 条，这里打前 12）" % len(rows))
-    for _pid, w, ipa, _src in rows[:12]:
-        print("   %-12s %s" % (w, ipa))
+    print("\n■ 全部 %d 条" % len(rows))
+    for _pid, w, ipa, src in rows:
+        print("   %-12s %-28s %s" % (w, ipa, src))
 
     if not a.apply:
         print("\n（干跑。确认后 --apply）")
         return
+
+    if orphan:
+        out = paths.WORK / "b10_ipa_orphans.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("".join("%s\t%s\t%s\n" % x for x in orphan), encoding="utf-8")
+        print("■ 删完没有读音的 %d 个词 → %s" % (len(orphan), out))
 
     ids = [r[0] for r in rows]
     with dbtool.session(
@@ -107,13 +126,15 @@ def main():
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     q = lambda x: con.execute(x).fetchone()[0]
     checks = [
-        ("库里不再有 X-SAMPA", q("SELECT COUNT(*) FROM pronunciation WHERE " + WHERE), 0),
+        ("库里不再有 X-SAMPA", sum(1 for (v,) in con.execute("SELECT ipa FROM pronunciation")
+                                   if is_bad(v)), 0),
         ("读音行数", q("SELECT COUNT(*) FROM pronunciation"), n_before - len(ids)),
-        # 🔴 反向闸：那 98 个词形**每一个都还有读音**
-        ("那批词形都还有读音",
+        # 🔴 反向闸：那批词形里，**除落盘名单外**每一个都还有读音
+        ("那批词形没读音的＝落盘名单",
          q("SELECT COUNT(*) FROM (SELECT DISTINCT d.word FROM dict d WHERE d.word IN (%s)"
            " AND NOT EXISTS(SELECT 1 FROM pronunciation p WHERE p.word_id=d.id))"
-           % ",".join("'%s'" % w.replace("'", "''") for _p, w, _i, _s in rows)), 0),
+           % ",".join("'%s'" % w.replace("'", "''") for _p, w, _i, _s in rows)),
+         len({w for w, _i, _s in orphan})),
     ]
     ok = True
     for name, got, want in checks:

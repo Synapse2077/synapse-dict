@@ -440,11 +440,14 @@ def _c37(con):
        （`stehen` 的派生栏印着 `Adjektive`/`Substantive`/`Verben`）改成 `hidden=1`，
        这个数从 188,494 掉到 **188,461**，闸立刻报红要求我来改这个数字。
        换成「按名字豁免」的写法，这 33 条的消失就会一声不吭 —— 那正是它要防的。
+    ⭐ **2026-10-27 第二次兑现**：B17（`scripts/hide_redundant_related.py`）藏掉同页同目标已在
+       更具体 kind 下的兜底 `related`，其中 de 版词条级 118 条 ⇒ 188,461 → **188,343**。
+       差额逐条可复现：`redundant_related.redundant()` 命中且 `src='de-edition' AND sense_id IS NULL`。
     """
     n = con.execute(
         "SELECT COUNT(*) FROM sense_relation "
         "WHERE src='de-edition' AND sense_id IS NULL AND hidden=0").fetchone()[0]
-    return 0 if n == 188_461 else n
+    return 0 if n == 188_343 else n
 
 
 def _c31(con):
@@ -652,7 +655,7 @@ DONE = {
     ),
     # C36/C37：2026-09-04 外审那轮加。两条都 import 生成侧的判据，不另抄一份。
     "C36": _py(_c36, "该带语域前缀而没带的变形行"),
-    "C37": _py(_c37, "可见且未挂义项的德语版关系（锁 188,461，超或低都要看）"),
+    "C37": _py(_c37, "可见且未挂义项的德语版关系（锁 188,343，超或低都要看）"),
     # C34：冠词被写成名词的变格形式。判据 import `drop_article_forms.bad_rows`，
     #      不在这里重写一遍 SQL（那 12 个冠词的表只许一份）。
     "C34": _py(lambda con: __import__("drop_article_forms").bad_rows(con),

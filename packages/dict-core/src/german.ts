@@ -472,12 +472,17 @@ export class GermanDictService {
 
       // ⚠️ 词条级只取**没有义项归属**的（763,001 条）。有归属的走 `relBySense`，
       //    否则同一条会在词条级和义项级各印一遍。
+      // 🔴🔴 2026-10-27 去掉 `LIMIT 200`（做 B17 渲染核对时撞见）：没有 ORDER BY 的 200 条上限
+      //    ⇒ **76 个词形、9,818 条关系静默看不见**（`Holz` 831／`Wasser` 813／`Haus` 580），
+      //    `Hund` 的 439 条只印出前 200 条派生词，相关词／下位词／惯用语一条都没有，也不说总数。
+      //    项目 2026-09-14 定的是关系**不封顶**（`DISPLAY_EXTREMES` §2.1），这一条漏网了；
+      //    折叠是界面那一轮的事，且必须给得出去（能展开），不许静默截断。
       rel: this.db.prepare(`
         SELECT kind, target,
                (SELECT 1 FROM dict d WHERE d.word = sense_relation.target) AS ok
           FROM sense_relation
          WHERE word_id = ? AND sense_id IS NULL AND COALESCE(hidden,0) = 0
-         LIMIT 200`),
+         ORDER BY id`),
 
       relBySense: this.db.prepare(`
         SELECT r.sense_id, r.kind, r.target,

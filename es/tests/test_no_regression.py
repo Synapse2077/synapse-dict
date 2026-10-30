@@ -47,19 +47,30 @@ _sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent.parent / "it"
 from fix_unclosed_paren import classify as paren_class   # noqa: E402
 _sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent / "fixes"))
 from hide_english_relation_notes import is_english_note   # noqa: E402
+from fix_ipa_xsampa import BAD as XSAMPA_BAD, ENTITY as IPA_ENTITY   # noqa: E402
 
 # ══════════════════════════════════════════════════════════════════════════
 #  落点：同一个「缺陷」要在哪两个地方查
 #
-#  IPA_COLS  修复写在 dict.phonetic；App 读的是 pronunciation 里
-#            notation='phonemic' AND is_primary=1 的那一条（spanish.ts:530）。
+#  IPA_COLS  修复写在 dict.phonetic；App 读的是**页面上实际印出来的那一格**（`spanish.ts`）：
+#            ① 词条行：有 phonemic 主读音就用 `pronunciation`（:1025），**没有就退回 `dict.phonetic`**（:383）
+#            ② 同形词：一律 `dict.phonetic`（:1041）   ③ 变位页上的原形：一律 `dict.phonetic`（:1000）
+#  🔴 2026-10-29（BACKLOG B28）之前 READS 只有 `pronunciation` ⇒ ①的退回分支与②③全看不见：
+#     140 条判「✅ 仍在」的缺陷印在页面上（`lojban /ˈloʒban/`；规则 G2P 生成的 `anfioxo /anˈfjoɡso/` 92 条）。
+#     ⇒ `dict.phonetic` 的 107 万非空行里 93% 是读者看得见的，「修复列 ≠ 读取列」那个假设本来就不成立。
 # ══════════════════════════════════════════════════════════════════════════
 WROTE = "dict.phonetic"
-READS = "pronunciation.ipa"
+READS = "pronunciation.ipa ∪ 页面会印的 dict.phonetic"
 
 IPA_SRC = "SELECT word, phonetic AS ipa FROM dict WHERE TRIM(COALESCE(phonetic,''))<>''"
 IPA_APP = ("SELECT d.word AS word, p.ipa AS ipa FROM dict d JOIN pronunciation p "
-           "ON p.word_id=d.id WHERE p.notation='phonemic' AND p.is_primary=1")
+           "ON p.word_id=d.id WHERE p.notation='phonemic' AND p.is_primary=1"
+           " UNION ALL "
+           "SELECT d.word AS word, d.phonetic AS ipa FROM dict d WHERE TRIM(COALESCE(d.phonetic,''))<>'' AND ("
+           " NOT EXISTS(SELECT 1 FROM pronunciation p WHERE p.word_id=d.id"
+           "            AND p.notation='phonemic' AND p.is_primary=1)"                  # ① 退回
+           " OR EXISTS(SELECT 1 FROM dict h WHERE h.word=d.word COLLATE NOCASE AND h.id<>d.id)"  # ② 同形词
+           " OR EXISTS(SELECT 1 FROM inflection i WHERE i.base_id=d.id AND COALESCE(i.hidden,0)=0))")  # ③ 原形
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -85,12 +96,22 @@ ACCEPT = {
     # x 数与 ɡs 数对不齐，`fix_x_gs.convert` 判据**故意拒绝猜**：
     # cóccix ˈkoɡsiɡs（cc 也读 ks）、exotoxina、exaccionista、saxitoxina。
     # 宁可留 4 个错，不要用机械替换去猜 —— 猜错的代价见 fix_x_gs 里 blogs/gangs 那段。
-    "A1": 4,
+    # +1（2026-10-29，B28 读取列改成读者口径后）：`unboxings umˈboksinɡs` —— x 那处已是 ks，
+    # 剩下的 ɡs 是 ng+复数 s 的真音。是 A1 的 SQL 判据误报，`fix_x_gs.convert` 正确跳过了它。
+    "A1": 5,
     # 🔴 全部是 **kaikki 原文**（software ˈsofdw̝eɾ / Kuwait kuˈw̝ait / web ˈw̝eb）。
     # 2026-07-31 上午我拿 --wraised 把其中 83 条当成"豆包填的"改坏过，靠来源普查才发现。
     # 本项目既定策略：IPA 归信人工源 kaikki。**不许再动。**
     "A4": 86,
-    "A6": 1, "A10": 1, "A12": 3,   # 同上，都是 kaikki 原文的个别行
+    "A12": 3,   # 同上，kaikki 原文的个别行（A6/A10 原也在这一行、基线各 1，2026-10-29 改到下面）
+    # 🔴 2026-10-29（B28）读取列改成读者口径后，这两条把**一直印在页面上**的行也算进来了，逐条裁决：
+    # A6 1→6：字母名 `r`/`R` 写 ɾ（kaikki 原文）＋ `reproductor de MP3/MP4`、`R. Dom.`
+    #   —— `fix_ipa_residue.propose` 因词数与音标段数不符拒绝改，不手改（`fix_late_ipa_residue.py` 列过）。
+    #   同一批里能改的 13 条已修。
+    # A10 1→26：全是**外语专名与借词**，西语版就写 ʒ —— 汉语 zh（`Guangzhou ˈɡwanʒou`）、俄语 ж
+    #   （`Izhevsk iˈʒebsk`）、dj- 借词（`djaina ˈʒaina`）。`fix_ipa_nonspanish` 的 ʒ→ʝ 针对的是
+    #   西语本族词（rehilamiento），套在外语读音上是改错。`zheísmo` 描述的正是 ʒ 这个音。
+    "A6": 6, "A10": 26,
     # `Imperio bizantino` / `Imperio romano` —— 多词专名的另一种拼法，源头就没给义项。
     # `exactQuery` 已把这类无义项无指针的行排到最后（spanish.ts:417），不会挡住正常检索。
     "B5": 2,
@@ -138,7 +159,15 @@ IPA_CHECKS = [
      "ipa LIKE '%' || char(103) || '%'"),
     ("A14", "normalize_notation.py", "08-03", "音标含正字法 y 残留",
      "ipa LIKE '%y%'"),
+    # B10（2026-10-28/29）：判据 import 修复脚本的 `BAD`/`ENTITY`，经 `run_ipa` 注册成 SQL 函数，不在这里重写。
+    ("A15", "fix_ipa_xsampa.py", "10-29", "音标里有 IPA 不会用的 ASCII 字符或 HTML 实体（B10）",
+     "b10_bad(ipa)"),
 ]
+
+# 🔴 两列都判红的断言。A 组其余条只在读取列判红（假定 App 只读 `pronunciation`），
+#    而 `spanish.ts` 在 `pronunciation` 没有行时**退回印 `dict.phonetic`**，同形词与变位原形也直接印它。
+#    A15 第一版只修了读取列，`PDF417 → ˈpdf417` 等 4 条躺在修复列里照样印在页面上。
+BOTH_SIDES = {"A15"}
 
 # 义项层：修复直接写 sense / sense_gloss，而 build_sense_layer.py 是 DROP 重建。
 SENSE_CHECKS = [
@@ -391,6 +420,8 @@ def run_infl(con):
 
 
 def run_ipa(con, mutate_note=""):
+    con.create_function("b10_bad", 1, lambda v: int(bool(v) and bool(
+        XSAMPA_BAD.search(v) or IPA_ENTITY.search(v))), deterministic=True)
     out = []
     for cid, script, date, name, cond in IPA_CHECKS:
         a = con.execute(f"SELECT COUNT(*) FROM ({IPA_SRC}) WHERE {cond}").fetchone()[0]
@@ -420,7 +451,10 @@ def report(con):
     print("─" * 108)
     for cid, script, date, name, a, b in run_ipa(con):
         acc = ACCEPT.get(cid, 0)
-        if b <= acc:
+        if cid in BOTH_SIDES and a > acc:
+            verdict, mark = "❌ 修复列有残留", "  ← 页面在读取列没行时退回印它"
+            bad_wrote += 1
+        elif b <= acc:
             verdict = "✅ 仍在" if b == 0 else f"✅ 在基线内({acc})"
             mark = ""
         elif a == 0:
@@ -560,6 +594,18 @@ MUTATIONS = [
      "          WHERE d.word='Gracias' LIMIT 1)"),
     ("C9 让一个伪原形在读取路径上复活",
      "UPDATE inflection SET hidden=NULL, base_fixed=NULL WHERE base='tú and vos'"),
+    # ── A15（B10）：两列各打一个，读取列与修复列都必须单独判红
+    ("A15 读取列塞回一条 X-SAMPA",
+     "UPDATE pronunciation SET ipa='a\"tSEtiko' WHERE id=(SELECT MIN(id) FROM pronunciation"
+     "  WHERE notation='phonemic' AND is_primary=1)"),
+    # B28：没有读音行的 x 词，页面退回印 dict.phonetic ⇒ 塞回 ɡs，A1 必须在读取列红
+    ("A1b 没读音行的词，dict.phonetic 塞回 ɡs（B28 退回分支）",
+     "UPDATE dict SET phonetic=REPLACE(phonetic,'ks','ɡs') WHERE id=(SELECT MIN(d.id) FROM dict d"
+     "  WHERE lower(d.word) LIKE '%x%' AND d.phonetic LIKE '%ks%' AND d.phonetic NOT LIKE '%ɡs%'"
+     "  AND NOT EXISTS(SELECT 1 FROM pronunciation p WHERE p.word_id=d.id))"),
+    ("A15b 修复列塞回一条葡语版的 `R`（读取列不动）",
+     "UPDATE dict SET phonetic='ˈRo.ða' WHERE id=(SELECT MIN(id) FROM dict"
+     "  WHERE TRIM(COALESCE(phonetic,''))<>'')"),
     ("C6 造一条重复的 (word_id,seq)",
      "INSERT INTO inflection(word_id,seq,base,base_id,label_zh,src,src_ref)"
      " SELECT word_id,seq,base,base_id,label_zh,src,src_ref||'-mut' FROM inflection LIMIT 1"),
@@ -575,7 +621,7 @@ def reds_of(con):
     """
     red = []
     for cid, *_x, a, b in run_ipa(con):
-        if b > ACCEPT.get(cid, 0):
+        if (max(a, b) if cid in BOTH_SIDES else b) > ACCEPT.get(cid, 0):
             red.append(cid)
     for cid, *_x, n in run_sense(con):
         if isinstance(n, str) or n > ACCEPT.get(cid, 0):
@@ -627,6 +673,8 @@ def check_brief():
             acc = ACCEPT.get(cid, 0)
             if b > acc:
                 red.append((cid, name, f"App 读取列残留 {b:,} 行，基线 {acc}（{script}）"))
+            elif cid in BOTH_SIDES and a > acc:
+                red.append((cid, name, f"修复列残留 {a:,} 行（页面会退回印它），基线 {acc}（{script}）"))
         for cid, script, _d, name, n in run_sense(con):
             acc = ACCEPT.get(cid, 0)
             if isinstance(n, str):

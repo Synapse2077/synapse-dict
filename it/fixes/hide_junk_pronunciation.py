@@ -69,6 +69,12 @@ FR_TAIL = {
 }
 
 
+# 主音标被藏之后重选默认读音的档位，与 A54 一致：en > it > rule:accent > fr > rule:plain。
+# 🔴 2026-10-28 抽成常量：B10 的 `fix_ipa_xsampa.py` 也要重选，**import 这一份，不另抄**。
+REPICK_ORDER = ("CASE src WHEN 'en-edition' THEN 0 WHEN 'it-edition' THEN 1 "
+                "WHEN 'rule:accent' THEN 2 WHEN 'fr-edition' THEN 3 ELSE 4 END, id")
+
+
 def scan(con):
     """→ (要藏的 [(id, word, ipa, is_primary, 理由)], 要重选 primary 的 [(word_id, 新 id)])"""
     hide = []
@@ -89,13 +95,10 @@ def scan(con):
     repick = []
     for pid, w, prim in [(h[0], h[1], h[3]) for h in hide if h[3] == 1]:
         wid = con.execute("SELECT word_id FROM pronunciation WHERE id=?", (pid,)).fetchone()[0]
-        # 与 A54 的档位一致：en > it > rule:accent > fr > rule:plain
         cand = con.execute(
             """SELECT id, src FROM pronunciation WHERE word_id=? AND id NOT IN (%s)
-               ORDER BY CASE src WHEN 'en-edition' THEN 0 WHEN 'it-edition' THEN 1
-                                 WHEN 'rule:accent' THEN 2 WHEN 'fr-edition' THEN 3
-                                 ELSE 4 END, id LIMIT 1"""
-            % ",".join(str(i) for i in hidden_ids), (wid,)).fetchone()
+               ORDER BY %s LIMIT 1"""
+            % (",".join(str(i) for i in hidden_ids), REPICK_ORDER), (wid,)).fetchone()
         repick.append((w, wid, cand[0] if cand else None, cand[1] if cand else None))
     return hide, repick
 

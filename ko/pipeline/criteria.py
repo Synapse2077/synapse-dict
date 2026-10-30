@@ -69,3 +69,59 @@ def real_senses(o):
             continue
         out.append((g[-1], se))
     return out
+
+
+# ═══ K36②：韩文版词源正文的分类（2026-10-28）═══
+# 韩文版 `etymology_texts`（**复数** —— K36 本身就是读单数读出的 0）46,120 条，成分实测：
+#   汉字写法「한자 X.」23,136（页面上已印着同一个汉字 ⇒ 不收）／构词式 `A + B` 15,376／
+#   来源 `< 영어 date`、`< 중세 한국어 …` 2,734／汉字写法而页面上没有 3,516／其他正文约 1,350。
+# 🔴 多词源条目里，源头把**每个义项的例句**也塞进了这个字段（`:* 기적이 일어나기를 빌다.`）
+#    ⇒ 以 `:*`／`*:`／`:#`／`#:` 开头的行**整行不是词源**，剔掉；只有标记的行同理。
+# 🔴 `(어원 서술)`（＝「词源描述」）是没填的模板占位，不是词源。
+ETYM_BULLET = (":*", "*:", ":#", "#:")
+ETYM_PLACEHOLDER = {"(어원 서술)", "(어원)", "어원 서술"}
+
+
+def _all_han(s):
+    return bool(s) and all(unicodedata.name(c, "").startswith("CJK") for c in s)
+
+
+def ko_etym_hanja_line(line):
+    """「한자 X.」或裸「X」（X 全是汉字）⇒ X；否则 None。"""
+    s = line.strip()
+    if s.startswith("한자"):
+        s = s[2:].strip()
+    s = s.rstrip(".").strip()
+    return s if " " not in s and "(" not in s and _all_han(s) else None
+
+
+def ko_etymology(texts, known_hanja):
+    """韩文版一个条目的词源 → (要收的正文 | None, 类别)。
+
+    `known_hanja`：**读者这一页上已经印着的汉字表记**（`entry.hanja` ∪ 未隐藏的
+    `hanja_spelling`／`alt_hanja` 目标）。整段只是汉字写法、且全都已在页面上 ⇒ 不收：
+    收进来就是把页面上早印着的再说一遍（与阶段 5 日文版「只是汉字」那 3,344 条同一个决定）。
+    只要有一个汉字页面上没有，就**整段原样收**（不拆行改写源头）。
+    """
+    if isinstance(texts, str):
+        texts = [texts]
+    lines = [l.strip() for t in (texts or []) for l in (t or "").split("\n") if l.strip()]
+    body = [l for l in lines
+            if not l.startswith(ETYM_BULLET) and any(unicodedata.category(c)[0] in "LN" for c in l)]
+    if not body:
+        return None, "不收·只有例句或标记" if lines else "无"
+    if all(l in ETYM_PLACEHOLDER for l in body):
+        return None, "不收·模板占位"
+    body = [l for l in body if l not in ETYM_PLACEHOLDER]
+    hans = [ko_etym_hanja_line(l) for l in body]
+    text = "\n".join(body)
+    if all(hans):
+        if set(hans) <= set(known_hanja):
+            return None, "不收·汉字写法已在页面上"
+        return text, "汉字写法（页面上没有）"
+    rest = [l for l, h in zip(body, hans) if not h]
+    if any("+" in l for l in rest):
+        return text, "构词"
+    if rest[0][0] in "<＜":
+        return text, "来源"
+    return text, "正文"

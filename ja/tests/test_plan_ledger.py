@@ -182,8 +182,11 @@ CODE = {
           ("词性走了日语覆盖层（不是全局表）", "apps/web/src/App.tsx",
            "JA_POS_LABELS"),
           # 🔴 兜底白名单：未接线的语种必须**明说没接**，不许悄悄落进西语视图
+          # 🔴 2026-10-27：原锚是字面量 `'de', 'ja'].includes(entry.lang)`，ko 上线（3bb2c3a）
+          #    把列表扩成十门后它**红了一个月没人看见**（ja 的账不在别门写库的路上）。
+          #    意思没变（ja 在白名单里），是锚钉在了行文上（B20 同形）⇒ 改成按意思匹配。
           ("展示层兜底不再是「其余全部走西语」", "apps/web/src/App.tsx",
-           "'de', 'ja'].includes(entry.lang)")],
+           re.compile(r"\[[^\]]*'ja'[^\]]*\]\.includes\(entry\.lang\)"))],
 }
 
 
@@ -353,9 +356,10 @@ def p1(con):
             p = ROOT / rel
             if not p.exists():
                 bad.append(("P1", "阶段 %s 声明✅，但 %s 不存在" % (num, rel)))
-            elif need not in p.read_text(encoding="utf-8"):
+            elif not (need.search(p.read_text(encoding="utf-8")) if hasattr(need, "search")
+                      else need in p.read_text(encoding="utf-8")):
                 bad.append(("P1", "阶段 %s「%s」声明✅，但 %s 里找不到 `%s`"
-                            % (num, what, rel, need)))
+                            % (num, what, rel, getattr(need, "pattern", need))))
     return bad
 
 

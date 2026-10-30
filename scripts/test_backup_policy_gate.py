@@ -16,17 +16,46 @@
 不查「有没有 `_language_is_done` 这个函数」（那是形式代理，改个名就失效）。
 查的是**落点**：这门语言实际会用哪个预算，和计划表宣布的状态对不对得上。
 
+═══ 第二部分（2026-10-28）：十门各自的删除行为测试，由这里统一跑 ═══
+上面那段说「六门各有一个测试，当时全是绿的」—— 而到 10-28 才发现：**这些测试没有任何东西在跑**。
+· fr 那份**一直红着 3 条**：它的 `run()` 没钉 `done`，fr 标完结之后测试读的是真计划表，
+  预算被悄悄换成 1.5 GB（de 那份文件头写过这个坑，fr 没跟上）；
+· ko／vi／ru **连这份测试都没有**；
+· 而同一天补 ru 完结标记时试算「删掉唯一的备份」—— 完结预算小于库本身时，
+  `backup()` 刚打的写前备份当场被删。八门同一段代码，八门的测试都没钉这个形状。
+⇒ 每门的测试必须存在、必须绿；本闸挂进 `npm run gate:display` 汇总，台账盯住这些文件。
+
 用法：
     python3 scripts/test_backup_policy_gate.py          # 红了退出码非 0
 """
 import importlib
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LANGS = ("en", "es", "it", "fr", "pt", "de", "ja", "ko", "vi", "ru")
+# 各门删除行为测试的文件名。es 的是最早那份，名字不同（2026-08-11 建）。
+PRUNE_TEST = {l: "tests/test_prune_backups.py" for l in LANGS}
+PRUNE_TEST["es"] = "tests/test_backup_prune.py"
+
+
+def behavior_tests():
+    """→ [(语种, 原因)]：测试文件不存在或退出码非 0。在本语种目录下跑（测试 `import dbtool`）。"""
+    bad = []
+    for lang in LANGS:
+        f = ROOT / lang / PRUNE_TEST[lang]
+        if not f.exists():
+            bad.append((lang, "没有删除行为测试 %s" % PRUNE_TEST[lang]))
+            continue
+        r = subprocess.run([sys.executable, "-B", PRUNE_TEST[lang]], cwd=ROOT / lang,
+                           capture_output=True, text=True)
+        if r.returncode:
+            tail = [l.strip() for l in r.stdout.splitlines() if l.strip()][-1:] or [r.stderr.strip()[-200:]]
+            bad.append((lang, "删除行为测试退出码 %d：%s" % (r.returncode, tail[0])))
+    return bad
 
 
 def _discover():
@@ -170,10 +199,17 @@ def main():
     # ⚠️ **登记在册的豁免要大声印**，不许静默跳过（否则它和「通过」长得一样）
     for lang, why in skipped:
         print("  ⚠️ %s：%s" % (lang, why))
-    if not bad:
+    tests_bad = behavior_tests()
+    print("■ 十门删除行为测试：%s" % ("✅ 全部存在且全绿" if not tests_bad else "🔴 %d 门不过" % len(tests_bad)))
+    for lang, why in tests_bad:
+        print("  ❌ %s：%s" % (lang, why))
+    print()
+    if not bad and not tests_bad:
         print("■ ✅ %d 门全部一致（含正反控制：拿临时计划表正着问过 `_language_is_done()`）"
               % len(LANGS))
         return 0
+    if not bad:
+        return 1
     for lang, declared, effective, note in bad:
         if declared and not effective:
             print(f"■ ❌ {lang}：计划表宣布完结，**但 dbtool 按未完结的宽预算在跑** —— "

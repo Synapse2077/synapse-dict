@@ -77,10 +77,6 @@ import paths
 from build import POS_MAP                                    # noqa: E402
 from ingest_de_senses import is_real_sense                   # noqa: E402  判据只许一份
 
-import opencc
-
-_T2S = opencc.OpenCC("t2s")
-
 # 句末标点：中文版给谚语条目的标题带，英文版不带。
 TAIL_PUNCT = ".!?"
 
@@ -216,18 +212,9 @@ def clean_gloss(g, word):
     return s, gender, pos
 
 
-def t2s(s, cap=6):
-    """繁→简，转到收敛。🔴 `opencc` 的 `t2s` 不幂等（ja 那轮实测跑一遍还剩 2 条会变）。
-
-    德语这边比日语简单：ja 那轮要保护 `【…】` 里被引用的**日文词形**
-    （`[[source-typo-fix-ours-not-quote]]`），而德语词是拉丁字母，`t2s` 本来就不动它。
-    """
-    for _ in range(cap):
-        out = _T2S.convert(s)
-        if out == s:
-            return s
-        s = out
-    raise RuntimeError("opencc 转换 %d 轮仍不收敛：%r" % (cap, s[:60]))
+# 🔴 B25（2026-10-29）：原来这里自己写了一份**整段** OpenCC t2s，会把简体文本改错（`鵟→𫛭` 扩展平面字形、
+#    `覆上→复上`）。改成 import 安全版 —— 判据只许一份，在 `fix_traditional_to_simplified.t2s`。
+from fix_traditional_to_simplified import t2s                 # noqa: E402
 
 
 def _assert_de():

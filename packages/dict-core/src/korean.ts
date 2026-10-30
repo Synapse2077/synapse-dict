@@ -163,7 +163,8 @@ export type KoreanEntry = {
   baseOf: { base: string; labels: string[]; ok: boolean }[];
   /** 这个谚文音节对应的汉字音训（`주` → 主/住/注…） */
   hanjaReadings: { hanja: string; eumhun: string | null; glossEn: string | null }[];
-  etymology: { edition: string; etymNo: string | null; text: string }[];
+  /** `entryId` 为 null ＝ 挂在词上（K36①：中文版词源，这个词没有中文版 entry）。 */
+  etymology: { edition: string; etymNo: string | null; entryId: number | null; text: string; lang: string }[];
   /** 词源正文，键＝`${edition}:${etym_no}` —— 八门共用 `<EtymologyNote>` 的入口。 */
   etymologyTexts: Record<string, string>;
   /** **已经抽过词源的版**。组件靠它区分「源头没写」与「我们没抽」，不许省。 */
@@ -343,9 +344,16 @@ export class KoreanDictService {
         'SELECT hanja, eumhun, gloss_en AS glossEn FROM hanja_reading'
         + ' WHERE word_id = ? ORDER BY id'),
 
+      // 🔴 2026-10-28 K36 收尾：日文版词源的 `text` 是**日语原文**（证据），三语方针下读者一个字都不许看到 ——
+      //    印的是 `etymology_gloss` 的中文译文；**没有译文的日文版行整行不印**（不是退回原文）。
+      //    `lang` 跟着印出来的那段文字走，不跟版本走（日文版印的是中文）。
       etymology: this.db.prepare(
-        'SELECT edition, etym_no AS etymNo, text FROM etymology'
-        + ' WHERE word_id = ? ORDER BY etym_no'),
+        'SELECT e.edition, e.etym_no AS etymNo, e.entry_id AS entryId,'
+        + ' COALESCE(g.text, e.text) AS text,'
+        + ' CASE WHEN g.text IS NOT NULL THEN \'zh\' ELSE substr(e.edition, 1, 2) END AS lang'
+        + ' FROM etymology e LEFT JOIN etymology_gloss g ON g.etymology_id = e.id AND g.lang = \'zh\''
+        + ' WHERE e.word_id = ? AND (e.edition <> \'ja-edition\' OR g.text IS NOT NULL)'
+        + ' ORDER BY e.etym_no, e.id'),
 
       // 🔴 `speaker` 必须端出去：ko 实测 **1,606 行里 1,482 行没有 region**，
       //    而 `HumanAudioRow` 的标签是「region ?? speaker ?? 未标注」——
@@ -479,9 +487,12 @@ export class KoreanDictService {
       // 🔴 K26：组件要的是**键 → 正文**的字典，不是数组。ko 的词源 100% 是 en-edition，
       //    但 `etymologyEditions` **从数据里算**而不是写死 `['en-edition']` ——
       //    哪天抽了别的版，这里自动跟上；写死就会对新抽的版说「源头没给」。
+      // 🔴 2026-10-27 K36①：**只用挂了 entry 的行建键**。挂在词上的中文版词源（entryId 为空）
+      //    键也是 `zh-edition-trad:0`，混进来会顶掉同键那一组自己的正文 —— 它们去页尾「其余词源」区。
       etymologyTexts: Object.fromEntries(
         (this.q.etymology.all(id) as unknown as
-          { edition: string; etymNo: string | null; text: string }[])
+          { edition: string; etymNo: string | null; entryId: number | null; text: string; lang: string }[])
+          .filter((x) => x.entryId !== null)
           .map((x) => [`${x.edition}:${x.etymNo ?? '0'}`, x.text])),
       etymologyEditions: this.etymEditions,
       relations: groupRelations(wordLevel),
@@ -491,7 +502,7 @@ export class KoreanDictService {
       hanjaReadings: this.q.hanjaReadings.all(id) as unknown as
         { hanja: string; eumhun: string | null; glossEn: string | null }[],
       etymology: this.q.etymology.all(id) as unknown as
-        { edition: string; etymNo: string | null; text: string }[],
+        { edition: string; etymNo: string | null; entryId: number | null; text: string; lang: string }[],
       audio: this.q.audio.all(hit.word) as unknown as
         { file: string; url: string | null; kind: string;
           region: string | null; speaker: string | null }[],

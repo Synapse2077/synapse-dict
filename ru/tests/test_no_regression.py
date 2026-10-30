@@ -51,7 +51,8 @@ READ_PATH = [
     ("RP5", "词源：写入 vs 展示", "SELECT COUNT(*) FROM etymology", "SELECT COUNT(*) FROM etymology WHERE hidden = 0",
      32113, "fr/vi/pl 第四语言 31,953 ＋ 指针段 157 ＋ 没有字母 3"),
     ("RP6", "读音：写入 vs 展示", "SELECT COUNT(*) FROM pronunciation",
-     "SELECT COUNT(*) FROM pronunciation WHERE hidden = 0", 245, "源头标错/不推荐（P3 同一批）"),
+     "SELECT COUNT(*) FROM pronunciation WHERE hidden = 0", 249,
+     "源头标错/不推荐 245（P3）＋ 内容不是 IPA 4（P24，B10，2026-10-29）"),
     ("RP7", "指针：证据层 vs 展示的指针", "SELECT COUNT(*) FROM sense_src",
      "SELECT COUNT(*) FROM sense_src WHERE sense_id IS NULL AND pointer_target IS NOT NULL", 1168141,
      "已出版的义项（sense_id 有值）＋ 不出版语言的普通释义证据 ＋ 没有结构目标的指针（R22 形动词页）"),
@@ -64,7 +65,9 @@ CHECKS = [
      "分母虚胖过 42%。**锁数**：判据再动一次它就变，变了必须有人解释"),
     ("P2", "带重音符的词头", "SELECT COUNT(*) FROM dict WHERE instr(word, char(769))>0 OR instr(word, char(768))>0",
      1, "R13 并掉 7 个；剩的 1 个是 `◌́`（维基词典给重音符本身建的条目，重音闸 T11 白名单）"),
-    ("P3", "源头标错的读音藏而不删", "SELECT COUNT(*) FROM pronunciation WHERE hidden=1", 245,
+    # 🔴 2026-10-29 收窄到「源头标的」：B10 起另有一种藏法（内容不是 IPA，P24），混着数 245 就变 249、两件事分不开
+    ("P3", "源头标错的读音藏而不删",
+     "SELECT COUNT(*) FROM pronunciation WHERE hidden=1 AND hidden_why IN ('源头标为错误读音','源头标为不推荐')", 245,
      "源头 `неправильно`/proscribed 等；删掉就找不回，清零 hidden 就印给读者"),
     ("P4", "可出版义项", "SELECT COUNT(*) FROM sense WHERE hidden=0", 625800,
      "5a 落库 ＋ 5b 破例 11,496。`--rebuild` 改判据会动它"),
@@ -113,13 +116,25 @@ CHECKS = [
      "COALESCE(text_pub,text) LIKE '%覆上%')", 92,
      "6d 回收时整段 OpenCC t2s 把 23 条「覆上（盖）」改成「复上」（OpenCC 短语表的古义），已从答案文件改回；5c 新译文里又有 23 处正确的「覆上」（69→92）；"
      "少了 ⇒ 有人又整段 t2s 了"),
+    ("P24", "内容不是 IPA 的读音藏而不印（B10）",
+     "SELECT COUNT(*) FROM pronunciation WHERE hidden=1 AND hidden_why='不是 IPA（B10）'", 4,
+     "`criteria.NOT_IPA`（十门同一份判据）：`сердечный → 5`、`во → v0` ×2、两条读音粘成一串夹 `0`。"
+     "少了 ⇒ 判据被放松或有人清零 hidden；多了 ⇒ 源头新来了，逐条看过再改数"),
 ]
 # R0c：中文的读取路径必须读 `text_pub`（R29）—— 这几段在 russian.ts 里抠不到 ⇒ 展示层回到繁体原文
 ZH_READ = ("COALESCE(g.text_pub, g.text) FROM sense s JOIN sense_gloss g",
            "COALESCE(g.text_pub, g.text) AS text, g.src FROM sense_gloss g",
            "COALESCE(text_pub, text) FROM example_gloss WHERE example_id = x.id AND lang = 'zh'",
            "COALESCE(x.text_pub, x.text) AS text, x.src, x.pointer_target")
-ROSTER = ["R0"] + [c[0] for c in CHECKS] + [c[0] for c in READ_PATH] + ["R0b", "R0c"]
+# 🔴🔴 2026-10-30（B23 那一类）：原来是 `["R0"] + [c[0] for c in CHECKS] + …` —— **从检查列表推出来的**，
+#    于是从 CHECKS 里删掉一条，花名册跟着少一条，`roster_check` 照样对得上：它只逮得到「列表里有而没跑」，
+#    逮不到「整条被删了」（vi 栽过的正是后者：P12/P13 被整段替换切走，正常跑报全绿）。
+#    ⇒ 独立写死。加一条检查 ⇒ 这里也要加，不加就红 —— 那正是它存在的理由（`[[expectation-must-be-declared]]`）。
+ROSTER = ["R0",
+          "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P12",
+          "P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21", "P22", "P23", "P24",
+          "RP1", "RP2", "RP3", "RP4", "RP5", "RP6", "RP7",
+          "R0b", "R0c"]
 
 
 def run_all(con):
@@ -188,7 +203,9 @@ def _mutations():
         ("P2", "一个词头带上重音符", "UPDATE dict SET word=word||char(769) WHERE id=(SELECT MIN(id) FROM dict "
          "WHERE is_lemma=0)"),
         ("P3", "藏的读音被放出来", "UPDATE pronunciation SET hidden=0 WHERE id=(SELECT MIN(id) FROM pronunciation "
-         "WHERE hidden=1)"),
+         "WHERE hidden=1 AND hidden_why IN ('源头标为错误读音','源头标为不推荐'))"),
+        ("P24", "一条「不是 IPA」的读音被放出来", "UPDATE pronunciation SET hidden=0 WHERE id=(SELECT MIN(id) "
+         "FROM pronunciation WHERE hidden_why='不是 IPA（B10）')"),
         ("P4", "一条可出版义项被藏", "UPDATE sense SET hidden=1 WHERE id=(SELECT MIN(id) FROM sense WHERE hidden=0)"),
         ("P5", "删一条付费中文释义", "DELETE FROM sense_gloss WHERE id=(SELECT MIN(id) FROM sense_gloss WHERE "
          "src='model:deepseek-v4-flash')"),
@@ -254,6 +271,7 @@ def _mutations():
 #    RP 锁的就是「写入 − 展示」的差额，任何「藏/放出一行」的变异都**必然**同时动它，这正是两个数一起锁的意义。
 ALSO = {
     "P3": {"RP6"}, "RP6": {"P3"},          # 藏着的读音：P3 数 hidden=1、RP6 数差额 —— 同一批行
+    "P24": {"RP6"},                        # B10 那 4 条也在 RP6 的差额里
     "P4": {"RP1"},                         # 藏一条义项 ⇒ 差额 +1
     "P12": {"RP2"},                        # 放出构词示意式 ⇒ 差额 −1
     "P13": {"RP4"}, "P14": {"RP4"},        # 录音放出/多插一行藏着的
@@ -314,6 +332,18 @@ def mutate():
                 if sql is None:
                     globals()["READ_PATH"] = saved_rp
                 paths.DB = real
+    # 花名册自检自己的变异（B23 那一类，2026-10-30）：一条检查**整条被删**，花名册必须报「少了它」。
+    #    原来 ROSTER 从 CHECKS 推出来，这条变异会空过 —— 这里每次都证明一遍它没有退回去。
+    con = sqlite3.connect("file:%s?mode=ro" % real, uri=True)
+    try:
+        rows = run_all(con)
+    finally:
+        con.close()
+    gone = rows[len(rows) // 2][0]
+    caught = bool(roster_check([r for r in rows if r[0] != gone]))
+    print("   %s 花名册  删掉一整条检查（%s）%s" % ("✅" if caught else "🔴🔴", gone, " → 判红" if caught else " —— **没逮到**"))
+    if not caught:
+        fails.append("ROSTER")
     if report():
         print("\n🔴🔴 反控制失败：真库基线不绿了")
         return 1

@@ -51,6 +51,7 @@ sys.path.insert(0, str(HERE.parent / "fixes"))
 sys.path.insert(0, str(HERE.parent / "pipeline"))
 
 import paths                                              # noqa: E402
+from fix_ipa_xsampa import is_bad as _b10_bad             # noqa: E402
 # ⭐ 判据一律 import 生成/修复侧那一份，**不另抄**
 import strip_citation_tails as _cit                       # noqa: E402
 import strip_editorial_residue as _res                    # noqa: E402
@@ -200,6 +201,13 @@ def checks():
         #    与 `[[dbtool-and-golden-tests]]` 记的葡语 X-SAMPA 坑同一族。
         ("A5", "build_pronunciation_layer", "08-25", "X-SAMPA 冒充 IPA（大写字母）",
          IPA_ALL, IPA_PRIM, lambda t: bool(_XSAMPA.search(t))),
+        # 🔴 B10（2026-10-29）：A5 只查大写、读取侧只查主音标 ⇒ `pron2`、`fij.d_m9_"ˈpyt_m` 这类
+        #    5 行非主读音（页面照样印）躺了两个月，录音标注 59 格（「对应读音 [France (Paris)]」）更是没人查。
+        #    判据 import 修复脚本：大写 ∪ 数字/反引号/反斜杠/下划线 ∪ HTML 实体，十门同一份。
+        ("A6", "fix_ipa_xsampa", "10-29", "音标里有 IPA 不会用的 ASCII 字符或 HTML 实体（B10）",
+         IPA_ALL, IPA_ALL, _b10_bad),
+        ("A7", "fix_ipa_xsampa", "10-29", "录音标注不是 IPA（占位符/地名/双重定界符，B10）",
+         "SELECT ipa FROM audio", "SELECT ipa FROM audio WHERE kind='human'", _b10_bad),
 
         # ── B 组：释义清洗（写 sense_gloss / **证据层会被搬回来**）────────
         ("B1", "strip_footnote_refs", "08-23", "脚注引用残渣 ^([1])",
@@ -493,6 +501,10 @@ MUTATIONS = [
            "(SELECT id FROM example WHERE sense_id IS NOT NULL LIMIT 1)"),
     ("A5", "INSERT INTO pronunciation (word_id,ipa,notation,is_primary,src,src_ref) "
            "VALUES ((SELECT id FROM dict LIMIT 1),'myta.sjO~','phonemic',0,'mutate','mutate')"),
+    # A6 用**小写**的 X-SAMPA 形状（`_` 拍平的上标）：A5 只查大写，这条它看不见
+    ("A6", "INSERT INTO pronunciation (word_id,ipa,notation,is_primary,src,src_ref) "
+           "VALUES ((SELECT id FROM dict LIMIT 1),'i_s.paʁ','phonemic',0,'mutate','mutate')"),
+    ("A7", "UPDATE audio SET ipa='[\\sɔ.mɛʁ\\]' WHERE id=(SELECT MIN(id) FROM audio WHERE kind='human')"),
     ("B6", "UPDATE sense_gloss SET text=text||' [[mutation]]' WHERE rowid="
            "(SELECT g.rowid FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
            " WHERE g.lang='fr' AND COALESCE(s.hidden,0)=0 LIMIT 1)"),

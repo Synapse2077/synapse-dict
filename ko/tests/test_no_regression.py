@@ -135,10 +135,12 @@ CHECKS = [
     #      只修了 fr，教训没跨语种传过来 ⇒ 另六门落账 `BACKLOG` B10。
     #    ⭐ 判据必须用 `GLOB`：SQL 的 `LIKE '%_%'` 里 `_` 是通配符，
     #      我第一版用 LIKE，当场"命中"整库 298,951 行。
+    # 🔴 2026-10-29 判据放宽（B10 回扫）：原 GLOB 只查数字/符号、不查 ASCII 大写 ⇒
+    #    `는 → nMn` 等 35 行躺了一个月而 R12 是绿的。改成 import 修复脚本的 `is_bad`，不在这儿重写。
     ("R12", "读音层没有混进 X-SAMPA（冒充 IPA 的 ASCII 转写）",
-     "SELECT COUNT(*) FROM pronunciation WHERE ipa GLOB '*[0-9`\\_]*'", 0,
-     "IPA 不用 ASCII 数字/反引号/反斜杠/下划线，X-SAMPA 这四样全用。"
-     "98 行已删（全部 `ja-edition`，且每个词形都另有正确 IPA 兜底）"),
+     "@xsampa", 0,
+     "IPA 不用 ASCII 大写/数字/反引号/反斜杠/下划线/HTML 实体，X-SAMPA 全用。"
+     "第一轮删 98 行、第二轮 35 行（`fix_xsampa_ipa.py`）"),
 
     # 🔴 **渲染逮到的，闸一条都没响**：四套罗马字齐全、非空、全 ASCII、
     #    与词形一一对应 —— 所有**形式**判据都满足，只有**内容**是错的
@@ -588,7 +590,14 @@ def _redundant_related(con):
     return len(plan(con)[0])
 
 
+def _xsampa(con):
+    sys.path.insert(0, str(paths.ROOT / "ko" / "pipeline"))
+    from fix_xsampa_ipa import is_bad
+    return sum(1 for (v,) in con.execute("SELECT ipa FROM pronunciation") if is_bad(v))
+
+
 _FUNCS = {"@schema_drift": _schema_drift,
+          "@xsampa": _xsampa,
           "@nonexample_rows": _nonexample_rows,
           "@redundant_related": _redundant_related,
           "@audio_filename_leak": _audio_filename_leak,

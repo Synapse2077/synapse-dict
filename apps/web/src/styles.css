@@ -339,6 +339,9 @@ button.brand:focus-visible {
    Right column: entry detail
    ============================================================ */
 .detail-column {
+  /* 🔴 2026-10-27 B26：超长不可断的单个词（词头 `Taumatawhakatangihanga…`、长音标、异体词、变格表里的化学名）
+     只在一行实在放不下时才断 —— 可继承，十门视图都吃得到。拿掉它版式溢出闸当场红。 */
+  overflow-wrap: anywhere;
   height: 100vh;
   overflow-y: auto;
   padding: 48px 56px;
@@ -768,7 +771,8 @@ button.brand:focus-visible {
    ⚠️ 字号刻意比义项中文小一档、颜色退到次级 —— 它是**背景信息**，
       不该跟释义抢视线；但也不能小到看不清（用户 2026-09-11：字体样式要统一，
       这里沿用 `.sense-src` 那一档）。 */
-.etym-text {
+.etym-text,
+.ko-etym-orphan-text {
   font-size: 12.5px;
   line-height: 1.65;
   color: var(--text-secondary);
@@ -1609,7 +1613,12 @@ button.brand:focus-visible {
   vertical-align: 1px;
 }
 
-.rel-item { margin-right: 8px; }
+/* 🔴 2026-10-27 B26：`inline-block` 不是排版偏好，是**正确性**。关系词是一串首尾相接的 `<span>`
+   （React 不在相邻元素之间插空白），普通 `inline` 之间**没有断行机会** ⇒ `Winde``Affenkasten``Kasten`…
+   在浏览器眼里是一个词：de `Haus` 一行 26,163px、fr `Rubiacées` 35,522px，手机和桌面都横向溢出。
+   `inline-block` 之间天然可断 ⇒ 在**词与词之间**换行，不把一个词从中间劈开。
+   版式溢出闸 `contract-check-overflow.tsx` 盯着它（拿掉这一行当场红）。 */
+.rel-item { display: inline-block; margin-right: 8px; }
 
 /* 🔴 2026-09-10：这条规则是给 `<a>` 写的 —— 它只定颜色和点线下划线，
    **没有重置 `background` / `border` / `padding` / `font`**，而 `styles.css` 里
@@ -2516,6 +2525,7 @@ button.rel-link {
 .vi-pron-dialect,
 .vi-pron-composed,
 .vi-etym-src,
+.ko-etym-src,
 .vi-etym-type,
 .vi-pointer-src,
 .vi-classifier-note {
@@ -2728,7 +2738,8 @@ button.rel-link {
 
 /* B18 的落点：词源号与义项组对不上的 407 个词形，词源单独成区印在义项之后。
    ⇒ 与上文拉开，并且不带「词源 N」的编号（那个号对不上，印出来会误导）。 */
-.vi-etym-orphan {
+.vi-etym-orphan,
+.ko-etym-orphan {
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px dashed var(--border);

@@ -43,7 +43,7 @@ import { getService } from '@synapse-dict/dict-core';
 import {
   EnglishEntryView, SpanishEntryView, ItalianEntryView,
   FrenchEntryView, PortugueseEntryView, GermanEntryView, JapaneseEntryView,
-  KoreanEntryView,
+  KoreanEntryView, VietnameseEntryView, RussianEntryView,
 } from './App';
 
 const mutate = process.argv.includes('--mutate');
@@ -58,12 +58,15 @@ const mutate = process.argv.includes('--mutate');
 //    **而那条自检只加在了那一个文件里**，本文件和 `render-dump.tsx` 都没有。
 //    ⇒ 于是 ko 又一次漏了整个阶段 9。`[[lesson-must-become-mechanism]]`：
 //      教训做进一个文件不等于做进这一类文件。下面补上同一条自检。
-type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de' | 'ja' | 'ko';
-const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja', 'ko'];
+// 🔴🔴 2026-10-27 加 vi/ru —— **第五、六次漏登记**。本文件的自检（下面 `unlisted`）是对的、
+//    从 vi 上线（10-06）起一直红着，而本闸不在任何一门的 `run_gates` 里 ⇒ 三周没人看见（B14/B15）。
+type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de' | 'ja' | 'ko' | 'vi' | 'ru';
+const LANGS: Lang[] = ['en', 'es', 'it', 'fr', 'pt', 'de', 'ja', 'ko', 'vi', 'ru'];
 const VIEW: Record<Lang, unknown> = {
   en: EnglishEntryView, es: SpanishEntryView, it: ItalianEntryView,
   fr: FrenchEntryView, pt: PortugueseEntryView, de: GermanEntryView,
   ja: JapaneseEntryView, ko: KoreanEntryView,
+  vi: VietnameseEntryView, ru: RussianEntryView,
 };
 
 // 🔴🔴 **登记表与源码对账** —— 与 `css-audit.ts` 里那条同一份判据。
@@ -72,10 +75,18 @@ const VIEW: Record<Lang, unknown> = {
 //    ⚠️ 判据是「源码里有几个视图，表里就得有几行」，**不是「表里这几门对不对」** ——
 //      后者对「是不是所有门都登记了」结构性失明。
 {
-  const app = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'App.tsx'), 'utf8');
+  const app = readFileSync(process.env.LAYOUT_APP_SRC
+    || join(dirname(fileURLToPath(import.meta.url)), 'App.tsx'), 'utf8');
   const declared = new Set(Object.values(VIEW).map((f) => (f as { name: string }).name));
-  const unlisted = [...app.matchAll(/export function (\w+EntryView)\b/g)]
-    .map((m) => m[1]).filter((fn) => !declared.has(fn));
+  const inSource = [...app.matchAll(/export function (\w+EntryView)\b/g)].map((m) => m[1]);
+  // 🔴 B23 那一类（2026-10-30）：正则一个视图都没认出来 ⇒ `unlisted` 恒空 ⇒ 漏登记永远报不出来。
+  //    （「登记了却找不到」这一半不用查：VIEW 是直接 import 的函数，改名在编译时就炸。）
+  //    变异：`LAYOUT_APP_SRC` 指向把 `export function` 全改成 `export const` 的副本 ⇒ 判红。
+  if (inSource.length === 0) {
+    console.log('\n🔴 判据坏了：App.tsx 里一个 `export function XxxEntryView` 都没认出来 —— 空结果不是「全登记了」');
+    process.exit(1);
+  }
+  const unlisted = inSource.filter((fn) => !declared.has(fn));
   if (unlisted.length) {
     console.log(`\n🔴 App.tsx 里有没登记进 LANGS/VIEW 的视图：${unlisted.join(', ')}`
       + '\n   —— 本闸对它们结构性失明：少查一门与全查了都通过，输出上一模一样。');
@@ -84,18 +95,23 @@ const VIEW: Record<Lang, unknown> = {
 }
 
 /** 规范序列。角色 → 六门各自认得出它的类名（任一命中即可）。 */
+// 🔴 2026-10-27：vi/ru 的义项**整套用自己的类名**（`vi-zh`／`ru-gloss-ru`／`ru-rels`…），
+//    登记进 LANGS 之后本闸照样全绿 —— **取样 0 条**（`<li class="sense-item">` 一条都切不到）。
+//    少查一门与全查了，输出上只差 bucket 那一列的数字 ⇒ 下面补了「每门取样不得为 0」。
 const CANON: Array<[string, RegExp]> = [
-  ['中文', /class="sense-zh"/],
+  ['中文', /class="(sense-zh|vi-zh|ru-zh)[ "]/],
   ['中文副行', /class="(sense-detail|sense-alt-zh)"/],
-  ['原文定义', /class="sense-src"/],
+  ['原文定义', /class="(sense-src|vi-vi|vi-en|ru-gloss-ru|ru-gloss-en)"/],
   ['异体', /class="sense-altof"/],
-  ['关系', /class="(rel-row|sense-relations|sense-rels|rel-group)"/],
+  ['关系', /class="(rel-row|sense-relations|sense-rels|rel-group|vi-rel|ru-rels)"/],
   // ⚠️ ja 的义项内例句用的是共用的 `.example-list`（`<ul>` 容器），
   //    正文那一层是 `.example-text` —— 两个名字都要认，否则日语的例句块
   //    在本闸眼里根本不存在，序列永远"合规"。
-  ['例句', /class="(sense-example|example-item|example-text)"/],
+  ['例句', /class="(sense-example|example-item|example-text|vi-example|ru-example)"/],
 ];
 const ROLES = CANON.map(([n]) => n);
+/** 一条义项的 `<li>`。vi/ru 是 `vi-sense`／`ru-sense`（义项内没有嵌套 `<li>`，非贪婪匹配不会截断）。 */
+const SENSE_LI = /<li class="(?:sense-item|vi-sense|ru-sense)"[^>]*>([\s\S]*?)<\/li>/g;
 
 /** 一条义项里各角色**首次出现**的先后。 */
 function rolesOf(seg: string): string[] {
@@ -145,6 +161,8 @@ const SEEDS: Record<Lang, string[]> = {
   //   `기적` 多词源（同形异义两支）、`犬` 汉字条目（走汉字音那一路）、
   //   `가을` 关系多（中文版把关系塞进 examples 的那个词）、`읽다` 有发音形。
   ko: ['사람', '물', '하다', '가다', '기적', '犬', '가을', '읽다'],
+  vi: ['ăn', 'nhà', 'con', 'hóa', 'mai', 'thối', 'nước', 'người'],
+  ru: ['вода', 'замок', 'идти', 'читать', 'дом', 'быть', 'хороший', 'всё'],
 };
 
 const pages: Array<[string, string[]]> = [];     // [词, 角色序列]
@@ -160,7 +178,7 @@ for (const lang of LANGS) {
     if (!e) continue;
     const html = render(lang, e);
     fullPages.push([`${lang} ${w}`, html]);
-    for (const m of html.matchAll(/<li class="sense-item"[^>]*>([\s\S]*?)<\/li>/g)) {
+    for (const m of html.matchAll(SENSE_LI)) {
       const roles = rolesOf(m[1]);
       if (roles.length < 3) continue;            // 块太少，测不出顺序
       pages.push([`${lang} ${w}`, roles]);
@@ -178,6 +196,11 @@ for (const lang of LANGS) {
   console.log(`    ${lang}  ${String(bucket.get(lang) ?? 0).padStart(3)} 条 ｜ `
     + [...(seenOrder.get(lang) ?? [])].slice(0, 2).join('  ／  '));
 }
+
+// 🔴 每门取样不得为 0 —— 0 条就是本闸对这门结构性失明（vi/ru 登记后照样全绿那一跤）。
+const blindOf = (b: Map<string, number>) => LANGS.filter((l) => !b.get(l));
+const blind = blindOf(bucket);
+if (blind.length) console.log(`\n🔴 ${blind.join('/')} 取样 0 条：本闸认不出这几门义项里的块，等于没查`);
 
 const bad: string[] = [];
 for (const [w, roles] of pages) {
@@ -210,7 +233,7 @@ console.log(bad.length
 /** 把整页切成「义项内」与「义项外」两段。 */
 function splitBySense(html: string): { inSense: string; outSense: string } {
   let inSense = '';
-  const outSense = html.replace(/<li class="sense-item"[^>]*>[\s\S]*?<\/li>/g, (m) => {
+  const outSense = html.replace(SENSE_LI, (m) => {
     inSense += m;
     return '';
   });
@@ -241,11 +264,12 @@ function relPairs(seg: string): Set<string> {
   // 见到别的类名（`de-form-cell`/`sense-altof`/`sense-example`/`exchange-item`…）
   // 一律把 `kind` 清空，`kind` 为空的目标**一概不算关系**。
   const INSIDE = new Set(['rel-groups', 'rel-group', 'rel-row', 'rel-targets',
-    'rel-item', 'rel-more', 'sense-relations', 'sense-rels']);
+    'rel-item', 'rel-more', 'sense-relations', 'sense-rels',
+    'vi-rel', 'vi-rel-sep', 'ru-rels', 'ru-rel', 'ru-sep', 'ru-more']);
   for (const m of seg.matchAll(/class="([^"]+)"[^>]*>([^<]*)/g)) {
     const cls = m[1];
-    if (cls === 'rel-kind') { kind = m[2]; continue; }
-    if (cls === 'rel-link' || cls === 'rel-plain') {
+    if (cls === 'rel-kind' || cls === 'vi-rel-kind' || cls === 'ru-rel-kind') { kind = m[2]; continue; }
+    if (['rel-link', 'rel-plain', 'vi-link', 'vi-nolink', 'ru-link', 'ru-nolink'].includes(cls)) {
       if (kind && m[2]) out.add(`${kind}｜${m[2]}`);
       continue;
     }
@@ -299,7 +323,14 @@ if (mutate) {
       console.log(`   🔴 ${name}  —— ${touched === 0 ? '一条都没造出来' : '造出来了但闸没红'}`);
     } else console.log(`   ✅ ${name}  → 打红 ${hits}/${touched} 条`);
   }
-  console.log(`\n   变异 ${MUTS.length - dead}/${MUTS.length} 有效`);
+  // 「取样 0 条」那条自检的变异：假装 vi 一条都没切到（登记进来而类名不认识的样子）
+  {
+    const fake = new Map(bucket); fake.set('vi', 0);
+    const caught = blindOf(fake).includes('vi');
+    if (!caught) dead += 1;
+    console.log(`   ${caught ? '✅' : '🔴'} M5 某门取样 0 条（vi 登记了而类名不认识）${caught ? ' → 判红' : ' —— 没逮到'}`);
+  }
+  console.log(`\n   变异 ${MUTS.length + 1 - dead}/${MUTS.length + 1} 有效`);
 
   // ── 关系分级那条断言的变异：**注入一条重复**（负控型断言必须"往上加"）──
   // 🔴 这条断言说的是"不该出现 X"。页面上现在一条重复都没有，
@@ -330,6 +361,6 @@ if (mutate) {
   console.log(`   ${injOk ? '✅' : '🔴'} 注入重复 → 打红 ${injHit}/${injTouched} 个页面`
     + (injTouched === 0 ? '（一个都没造出来 —— 取样里没有义项级关系）' : ''));
 
-  process.exit(dead || bad.length || dupBad.length || !injOk ? 1 : 0);
+  process.exit(dead || bad.length || dupBad.length || blind.length || !injOk ? 1 : 0);
 }
-process.exit(bad.length || dupBad.length ? 1 : 0);
+process.exit(bad.length || dupBad.length || blind.length ? 1 : 0);

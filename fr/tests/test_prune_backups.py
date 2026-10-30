@@ -52,29 +52,41 @@ def build(d, specs):
     return d
 
 
-def run(specs, keep_plain=None, max_bytes=None):
+def run(specs, keep_plain=None, max_bytes=None, done=False, done_bytes=None):
     """→ (留下的 tag 集合, 留下的**文件数**)
 
     🔴 文件数不能省：tag 集合会把「同 tag 的多个文件」折成一个，
        断言不到「同天两个快照留了几个」这种形状。
+
+    🔴 `done` **默认 False，而且必须显式钉死**（2026-09-01）：
+       规则④上线那天，`_language_is_done()` 读的是真的 `docs/PT_PLAN.md`，
+       而那天正好写上了「✅ pt 完结」⇒ **上面每一条用例的预算都会被悄悄换成
+       `DONE_BACKUP_BYTES`**，`max_bytes=BIG` 那几条从此测的不是它们声称在测的东西。
+       用例本身还是绿的 —— 这正是最坏的一种坏法。
+       ⇒ 测试不许读真实文件系统的状态，`done` 一律由用例说了算。
     """
     d = Path(tempfile.mkdtemp())
     build(d, specs)
-    old = (dbtool.paths.BACKUPS, dbtool.DB, dbtool.KEEP_PLAIN, dbtool.MAX_BACKUP_BYTES)
+    old = (dbtool.paths.BACKUPS, dbtool.DB, dbtool.KEEP_PLAIN,
+           dbtool.MAX_BACKUP_BYTES, dbtool.DONE_BACKUP_BYTES, dbtool._language_is_done)
     try:
         dbtool.paths.BACKUPS = d
         dbtool.DB = d / "synapse-dict-tst.sqlite"
+        dbtool._language_is_done = lambda: done
         if keep_plain is not None:
             dbtool.KEEP_PLAIN = keep_plain
         if max_bytes is not None:
             dbtool.MAX_BACKUP_BYTES = max_bytes
+        if done_bytes is not None:
+            dbtool.DONE_BACKUP_BYTES = done_bytes
         dbtool.prune_backups(verbose=False)
         files = list(d.glob("*.bak"))
         left = {p.name.split(".pre-")[1].rsplit("-", 2)[0] for p in files}
         return left, len(files)
     finally:
-        (dbtool.paths.BACKUPS, dbtool.DB,
-         dbtool.KEEP_PLAIN, dbtool.MAX_BACKUP_BYTES) = old
+        (dbtool.paths.BACKUPS, dbtool.DB, dbtool.KEEP_PLAIN,
+         dbtool.MAX_BACKUP_BYTES, dbtool.DONE_BACKUP_BYTES,
+         dbtool._language_is_done) = old
         shutil.rmtree(d)
 
 
@@ -128,11 +140,11 @@ CASES = [
         {"max_bytes": 1}, {"keep-a", "keep-c"}, 2,
     ),
     (
-        "③ keep 计入字节：普通的先被砍光",
+        "③ keep 计入字节：普通的先砍，**最新那个除外**",
         [("keep-a", "20260801", "100000", 100),
          ("keep-b", "20260820", "100000", 100),
          ("p1", "20260825", "100001", 100), ("p2", "20260825", "100002", 100)],
-        {"keep_plain": 2, "max_bytes": 200 * MB}, {"keep-a", "keep-b"}, 2,
+        {"keep_plain": 2, "max_bytes": 200 * MB}, {"keep-a", "keep-b", "p2"}, 3,
     ),
     (
         # 🔴 排序按**文件名里的时间戳**，不按 mtime。这里把两个时钟造成**相反**：
@@ -143,6 +155,30 @@ CASES = [
          ("t1", "20260820", "100001", 1, ("20260820", "140000")),
          ("t2", "20260820", "100002", 1, ("20260820", "100000"))],
         {"keep_plain": 2, "max_bytes": BIG}, {"t1", "t2"}, 2,
+    ),
+    (
+        # 🔴🔴 2026-10-28：**最新的那个备份无论什么 tag 都不删。**
+        #    现场是 ru：标了完结后预算 1.5 GB，而库本身 4.4 GB ⇒ 唯一的普通备份试算「删 1 个」。
+        #    更坏的是 `backup()` 复制完立刻 `prune_backups()` ⇒ **刚打的写前备份当场被删，
+        #    这一步写库没有回滚点**。fr 3.1 G／de 3.5 G 早就是这个状态，只是现存备份碰巧带 keep。
+        #    旧契约「普通备份 floor=0」防的是「普通的该砍光却留了 2 个」—— 那条照旧成立，
+        #    只有**全体里最新的那一个**例外（下一条用例钉住「最新是 keep 时普通的照样砍光」）。
+        "🔴 完结且库大于预算：唯一的普通备份不删",
+        [("zh-pub", "20261026", "214431", 100)],
+        {"max_bytes": BIG, "done": True, "done_bytes": 1}, {"zh-pub"}, 1,
+    ),
+    (
+        "🔴 刚打的普通备份不删，更早的普通备份照砍",
+        [("keep-a", "20260801", "100000", 100),
+         ("p1", "20261020", "100000", 100), ("p2", "20261028", "100000", 100)],
+        {"max_bytes": BIG, "done": True, "done_bytes": 1}, {"keep-a", "p2"}, 2,
+    ),
+    (
+        "最新的是 keep ⇒ 普通的照旧砍光（例外只给全体最新的那一个）",
+        [("keep-a", "20260801", "100000", 100),
+         ("p1", "20261020", "100000", 100),
+         ("keep-b", "20261028", "100000", 100)],
+        {"max_bytes": BIG, "done": True, "done_bytes": 1}, {"keep-a", "keep-b"}, 2,
     ),
 ]
 

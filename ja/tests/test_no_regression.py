@@ -75,6 +75,10 @@ TABLES = ("entry", "sense_src", "sense", "sense_gloss", "sense_tag", "sense_rela
 # ══════════════════════════════════════════════════════════════════
 # 允许的非零基线：`断言名 → (期望值, 理由)`。**锁数字不锁名字。**
 ACCEPT = {
+    "A9 中文里有 OpenCC 转出来的扩展平面字形（B25）": (
+        14,
+        "2026-10-29 B25 从原文改回 128 条之后剩的 14 条，**都找不到原文、证明不了是转换造成的**："
+        "中文版 8（`𬬭`/`𫟼` 元素名、`二𫫇英`）＋ 模型 6。多了 ⇒ 有人又整段 t2s 了，逐条看"),
     "A1 义项没有中文": (
         3_139,   # 2026-09-18 从 3,202 收紧：3b 那批多层 gloss 的中文回填
                  # （`translate_hier_gloss` → `fix_hierarchical_gloss --load`）
@@ -204,13 +208,15 @@ def build(con):
     try:
         import opencc as _oc
         sys.path.insert(0, str(HERE.parent / "fixes"))
-        from fix_traditional_to_simplified import convert as _t2s
-        _cv = _oc.OpenCC("t2s").convert
+        from fix_traditional_to_simplified import convert as _t2s, safe_t2s as _safe
+        _cv = _oc.OpenCC("t2s").convert          # 只给 A6 探测【】里还有没有可转的原字
         trad = 0
+        # 🔴 B25（2026-10-29）：「还有繁体」按**安全判据**判，不按整段 opencc —— `鮟鱇`、`糙叶薹草`、卦名 `乾`
+        #    整段 opencc 认为「还能转」，而那正是它改错的地方（改回之后 A5 当场报 11 条假红）。
         for tbl in ("sense_gloss", "example_gloss"):
             for (t,) in con.execute(
                     "SELECT text FROM %s WHERE lang='zh' AND rowid %% 15 = 0" % tbl):
-                trad += (_t2s(t or "", _cv)[0] != t)
+                trad += (_t2s(t or "", _safe)[0] != t)
         a(("A", "A5 中文释义/译文里还有繁体（抽样 1/15）", trad))
         # 🔴 反向断言：**日文词形（【】内）的原字必须还在**。
         #    它为 0 说明保护段失效了 —— 那时 A5 反而会是绿的，
@@ -220,6 +226,13 @@ def build(con):
             "SELECT text FROM sense_gloss WHERE lang='zh' AND text LIKE '%【%'")
             for m in _BR.finditer(t or "") if _cv(m.group(0)) != m.group(0))
         a(("A", "A6 日文词形（【】内）的原字被一起转成简体了", 0 if kept else 1))
+        # B25（2026-10-29）：09-16 整段 opencc 把 128 条转成扩展平面豆腐块（`鮟鱇→𩽾𩾌`），已从原文改回。
+        from fix_traditional_to_simplified import ext_targets as _ext_t
+        _ext = _ext_t()
+        a(("A", "A9 中文里有 OpenCC 转出来的扩展平面字形（B25）", sum(
+            1 for tbl in ("sense_gloss", "example_gloss")
+            for (t,) in con.execute("SELECT text FROM %s WHERE lang='zh'" % tbl)
+            if t and any(c in _ext for c in t))))
     except ImportError:
         pass
 
@@ -791,6 +804,10 @@ MUT = [
      ["UPDATE sense_gloss SET text='國際標準書號' WHERE lang='zh' AND rowid % 15 = 0"
       " AND rowid < 3000"],
      "A5 中文释义/译文里还有繁体（抽样 1/15）"),
+    ("M-B25", "A9 扩展平面字形回潮（整段 t2s 重跑）",
+     ["UPDATE sense_gloss SET text='𩽾𩾌' WHERE lang='zh' AND rowid=(SELECT MIN(rowid) FROM sense_gloss"
+      " WHERE lang='zh' AND src LIKE 'model:%')"],
+     "A9 中文里有 OpenCC 转出来的扩展平面字形（B25）"),
     ("M11", "🔴 A6 保护段失效：日文词形被一起转成简体", [_unprotect],
      "A6 日文词形（【】内）的原字被一起转成简体了"),
     ("M3", "A2 释义变成空串",

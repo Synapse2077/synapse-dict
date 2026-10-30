@@ -25,6 +25,7 @@
 """
 import argparse
 import asyncio
+import contextlib
 import json
 import pathlib
 import sys
@@ -56,7 +57,12 @@ async def ask_deepseek(cl, e, text, think):
     if r.status_code != 200:
         raise RuntimeError("HTTP %s: %s" % (r.status_code, r.text[:200]))
     d = r.json()
-    return d["choices"][0]["message"]["content"], d.get("usage") or {}
+    return d["choices"][0]["message"]["content"], d.get("usage") or {}, d.get("model", "?")
+
+
+def doubao_model(e, lite=False):
+    """→ 豆包端点 id。抽成函数是为了 `--selftest` 能锁住「默认是 pro」（B8）。"""
+    return e["DOUBAO_MODEL_ONLINE_LITE" if lite else "DOUBAO_SEED_2_1_PRO"].strip()
 
 
 async def ask_doubao(cl, e, text, think, lite=False):
@@ -64,7 +70,7 @@ async def ask_doubao(cl, e, text, think, lite=False):
     #    而用户 2026-08-01 定的规矩原文是「同时咨询豆包 **pro** 和 deepseek v4-pro」。
     #    ⇒ 脚本与规矩漂开了，而两边都没人报错：**咨询照常返回，只是档次不对**。
     #    咨询是「商量规则」，正是该用 pro 的那一类；lite 留成显式选项。
-    model = e["DOUBAO_MODEL_ONLINE_LITE" if lite else "DOUBAO_SEED_2_1_PRO"].strip()
+    model = doubao_model(e, lite)
     body = {"model": model,
             "messages": [{"role": "system", "content": SYS},
                          {"role": "user", "content": text}],
@@ -76,12 +82,81 @@ async def ask_doubao(cl, e, text, think, lite=False):
     if r.status_code != 200:
         raise RuntimeError("HTTP %s: %s" % (r.status_code, r.text[:200]))
     d = r.json()
-    return d["choices"][0]["message"]["content"], d.get("usage") or {}
+    return d["choices"][0]["message"]["content"], d.get("usage") or {}, d.get("model", "?")
+
+
+def report(names, res, out, doc, t0, err=sys.stderr):
+    """落盘 ＋ 打结果。→ 退出码：0 都回来了／2 两家只回来一家／1 全挂。
+
+    🔴 B9（2026-10-27）：原来挂了一家照样退 0、只在 stderr 打一行 ⇒ 调用方默认拿到的是双份。
+       而「两家独立一致」是这仓库反复引用的信号 —— **挂掉一家时必须显式降级**，不能当成「一家说了算」。
+    """
+    ok = 0
+    for name, r in zip(names, res):
+        p = out / ("%s.%s.md" % (doc.stem, name))
+        if isinstance(r, Exception):
+            # 🔴 2026-09-24：原来写的是 `%s % r`，而**超时类异常的 `str()` 是空串** ——
+            #    ko 那轮豆包跑满 1200s 挂掉，打出来就是「🔴 doubao 失败：」后面什么都没有，
+            #    我拿不到任何可诊断的东西，连"是超时还是 4xx"都分不出。
+            #    ⇒ 打**类型名 ＋ repr**，空 `str()` 的异常也说得出自己是谁。
+            #    ⚠️ 同一形状：`[[residual-bucket-is-not-evidence]]` 的反面 ——
+            #      **"什么都没打印"被我读成了"没什么可说的"**，而它其实是信息丢了。
+            print("🔴 %s 失败：%s: %r（用时 %.0fs）"
+                  % (name, type(r).__name__, r, time.time() - t0), file=err)
+            continue
+        content, usage, model = r
+        # 答案文件第一行写明**实际是谁答的**（接口回报的 model），B8 那种档次漂移日后查得到
+        p.write_text("<!-- model: %s -->\n%s" % (model, content), encoding="utf-8")
+        ok += 1
+        print("✓ %-7s %6d 字 → %s   model=%s tokens=%s" % (
+            name, len(content), p, model, json.dumps(usage, ensure_ascii=False)))
+    print("用时 %.0fs" % (time.time() - t0))
+    if ok == len(names):
+        return 0
+    if ok == 0:
+        print("🔴🔴 一家都没回来", file=err)
+        return 1
+    print("🔴🔴 **本轮不构成两家交叉验证**：只回来 %d/%d 家 —— 别把它当成「两家一致」引用"
+          % (ok, len(names)), file=err)
+    return 2
+
+
+def selftest():
+    """离线自检，一个请求都不发。锁住 B8（默认 pro）与 B9（失败分支说得出自己是谁／挂一家要降级）。"""
+    import io, tempfile
+    bad = []
+    e = {"DOUBAO_SEED_2_1_PRO": "ep-pro ", "DOUBAO_MODEL_ONLINE_LITE": "ep-lite"}
+    if doubao_model(e) != "ep-pro":
+        bad.append("B8 默认豆包端点不是 pro：%r" % doubao_model(e))
+    if doubao_model(e, lite=True) != "ep-lite":
+        bad.append("B8 --lite 没走 lite")
+    out = pathlib.Path(tempfile.mkdtemp())
+    doc = out / "q.md"
+    for res, want_code, must in [
+        ([("答", {}, "m1"), TimeoutError()], 2, ["TimeoutError", "不构成两家交叉验证"]),
+        ([TimeoutError(), RuntimeError("HTTP 500")], 1, ["一家都没回来"]),
+        ([("答", {}, "m1"), ("答", {}, "m2")], 0, []),
+    ]:
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = report(["v4pro", "doubao"], res, out, doc, time.time(), err=err)
+        if code != want_code:
+            bad.append("B9 退出码 %d ≠ %d（%s）" % (code, want_code, res))
+        for m in must:
+            if m not in err.getvalue():
+                bad.append("B9 stderr 里没有「%s」：%r" % (m, err.getvalue()))
+    if not (out / "q.v4pro.md").read_text(encoding="utf-8").startswith("<!-- model: m1 -->"):
+        bad.append("B8 答案文件第一行没写实际模型")
+    for b in bad:
+        print("🔴 " + b)
+    print("✅ consult.py 自检通过（6 项）" if not bad else "🔴 %d 项失败" % len(bad))
+    return 1 if bad else 0
 
 
 async def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("doc")
+    ap.add_argument("doc", nargs="?")
+    ap.add_argument("--selftest", action="store_true", help="离线自检，不发请求")
     ap.add_argument("--out")
     ap.add_argument("--no-think", action="store_true")
     ap.add_argument("--only", choices=("v4pro", "doubao"), default="",
@@ -91,6 +166,10 @@ async def main():
     ap.add_argument("--big", action="store_true",
                     help="材料超过 %d KB 时必须显式加上，见文件头「豆包的边界」" % MAX_KB)
     a = ap.parse_args()
+    if a.selftest:
+        sys.exit(selftest())
+    if not a.doc:
+        ap.error("要给材料文件")
 
     import httpx
     doc = pathlib.Path(a.doc)
@@ -105,6 +184,9 @@ async def main():
     out = pathlib.Path(a.out) if a.out else doc.parent
     e = env()
     think = not a.no_think
+    # B8：发出去之前把**实际端点**说出来 —— 档次漂移不报错，只能靠看得见
+    print("■ v4pro → deepseek-v4-pro ／ doubao → %s%s" % (
+        doubao_model(e, a.lite), "（--lite）" if a.lite else "（pro）"))
 
     async with httpx.AsyncClient(timeout=1200) as cl:
         t0 = time.time()
@@ -119,23 +201,7 @@ async def main():
     # 🔴 建目录要在**写之前**：2026-09-24 两家都答完了、写盘时 `FileNotFoundError`，
     #    一次咨询的钱白花。失败点在最后一步，而最后一步之前的东西都已经付过钱了。
     out.mkdir(parents=True, exist_ok=True)
-    for name, r in zip(names, res):
-        p = out / ("%s.%s.md" % (doc.stem, name))
-        if isinstance(r, Exception):
-            # 🔴 2026-09-24：原来写的是 `%s % r`，而**超时类异常的 `str()` 是空串** ——
-            #    ko 那轮豆包跑满 1200s 挂掉，打出来就是「🔴 doubao 失败：」后面什么都没有，
-            #    我拿不到任何可诊断的东西，连"是超时还是 4xx"都分不出。
-            #    ⇒ 打**类型名 ＋ repr**，空 `str()` 的异常也说得出自己是谁。
-            #    ⚠️ 同一形状：`[[residual-bucket-is-not-evidence]]` 的反面 ——
-            #      **"什么都没打印"被我读成了"没什么可说的"**，而它其实是信息丢了。
-            print("🔴 %s 失败：%s: %r（用时 %.0fs）"
-                  % (name, type(r).__name__, r, time.time() - t0), file=sys.stderr)
-            continue
-        content, usage = r
-        p.write_text(content, encoding="utf-8")
-        print("✓ %-7s %6d 字 → %s   tokens=%s" % (
-            name, len(content), p, json.dumps(usage, ensure_ascii=False)))
-    print("用时 %.0fs" % (time.time() - t0))
+    sys.exit(report(names, res, out, doc, t0))
 
 
 if __name__ == "__main__":

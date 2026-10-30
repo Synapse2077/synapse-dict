@@ -30,7 +30,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SRC = join(process.cwd(), 'apps/web/src');
-const app = readFileSync(join(SRC, 'App.tsx'), 'utf8');
+// 变异验证用：`CSS_AUDIT_APP_SRC` 指向一份改坏的 App.tsx 副本（真文件不动），见下面自检的注释
+const app = readFileSync(process.env.CSS_AUDIT_APP_SRC || join(SRC, 'App.tsx'), 'utf8');
 const css = readFileSync(join(SRC, 'styles.css'), 'utf8');
 
 const stripComments = (s: string, block: RegExp) => s.replace(block, '');
@@ -71,6 +72,21 @@ const VIEWS: Array<[string, string]> = [
 const declared = new Set(VIEWS.map(([, fn]) => fn));
 const inSource = [...app.matchAll(/export function (\w+EntryView)\b/g)].map((m) => m[1]);
 const unlisted = inSource.filter((fn) => !declared.has(fn));
+// 🔴🔴 B23 那一类（2026-10-30 补）：上面只问「源码里有的都登记了」，两个方向漏了一个、空集还恒真 ——
+//    ① 正则一个视图都没认出来（改成 `export const XxxEntryView =`、或视图搬出 App.tsx）⇒ `inSource` 空
+//       ⇒ `unlisted` 空 ⇒ 自检静默通过，而下面的审计一门都没做；
+//    ② 登记了而源码里找不到（改名／搬走）⇒ `marks` 那一步 `.filter(at >= 0)` **悄悄丢掉这一门**，照样报绿。
+//    变异（`CSS_AUDIT_APP_SRC` 指向副本）：把 `export function` 全改成 `export const` ⇒ 判红；
+//    把 `RussianEntryView` 改名 ⇒ 判红。
+if (inSource.length === 0) {
+  console.log('\n🔴 判据坏了：App.tsx 里一个 `export function XxxEntryView` 都没认出来 —— 空结果不是「全登记了」');
+  process.exit(1);
+}
+const vanished = [...declared].filter((fn) => !inSource.includes(fn));
+if (vanished.length) {
+  console.log(`\n🔴 VIEWS 登记了而 App.tsx 里找不到：${vanished.join(', ')} —— 这几门的类名审计会被静默跳过`);
+  process.exit(1);
+}
 if (unlisted.length) {
   console.log(`\n🔴 App.tsx 里有没登记进 VIEWS 的视图：${unlisted.join(', ')}`
     + '\n   —— 它们的类名会被算到上一个视图的账上，报告会指错语种。');

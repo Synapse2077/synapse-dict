@@ -540,7 +540,16 @@ def prune_backups(verbose=True, dry=False):
     done = _language_is_done()
     budget = DONE_BACKUP_BYTES if done else MAX_BACKUP_BYTES
     used = sum(p.stat().st_size for p in exempt)
-    plain, cut = _thin(plain, when, max(budget - used, 0), floor=0) if plain else ([], [])
+    # 🔴🔴 2026-10-28：**全体里最新的那一个备份无论什么 tag 都不删。**
+    #    它是刚打的写前备份 ——`backup()` 复制完立刻调本函数。普通备份 floor=0 的本意是
+    #    「预算被里程碑占满时普通的让干净」，而完结预算 1.5 GB 小于库本身（fr 3.1／de 3.5／
+    #    ru 4.4 GB）时，它把**刚打的这一个**也删了 ⇒ 这一步写库没有回滚点。
+    #    ru 补完结标记前试算「删 1 个（唯一的备份）」才发现；fr/de 现存备份碰巧都带 keep。
+    #    ⇒ 最新的是普通备份时普通的留 1 个（`_thin` 只剩首尾时从老往新让，留下的就是它）；
+    #      最新的是 keep 时照旧砍光（keep 自己的 floor=2 保住了它）。
+    latest = max(list(plain) + list(exempt), key=lambda p: when[p], default=None)
+    pfloor = 1 if latest in plain else 0
+    plain, cut = _thin(plain, when, max(budget - used, 0), floor=pfloor) if plain else ([], [])
     drop += cut
     used += sum(p.stat().st_size for p in plain)
     if used > budget:
@@ -766,6 +775,13 @@ def session(tag, expect=None, dry=False, verbose=True, invalidates=None):
         #    把 `keep-v3-schema` 和 `keep-v3-entry` 两个**不可再生的迁移锚点**挤出了条数上限。
         #    ⚠️ 只删「异常回滚」这一路。**闸核对未通过那一路不能删** ——
         #       那时数据已经在库里，备份是唯一的回滚点。
+        # 🔴🔴 B22（2026-10-27 修）：`backup()` 在库不存在（建库）时返回 None，
+        #    原来这里直接 `bak.unlink()` ⇒ `AttributeError`（不是 OSError，下面接不住）
+        #    ⇒ **真正的建库报错被挤成上一条**。判空提到最前（照 ru/dbtool.py）。
+        if bak is None:
+            print("\n🔴 写库异常，已 rollback。本步是建库，没有可回滚的前状态"
+                  "（库原本就不存在）—— 删掉半成品库重跑即可。", file=sys.stderr)
+            raise
         try:
             bak.unlink()
             print("\n🔴 写库异常，已 rollback；本次备份是冗余的，已删除（%s）"
@@ -825,11 +841,12 @@ def session(tag, expect=None, dry=False, verbose=True, invalidates=None):
             #    自删备份（那次是对的，事务已回滚），第二版闸红时打出的 `cp` 路径
             #    已经被保留策略清掉了 —— 照着敲会得到 "No such file"，
             #    而我以为自己手上有回滚点。**说得出的回滚点必须是存在的回滚点。**
-            if bak.exists():
-                if bak:
-                    print("   回滚：cp '%s' '%s'" % (bak, DB), file=out)
-                else:
-                    print("   ⚠️ 本步是建库，没有可回滚的前状态 —— 删库重跑即可", file=out)
+            # 🔴🔴 B22（2026-10-27 修）：原来是 `if bak.exists(): if bak: …` —— 判空写在
+            #    `.exists()` 之后 ⇒ 建库时第一行就 `AttributeError`，**`bad` 清单整个印不出来**。
+            if bak is None:
+                print("   ⚠️ 本步是建库，没有可回滚的前状态 —— 删掉半成品库重跑即可", file=out)
+            elif bak.exists():
+                print("   回滚：cp '%s' '%s'" % (bak, DB), file=out)
             else:
                 print("   🔴🔴 **没有回滚点** —— 本次备份 %s 已不在（被保留策略清掉，"
                       "或上一次异常回滚时自删）。只能向前修。" % bak.name, file=out)

@@ -344,7 +344,10 @@ DONE = {
     "C55": _both(_has("pt/fixes/hide_citation_examples.py", "For quotations using this term"),
                  _sql("SELECT COUNT(*) FROM example WHERE COALESCE(hidden,0)=0 "
                       "  AND text LIKE '%see Citations:%'", "为零")),
-    "C56": _both(_has("apps/web/src/App.tsx", "dupLabel", "HumanAudioRow"),
+    # 🔴 2026-10-27 改锚：09-26 ko 的 K23 把标签逻辑整段搬进 `dict-labels` 的 `audioChipLabels`，
+    #    `dupLabel` 这个名字没了 ⇒ 本条**红了一个月**而没人看见（pt 已封版，没有东西逼人跑它）。
+    #    功能本身还在，且由 `gate:audio-labels`（按钮标签两两不同）守着；这里锚到真正干活的那个调用。
+    "C56": _both(_has("apps/web/src/App.tsx", "audioChipLabels", "HumanAudioRow"),
                  # 发音必须在音标之后、释义之前 —— 位置本身就是这条的交付物
                  lambda _c: ((lambda t: (
                      t.index("<HumanAudioRow", t.index("export function PortugueseEntryView"))
@@ -634,11 +637,16 @@ def mutate():
     print("   M5 %s" % ("✅ 逮到收尾单消失" if got else "🔴 **漏了**：收尾单没了却不红"))
     ok += bool(got)
 
-    print("\n   变异 %d/8" % ok)
+    print("\n   变异 %d/%d" % (ok, N_MUT))
     return ok
 
 
+# 🔴 2026-10-27：入口原来写死 `== 6`，而变异后来加到 8 条、只改了打印那一处
+#    ⇒ **8/8 全过也永远退 1**（一条永远红的变异档＝没有变异档）。两处共用这一个常量；
+#    **独立声明**，不从 `ok +=` 的行数推 —— 那样删掉一条变异它也看不出来。
+N_MUT = 8
+
 if __name__ == "__main__":
     if "--mutate" in sys.argv:
-        sys.exit(0 if mutate() == 6 else 1)
+        sys.exit(0 if mutate() == N_MUT else 1)
     sys.exit(1 if report() else 0)

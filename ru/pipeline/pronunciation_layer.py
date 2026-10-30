@@ -103,7 +103,6 @@ def collect(conn, limit=None, verbose=True):
                 else:
                     w_id, e_id = self_wid, entry_id
                 st["target"][target] += 1
-                dialect, hidden, why = criteria.pronunciation_status(tags, raw_tags)
                 # 🔴 `tags` 与 `raw_tags` **分开存**：闸要从这一列重算 dialect/hidden
                 #    （`criteria.pronunciation_status` 对两边的判法不同），混成一个数组就重算不出来。
                 tj = json.dumps({"tags": list(tags), "raw_tags": list(raw_tags)},
@@ -114,6 +113,7 @@ def collect(conn, limit=None, verbose=True):
                         st["dup"] += 1
                         continue
                     seen.add(key)
+                    dialect, hidden, why = criteria.pronunciation_status(tags, raw_tags, ip)
                     rows.append((w_id, e_id, ip, dialect, notation, tj, hidden, why,
                                  src, "%s#ipa.%d.%d" % (sref, si, pno)))
                     st["by_src"][src] += 1

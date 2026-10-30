@@ -258,3 +258,16 @@ export function koIpaWrap(ipa: string, notation: string): string {
 export const KO_PRON_SRC_NOTE: Record<string, string> = {
   g2p: '依《표준발음법》规则生成',
 };
+
+/**
+ * 词源段的来源标注（2026-10-27，K36①）。页尾「其余词源」区里中文版与英文版的词源会并排出现，
+ * **不标来源就像同一个词有两个来历** —— 它们是两部词典各自的说法（照 vi 的 `VI_EDITION_LABELS`）。
+ */
+export const KO_EDITION_LABELS: Record<string, string> = {
+  'zh-edition-trad': '中文版',
+  'zh-edition-simp': '中文版',
+  'en-edition': '英文版',
+  'ko-edition': '韩文版',
+  // 日文版只印中文译文（原文是日语，三语方针不印）⇒ 标签要说清这段是**译过来的**，别和源头白送的中文版混。
+  'ja-edition': '日文版·中译',
+};

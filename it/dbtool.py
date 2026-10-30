@@ -437,6 +437,14 @@ def sample_check(rows, n=10, cols=("词", "改前", "改后")):
 
 
 if __name__ == "__main__":
+    # 🔴 B6（2026-10-27 修，照 ko）：**库还不存在**是新语种第一次跑本入口时的正常状态，
+    #    而 `PLAYBOOK` 1.4 要求闸门排在任何数据动作前面 ⇒ 必须在库不存在时跑得起来。
+    #    原来这里直接 `snapshot()`／`s["__rows__"]` ⇒ 崩（ja `KeyError`，其余 `OperationalError`）。
+    #    跨门闸 `scripts/test_first_build_gate.py` 锁住它。
+    if not DB.exists():
+        print("%s  （库还不存在 —— 尚未建库，不变量为空。这不是异常。）" % DB.name)
+        print("  TRACK 现在声明了 %d 个列 / %d 张表。" % (len(TRACK), len(TRACK_TABLES)))
+        raise SystemExit(0)
     s = snapshot()
     print("%s  表 %s" % (DB.name, TABLE))
     print("  总行 {:,}".format(s["__rows__"]))

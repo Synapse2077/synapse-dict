@@ -1300,6 +1300,13 @@ _HIDE_PREFIX = (
 )
 _HIDE_TAGS = {"proscribed": "源头标为错误读音"}
 
+# B10（2026-10-29）：**内容**不是 IPA ⇒ 存、但不印。IPA 一个都不会合法出现的 ASCII
+#   （大写/数字/反引号/反斜杠/下划线，IPA 的小型大写是单独码位）∪ HTML 实体 —— 与另九门同一份判据。
+#   实测 4 行：`сердечный → 5`、`во → v0`（fr 版）、两条读音粘成一串中间夹 `0`。
+#   ⚠️ 只在源头标签**没说**要藏时才用它：源头的话优先，这条是我们看内容判的。
+NOT_IPA = re.compile(r"[A-Z0-9`\\_]|&(#\d+|#x[0-9a-fA-F]+|[a-z]+);")
+NOT_IPA_WHY = "不是 IPA（B10）"
+
 # 地域：**只收能确定是「这条读音属于哪里」的**。其余一律 unknown，原词留在 tags。
 #   🔴 fr 版的 `Russie (Saint-Pétersbourg)` **不在这里**：99.7% 与录音同对象 ⇒ 录音者所在地。
 #   🔴 `М` 不在这里（见本节头）；`圣彼得堡或过时` 这种「A 或 B」不在这里（判不出是哪个）。
@@ -1381,8 +1388,9 @@ def pronunciation_parts(raw, tags=(), raw_tags=(), word=None):
     return kind, out
 
 
-def pronunciation_status(tags=(), raw_tags=()):
-    """→ `(dialect, hidden, hidden_why)`。只看源头标签，**一条都不猜**。"""
+def pronunciation_status(tags=(), raw_tags=(), ipa=None):
+    """→ `(dialect, hidden, hidden_why)`。地域只看源头标签，**一条都不猜**；
+    藏不藏先看源头标签，源头没说时再看 `ipa` 的内容是不是 IPA（`NOT_IPA`）。"""
     why = None
     for t in tags:
         if t in _HIDE_TAGS:
@@ -1391,6 +1399,8 @@ def pronunciation_status(tags=(), raw_tags=()):
         for pre, w in _HIDE_PREFIX:
             if t.startswith(pre):
                 why = why or w
+    if why is None and ipa and NOT_IPA.search(ipa):
+        why = NOT_IPA_WHY
     ds = {DIALECT_MAP[t] for t in list(tags) + list(raw_tags) if t in DIALECT_MAP}
     dialect = ds.pop() if len(ds) == 1 else "unknown"   # 两个地域并列 ⇒ 判不出，不猜
     return dialect, (1 if why else 0), why

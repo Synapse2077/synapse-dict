@@ -41,8 +41,13 @@ def original_name(fn):
 
 
 def commons_title(fn):
-    """MediaWiki 标题归一：下划线 ≡ 空格，连续空白折叠。"""
-    return re.sub(r"\s+", " ", (fn or "").replace("_", " ")).strip()
+    """MediaWiki 标题归一：百分号编码解码，下划线 ≡ 空格，连续空白折叠。
+
+    🔴 2026-10-29 补百分号解码：pt 有 107 组 `Pt-br-cora%C3%A7%C3%A3o`／`pt-br-coração` —— 同一个文件，
+       一个写入方存了 URL 编码的名字。B12 原先只登记了首字母／下划线／HTML 实体／转码四种写法，这是第五种，
+       是换成「看链接里的实际文件名」（`audio_key`）之后才显出来的。"""
+    from urllib.parse import unquote
+    return re.sub(r"\s+", " ", unquote(fn or "").replace("_", " ")).strip()
 
 
 def commons_key(fn):
@@ -61,3 +66,37 @@ def commons_key(fn):
     """
     t = commons_title(original_name(fn))
     return (t[:1].lower() + t[1:]) if t else t
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  录音行的身份键：`file` 没有扩展名时，以链接里的**实际文件名**为准（2026-10-29，B12 合并时撞见）
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 pt 的 `file` 存的是不带扩展名的名字（`Pt-br-eu`），而它的两行链接指向 `Pt-br-eu.oga` 与
+#    `Pt-br-eu.ogg` —— 上面写着「`.ogg` vs `.oga` 是两个独立文件」，可单看 `file` 两行同键，
+#    `scripts/dedupe_audio_commons.py` 第一次 `--apply` 就把一条真录音并没了（写后回核「按指向的文件比 URL」逮到）。
+_URL_NAME = (re.compile(r"Special:FilePath/(.+)$"),
+             re.compile(r"/commons/transcoded/[0-9a-f]/[0-9a-f]{2}/([^/]+)/[^/]+$"),
+             re.compile(r"/commons/[0-9a-f]/[0-9a-f]{2}/([^/]+)$"))
+_HAS_EXT = re.compile(r"\.[A-Za-z0-9]{2,5}$")
+
+
+def url_filename(u):
+    """Commons 链接 → 它指向的原始文件名（转码链接取原始名）；认不出返回 None。"""
+    from urllib.parse import unquote, urlparse
+    p = unquote(urlparse(u or "").path)
+    for rx in _URL_NAME:
+        m = rx.search(p)
+        if m:
+            return m.group(1)
+    return None
+
+
+def audio_key(fn, urls=()):
+    """一行录音的身份键。`file` 带扩展名 ⇒ `commons_key(file)`；不带 ⇒ 链接里第一个认得出的文件名。"""
+    if fn and _HAS_EXT.search(original_name(fn)):
+        return commons_key(fn)
+    for u in urls:
+        n = url_filename(u)
+        if n:
+            return commons_key(n)
+    return commons_key(fn)

@@ -215,6 +215,24 @@ const CHECKS: Check[] = [
       ? `${e.relations.length} 组词条级关系，HTML 里没有 .rel-row` : null,
   },
   {
+    // 🔴🔴 2026-10-27：服务层词条级关系曾经 `LIMIT 200`、没有 ORDER BY ⇒ 76 个词形
+    //    9,818 条关系静默看不见（`Holz` 831／`Wasser` 813），`Hund` 只印出前 200 条派生词。
+    //    判据是**读者口径**：「语义关系」区印出来的目标数 ＝ 库里该印的数
+    //    （词条级可见、且没有在义项里印过的 (kind, target)，与服务层 `dropDuplicatedAtSenseLevel` 同口径）。
+    name: '🔴 词条级语义关系被截断（少印了）',
+    hit: (e, h) => {
+      const want = (db.prepare(`
+        SELECT COUNT(*) AS n FROM (SELECT DISTINCT kind, target FROM sense_relation
+         WHERE word_id = ? AND sense_id IS NULL AND COALESCE(hidden,0) = 0
+           AND (kind, target) NOT IN (SELECT kind, target FROM sense_relation
+                WHERE sense_id IN (SELECT id FROM sense WHERE word_id = ?)
+                  AND kind <> 'alt_of' AND COALESCE(hidden,0) = 0))`).all(e.id, e.id)[0] as { n: number }).n;
+      const sec = /<h3>语义关系<\/h3>([\s\S]*?)<\/section>/.exec(h)?.[1] ?? '';
+      const got = count(sec, /class="rel-item"/g);
+      return got !== want ? `库里该印 ${want} 条，「语义关系」区印了 ${got} 条` : null;
+    },
+  },
+  {
     name: '🔴 词形变化没渲染',
     hit: (e, h) => (e.forms.length > 0 && !/class="de-form-grid"/.test(h))
       ? `${e.forms.length} 个形式，HTML 里没有 .de-form-grid` : null,
@@ -267,6 +285,10 @@ const arms: Array<[string, string]> = [
   ['多读音', `SELECT d.word FROM dict d JOIN pronunciation p ON p.word_id=d.id
       GROUP BY d.id HAVING COUNT(DISTINCT p.ipa)>1 LIMIT ${PER}`],
   ['有录音', `SELECT word FROM audio GROUP BY word LIMIT ${PER}`],
+  // 🔴 词条级关系 >200 条的（LIMIT 200 那个形状）—— 不取这一支，截断那条断言永远空过
+  ['词条级关系 >200', `SELECT d.word FROM dict d JOIN (SELECT word_id FROM sense_relation
+     WHERE sense_id IS NULL AND COALESCE(hidden,0)=0 GROUP BY word_id HAVING COUNT(*) > 200 LIMIT 8) x
+     ON x.word_id = d.id`],
   ['例句有中文', `SELECT e.word FROM example e
       JOIN example_gloss g ON g.example_id=e.id AND g.lang='zh'
       WHERE COALESCE(e.hidden,0)=0 GROUP BY e.word LIMIT ${PER}`],
@@ -327,7 +349,9 @@ for (const w of words) {
       .replace(/class="de-form-grid"/g, 'class="x"')
       // 🔴 新断言读的是**分组名的内容**，抹类名打不到它 ⇒ 单独造一条变异：
       //    把一个已有中文名的分组还原成英文 kind，正是 C37 那个缺陷的形状。
-      .replace(/class="rel-kind">近义</g, 'class="rel-kind">synonym<');
+      .replace(/class="rel-kind">近义</g, 'class="rel-kind">synonym<')
+      // 截断那条：「语义关系」区少印一个目标
+      .replace(/(<h3>语义关系<\/h3>[\s\S]*?)<span class="rel-item">(?:<a [^>]*>[^<]*<\/a>|<span class="rel-plain">[^<]*<\/span>)<\/span>/, '$1');
   }
   for (const c of CHECKS) {
     const why = c.hit(e, html);

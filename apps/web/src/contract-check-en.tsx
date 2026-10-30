@@ -38,7 +38,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { enExamLabels } from '@synapse-dict/dict-labels';
+import { enExamLabels, enSenseTopics } from '@synapse-dict/dict-labels';
 import { EnglishEntryView, capAudios } from './App';
 
 const svc = getService('en') as unknown as {
@@ -65,8 +65,11 @@ const text = (h: string) => norm(h.replace(/<[^>]*>/g, ' '));
 const count = (h: string, re: RegExp) => (h.match(re) ?? []).length;
 
 /** 页面上所有 `.badge tag` 的文字 —— 义项标签、考纲标签都走这个类名。 */
+// 🔴 2026-10-29（B13）：学科标签印成 `class="badge tag topic"`（App.tsx 给它单配样式），原来这里只认
+//    `class="badge tag"` ⇒ F4 **一个学科标签都看不见**：「老词典层的没印」那一半红了一个多月（43 条全是假红，
+//    页面上明明印着「化」），「kaikki 英文 slug 印出来了」那一半**从来逮不到任何东西**。
 const badges = (h: string) =>
-  [...h.matchAll(/<span class="badge tag">([^<]*)<\/span>/g)].map((m) => norm(m[1]));
+  [...h.matchAll(/<span class="badge tag(?: topic)?">([^<]*)<\/span>/g)].map((m) => norm(m[1]));
 
 const CHECKS: Check[] = [
   // ───────────────── A. 释义区 ─────────────────
@@ -338,12 +341,16 @@ const CHECKS: Check[] = [
     hit: (e, h) => {
       const bs = new Set(badges(h));
       for (const s of e.senses) {
-        for (const t of s.tags as Array<{ kind: string; value: string }>) {
-          if (t.kind !== 'topic') continue;
+        const tags = (s.tags as Array<{ kind: string; value: string }>).filter((t) => t.kind === 'topic');
+        // 🔴 kaikki 那一侧判的是「**印出来的是原文 slug 而不是映射后的中文**」：有的映射写出来与原文同形
+        //    （`BDSM→BDSM`，中文里也这么写），只比「页面上有没有这个串」会把它报成假红（B13 修判据时当场撞见）。
+        //    映射 import 展示层用的那一个 `enSenseTopics`，不在这儿重写。
+        const mapped = new Set(s.src === 'ecdict' ? [] : enSenseTopics(tags.map((t) => t.value)).map(norm));
+        for (const t of tags) {
           if (s.src === 'ecdict' && !bs.has(norm(t.value))) {
             return `老词典层的学科标签「${t.value}」没印给读者`;
           }
-          if (s.src !== 'ecdict' && bs.has(norm(t.value))) {
+          if (s.src !== 'ecdict' && bs.has(norm(t.value)) && !mapped.has(norm(t.value))) {
             return `kaikki 的英文 slug「${t.value}」印到了页面上`;
           }
         }
@@ -494,7 +501,7 @@ const MUTS: Mut[] = [
         }
       }
       return [...vs].reduce(
-        (acc, v) => acc.replace(new RegExp(`<span class="badge tag">${v}</span>`, 'g'), ''), h);
+        (acc, v) => acc.replace(new RegExp(`<span class="badge tag(?: topic)?">${v}</span>`, 'g'), ''), h);
     }],
   ['F4b kaikki 的英文 slug 印给了读者',
     (h, e) => {
@@ -502,7 +509,8 @@ const MUTS: Mut[] = [
         if (s.src === 'ecdict') continue;
         for (const t of s.tags as Array<{ kind: string; value: string }>) {
           if (t.kind === 'topic') {
-            return h.replace('</article>', `<span class="badge tag">${t.value}</span></article>`);
+            // 按页面**真实会印的样子**塞（学科标签是 `badge tag topic`）——原来塞的是 `badge tag`，只验了一个页面不会产出的形状
+            return h.replace('</article>', `<span class="badge tag topic">${t.value}</span></article>`);
           }
         }
       }

@@ -150,7 +150,16 @@ DELIMS = "/[]\\|"
 
 
 def has_delim(v):
-    return bool(v) and any(c in v for c in DELIMS)
+    """🔴 2026-10-28（B10）：`|` 只在**两端**才算定界符。夹在中间、两边带空格的 `|` 是 IPA 的
+    **短语内小停顿**（`ˈnãw | o.bɾiˈga.du`），合法；es 484／fr 153／de 16 条都这么存。
+    pt 的 18 条原来是 `&#124;`（HTML 转义残渣）才没被这里看见，还原成 `|` 之后 C2 当场报红 ——
+    判据比它要描述的「外层定界符」宽了一圈。"""
+    if not v:
+        return False
+    if any(c in v for c in DELIMS if c != "|"):
+        return True
+    s = v.strip()
+    return s.startswith("|") or s.endswith("|")
 
 
 def extract_ipa(raw):

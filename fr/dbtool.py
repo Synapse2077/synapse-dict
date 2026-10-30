@@ -286,7 +286,16 @@ def prune_backups(verbose=True, dry=False):
     done = _language_is_done()
     budget = DONE_BACKUP_BYTES if done else MAX_BACKUP_BYTES
     used = sum(p.stat().st_size for p in exempt)
-    plain, cut = _thin(plain, when, max(budget - used, 0), floor=0) if plain else ([], [])
+    # 🔴🔴 2026-10-28：**全体里最新的那一个备份无论什么 tag 都不删。**
+    #    它是刚打的写前备份 ——`backup()` 复制完立刻调本函数。普通备份 floor=0 的本意是
+    #    「预算被里程碑占满时普通的让干净」，而完结预算 1.5 GB 小于库本身（fr 3.1／de 3.5／
+    #    ru 4.4 GB）时，它把**刚打的这一个**也删了 ⇒ 这一步写库没有回滚点。
+    #    ru 补完结标记前试算「删 1 个（唯一的备份）」才发现；fr/de 现存备份碰巧都带 keep。
+    #    ⇒ 最新的是普通备份时普通的留 1 个（`_thin` 只剩首尾时从老往新让，留下的就是它）；
+    #      最新的是 keep 时照旧砍光（keep 自己的 floor=2 保住了它）。
+    latest = max(list(plain) + list(exempt), key=lambda p: when[p], default=None)
+    pfloor = 1 if latest in plain else 0
+    plain, cut = _thin(plain, when, max(budget - used, 0), floor=pfloor) if plain else ([], [])
     drop += cut
     used += sum(p.stat().st_size for p in plain)
     if used > budget:
@@ -581,6 +590,14 @@ def sample_check(rows, n=10, cols=("词", "改前", "改后")):
 
 
 if __name__ == "__main__":
+    # 🔴 B6（2026-10-27 修，照 ko）：**库还不存在**是新语种第一次跑本入口时的正常状态，
+    #    而 `PLAYBOOK` 1.4 要求闸门排在任何数据动作前面 ⇒ 必须在库不存在时跑得起来。
+    #    原来这里直接 `snapshot()`／`s["__rows__"]` ⇒ 崩（ja `KeyError`，其余 `OperationalError`）。
+    #    跨门闸 `scripts/test_first_build_gate.py` 锁住它。
+    if not DB.exists():
+        print("%s  （库还不存在 —— 尚未建库，不变量为空。这不是异常。）" % DB.name)
+        print("  TRACK 现在声明了 %d 个列 / %d 张表。" % (len(TRACK), len(TRACK_TABLES)))
+        raise SystemExit(0)
     s = snapshot()
     print("%s  表 %s" % (DB.name, TABLE))
     print("  总行 {:,}".format(s["__rows__"]))

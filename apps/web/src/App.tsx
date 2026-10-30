@@ -16,7 +16,7 @@ import {
   JA_REGISTER_LABELS, JA_REGION_LABELS, JA_GRAMMAR_LABELS, JA_USAGE_LABELS,
   jaVclassLabel, mostSpecificTopics,
   KO_POS_LABELS, KO_RELATION_LABELS, KO_ANNOTATION_KINDS, koRelationTagLabels,
-  KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE,
+  KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE, KO_EDITION_LABELS,
   VI_POS_LABELS, VI_RELATION_LABELS, VI_DIALECT_LABELS, VI_ETYM_TYPE_LABELS,
   VI_SPELLING_RULE, VI_EDITION_LABELS, viEditionRank,
   RU_POS_LABELS, RU_RELATION_LABELS, RU_ASPECT_SUBKIND_LABELS, RU_FAMILY_POS_LABELS, RU_FAMILY_FORM_LABELS,
@@ -714,6 +714,16 @@ export const EXAMPLES: Record<string, string[]> = {
   //   한국  `entry.hanja` 韓國 ＋ RR 带隔音符 `han'guk`
   //   꽃    `counter → 송이`（配用量词，ko 特有的关系类）＋ 34 条 derived
   ko: ['사랑', '읽다', '걷다', '아름답다', '한국', '꽃'],
+  // 俄语六个（2026-10-27 回库验过）。🔴 阶段 9 上线时**这一行漏了**，欢迎页空着两天，是用户在页面上看见的 ——
+  //   `examplesGuard()` 早就会红，但它在 `contract-check.tsx`，ru 的闸只跑 `contract-check-ru.tsx`
+  //   ⇒ 已在 ru 契约闸里补 C18（「闸存在」≠「这门语言的闸真跑它」）。
+  //   привет   问候语（与各门首词同口径）、录音 2 条、例句 10
+  //   вода     **重音移动** вода́／во́да ＋ 义项 25（5c 补的中文现场）＋ 录音 5
+  //   замок    **同形异重音** за́мок（城堡）／замо́к（锁）分两组（9a 修的并组现场）
+  //   читать   **体对**（未完成体 ↔ прочитать）＋ 变位 83 形
+  //   хороший  形容词变格 109 形 ＋ 例句 40
+  //   всё      **ё** —— 页面印「ё/е 写法不同的词」все（R30 现场）
+  ru: ['привет', 'вода', 'замок', 'читать', 'хороший', 'всё'],
 };
 
 // --- English parsing helpers ---
@@ -2034,12 +2044,19 @@ function etymLabel(n: number): string {
  *    （`bat` 九支里源头只写了五支）。留白读者会以为页面坏了；
  *    而让模型补一句「源自古英语」是造假（`[[dict-framework-doc]]`：错比缺更伤权威）。
  */
-function EtymologyNote({ etymKey, texts, editions }: {
+function EtymologyNote({ etymKey, texts, editions, title, quietIfNone }: {
   etymKey: string | null; texts?: Record<string, string>; editions?: string[];
+  /** 单词源时印的不带序号的「词源」（B18）。只跟正文一起出现 —— 不会留下一个空标题。 */
+  title?: string;
+  /** 单词源且源头没写时**一个字都不说**（B18）：en-edition 没有词源号的义项键都是
+   *  `en-edition:0`，照多词源的口径说「源头未给出」会给几百万个页面加一行噪声。 */
+  quietIfNone?: boolean;
 }) {
   const text = etymKey ? texts?.[etymKey] : undefined;
   const brief = etymologyBrief(text);
+  const head = title ? <div className="etym-title">{title}</div> : null;
   if (!brief) {
+    if (quietIfNone) return null;
     // 🔴🔴 **「源头没写」和「我们没抽」是两件事，绝不能说成同一件。**
     //    it/fr/pt 的义项来自 2–4 个维基版（en/it/fr/pt/el/tr/zh-edition），
     //    每版各有一套词源编号，而我们目前只抽了英文版那一支。
@@ -2049,12 +2066,43 @@ function EtymologyNote({ etymKey, texts, editions }: {
     //      在 ⇒ 源头确实没写，照实说；不在 ⇒ **一个字都不说**。
     const edition = etymKey ? etymKey.slice(0, etymKey.lastIndexOf(':')) : '';
     if (!edition || !(editions ?? []).includes(edition)) return null;
-    return <div className="etym-text etym-text-none">源头未给出这一支的词源说明</div>;
+    return <>{head}<div className="etym-text etym-text-none">源头未给出这一支的词源说明</div></>;
   }
+  // 🔴 2026-10-27：徽标与 `lang` 原来写死 `EN` —— 十门的词源以前全是英文版，于是一直对；
+  //    ko 收了中文版词源（K36①）之后，`박질하다` 的中文词源前面印着「EN」。⇒ 从键里的版本取语种。
+  const ed = etymKey ? etymKey.slice(0, etymKey.lastIndexOf(':')) : '';
+  const lang = /^[a-z]{2}-edition/.test(ed) ? ed.slice(0, 2) : 'en';
   return (
-    <div className="etym-text" lang="en">
-      <span className="sense-src-lang">EN</span>{brief}
-    </div>
+    <>
+      {head}
+      <div className="etym-text" lang={lang}>
+        <span className="sense-src-lang">{lang.toUpperCase()}</span>{brief}
+      </div>
+    </>
+  );
+}
+
+/**
+ * 🔴🔴 B18（2026-10-27）：六门原来把 `<EtymologyNote>` 套在 `etymHeadOf(…) &&` 里，
+ *    而它单词源时返回 null ⇒ **1,064,186 个词形**的词源正文一个字都到不了读者。
+ *    ⇒ 每支词源的第一组都过这里：多词源印「词源 ①」＋正文（源头没写照实说），
+ *      单词源有正文才印不带序号的「词源」＋正文（ko 的 `etym-title` 做法）。
+ *    ⚠️ 别只把组件移出 `&&`：单词源时正文会成为夹在「释义」和词性之间的**无主段落**
+ *      （ko 改之前就是那样，用户因此看不懂 `아름답다`）。
+ */
+function EtymBlock({ groups, i, order, texts, editions }: {
+  groups: { etym: string | null }[]; i: number; order: Map<string, number>;
+  texts?: Record<string, string>; editions?: string[];
+}) {
+  const g = groups[i];
+  if (g.etym === null || (i > 0 && groups[i - 1].etym === g.etym)) return null;
+  const head = etymHeadOf(groups, i, order);
+  return (
+    <>
+      {head && <div className="etym-label">{head}</div>}
+      <EtymologyNote etymKey={g.etym} texts={texts} editions={editions}
+          title={head ? undefined : '词源'} quietIfNone={!head} />
+    </>
   );
 }
 
@@ -2207,21 +2255,10 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                 数据没错，`gore` 是**三个不同词源的同形词**（血/污物、用角刺戳、三角形
                 地块），kaikki 按词源分块。**缺的是页面从来没说过这件事**：
                 读者看到「名词…动词…名词…动词」只会以为是 bug。
-                ⚠️ 只印词源**序号**，不印词源正文 —— 我们没存 `etymology_text`
-                   （kaikki 给了，建库时没收），编一句"源自古英语"是造假。
-                   这一条已记账，要补得回源重抽。 */}
-            {etymHeadOf(senseGroups, gi, enEtymOrder) && (
-              <>
-                <div className="etym-label">{etymHeadOf(senseGroups, gi, enEtymOrder)}</div>
-                {/* 🔴🔴 2026-09-14：正文接上了。原来这里的注释写着「只印词源**序号**，
-                    不印词源正文 —— 我们没存 `etymology_text`（kaikki 给了，建库时没收），
-                    编一句"源自古英语"是造假。这一条已记账，要补得回源重抽」。
-                    用户看 `serene` 问「这里的词源是什么意思？」⇒ 那笔账结了：
-                    `en/pipeline/ingest_etymology.py` 抽了 493,490 条 / 42 MB 落库。 */}
-                <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
-                    editions={entry.etymologyEditions} />
-              </>
-            )}
+                2026-09-14 接上正文（`en/pipeline/ingest_etymology.py` 493,490 条）；
+                2026-10-27 B18：单词源的词以前一个字都不印，见 `EtymBlock`。 */}
+            <EtymBlock groups={senseGroups} i={gi} order={enEtymOrder}
+                texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
             {/* 🔴 **无词性的组，只要它不是唯一的一组，就必须自己说出来。**
                 en 有 **223 万条**义项 `pos` 为空（老词典层只有 14.95% 带词性），
                 其中 **34,762 个词**是「有的有、有的没有」（0.91%）。这些词里，
@@ -2691,14 +2728,9 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
                   不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
-              {etymHeadOf(esGroups, gi, esEtymOrder) && (
-                <>
-                  <div className="etym-label">{etymHeadOf(esGroups, gi, esEtymOrder)}</div>
-                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
-                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
-                    editions={entry.etymologyEditions} />
-                </>
-              )}
+              {/* 词源（2026-09-14 接上正文；2026-10-27 B18 单词源也印，见 `EtymBlock`）。 */}
+              <EtymBlock groups={esGroups} i={gi} order={esEtymOrder}
+                  texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
               {grp.pos && (
                 <div className="pos-group-label">{posLabel(grp.pos)}</div>
               )}
@@ -3177,14 +3209,9 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }
                   不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
-              {etymHeadOf(itGroups, gi, itEtymOrder) && (
-                <>
-                  <div className="etym-label">{etymHeadOf(itGroups, gi, itEtymOrder)}</div>
-                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
-                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
-                    editions={entry.etymologyEditions} />
-                </>
-              )}
+              {/* 词源（2026-09-14 接上正文；2026-10-27 B18 单词源也印，见 `EtymBlock`）。 */}
+              <EtymBlock groups={itGroups} i={gi} order={itEtymOrder}
+                  texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
               {grp.pos && (
                 <div className="pos-group-label">
                   {posLabel(grp.pos)}
@@ -3664,14 +3691,9 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                   不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
-              {etymHeadOf(frGroups, gi, frEtymOrder) && (
-                <>
-                  <div className="etym-label">{etymHeadOf(frGroups, gi, frEtymOrder)}</div>
-                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
-                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
-                    editions={entry.etymologyEditions} />
-                </>
-              )}
+              {/* 词源（2026-09-14 接上正文；2026-10-27 B18 单词源也印，见 `EtymBlock`）。 */}
+              <EtymBlock groups={frGroups} i={gi} order={frEtymOrder}
+                  texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
               {grp.pos && (
                 <div className="pos-group-label">
                   {posLabel(grp.pos)}
@@ -4064,14 +4086,9 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
                   不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
-              {etymHeadOf(ptGroups, gi, ptEtymOrder) && (
-                <>
-                  <div className="etym-label">{etymHeadOf(ptGroups, gi, ptEtymOrder)}</div>
-                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
-                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
-                    editions={entry.etymologyEditions} />
-                </>
-              )}
+              {/* 词源（2026-09-14 接上正文；2026-10-27 B18 单词源也印，见 `EtymBlock`）。 */}
+              <EtymBlock groups={ptGroups} i={gi} order={ptEtymOrder}
+                  texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
               {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
               <ol className="sense-list">
                 {grp.senses.map((s, i) => (
@@ -4451,14 +4468,9 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                   不回显源头编号（两个来源的编号不是同一个命名空间，见 etymOrder）。
                   ⚠️ 只印序号不印词源正文 —— kaikki 给了 etymology_text，建库时没收，
                      编一句「源自拉丁语」是造假。已记账，要补得回源重抽。 */}
-              {etymHeadOf(deGroups, gi, deEtymOrder) && (
-                <>
-                  <div className="etym-label">{etymHeadOf(deGroups, gi, deEtymOrder)}</div>
-                  {/* 词源正文（2026-09-14）。未抽过的版查不到 ⇒ 组件自己闭嘴。 */}
-                  <EtymologyNote etymKey={grp.etym} texts={entry.etymologyTexts}
-                    editions={entry.etymologyEditions} />
-                </>
-              )}
+              {/* 词源（2026-09-14 接上正文；2026-10-27 B18 单词源也印，见 `EtymBlock`）。 */}
+              <EtymBlock groups={deGroups} i={gi} order={deEtymOrder}
+                  texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
               {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
               <ol className="sense-list">
                 {grp.senses.map((s, i) => (
@@ -5483,7 +5495,7 @@ type KoEntry = {
   inflections: Array<{ label: string; forms: string[]; generated: boolean }>;
   baseOf: Array<{ base: string; labels: string[]; ok: boolean }>;
   hanjaReadings: Array<{ hanja: string; eumhun: string | null; glossEn: string | null }>;
-  etymology: Array<{ edition: string; etymNo: string | null; text: string }>;
+  etymology: Array<{ edition: string; etymNo: string | null; entryId: number | null; text: string; lang: string }>;
   audio: Array<{ file: string; url: string | null; kind: string;
     region: string | null; speaker: string | null }>;
 };
@@ -5719,6 +5731,43 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
     </section>
   ) : null;
 
+  // 🔴🔴 **2026-10-27 K36①：这一页有、而上面没有任何一组印出来的词源，汇总到这里。**
+  //    上面只在「一支词源的第一组」按那一组的 `etymKey` 印正文，有三种情形印不出来（实测）：
+  //      ① 中文版词源**挂在词上**（这个词英文版也有，当初没建中文版 entry）5,520 条 —— 根本没有组；
+  //      ② 挂了 entry、但与别的来源**共用同一个词源号**，被前一组的标题盖住 255 条；
+  //      ③ 挂的 entry 一条义项都没有 ⇒ 没有组 17 条。
+  //    ⇒ 不按「哪一组」而按「印没印过」判：凡上面没印过的正文，去重后在这里印，**逐条标来源**
+  //      （两部词典各自的说法并排时不标来源，读者会以为一个词有两个来历）。照 vi 的 B18 解法。
+  const etymOrphans = (() => {
+    const texts = entry.etymologyTexts ?? {};
+    const printed = new Set<string>();
+    groups.forEach((g, gi) => {
+      const t = startsEtym[gi] ? texts[g.senses[0]?.etymKey ?? ''] : undefined;
+      if (t) printed.add(t);
+    });
+    const seen = new Set<string>();
+    const left = entry.etymology.filter((y) => {
+      if (printed.has(y.text) || seen.has(y.text)) return false;
+      seen.add(y.text);
+      return true;
+    });
+    if (left.length === 0) return null;
+    return (
+      <section className="entry-section ko-etym-orphan">
+        {/* ⚠️ 不写「其他来源的」：被兜住的也有**同一来源**的（`-다` 两条英文版，被同号的组盖住）。
+            段落用专用类名 —— `etym-text` 是「组里那一支」的正文，词源闸按它数每支几段。 */}
+        <h3>{printed.size > 0 ? '其余词源' : '词源'}</h3>
+        {left.map((y) => (
+          <div key={`${y.edition}:${y.etymNo}:${y.text.slice(0, 24)}`} className="ko-etym-orphan-text"
+              lang={y.lang || undefined}>
+            <span className="ko-etym-src">{KO_EDITION_LABELS[y.edition] ?? y.edition}</span>
+            {' '}{etymologyBrief(y.text)}
+          </div>
+        ))}
+      </section>
+    );
+  })();
+
   // 🔴🔴 **汉字表记要从「语义关系」里拿出来单开一区。** 2026-09-25，用户看 `사가` 说
   //    「有很多没有释义」那一轮。
   //    `사가` 页上唯一的内容是 12 条 `hanja_spelling`，而它们印在「语义关系」标题下面 ——
@@ -5824,6 +5873,8 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
       )}
 
       {senseSections}
+
+      {etymOrphans}
 
       {/* 🔴 **没有释义时不印任何"说明文字"。** 2026-09-25 用户看了第一版说
           「这段根本没必要展示，直接展示汉字表记就行，你展示这个让用户很迷惑」——
@@ -6269,16 +6320,7 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
                   : null}
                 {s.vi ? <span className="vi-vi">{s.vi}</span> : null}
                 {s.en ? <span className="vi-en">{s.en}</span> : null}
-                {(bySense.get(s.id) ?? []).map((x) => (
-                  <div key={x.text} className="vi-example">
-                    <span className="vi-example-text">{x.text}</span>
-                    {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
-                    {x.en ? <span className="vi-example-en">{x.en}</span> : null}
-                    {/* 🔴🔴 W10：`ref` 是**出处**。vi 版 709 条 translation 里一条真译文都没有
-                        （214 条整串是 `.`）。排在译文位置就是印「译文：.」。 */}
-                    {x.ref ? <span className="vi-example-ref">出处：{x.ref}</span> : null}
-                  </div>
-                ))}
+                {/* 关系在例句之前 —— 十门共同的块序（`contract-check-layout.tsx`）。 */}
                 {grouped(relBySense.get(s.id) ?? []).map(([kind, items]) => (
                   <div key={kind} className="vi-rel">
                     <span className="vi-rel-kind">{viRelLabel(kind) ?? kind}</span>
@@ -6291,6 +6333,16 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
                           : <span className="vi-nolink">{r.target}</span>}
                       </span>
                     ))}
+                  </div>
+                ))}
+                {(bySense.get(s.id) ?? []).map((x) => (
+                  <div key={x.text} className="vi-example">
+                    <span className="vi-example-text">{x.text}</span>
+                    {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
+                    {x.en ? <span className="vi-example-en">{x.en}</span> : null}
+                    {/* 🔴🔴 W10：`ref` 是**出处**。vi 版 709 条 translation 里一条真译文都没有
+                        （214 条整串是 `.`）。排在译文位置就是印「译文：.」。 */}
+                    {x.ref ? <span className="vi-example-ref">出处：{x.ref}</span> : null}
                   </div>
                 ))}
               </li>
@@ -6713,6 +6765,12 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
           if (r.senseId === null) relEntry.push(r);
           else { const a = relSense.get(r.senseId); if (a) a.push(r); else relSense.set(r.senseId, [r]); }
         }
+        // 🔴 2026-10-27（布局闸登记 ru 当场逮到）：同一条 (类型, 目标) 既挂在义项上又在词条级各有一行
+        //    （不同版各给一行）⇒ 页面印两遍（`вода` 近义 влага）。词条级那句是在说「适用于整个词」，
+        //    而它已经归到某条义项上了 ⇒ 词条级不再重印。比较时**去掉重音符**（зда́ние／здание 是同一个词）。
+        const relKey = (r: RuRelation) => `${r.kind}|${r.target.normalize('NFD').replace(/[\u0300\u0301]/g, '').normalize('NFC')}`;
+        const inSense = new Set([...relSense.values()].flat().map(relKey));
+        const relEntryOwn = relEntry.filter((r) => !inSense.has(relKey(r)));
         const etSeen = new Set<string>();
         const etyms = entry.etymologies.filter((y) => ids.has(y.entryId))
           .sort((a, b) => ruEdRank(a.src) - ruEdRank(b.src))
@@ -6747,8 +6805,9 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
                       {[...usage, ...gram].map((t) => <span key={t as string} className="ru-chip">{t}</span>)}
                       {zh.map((x) => <span key={x.text} className="ru-zh"><RuTilde text={x.text} word={entry.word} />{x.model ? <span className="ru-mt">机翻</span> : null}</span>)}
                       {orig.map((x) => <span key={x.text} className={x.lang === 'ru' ? 'ru-gloss-ru' : 'ru-gloss-en'}>{x.text}</span>)}
-                      <RuExamples items={exBySense.get(s.id) ?? []} word={entry.word} />
+                      {/* 关系在例句之前 —— 十门共同的块序（`contract-check-layout.tsx`）。 */}
                       {(relSense.get(s.id) ?? []).length > 0 ? <RuRelations rels={relSense.get(s.id)!} onWord={onWord} /> : null}
+                      <RuExamples items={exBySense.get(s.id) ?? []} word={entry.word} />
                     </li>
                   );
                 })}
@@ -6757,7 +6816,7 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
             {exEntry.length > 0 && (
               <div className="ru-examples-entry"><h3 className="ru-sec-title">例句</h3><RuExamples items={exEntry} word={entry.word} /></div>
             )}
-            {relEntry.length > 0 && <RuRelations rels={relEntry} onWord={onWord} />}
+            {relEntryOwn.length > 0 && <RuRelations rels={relEntryOwn} onWord={onWord} />}
             {inflBy.size > 0 && (
               <details className="ru-infl" open={inflN <= 60}>
                 <summary><span className="ru-sec-title">变化形式</span><span className="ru-count">{inflN}</span></summary>

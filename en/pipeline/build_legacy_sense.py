@@ -34,9 +34,9 @@ en 有 **2,421,239** 个词形（60.3%）只有词条级释义，展示成一整
     `st.`(346) 是成句不全是谚语 ⇒ **pos 留空，原码存进 `raw_tags` 不丢**。
   · **切分必须括号感知**：`wilkins → n. 威尔金斯（姓氏，英国生物物理学家；美国民权
     领袖；澳大利亚北极探险家）` —— 朴素按「；」切会把一个人名撕成三块。实测 2,968 条。
-  · **释义里混着音标的跳过**（3,900 条 0.16%）：那是**别的词典条目被整条粘了进来**
-    （`outerer → outer ⏎ ['autə] ⏎ adj. ⏎ 在外面…`）。
-    🔴 **不确定的不结构化** —— 它们继续走原样兜底，不会因此看不见。
+  · **释义里嵌着别的词条**（`outerer → outer ⏎ ['autə] ⏎ adj. ⏎ 在外面…`）：2026-10-29 起先按结构剪掉
+    （`prune_embedded`，见那一节）。原来写的「混着音标的跳过 3,900 条」判据字符集窄了，实际有 3,333 个词
+    照样逐行进了义项层（`G.O.S.` 752 条＝`go` 全文）。剪完仍混着音标的（509 条）照旧跳过、走原样兜底。
 
     cd en && python3 -u pipeline/build_legacy_sense.py
     cd en && python3 -u pipeline/build_legacy_sense.py --run
@@ -108,6 +108,114 @@ def split_top(s):
     return [x.strip() for x in out if x.strip()]
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  多行原文里嵌着的「词条」（2026-10-29，EN_PLAN §16.7④）
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 ECDICT 有一批释义字段是**整段词条原文**：变形词 = 一句指针 ＋ 把原形的整条粘在后面
+#      `kamakuras → kamakura的复数 ⏎ Kamakura ⏎ [,kɑ:mə'kurə] ⏎ adj. ⏎ 镰仓时期艺术…`
+#    原形是大词就粘几百行（`G.O.S.` 752 条义项＝ `go` 的全文，`vi.`／`前进`／`每小时走90英里` 各成一条）。
+#    上面的 `IPA_RE` 本来要拦它们，但字符集写窄了（缺 `ɡ` `ɔ` `ɛ` 和逗号）⇒ 3,333 个词照样逐行进了义项层；
+#    拦住的那批走「整块原文兜底」，页面上同样是整段别的词条。
+# ⇒ 按**结构**认：一行拉丁字母词头，紧跟一行音标或单独的词性标记 ＝ 一个嵌入词条的开头。
+#    每个嵌入词条：是本词自己（同词异写 `A.B.F.M.`／`ABFM`）⇒ 留；是别的词而它**没有自己的页** ⇒ 留
+#    （唯一的释义来源，28 个）；是别的词、**有自己的页** ⇒ 删（读者点过去看全文）。
+#    本词在它前面一行自己的内容都没有（`G.O.S.`、`Woop Woop`）⇒ 留**第一个**，不让页面变空。
+#    留下的部分再清掉格式行：音标行、与词头相同的行、`变形：` 及其后的变形列表；
+#    单独一行的词性标记**不当义项**，当作后面几行的词性（`parse` 只认同一行的 `n. 传真`）。
+#    🔴 所有留下的字都原样取自源头，这里只删不写。
+# 音标行，两档：
+#   `PHON_LINE`  方括号里含 IPA 符号（`[ɡəu]`、`[ju:; 弱ju; jə]`）—— 单看这一行就能定，删行、闸 A9 都用它
+#   `PHON_ANY`   方括号里没有中文就行（`[pit]`）—— **只在紧跟拉丁词头时**才是音标：
+#                单看一行会误伤缩写全称 `[European Atomic Energy Community]`、`[E(scherichia)coli]`
+# 🔴 第一版只有前一档 ⇒ `[pit]`／`[spin]`／`[red]` 认不出，`p.i.t` 留下 80 条 `pit` 的释义；
+#    放宽成后一档单用 ⇒ 又会删掉缩写全称。⇒ 宽的那档靠上下文（前一行是词头）定。只放行弱读/强读标记「弱」「强」。
+PHON_LINE = re.compile(r"^\s*\[(?:[^\]㐀-鿿]|[弱强])*[ɑæəɛɪʊʌɔθðʃʒŋːɡ'ˈ,:;](?:[^\]㐀-鿿]|[弱强])*\]\s*$")
+PHON_ANY = re.compile(r"^\s*\[(?:[^\]㐀-鿿]|[弱强])+\]\s*$")
+POS_LINE = re.compile(r"^\s*((n|v|vt|vi|adj|adv|prep|conj|pron|int|interj|abbr|art|num|aux|a|ad|pl|det|suf|pref|comb)"
+                      r"\.?\s*(&|,|/|和)?\s*)+$", re.I)
+HEAD_LINE = re.compile(r"^\s*[A-Za-z][A-Za-z0-9.\-' ]{0,40}$")
+SECTION_LINE = re.compile(r"^\s*(变形|短语|派生词|习语|同义词|反义词|参考|词组)\s*[:：]\s*$")
+CJK_RE = re.compile(r"[㐀-鿿]")
+
+
+def word_key(w):
+    """同词异写的比较键：小写、只留字母数字、去掉同形词编号（`go1`→`go`、`A.B.F.M.`→`abfm`）。"""
+    return re.sub(r"\d+$", "", re.sub(r"[^0-9a-z]", "", (w or "").lower()))
+
+
+def is_head(line):
+    """拉丁字母词头。🔴 词性标记（`abbr.`、`n.`）也长这个形状 —— 不排除的话 `abbr.` 下一行的
+    `[European Atomic Energy Community]` 会被当成「词头 + 音标」，整段缩写全称被当成别的词条删掉。"""
+    return bool(HEAD_LINE.match(line)) and not POS_LINE.match(line) and not line.strip().startswith("=")
+
+
+def embedded_starts(lines):
+    return [i for i in range(len(lines) - 1)
+            if is_head(lines[i])
+            and (PHON_ANY.match(lines[i + 1]) or POS_LINE.match(lines[i + 1]))]
+
+
+def prune_embedded(word, text, has_page):
+    """→ 清过的原文（只删行、合并单独成行的词性，一个字不写）。没有可动的就原样返回。
+
+    `has_page(headword)`：那个词在本库里有没有自己的页（不算本词自己）。"""
+    lines = [l for l in (text or "").split("\n")]
+    if len(lines) < 2:
+        return text
+    starts = embedded_starts(lines)
+    me = word_key(word)
+    heads = set()
+    if starts:
+        keep = lines[:starts[0]]
+        own = any(CJK_RE.search(l) for l in keep)
+        for n, a in enumerate(starts):
+            b = starts[n + 1] if n + 1 < len(starts) else len(lines)
+            h = lines[a].strip()
+            heads.add(word_key(h))
+            # 🔴 同词异写只认「缩写的不同写法」（`A.B.F.M.`↔`ABFM`，361 处）。带同形词编号的词头（`go1`、`cab1`）
+            #    是正式词条，**不会**是缩写的另一种写法 —— 第一版只比 `word_key`，`g.o` 与 `go1` 都成了 `go`，
+            #    整条 `go` 被当成 `g.o` 自己的内容留下（568 条义项）。实测这个形状 51 处，全是误判。
+            # 本词带点时，只有词头也是缩写（全大写 `ABFM`，或本身带点 `aft.`）才算同一个词；
+            # 词头是普通词（`hand`、`you`、`go1`）⇒ 是 ECDICT 把普通词拆成字母串再粘全文（`H.and.` 845 条）。
+            same = word_key(h) == me and ("." not in (word or "") or "." in h
+                                          or (h == h.upper() and not re.search(r"\d$", h)))
+            if same or not has_page(h):
+                keep.extend(lines[a + 1:b])
+            elif n == 0 and not own:
+                # 本词一行自己的内容都没有、开头就是别的词的整条（`piger → pig1 …`、`carrys → carry …`，2,096 个，
+                # 几乎全是 ECDICT 自造的假变形）⇒ 印一行**交叉引用**，读者点过去看全文。
+                # 🔴 第一版是「留第一个嵌入词条，免得页面变空」—— 于是 `H.and.` 留下 `hand` 的 845 条、`carrys` 217 条，
+                #    读者会以为假词 `carrys` 有这么多义项。`= X` 是源头自己的记号（`= general obligation bond`），
+                #    这里只复述「这一格放的是 X 的词条」，不写任何释义。
+                keep.append("= " + re.sub(r"\d+$", "", h))
+    else:
+        keep = lines
+    out, pos, skip_forms, prev = [], None, False, ""
+    for l in keep:
+        s = l.strip()
+        after_head, prev = is_head(prev), s
+        if not s or PHON_LINE.match(s) or (after_head and PHON_ANY.match(s)):
+            continue
+        if SECTION_LINE.match(s):
+            skip_forms = s.startswith("变形")
+            continue
+        if skip_forms:
+            if CJK_RE.search(s):
+                skip_forms = False
+            else:
+                continue                      # `变形：` 下面的 `vt.`／`talent-spotted`／`. talent-spotting`
+        if POS_LINE.match(s):
+            pos = s
+            continue
+        if not CJK_RE.search(s) and not s.startswith("=") and word_key(s) in heads | {me}:
+            continue                          # 与词头相同的行（`Go`、`ABFM`）
+        if pos and not POS_RE.match(s):
+            tok = re.match(r"[A-Za-z]+", pos.strip()).group(0) + "."     # `vt.,`／`abbr` → `vt.`／`abbr.`
+            s = "%s %s" % (tok, s)
+        out.append(s)
+    return "\n".join(out)
+
+
 def parse(text):
     """→ ([(pos_raw, marks, gloss)], 残渣[])，按展示顺序"""
     items, resid = [], []
@@ -130,6 +238,13 @@ def parse(text):
         #      那是**欠账**（缺不是错），但既然量得出来就该补上。
         line_default = []
         for k, seg in enumerate(split_top(ln)):
+            # 🔴 分号之间夹着单独的词性（`六道木； n.；六道木`、`…；comb`）⇒ 是后面几段的词性，不是义项
+            #    （2026-10-29，A9 在重建后报的 104 条）。判不准的词性照旧不硬塞。
+            if POS_LINE.match(seg):
+                tok = re.match(r"[A-Za-z]+", seg.strip()).group(0).lower() + "."
+                if tok in POS_MAP or tok in POS_KEEP_RAW:
+                    pos_raw = tok
+                continue
             marks = []
             while True:
                 mm = MARK_RE.match(seg)
@@ -199,7 +314,19 @@ def collect(con):
     stat = collections.Counter()
     unmapped = collections.Counter()
     skipped = []
+    # 「那个词有没有自己的页」：dict 里有这一行，且它有义项或有可出版的老词典释义
+    word_of = dict(q("SELECT id, word FROM dict"))
+    paged = collections.defaultdict(set)
+    for (wid,) in q("SELECT DISTINCT word_id FROM sense UNION SELECT word_id FROM legacy_gloss WHERE published=1"):
+        if wid in word_of:
+            paged[word_key(word_of[wid])].add(wid)
     for wid, text in rows:
+        if text and "\n" in text:
+            new = prune_embedded(word_of.get(wid), text,
+                                 lambda h, wid=wid: bool(paged.get(word_key(h), set()) - {wid}))
+            if new != text:
+                stat["清掉嵌入词条/格式行的词形"] += 1
+                text = new
         if IPA_RE.search(text or ""):
             stat["跳过·释义里混着音标"] += 1
             skipped.append((wid, text))
@@ -289,6 +416,18 @@ def gates(con, before, n_sense, n_word):
          q("""SELECT COUNT(*) FROM sense_tag t JOIN sense s ON s.id=t.sense_id
               JOIN dict d ON d.id=s.word_id
               WHERE d.word='FAX' AND t.kind='topic' AND t.value='计'"""), 2),
+        # 🔴 负控④（§16.7④，2026-10-29）：嵌入词条。数格式行的 A9 逮不到「整条别的词被当成本词内容留下」——
+        #    第一版 `g.o` 与 `go1` 被判成同一个词，留下 568 条 `go` 的释义，而格式行已清干净、A9 是绿的。
+        #    ⇒ 拿已知答案钉住三种形状：缩写后面粘着整条 go／变形词只该剩指针。
+        ("🔴 负控 G.O.S.／g.o 里没有 go 的释义",
+         q("""SELECT COUNT(*) FROM sense s JOIN dict d ON d.id=s.word_id JOIN sense_gloss g ON g.sense_id=s.id
+              WHERE d.word IN ('G.O.S.','g.o') AND g.text LIKE '%前进%'"""), 0),
+        ("🔴 负控 H.and.／piger／carrys 各只剩一行交叉引用",
+         q("""SELECT COUNT(*) FROM sense s JOIN dict d ON d.id=s.word_id JOIN sense_gloss g ON g.sense_id=s.id
+              WHERE d.word IN ('H.and.','piger','carrys')"""), 3),
+        ("🔴 负控 kamakuras 只剩指针",
+         q("""SELECT COUNT(*) FROM sense s JOIN dict d ON d.id=s.word_id JOIN sense_gloss g ON g.sense_id=s.id
+              WHERE d.word='kamakuras' AND g.text='kamakura的复数'"""), 1),
     ]
     bad = 0
     for name, got, want in checks:
@@ -316,7 +455,7 @@ def main(run=False):
     }
     con.close()
     print("═══ 词条级释义 → 义项级 ═══")
-    for k in ("处理的词形", "义项", "跳过·释义里混着音标", "拆不出义项", "残渣行"):
+    for k in ("处理的词形", "义项", "清掉嵌入词条/格式行的词形", "跳过·释义里混着音标", "拆不出义项", "残渣行"):
         if stat[k]:
             print("   %-22s %10s" % (k, format(stat[k], ",")))
     print("   ⇒ 平均每词 %.2f 条义项" % (stat["义项"] / max(stat["处理的词形"], 1)))

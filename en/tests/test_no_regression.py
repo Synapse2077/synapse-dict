@@ -43,6 +43,7 @@ from build_ex_rel import KEEP, HIDDEN, DROP                     # noqa: E402
 from hide_non_examples import WHERE as NOT_EXAMPLE              # noqa: E402
 from split_quote_ref import YEAR, ref_leaked                    # noqa: E402
 from translate_examples import SRC as EX_SRC                    # noqa: E402
+from build_legacy_sense import PHON_LINE, POS_LINE, SECTION_LINE  # noqa: E402
 
 TS = _ROOT.parent / "packages" / "dict-core" / "src" / "english.ts"
 V3 = ("dict", "entry", "sense", "sense_src", "sense_gloss", "sense_tag",
@@ -56,6 +57,13 @@ ANYYEAR = re.compile(r"(1[4-9]\d\d|20[0-2]\d)")
 # 🔴 **锁数字**：超了红（回归），低了要求收紧（结尾单独汇总）。
 #    「已接受」不等于「不再看」—— 基线长大恰恰是回归最常见的样子。
 ACCEPT = {
+    "A9 老词典层的义项是格式行（音标/单独词性/栏目标签，§16.7④）": (
+        1, "2026-10-29 重建后剩 1 条：`bee's knee` 单行释义里夹着的短语形式 `[the bee's knees]`，撇号让音标判据认了 —— "
+           "判据误报，不是格式行。多了 ⇒ 嵌入词条又被逐行拆进来，或单独的词性又成了义项"),
+    "A10 老词典层义项超过 50 条的词（§16.7④ 残差）": (
+        5, "`trys`／`appealling`／`appealled`／`oncest`／`strawer`：ECDICT 自造的假变形，下面粘着原形的整条释义"
+           "**而且没带词头**，结构上认不出；内容与原形一致（不是 `G.O.S.`→`go` 那种牛头不对马嘴）⇒ 有意不动。"
+           "多了 ⇒ 有大词条又被整段拆进来"),
     "A3 义项没有中文": (
         4_376,
         # 🔴 **2026-09-10 基线 4,332 → 4,376（+44），是一次有意的「错换缺」。**
@@ -220,6 +228,16 @@ def build(con, only=None):
     add("A", "A8 同一个词里两种来源的义项并存（§〇 禁令）",
         q("SELECT COUNT(*) FROM (SELECT word_id FROM sense_src GROUP BY word_id "
           "HAVING COUNT(DISTINCT CASE WHEN src='ecdict' THEN 1 ELSE 0 END)>1)"))
+    # 🔴 A9（2026-10-29，§16.7④）：老词典释义里**嵌着整条别的词条**（`G.O.S.` 752 条义项＝`go` 的全文），
+    #    逐行拆开后音标行 `[ɡəu]`、单独的 `vi.`、`变形：` 都成了「义项」（1 万多条）。
+    #    凡是嵌入词条都带这几种格式行 ⇒ 数格式行就守住了「嵌入词条又被逐行拆进来」。判据 import 生成脚本。
+    add("A", "A10 老词典层义项超过 50 条的词（§16.7④ 残差）",
+        q("SELECT COUNT(*) FROM (SELECT word_id FROM sense_src WHERE src='ecdict' GROUP BY word_id HAVING COUNT(*)>50)"))
+    add("A", "A9 老词典层的义项是格式行（音标/单独词性/栏目标签，§16.7④）",
+        sum(1 for (x,) in con.execute(
+            "SELECT g.text FROM sense_src ss JOIN sense_gloss g ON g.sense_id=ss.sense_id AND g.lang='zh' "
+            "WHERE ss.src='ecdict'")
+            if x and (PHON_LINE.match(x) or POS_LINE.match(x) or SECTION_LINE.match(x))))
 
     # ── B 组：变形与关系 ──────────────────────────────────────
     # 🔴 收尾单 C16（de）：5.6 万行「变形」其实是异体拼写，正是回退默认值造成的。
@@ -472,6 +490,15 @@ def mutate():
          lambda c: (c.execute("INSERT INTO sense(id,word_id,rank) VALUES(1,1,0)"),
                     c.execute("INSERT INTO sense_src(id,sense_id,word_id,src,raw_tags)"
                               " VALUES(1,1,1,'ecdict','{}')")))
+    case("一整条大词条又被逐行拆进来", "A10 老词典层义项超过 50 条的词（§16.7④ 残差）",
+         lambda c: (c.executemany("INSERT INTO sense(id,word_id,rank) VALUES(?,1,?)", [(i, i) for i in range(1, 52)]),
+                    c.executemany("INSERT INTO sense_src(id,sense_id,word_id,src,raw_tags) VALUES(?,?,1,'ecdict','{}')",
+                                  [(i, i) for i in range(1, 52)])))
+    case("嵌入词条的音标行又成了义项", "A9 老词典层的义项是格式行（音标/单独词性/栏目标签，§16.7④）",
+         lambda c: (c.execute("INSERT INTO sense(id,word_id,rank) VALUES(1,1,0)"),
+                    c.execute("INSERT INTO sense_src(id,sense_id,word_id,src,raw_tags)"
+                              " VALUES(1,1,1,'ecdict','{}')"),
+                    c.execute("INSERT INTO sense_gloss(sense_id,lang,text) VALUES(1,'zh','[ɡəu]')")))
     case("两种来源的义项并存（§〇 禁令被破）",
          "A8 同一个词里两种来源的义项并存（§〇 禁令）",
          lambda c: (c.execute("INSERT INTO sense_src(id,sense_id,word_id,src,raw_tags)"

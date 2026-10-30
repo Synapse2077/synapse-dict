@@ -54,6 +54,7 @@ from fix_geo_parent_zh import DESC_PARENT, LAT           # noqa: E402
 from strip_pos_label_in_gloss import LAB, TAIL           # noqa: E402
 from fix_unclosed_paren import classify as paren_class   # noqa: E402
 from hide_junk_pronunciation import is_junk_ipa            # noqa: E402
+from fix_ipa_xsampa import BAD as XSAMPA_BAD, ENTITY as IPA_ENTITY   # noqa: E402
 from fix_cross_edition_sense import REWRITE as XED_REWRITE  # noqa: E402
 
 f = lambda n: format(n, ",")
@@ -139,6 +140,10 @@ def checks():
         ("A4", "normalize_ipa_stress_mark.py", "08-18", "撇号冒充重音符（应为 ˈ U+02C8）",
          IPA_WRITE, IPA_READ, lambda t: any(ch in t for ch in STRESS_ALIASES)),
         # A5（音节切分残渣）判据要同时看词形与音标 ⇒ 见 special()
+        # B10（2026-10-29）：读取侧取**全部可见读音**不只主音标 —— 展示层把多条读音并排列出。
+        ("A6", "fix_ipa_xsampa.py", "10-29", "音标里有 IPA 不会用的 ASCII 字符或 HTML 实体（B10）",
+         IPA_WRITE, "SELECT ipa FROM pronunciation WHERE COALESCE(hidden,0)=0",
+         lambda t: bool(XSAMPA_BAD.search(t) or IPA_ENTITY.search(t))),
 
         # ── B 组：中文释义（写 sense_gloss / 读 App 可见集）────────────────
         ("B1", "fix_untranslated_zh.py", "08-15", "「中文」整条是拉丁字母",
@@ -565,6 +570,12 @@ def mutate(only=()):
         ("A5", "A5 音节切分残渣（读取侧）",
          "UPDATE pronunciation SET ipa='su' WHERE id=(SELECT p.id FROM pronunciation p "
          "JOIN dict d ON d.id=p.word_id WHERE d.word='sudanese' LIMIT 1)"),
+        ("A6", "A6 写入侧塞回一条 X-SAMPA（B10）",
+         "UPDATE dict SET ipa='ka\"tSEtiko' WHERE word='casa'"),
+        # 读取侧挑一条**非主**的可见读音：只查主音标的判据逮不到它
+        ("A6", "A6 读取侧非主读音塞回 `_h`（B10）",
+         "UPDATE pronunciation SET ipa='ˈkat_hto' WHERE id=(SELECT id FROM pronunciation "
+         "WHERE is_primary=0 AND COALESCE(hidden,0)=0 LIMIT 1)"),
         ("B1", "B1 中文写成拉丁字母",
          "UPDATE sense_gloss SET text='house' WHERE rowid=(SELECT g.rowid FROM sense_gloss g "
          "JOIN sense s ON s.id=g.sense_id WHERE g.lang='zh' AND g.kind='equivalent' "

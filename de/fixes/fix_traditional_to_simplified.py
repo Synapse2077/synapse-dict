@@ -58,8 +58,9 @@ _T2S = opencc.OpenCC("t2s")
 QUOTE = re.compile(r"[【】「」『』《》]")
 
 
-def t2s(s, cap=6):
-    """繁→简，转到收敛。🔴 `opencc` 的 `t2s` **不幂等**。"""
+def t2s_opencc(s, cap=6):
+    """**整段** OpenCC 繁→简，转到收敛。🔴 只留给「复现 09-18 那两次写库」用（`fix_t2s_damage.py` 靠它认出
+    哪些行是被整段转过的）—— 新写的出版文本一律走 `t2s`。"""
     for _ in range(cap):
         out = _T2S.convert(s)
         if out == s:
@@ -68,19 +69,106 @@ def t2s(s, cap=6):
     raise RuntimeError("opencc 转换 %d 轮仍不收敛：%r" % (cap, s[:60]))
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  安全的繁→简（B25，2026-10-29）—— 照 ru `criteria` ⑮ 的判据，de 自己一份
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴 整段 `t2s_opencc` 在**本来就是简体**的文本上会改错。2026-10-29 用原文（答案文件 ＋ 证据层经
+#    `clean_gloss` 重算）对出 de 改错 10 条：6 条转成**扩展平面**字形（`宽翅鵟→宽翅𫛭`、`二噁英→二𫫇英`，
+#    多数字体显示成豆腐块）＋ 4 条 GB2312 里的歧义字（`鼠麴草`、`反覆`×2、`重覆` —— 这 4 条 OpenCC 是对的）。
+# ⇒ 逐个位置决定收不收 OpenCC 的改动：
+#    ① 目标字不在 BMP ⇒ 不收；
+#    ② 原字不在 GB2312（方向无歧义，`國→国`）⇒ 收；
+#    ③ 原字在 GB2312 而 OpenCC 要改它（歧义区：`乾覆薹吒甯麴…`）⇒ 只有「这行是繁体文本」（含②那种字）才收，
+#       另有两张逐条裁决过的短语表：`OPENCC_RIGHT` 在简体文本里也收，`OPENCC_WRONG` 永远不收；
+#    ④ 繁简对举（`習 /习`）⇒ 不收。
+OPENCC_RIGHT = ("反覆", "重覆", "覆信", "乾性", "乾燥", "乾田", "乾苔", "鼠麴")   # `反复`/`干燥`…是规范写法
+# 规范简体里**没有独立用法**的字：简体文本里出现就是漏转，照收（ru 同一张，从 OpenCC 字表枚举）。
+# 🔴 第一版从 ru 抄判据时漏了这张 ⇒ 干跑当场把 `征收→徵收`、`借口→藉口`、`存折→存摺`、`糖蛋白→醣蛋白` 列成「要改回」。
+ALWAYS = frozenset("後於夥摺醣菸麽捱徵藉彷俱")
+OPENCC_WRONG = ("覆上", "覆住", "覆育", "慰藉", "狼藉", "枕藉")                   # 「盖」「养育」；`慰藉`仍写藉
+NEVER = frozenset("薹")                                                          # OpenCC 字表错：`薹草`是规范简体
+
+
+def _gb(ch):
+    try:
+        ch.encode("gb2312")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _hit(text, i, phrases):
+    return any(text[j:j + len(p)] == p for p in phrases for j in range(max(0, i - len(p) + 1), i + 1))
+
+
+def _t2s_once(text):
+    out = _T2S.convert(text)
+    if out == text or len(out) != len(text):      # OpenCC t2s 逐字等长；不等长就别信它
+        return text
+    trad_row = any(a != b and not _gb(a) for a, b in zip(text, out))
+    res = []
+    for i, (a, b) in enumerate(zip(text, out)):
+        if a == b or ord(b) > 0xFFFF or a in NEVER or _hit(text, i, OPENCC_WRONG):
+            res.append(a)
+        elif _gb(a) and not (trad_row or a in ALWAYS or _hit(text, i, OPENCC_RIGHT)):
+            res.append(a)
+        elif re.match(r"\s*[/／（(、]\s*" + re.escape(b), text[i + 1:i + 5]) or \
+                re.search(re.escape(b) + r"\s*[/／（(、]\s*$", text[max(0, i - 4):i]):
+            res.append(a)
+        else:
+            res.append(b)
+    return "".join(res)
+
+
+_EXT = None
+
+
+def ext_targets():
+    """OpenCC 字表里「常用平面字 → **扩展平面**字」的目标字集合（815 个，从 OpenCC 自己的字表读，不手抄）。
+    页面上出现它们，多半是整段 t2s 转出来的豆腐块（`鮟鱇→𩽾𩾌`）；回归闸拿它锁住 B25 不回来。"""
+    global _EXT
+    if _EXT is None:
+        import os
+        _EXT = set()
+        for root, _d, fs in os.walk(os.path.dirname(opencc.__file__)):
+            for f in fs:
+                if f.startswith("TSCharacters") and f.endswith(".txt"):
+                    for line in open(os.path.join(root, f), encoding="utf-8"):
+                        a, b = line.rstrip("\n").split("\t")
+                        _EXT.update(x for x in b.split() if len(x) == 1 and ord(x) > 0xFFFF
+                                    and len(a) == 1 and ord(a) <= 0xFFFF)
+        assert len(_EXT) > 500, "🔴 OpenCC 字表没读到（%d）—— 闸会空过" % len(_EXT)
+    return _EXT
+
+
+def t2s(s, cap=6):
+    """**安全的**繁→简，转到收敛（`opencc` 短语切分依赖上下文，转一遍邻字变了下一遍会再变）。"""
+    for _ in range(cap):
+        out = _t2s_once(s)
+        if out == s:
+            return s
+        s = out
+    raise RuntimeError("t2s %d 轮仍不收敛：%r" % (cap, s[:60]))
+
+
 def _assert_de():
     assert paths.DB.name == "synapse-dict-de.sqlite", "🔴 paths 不是 de 的：%s" % paths.DB
 
 
+# 🔴 2026-10-29（B25 顺带）：原来只查 `sense_gloss`；例句译文里模型写出的繁体（`兩倍`、`蚁鴷`）75 条没人管
+TABLES = ("sense_gloss", "example_gloss")
+
+
 def plan(con):
-    """→ ([(rowid, 原文, 转换后, 来源)], 带引用结构的那些)"""
+    """→ ([(表, rowid, 原文, 转换后, 来源)], 带引用结构的那些)"""
     rows, quoted = [], []
-    for rid, txt, src in con.execute(
-            "SELECT rowid, text, src FROM sense_gloss WHERE lang='zh'"):
-        new = t2s(txt)
-        if new == txt:
-            continue
-        (quoted if QUOTE.search(txt) else rows).append((rid, txt, new, src))
+    for tbl in TABLES:
+        for rid, txt, src in con.execute(
+                "SELECT rowid, text, src FROM %s WHERE lang='zh'" % tbl):
+            new = t2s(txt)
+            if new == txt:
+                continue
+            (quoted if QUOTE.search(txt) else rows).append((tbl, rid, txt, new, src))
     return rows, quoted
 
 
@@ -91,22 +179,22 @@ def main():
     a = ap.parse_args()
 
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
-    total = con.execute("SELECT count(*) FROM sense_gloss WHERE lang='zh'").fetchone()[0]
+    total = sum(con.execute("SELECT count(*) FROM %s WHERE lang='zh'" % t).fetchone()[0] for t in TABLES)
     rows, quoted = plan(con)
     con.close()
 
-    print("   中文释义总数          %9s" % format(total, ","))
+    print("   中文释义＋例句译文总数 %9s" % format(total, ","))
     print("   繁转简会变的          %9s（%.2f%%）"
           % (format(len(rows), ","), 100.0 * len(rows) / max(total, 1)))
     print("   🔴 含引用结构、不转    %9s %s"
-          % (len(quoted), [q[1][:30] for q in quoted[:3]] or "（0 条 —— 德语没有这个形状）"))
+          % (len(quoted), [q[2][:30] for q in quoted[:3]] or "（0 条 —— 德语没有这个形状）"))
     by_src = {}
-    for _r, _t, _n, src in rows:
+    for _tb, _r, _t, _n, src in rows:
         by_src[src] = by_src.get(src, 0) + 1
     for src, n in sorted(by_src.items(), key=lambda x: -x[1]):
         print("      %-20s %6s" % (src, format(n, ",")))
 
-    dbtool.sample_check([(t[:28], n[:28], s) for _r, t, n, s in rows[::max(1, len(rows) // 14)]],
+    dbtool.sample_check([(t[:28], n[:28], s) for _tb, _r, t, n, s in rows[::max(1, len(rows) // 14)]],
                         12, ("繁（源头原样）", "简（出版层改成）", "来源"))
 
     if not a.apply:
@@ -114,8 +202,9 @@ def main():
         return
 
     with dbtool.session("de-fix-traditional-to-simplified", expect={}) as s:
-        s.executemany("UPDATE sense_gloss SET text=? WHERE rowid=?",
-                      [(n, r) for r, _t, n, _s in rows])
+        for tbl in TABLES:
+            s.executemany("UPDATE %s SET text=? WHERE rowid=?" % tbl,
+                          [(n, r) for tb, r, _t, n, _s in rows if tb == tbl])
 
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     left, left_q = plan(con)
@@ -123,7 +212,9 @@ def main():
         "SELECT count(*) FROM sense_src WHERE lang='zh'").fetchone()[0]
     con.close()
     checks = [
-        ("出版层不再有繁体", len(left) + len(left_q) == 0),
+        ("出版层不再有可转的繁体", len(left) == 0),
+        # 含引用结构的有意不转（2026-10-29 起例句里有 3 条：`《罗马书》`…），条数不许因这次写库而变
+        ("含引用结构的那几条一个没动", len(left_q) == len(quoted)),
         ("证据层一个字没动（繁体原样留着）", ev > 0),
     ]
     for name, ok in checks:

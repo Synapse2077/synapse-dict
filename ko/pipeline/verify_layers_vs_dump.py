@@ -50,6 +50,11 @@ import harvest_examples as HE
 import build_inflection_layer as BI
 import build_pronunciation as BP
 import fix_audio_filename_leak as FAL   # 🔴 判据的唯一家（录音文件名冒充 IPA）
+import criteria
+import harvest_ko_etymology as HKE
+import harvest_zh_etymology as HZE
+import harvest_ja_etymology as HJE
+import build_etymology as BE
 
 f = lambda n: format(n, ",")
 
@@ -311,6 +316,57 @@ def layer_pronunciation(show=0):
 
 
 # ══════════════════════════════════════════════════════════════════
+def _ja_want(con):
+    rows, _st = HJE.collect(con)
+    return {(r[4], None, r[3]) for r in HJE.publishable(rows, HJE.answers())}
+
+
+def layer_etymology(show=0):
+    """词源层（四版）：英文版／韩文版／中文版／日文版四个收割器的产出 ≡ 库里**全部** `etymology` 行。2026-10-28 补。
+    日文版另查**译文**（`etymology_gloss`）：每行都有中文，且 `HJE.shape_problems()` 为空 ——
+    其中一条就是「被引用的韩语／古谚文形式一个字符都没改」（声点 〮〯 也算）。
+
+    🔴 这一层**九个阶段都不在外锚闸里** —— K36 漏掉 48.5% 就是这么藏住的。
+    身份键 `(src_ref, entry_id, text)`：只比 `src_ref` 的话，挂错 entry、正文被改都看不见。
+    ⭐ 英文版 `build_etymology.harvest()` 本来就是纯收集函数（`main()` 只打印和写库、产出全部落库）
+       ⇒ 直接 import，一个判据都不重写。⚠️ 我曾在计划表里写「它没拆 `collect()`、要先重构」——没读代码就下的结论，是错的。
+    """
+    con = ro()
+    rk, stat_k, _s = HKE.harvest(con)
+    rz, _stat_z = HZE.harvest(con)
+    re_, stat_e, _m = BE.harvest(con)
+    bad_en = sum(v for k, v in stat_e.items() if k.startswith("🔴"))
+    have = {(r, e, t) for r, e, t in con.execute(
+        "SELECT src_ref, entry_id, text FROM etymology")}
+    gl = con.execute("SELECT e.text, g.text FROM etymology e LEFT JOIN etymology_gloss g "
+                     "ON g.etymology_id=e.id AND g.lang='zh' WHERE e.edition='ja-edition'").fetchall()
+    want = {(r[6], r[1], r[4]) for r in rk + rz + re_} | _ja_want(con)
+    con.close()
+    nozh = sum(1 for _t, z in gl if not z)
+    badzh = [(t, z) for t, z in gl if z and HJE.shape_problems(t, z)]
+    miss, extra = want - have, have - want
+    print("■ 词源层（英文版／韩文版／中文版／日文版）")
+    print("   收割器产出 %8s   库里 %8s" % (f(len(want)), f(len(have))))
+    print("   %s 源头有·库里没有 %s" % ("✅" if not miss else "🔴", f(len(miss))))
+    print("   %s 库里有·追不回源头 %s" % ("✅" if not extra else "🔴", f(len(extra))))
+    for ref, _e, txt in list(miss)[:max(show, 5) if miss else 0]:
+        print("      🔴缺  %-40s %s" % (ref[:40], txt[:50].replace("\n", " ⏎ ")))
+    for ref, _e, txt in list(extra)[:max(show, 5) if extra else 0]:
+        print("      🔴多  %-40s %s" % (ref[:40], txt[:50].replace("\n", " ⏎ ")))
+    print("   %s 英文版收割器自报的错（entry 认不到／词源号对不上）%s" % ("✅" if not bad_en else "🔴", f(bad_en)))
+    print("   %s 日文版行没有中文译文 %s ／ 译文形状不过（引用形式被改、残留日语…）%s"
+          % ("✅" if not nozh and not badzh else "🔴", f(nozh), f(len(badzh))))
+    for t_, z_ in badzh[:5]:
+        print("      🔴 %s → %s ｜ %s" % (t_[:40], z_[:40], HJE.shape_problems(t_, z_)[0]))
+    print("   ── 韩文版有意不收的那几桶（判据 `criteria.ko_etymology`）──")
+    for k, v in sorted(stat_k.items()):
+        if k.startswith("不收"):
+            print("      %-28s %7s" % (k, f(v)))
+    return {"miss": len(miss), "extra": len(extra) + nozh + len(badzh) + bad_en, "_want": want, "_have": have,
+            "_gl": gl}
+
+
+# ══════════════════════════════════════════════════════════════════
 # 🔴 变异验证（`PLAYBOOK` 7.3）——**一条永远通过的检查等于没检查**。
 #    每条都对着「这道闸声称能逮到什么」，不是「它跑不跑得起来」。
 MUTATIONS = {
@@ -329,10 +385,20 @@ MUTATIONS = {
     "N4": ("读音：库侧把 `src='g2p'` 也算进来",
            "18 万条规则读音 dump 里没有 ⇒ **「追不回源头」必须暴涨**。"
            "验的是「排除 g2p」这条不是随口说的"),
+    "N6": ("词源：库侧把一行正文改一个字",
+           "行数不变 ⇒ 计数看不见；身份键带正文 ⇒ 缺、多**各 1**"),
+    "N8": ("词源：日文版一条译文里的古谚文声点被「规范化」掉",
+           "`보내〮다〮` → `보내다` 这种改动行数不变、读着也通顺 ⇒ 只有逐 token 比对逮得到。"
+           "验的是 09-27 写下的那条闸条件「被引用的语言形式一个字符都没改」真的在跑"),
+    "N9": ("词源：库侧删掉 5 条英文版",
+           "英文版 2026-10-28 才进这道闸 ⇒ 验它真在比英文版，不是只比后来那三版"),
+    "N7": ("词源：判据不再剔掉例句行（`ETYM_BULLET` 置空）",
+           "多词源条目里塞进来的义项例句会混进词源 ⇒ **「源头有·库里没有」必须变**。"
+           "验的是剔例句那一刀真的在判据里，不是写在注释里"),
 }
 
 
-def mutate(which, ex, infl, pron):
+def mutate(which, ex, infl, pron, ety=None):
     if which == "N1":
         h = set(list(ex["_have"])[200:])
         return len(ex["_want"] - h), len(h - ex["_want"])
@@ -362,19 +428,50 @@ def mutate(which, ex, infl, pron):
             "JOIN dict d ON d.id=p.word_id")}
         con.close()
         return len(pron["_want"] - h), len(h - pron["_want"])
+    if which == "N6":
+        h = set(ety["_have"])
+        v = sorted(x for x in h if x[0].startswith("ko-edition:"))[0]
+        h.discard(v)
+        h.add((v[0], v[1], v[2] + "。"))
+        return len(ety["_want"] - h), len(h - ety["_want"])
+    if which == "N8":
+        gl = list(ety["_gl"])
+        i = next(i for i, (t_, z_) in enumerate(gl) if z_ and ("〮" in z_ or "〯" in z_))
+        gl[i] = (gl[i][0], gl[i][1].replace("〮", "").replace("〯", ""))
+        n = sum(1 for t_, z_ in gl if z_ and HJE.shape_problems(t_, z_))
+        return 0, n
+    if which == "N9":
+        h = set(ety["_have"])
+        for x in sorted(x for x in h if x[0].startswith("kk-ko:"))[:5]:
+            h.discard(x)
+        return len(ety["_want"] - h), len(h - ety["_want"])
+    if which == "N7":
+        old = criteria.ETYM_BULLET
+        criteria.ETYM_BULLET = ("\x00never",)
+        try:
+            con = ro()
+            rk, _s, _x = HKE.harvest(con)
+            rz, _z = HZE.harvest(con)
+            con.close()
+        finally:
+            criteria.ETYM_BULLET = old
+        want2 = {(r[6], r[1], r[4]) for r in rk + rz}
+        return len(want2 - ety["_have"]), len(ety["_have"] - want2)
     raise KeyError(which)
 
 
-def run_mutations(ex, infl, pron):
+def run_mutations(ex, infl, pron, ety):
     # ⚠️ 例句那两条的基线用**未扣「词形不在 dict」的 raw gap** ——
     #    `mutate()` 返回的也是 raw，两边必须同一个口径才比得出变化。
     base = {"N1": (ex["gap"], ex["extra"]), "N2": (ex["gap"], ex["extra"]),
             "N3": (infl["miss"], infl["extra"]), "N5": (infl["miss"], infl["extra"]),
-            "N4": (pron["miss"], pron["extra"])}
+            "N4": (pron["miss"], pron["extra"]),
+            "N6": (ety["miss"], ety["extra"]), "N7": (ety["miss"], ety["extra"]),
+            "N8": (0, 0), "N9": (ety["miss"], ety["extra"])}
     print("\n═══ 变异验证（%d 条）═══" % len(MUTATIONS))
     bad = 0
     for mid, (what, why) in MUTATIONS.items():
-        m, e = mutate(mid, ex, infl, pron)
+        m, e = mutate(mid, ex, infl, pron, ety)
         b = base[mid]
         if mid == "N1":
             ok = m > b[0]
@@ -382,6 +479,14 @@ def run_mutations(ex, infl, pron):
             ok = e != b[1] or m != b[0]
         elif mid in ("N3", "N5"):
             ok = m > b[0] and e > b[1]
+        elif mid == "N6":
+            ok = (m, e) == (b[0] + 1, b[1] + 1)
+        elif mid == "N7":
+            ok = m > b[0]
+        elif mid == "N8":
+            ok = e == 1
+        elif mid == "N9":
+            ok = m == b[0] + 5
         else:
             ok = e > b[1] + 100_000
         bad += not ok
@@ -396,26 +501,28 @@ def run_mutations(ex, infl, pron):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--layer", default="", choices=["", "example", "inflection",
-                                                    "pronunciation"])
+                                                    "pronunciation", "etymology"])
     ap.add_argument("--show", type=int, default=0)
     ap.add_argument("--mutate", action="store_true")
     a = ap.parse_args()
 
-    ex = infl = pron = None
+    ex = infl = pron = ety = None
     if a.layer in ("", "example"):
         ex = layer_example(a.show)
     if a.layer in ("", "inflection"):
         infl = layer_inflection(a.show)
     if a.layer in ("", "pronunciation"):
         pron = layer_pronunciation(a.show)
+    if a.layer in ("", "etymology"):
+        ety = layer_etymology(a.show)
 
     red = sum((d["miss"] > 0) + (d["extra"] > 0)
-              for d in (ex, infl, pron) if d)
-    if a.mutate and ex and infl and pron:
-        red += run_mutations(ex, infl, pron)
+              for d in (ex, infl, pron, ety) if d)
+    if a.mutate and ex and infl and pron and ety:
+        red += run_mutations(ex, infl, pron, ety)
     if red:
-        raise SystemExit("\n🔴 外锚闸·三层：%d 项对不上" % red)
-    print("\n■ 外锚闸·例句/变形/读音三层 通过 ✓")
+        raise SystemExit("\n🔴 外锚闸·四层：%d 项对不上" % red)
+    print("\n■ 外锚闸·例句/变形/读音/词源四层 通过 ✓")
 
 
 if __name__ == "__main__":

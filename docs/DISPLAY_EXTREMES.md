@@ -177,7 +177,7 @@ de `deShownExamples` 每义项 ≤3 + 词条级 ≤12。判据在**组件里一�
 
 | 块 | 封顶 | 在哪 | 截断时说不说「还有多少」 |
 |---|---|---|---|
-| 语义关系 | **无** | — | — |
+| 语义关系 | **无**（⚠️ 2026-10-27 才真的是无：de 服务层词条级关系一直 `LIMIT 200` 且无 ORDER BY，76 个词形 9,818 条**静默看不见**，`Holz`/`Wasser`/`Haus` 都在里面；本表那天之前写的「无」是错的。已去掉，de 契约闸锁住）| — | — |
 | 义项 | **无** | — | — |
 | 词源 | **无** | — | — |
 | 读音 | **无**（只判重）| — | — |
@@ -229,3 +229,9 @@ python3 scripts/measure_display_extremes.py
 
 相关：`docs/FRAMEWORK.md`（错比缺更伤权威）、`docs/PITFALLS.md`、
 `apps/web/src/contract-check-*.tsx`（改展示层之前先跑这九道闸）。
+
+## 断行（2026-10-27，B26）
+
+- **关系词必须 `inline-block`**：一串首尾相接的 `<span>` 之间没有断行机会，关系多的页一行能到 3.5 万像素（fr `Rubiacées`）。
+- **`.detail-column { overflow-wrap: anywhere }`** 给超长单词兜底（`Taumatawhakatangihanga…`、长音标、化学名）。
+- 闸：`npm run gate:overflow`（真用 Chrome 排版，375px）。⚠️ 「不溢出」分不出「词与词之间换行」和「把词劈开」，所以另有 O2。

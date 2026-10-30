@@ -21,7 +21,7 @@
  *     npx tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-etym.tsx
  *     npx tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-etym.tsx --mutate
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -85,18 +85,23 @@ type Shape = {
    *       it 97,459、pt 48,875、es 36,587）。实证：en `porion` 库里有
    *      `From Ancient Greek πόρος …`，页面从「释义」直接跳到「名词」。
    *      ⇒ 已记 `docs/BACKLOG.md`。这里**如实登记现状**，不假装它是对的。
+   *      ✅ 2026-10-27 B18 结清后**已无门用它**，六门都改登 `multi-or-text`；留着是为了
+   *         哪天谁把某门改回去，登记表上一眼看得出那是在退回疤上。
+   *   `multi-or-text` B18 修过的门（2026-10-27 起 en）—— 多词源同 `multi-only`；
+   *      单词源**库里有正文才印**（不带序号的「词源」＋正文），没正文一个字都不说
+   *      （en-edition 没词源号的义项键都是 `en-edition:0`，说「源头未给出」是几百万页的噪声）。
    *   `group` ja —— 每个**词性组**都印一条。
    *   `etymology` ko —— 每**支词源**印一条（含单词源），一支跨几个词性组只印一次。
    */
-  noteMode: 'multi-only' | 'group' | 'etymology';
+  noteMode: 'multi-only' | 'multi-or-text' | 'group' | 'etymology';
 };
 const SHAPE: Record<Lang, Shape> = {
-  en: { etymHeadings: 'always', noteMode: 'multi-only' },
-  es: { etymHeadings: 'always', noteMode: 'multi-only' },
-  it: { etymHeadings: 'always', noteMode: 'multi-only' },
-  fr: { etymHeadings: 'always', noteMode: 'multi-only' },
-  pt: { etymHeadings: 'always', noteMode: 'multi-only' },
-  de: { etymHeadings: 'always', noteMode: 'multi-only' },
+  en: { etymHeadings: 'always', noteMode: 'multi-or-text' },
+  es: { etymHeadings: 'always', noteMode: 'multi-or-text' },
+  it: { etymHeadings: 'always', noteMode: 'multi-or-text' },
+  fr: { etymHeadings: 'always', noteMode: 'multi-or-text' },
+  pt: { etymHeadings: 'always', noteMode: 'multi-or-text' },
+  de: { etymHeadings: 'always', noteMode: 'multi-or-text' },
   ja: { etymHeadings: 'fallback', noteMode: 'group' },
   // 🔴🔴 **ko 2026-09-26 才登记进来（K26），而登记之前它的词源层对读者完全不可见。**
   //    实测：另外七门的视图各调用 `<EtymologyNote>` **1 次**，`KoreanEntryView` **0 次**，
@@ -151,6 +156,18 @@ const SHAPE: Record<Lang, Shape> = {
  *   **闸查的是「登记了的那几门对不对」，没有一条查「是不是所有门都登记了」。**
  *   名单从磁盘推，对不上就红；加语种时不需要记得改这里，忘了它会自己响。
  */
+/**
+ * 🔴 **带锁的豁免**：词源数据形状与前八门不同的语种（按 `etymNo` 存成列表、不走 `etymKey`），
+ * 由**它自己的契约闸**守词源。登记要写明是哪个文件里的哪一条 —— 那条断言不在了就判红，
+ * 豁免不许变成「没人守」。
+ * ⚠️ 2026-10-27 做 B18 时才发现：vi（10-06 上线）、ru（10-25 上线）之后这道闸**一直红在登记表自检上**，
+ *    而它不在任何一门的 `run_gates` 里 ⇒ 没人跑、没人看见（B14/B15 同形）。
+ */
+const OWN_GATE: Record<string, { file: string; marker: string }> = {
+  vi: { file: 'contract-check-vi.tsx', marker: "B18：词源号对不上时词源仍然印出来" },
+  ru: { file: 'contract-check-ru.tsx', marker: "id: 'C7', word: 'тараса'" },
+};
+
 function registryGate(): string[] {
   const bad: string[] = [];
   // 🔴🔴 **名单从磁盘推，不从我的记忆推 —— 而这一行我第一版写错了。**
@@ -171,6 +188,12 @@ function registryGate(): string[] {
       "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='etymology'",
     ).get() as { n: number }).n > 0;
     db.close();
+    const own = OWN_GATE[d];
+    if (has && own) {
+      const src = readFileSync(new URL(`./${own.file}`, import.meta.url), 'utf8');
+      if (!src.includes(own.marker)) bad.push(`${d}：豁免说由 ${own.file} 守词源，而那条断言（${own.marker}）不在了`);
+      continue;
+    }
     if (has && !(LANGS as string[]).includes(d)) {
       bad.push(`${d}：库里有 etymology 表，而 LANGS 名单里没有它 ⇒ 这门的词源层没有任何闸`);
     }
@@ -257,7 +280,9 @@ function headsExpected(senses: Sense[]): string[] {
  * ⚠️ 分组规则与上面 `headsExpected` 同源，只是返回键而不是序号 ——
  *    两处要一起改（这份闸本来就承认"独立算一遍"的代价，注释在 `sameEtymGroup` 上）。
  */
-function etymBlocksOf(senses: Sense[], shape: Shape): string[] {
+const textsOf = (e: Entry) => (e as { etymologyTexts?: Record<string, string> }).etymologyTexts;
+
+function etymBlocksOf(senses: Sense[], shape: Shape, texts?: Record<string, string>): string[] {
   if (senses.length === 0) return [];
   const groups: Array<{ pos: string | null; etym: string | null }> = [];
   for (const s of senses) {
@@ -286,6 +311,10 @@ function etymBlocksOf(senses: Sense[], shape: Shape): string[] {
   groups.forEach((g, i) => {
     if (g.etym !== null && (i === 0 || groups[i - 1].etym !== g.etym)) out.push(g.etym);
   });
+  // B18：单词源只在库里有正文时才印（判据与 `EtymologyNote` 同一个 `etymologyBrief`）
+  if (shape.noteMode === 'multi-or-text' && distinct.size <= 1) {
+    return out.filter((k) => etymologyBrief(texts?.[k]));
+  }
   return out;
 }
 
@@ -449,7 +478,7 @@ const CHECKS: Array<{
       //    说「源头未给出」就是把"我们没做"说成"源头没有"。
       //    ⇒ 期望条数 ＝ 词源支里**所属版已抽过**的那些，不是全部标题。
       //    （fr 实测 40 个词里就有 7 个这样的块，判据不区分就会恒红。）
-      const want = etymBlocksOf(senses, shape).filter((k) => ed.includes(editionOf(k))).length;
+      const want = etymBlocksOf(senses, shape, textsOf(e)).filter((k) => ed.includes(editionOf(k))).length;
       const notes = (h.match(/class="etym-text/g) || []).length;
       return want !== notes ? `该有 ${want} 条正文/说明，页面上 ${notes} 条` : null;
     },
@@ -465,7 +494,7 @@ const CHECKS: Array<{
       const texts = (e as { etymologyTexts?: Record<string, string> }).etymologyTexts;
       if (!texts) return null;
       const ed = (e as { etymologyEditions?: string[] }).etymologyEditions ?? [];
-      const all = etymBlocksOf(senses, shape);
+      const all = etymBlocksOf(senses, shape, textsOf(e));
       // 🔴 ja 单词源的词也印正文 ⇒ **单块也要比**。这正是 ja 上最值钱的一条：
       //    `etymology.edition` 写 `en-edition` 而服务层的 etymKey 一度取裸词源号（`1`），
       //    两边各自自洽、拼起来对不上 ⇒ 页面静默空白，入库闸/回核/tsc 全绿。
@@ -511,13 +540,26 @@ const CHECKS: Array<{
       const texts = (e as { etymologyTexts?: Record<string, string> }).etymologyTexts;
       if (!texts) return null;
       const ed = (e as { etymologyEditions?: string[] }).etymologyEditions ?? [];
-      const all = etymBlocksOf(senses, shape);
+      const all = etymBlocksOf(senses, shape, textsOf(e));
       if (all.length < (shape.noteMode === 'multi-only' ? 2 : 1)) return null;
       const keys = [...new Set(all.filter((k) => ed.includes(editionOf(k))))];
       const have = keys.filter((k) => etymologyBrief(texts[k])).length;
       const none = (h.match(/etym-text-none/g) || []).length;
       return none > keys.length - have
         ? `${keys.length} 支里库中 ${have} 支有正文，页面却有 ${none} 条「源头未给出」` : null;
+    },
+  },
+  {
+    // 🔴 B18（2026-10-27）：正文**必须有主**。只把 `<EtymologyNote>` 移出 `etymHeadOf(…) &&`
+    //    而不给标题，单词源的正文就成了夹在「释义」和词性之间的无主段落 ——
+    //    ko 改之前正是那样，用户看 `아름답다` 问「这是什么啊」。
+    //    ⚠️ ja 不在射程内：它的组标题印的是读音、正文跟在每个词性组下（`group`），本来就有主。
+    name: '🔴 H4 词源正文前面没有标题（无主段落）',
+    hit: (_senses, h, _e, shape) => {
+      if (shape.noteMode === 'group') return null;
+      const notes = (h.match(/class="etym-text/g) || []).length;
+      const owned = (h.match(/<div class="etym-(?:label|title)">[^<]*<\/div><div class="etym-text/g) || []).length;
+      return notes !== owned ? `${notes} 段正文里 ${notes - owned} 段前面没有「词源」标题` : null;
     },
   },
 ];
@@ -546,6 +588,8 @@ const MUTS: Array<[string, (h: string) => string]> = [
         /(<div class="etym-text(?: etym-text-none)?"[^>]*>)([\s\S]*?)(<\/div>)/g)];
       return m.length > 1 ? h.replace(m[1][0], m[1][1] + m[0][2] + m[1][3]) : h;
     }],
+  ['M10 单词源的「词源」标题被抹掉（B18 只移不加标题的样子）',
+    (h) => h.replace(/<div class="etym-title">[^<]*<\/div>/g, '')],
   ['M9 有正文却印成「源头未给出」',
     (h) => h.replace(/<div class="etym-text" [^>]*>[\s\S]*?<\/div>/,
       '<div class="etym-text etym-text-none">源头未给出这一支的词源说明</div>')],

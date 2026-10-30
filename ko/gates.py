@@ -96,7 +96,10 @@ GATES = [
         cmd="python3 -u ko/pipeline/verify_layers_vs_dump.py",
         file="ko/pipeline/verify_layers_vs_dump.py",
         deps=frozenset({"dict", "example", "inflection", "pronunciation",
-                        "sense_relation"}),
+                        "sense_relation",
+                        # 2026-10-28 加词源层（K36）：韩文版／中文版／日文版三收割器 ≡ 库，
+                        # 日文版译文查「被引用形式一字不改」（09-27 写下的建表条件）
+                        "etymology", "etymology_gloss"}),
         why="三层双向恒等式。09-25 红了一天的第二条（录音文件名冒充 IPA 修掉了，"
             "而源头侧判据没跟着登记）。",
     ),
@@ -191,17 +194,12 @@ UNCLAIMED = {
     "collocation":      "搭配层 ko 没做（0 行）。前五门那层 99.3% 是模型凭记忆写的，"
                         "ko 有意不做（`[[collocation-layer-is-llm-generated]]`）。",
     "collocation_gloss": "同上（0 行）。",
-    # 🔴 2026-09-27 建表当天登记。表建了、`build_v3_schema.py` 与 `TRACK_TABLES` 都同步了，
-    #    而**一道闸都没有** —— 这条自检当场把它拦下来了（K31 的机制第一次拦到我自己）。
-    #    目标：词源正文的中文。两个来源，都还没落一行：
-    #      ① 中文两片白送的 **6,942 条现成中文词源**（`src='zh-edition-*'`）
-    #      ② 模型译文（`src='model:*'`）—— 而它是**跨门决定**（八门都没有译文），
-    #         已记 `docs/BACKLOG.md` 的 B18，不是 ko 单独能定的
-    #    ⚠️ 条件是「还是 0 行」：落第一行的那天这条自检就红，逼人先建
-    #      「词源中文覆盖率 ＋ 引用形式没被改写」那道闸再入库。
-    "etymology_gloss":  "词源正文的中文（0 行）。2026-09-27 建表，入库前必须先登记闸 —— "
-                        "要验的是「覆盖率」和「被引用的语言形式一个字符都没改」"
-                        "（古谚文结合型字母与声点最容易被模型顺手规范化）。",
+    # ✅ `etymology_gloss` 2026-10-28 建表（日文版词源的中文译文 3,093 行），由外锚闸认领 —— 下面是拿掉时的原话：
+    # ⚠️ `etymology_gloss` 2026-10-27 从这里拿掉（与 `dbtool.TRACK_TABLES` 同步）：09-27 这里写着
+    #    「表建了」，而库里**这张表不存在**（`test_dbtool_gate` M7 自 09-28 红到 10-27）。
+    #    K36① 的中文版现成词源进的是 `etymology` 本表（一份来源一行，照 vi/ru），不是它；
+    #    它只剩「模型译文」一个用途，而「译不译」是跨门决定。建表那天两边一起加回来，
+    #    并按原条件先登记闸：词源中文覆盖率 ＋ 被引用的语言形式一个字符都没改（古谚文结合型字母与声点）。
 }
 
 

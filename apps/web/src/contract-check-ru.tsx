@@ -15,7 +15,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { RussianEntryView } from './App';
+import { RussianEntryView, EXAMPLES } from './App';
 import { POS_LABELS, REL_LABELS, RU_POS_LABELS, RU_RELATION_LABELS, RU_INFL_TAG_LABELS, RU_GRAMMAR_LABELS,
   RU_USAGE_LABELS, RU_USAGE_UNPRINTED, RU_FAMILY_POS_LABELS, RU_FAMILY_FORM_LABELS, RU_ASPECT_SUBKIND_LABELS,
   RU_ETYM_TYPE_LABELS, RU_EDITION_LABELS } from '@synapse-dict/dict-labels';
@@ -158,6 +158,14 @@ function searchGaps(search: SearchFn): string[] {
   return out;
 }
 
+/** C18：欢迎页「试试这些词」—— ru 有自己的一行，且每个词**点进去有义项**（不是「字符串非空」）。
+ *  🔴 2026-10-27 用户看见欢迎页空着：通用闸 `contract-check.tsx` 的 `examplesGuard()` 早会红，
+ *  而 ru 的闸单只跑这个文件 ⇒ 它从没被跑过。在这里补一条，跟着 ru 的闸一起跑。 */
+function examplesGaps(words: string[] | undefined): string[] {
+  if (!words || words.length === 0) return ['ru 没有推荐词 —— 欢迎页空着'];
+  return words.filter((w) => !(svc.getEntry(w)?.senses?.length)).map((w) => `推荐词「${w}」点进去没有义项`);
+}
+
 function run(mutateEntry?: (w: string, e: any) => any): string[] {
   const red: string[] = [];
   const cache = new Map<string, any>();
@@ -183,6 +191,10 @@ if (!MUTATE) {
   console.log(`   ${sg.length ? '🔴' : '✅'} C16  搜索：省写 ё 也找得到、逐字对上的排第一`);
   for (const g of sg) console.log(`      C16 ${g}`);
   if (sg.length) red.push('C16');
+  const eg = examplesGaps(EXAMPLES.ru);
+  console.log(`   ${eg.length ? '🔴' : '✅'} C18  欢迎页推荐词：有自己的一行、每个都点得进去`);
+  for (const g of eg) console.log(`      C18 ${g}`);
+  if (eg.length) red.push('C18');
   console.log(`■ ru 展示层契约闸 —— ${CHECKS.length} 条`);
   for (const c of CHECKS) console.log(`   ${red.some((r) => r.startsWith(`${c.id} `)) ? '🔴' : '✅'} ${c.id.padEnd(4)} ${c.name}`);
   for (const r of red) console.log(`      ${r}`);
@@ -225,6 +237,13 @@ if (!MUTATE) {
     if (!ok) fails += 1;
     console.log(`   ${ok ? '✅' : '🔴🔴 没逮到'} C16  搜索退回只按 word_norm 前缀`);
   }
+  // C18 的变异：整行漏填（上线时的原样）／一个词库里查不到
+  for (const [why, ws] of [['整行漏填', undefined], ['库里查不到', ['привет', 'нетакогослова']]] as const) {
+    const ok = examplesGaps(ws as string[] | undefined).length > 0;
+    if (!ok) fails += 1;
+    console.log(`   ${ok ? '✅' : '🔴🔴 没逮到'} C18  推荐词${why}`);
+  }
+  if (examplesGaps(EXAMPLES.ru).length) { console.log('🔴🔴 反控制失败：C18 基线不绿'); process.exit(1); }
   if (searchGaps((p, l) => svc.search(p, l)).length) { console.log('🔴🔴 反控制失败：C16 基线不绿'); process.exit(1); }
   const base = run();
   if (base.length) { console.log('🔴🔴 反控制失败：基线不绿'); process.exit(1); }

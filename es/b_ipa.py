@@ -78,7 +78,12 @@ def g2p(w):
         if c in simple:
             ph = simple[c]
             if ph == "ks":
-                toks.append(["k", "C", False, False]); toks.append(["s", "C", False, False])
+                # x → /ks/，词首 → /s/（`fix_x_gs`：西语版写 ks 7,311、ɡs 0）。
+                # 第 5 位标记「来自 x」：`_postprocess` 的韵尾浊化不碰它 —— 2026-10-29 前它被浊化成 ɡs，
+                # 08-20 补收词头用这个 G2P 又生成了 92 条（BACKLOG B28）。
+                if toks or i > 0:
+                    toks.append(["k", "C", False, False, "x"])
+                toks.append(["s", "C", False, False])
             else:
                 toks.append([ph, "C", False, False])
             i += 1; continue
@@ -129,7 +134,7 @@ def _postprocess(toks):
             continue
         if ph == "n" and nph in ("b", "m", "p"):
             toks[k][0] = "m"
-        elif ph in VOICE and (ph + nph) not in ONSET_CLUSTERS:
+        elif ph in VOICE and (ph + nph) not in ONSET_CLUSTERS and toks[k][4:] != ["x"]:
             # 仅 coda 塞音浊化；p/t/k + l/ɾ 是起始丛(同音节)不浊化
             toks[k][0] = VOICE[ph]
     return toks
@@ -205,6 +210,7 @@ if __name__ == "__main__":
         "ciudad": "/θjuˈdad/", "agua": "/ˈaɡwa/", "construir": "/konsˈtɾwiɾ/",
         "pingüino": "/pinˈɡwino/", "seis": "/ˈseis/", "ley": "/ˈlei/",
         "aire": "/ˈaiɾe/", "muy": "/ˈmwi/",
+        "taxi": "/ˈtaksi/", "examen": "/ekˈsamen/", "xerocopia": "/seɾoˈkopja/",
     }
     ok = 0
     for w, exp in tests.items():

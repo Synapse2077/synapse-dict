@@ -153,9 +153,28 @@ DELIVERABLE = {
     "7": [("etymology 词源层", "SELECT COUNT(*) FROM etymology"),
           # 🔴 ja 的 40,270 行栽在"展示层要自己重建一次键" ⇒ ko 存 entry_id，
           #    那就查它指得到。归零＝桥没建，NULL 多＝桥断了
-          ("词源的 entry_id 都指得到",
+          # ⚠️ 2026-10-27 K36①：中文版 5,520 条词源**有意**挂在词上（这些词英文版也有，
+          #    当初没建中文版 entry）⇒ NULL 只许出现在 zh-edition 行上，且条数锁成常量 ——
+          #    「NULL 多＝桥断了」那层意思靠这个常量守住
+          # ⚠️ 2026-10-28 K36②：韩文版 9,957 条同理（韩文版条目没有义项就没建 entry）⇒
+          #    NULL 许可扩到 ko-edition，常量**分版本各锁一个**（合成一个数，一边多一边少就互相抵掉）。
+          #    英文版仍不许有 NULL —— 英文版词源从来都挂在 entry 上。
+          # ⚠️ 2026-10-28 日文版：ko 没建过日文版 entry ⇒ 3,093 条全部挂在词上（常量见下）。
+          ("词源的 entry_id 都指得到（NULL 只许是中文版／韩文版／日文版挂在词上的）",
            "SELECT COUNT(*)=0 FROM etymology e LEFT JOIN entry x ON x.id=e.entry_id "
-           "WHERE x.id IS NULL")],
+           "WHERE (e.entry_id IS NOT NULL AND x.id IS NULL)"
+           "   OR (e.entry_id IS NULL AND e.edition NOT LIKE 'zh-edition-%' "
+           "       AND e.edition NOT IN ('ko-edition','ja-edition'))"),
+          ("日文版词源 ＝ 3,093，且每行都有中文译文（三语方针：日语原文不许印）",
+           "SELECT (SELECT COUNT(*) FROM etymology WHERE edition='ja-edition')=3093 "
+           "AND (SELECT COUNT(*) FROM etymology e JOIN etymology_gloss g ON g.etymology_id=e.id "
+           "     AND g.lang='zh' WHERE e.edition='ja-edition')=3093"),
+          ("中文版挂在词上的词源 ＝ 5,520（K36①）",
+           "SELECT COUNT(*)=5520 FROM etymology WHERE entry_id IS NULL AND edition LIKE 'zh-edition-%'"),
+          ("韩文版词源 ＝ 22,910（K36②，判据 `criteria.ko_etymology`）",
+           "SELECT COUNT(*)=22910 FROM etymology WHERE edition='ko-edition'"),
+          ("韩文版挂在词上的词源 ＝ 9,957（K36②）",
+           "SELECT COUNT(*)=9957 FROM etymology WHERE entry_id IS NULL AND edition='ko-edition'")],
 }
 
 FILES = {
@@ -816,6 +835,14 @@ def p12():
         bad.append(("P12", "闸「%s」欠着没跑（%s 弄脏的，%s）⇒ "
                            "python3 ko/run_gates.py"
                     % (n, v.get("tag", "?"), v.get("when", "?"))))
+    # 🔴 B14（2026-10-27）：展示层汇总闸在**当前源码**上跑绿过没有。改代码不经过写库，
+    #    上面的欠账标不脏它（`css-audit` 红过一个月、etym/layout 红过三周，都没人看见）。
+    #    按文件加载，不插 `scripts/` 进 sys.path —— 那会遮掉本门的同名模块。
+    import importlib.util
+    _sp = importlib.util.spec_from_file_location("display_stamp", paths.ROOT / "scripts" / "display_stamp.py")
+    _ds = importlib.util.module_from_spec(_sp)
+    _sp.loader.exec_module(_ds)
+    bad += [('P12', b) for b in _ds.check()]
     return bad
 
 

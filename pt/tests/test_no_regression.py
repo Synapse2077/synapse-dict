@@ -68,6 +68,7 @@ from harvest_pronunciation import has_delim, is_sampa  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "fixes"))
 from fix_stress_position import fix as stress_fix   # noqa: E402
 from fix_example_field_swap import broken, load_forms, SWAP_SRC   # noqa: E402
+from fix_ipa_xsampa import BAD as XSAMPA_BAD, ENTITY as IPA_ENTITY   # noqa: E402
 from fix_example_near_dup import same_sentence   # noqa: E402
 _SAME_SQL = "same_sentence(text)"
 from ingest_audio import region_of as audio_region    # noqa: E402
@@ -200,6 +201,11 @@ def build(con):
     #    打回两次（第一版差点毁掉 34.7 万条对的），抄一份等于把那两次教训也抄错一遍。
     add("C", "C4 🔴 重音符夹在声母与韵核之间（族H）",
         sum(1 for (v,) in con.execute("SELECT ipa FROM pronunciation") if stress_fix(v) != v))
+    # B10（2026-10-28）：C3 只认源头**自己标了** SAMPA 的；源头没标的（葡语版音位记号 `R`、
+    # fr 版拍平的 `i_s.paɾ`、HTML 实体 `&#124;`）它看不见 ⇒ 1,334 条躺了两个月。按**内容**判。
+    add("C", "C6 🔴 音标里有 IPA 不会用的 ASCII 字符或 HTML 实体（B10）",
+        sum(1 for (v,) in con.execute("SELECT ipa FROM pronunciation")
+            if v and (XSAMPA_BAD.search(v) or IPA_ENTITY.search(v))))
     add("C", "C3 🔴 X-SAMPA 冒充 IPA（`is_sampa` 的判据）",
         sum(1 for (v,) in con.execute("SELECT ipa FROM pronunciation")
             if is_sampa({"ipa": v})))
@@ -419,6 +425,11 @@ def run(trace=False):
     return 1 if red else 0
 
 
+# 🔴 变异条数**独立声明**（原来写死在 `print` 和 `return` 里两处）。加一条 `check()` 就改这里 ——
+#    pt 账的闸 2026-10-27 栽过同一个形状：写死 `== 6` 而变异是 8 条 ⇒ 全过也永远退 1。
+N_MUT = 12
+
+
 def mutate():
     """⭐ 变异验证：**一条永远通过的检查等于没检查。**
 
@@ -458,6 +469,9 @@ def mutate():
               "UPDATE pronunciation SET ipa='/'||ipa||'/' "
               "WHERE id=(SELECT MIN(id) FROM pronunciation)",
               "C2 🔴 `pronunciation.ipa` 违反「DB 存裸」约定（含定界符）")
+        check("塞回一条葡语版的 `R` 音标（B10）",
+              "UPDATE pronunciation SET ipa='ˈRɔ.dɐ' WHERE id=(SELECT MIN(id) FROM pronunciation)",
+              "C6 🔴 音标里有 IPA 不会用的 ASCII 字符或 HTML 实体（B10）")
         check("给一个词缀填上频次（tokenize 判据该拦住它）",
               "UPDATE dict SET freq_zipf=4.68 WHERE word='anti-'",
               "D1 🔴 给了频次却过不了 tokenize 判据（词缀被静默剥掉那族）")
@@ -518,8 +532,8 @@ def mutate():
         con.execute("DELETE FROM example WHERE src='mutation'")
         con.commit()
         con.close()
-    print("\n   变异 %d/11" % ok)
-    return ok == 11
+    print("\n   变异 %d/%d" % (ok, N_MUT))
+    return ok == N_MUT
 
 
 if __name__ == "__main__":

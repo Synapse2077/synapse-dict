@@ -18,6 +18,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
 import { KoreanEntryView, EXAMPLES, hashFor } from './App';
+import { etymologyBrief } from '@synapse-dict/dict-labels';
 import { KO_RELATION_LABELS, KO_ANNOTATION_KINDS, POS_LABELS,
          KO_POS_LABELS, KO_CONJ_CLASS_LABELS } from '@synapse-dict/dict-labels';
 
@@ -131,6 +132,33 @@ const CHECKS: Check[] = [
       return i < j ? null : '词源正文印在词性标签之下 —— 读者会当成义项的一部分';
     } },
   // 🔴 多词源的词：每支都要有标题。441 个词形以前一个都不印（判据只覆盖"词性相同"那一种）。
+  // 🔴🔴 2026-10-27 K36①：**读者口径** —— 库里这个词的每一条词源，第一句都得出现在页面上，
+  //    不论印在组里还是页尾「其余词源」区。词源闸（`contract-check-etym`）只数「组里那一支」，
+  //    页尾区它不看 ⇒ 没有这一条，页尾区整个消失两道闸都不会响。
+  //    四个词各钉一种情形：挂 entry（박질하다）／挂在词上（공산당、슬로벤스꼬）／
+  //    同来源被同号的组盖住、修前一直印不出来（-다 两条英文版）。
+  ...['-다', '공산당', '박질하다', '슬로벤스꼬'].map((w): Check => ({
+    word: w, name: '库里每一条词源都印出来（组里或页尾区）',
+    hit: (t, e) => {
+      const miss = (e.etymology as { edition: string; text: string }[])
+        .filter((y) => !t.includes(etymologyBrief(y.text).replace(/\s+/g, ' ').trim()));
+      if ((e.etymology as unknown[]).length < (w === '-다' ? 3 : 1)) return '变异前提不成立：库里词源行数不对';
+      return miss.length ? `${miss.length} 条没印：${miss.map((y) => y.edition).join('、')}` : null;
+    } })),
+  { word: '박질하다', name: '中文版词源的徽标不是 EN',
+    hit: (_t, _e, html) => (/lang="zh"><span class="sense-src-lang">ZH</.test(html)
+      ? null : '中文词源前面没有 ZH 徽标（以前写死成 EN）') },
+  // 🔴 2026-10-28 K36 收尾：日文版词源的原文是**日语**，库里存着（证据），而三语方针下读者一个字都不许看到。
+  //    读者口径两头都钉：中文译文印出来（带「日文版·中译」）、日语原文**一个字都不在页面上**。
+  //    `밟히다` 原来一条词源都没有（只有日文版给了）；`보내다` 的译文带古谚文声点。
+  ...['밟히다', '보내다'].map((w): Check => ({
+    word: w, name: '日文版词源印中文译文、不印日语原文',
+    hit: (t) => {
+      if (/として|からの|中期朝鮮語/.test(t)) return '页面上出现了日文版的日语原文';
+      if (!t.includes('日文版·中译')) return '没有「日文版·中译」来源标注 —— 读者会当成源头白送的中文';
+      if (!t.includes('首见于')) return '日文版的中文译文没印出来';
+      return null;
+    } })),
   { word: '-ㄹ', name: '两支不同来源的词各自印出词源号（K20 的展示面）',
     hit: (t) => (/词源 ①[\s\S]*词源 ②/.test(t)
       ? null : '两支词源没各自印号 —— 读者分不出这是两个词还是一个词的两种词性') },

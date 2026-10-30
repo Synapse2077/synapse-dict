@@ -22,8 +22,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
 import { ItalianEntryView, SpanishEntryView, FrenchEntryView, PortugueseEntryView,
          GermanEntryView, EnglishEntryView, JapaneseEntryView,
-         KoreanEntryView, VietnameseEntryView } from './App';
+         KoreanEntryView, VietnameseEntryView, RussianEntryView } from './App';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
 // 🔴 布尔开关必须与带值选项分开登记：第一版把 `--html` 也当成带值的，
@@ -68,7 +70,24 @@ const VIEWS = {
   pt: [PortugueseEntryView, 'pt-BR'], de: [GermanEntryView, 'de-DE'],
   ja: [JapaneseEntryView, 'ja-JP'], ko: [KoreanEntryView, 'ko-KR'],
   vi: [VietnameseEntryView, 'vi-VN'],
+  // 🔴 2026-10-30 加 ru —— **第六次漏登记**（ru 上线一周，`--lang ru` 一直报「认不出语种」）。
+  //    上面那五次之后 `css-audit`／`contract-check-layout` 都有了「源码里几个视图表里就几行」的自检，
+  //    **唯独本文件没有**（2026-09-26 的注释原话：「教训做进一个文件不等于做进这一类文件」）⇒ 下面补上。
+  ru: [RussianEntryView, 'ru-RU'],
 } as Record<string, [unknown, string]>;
+{
+  // 登记表与源码对账（与 css-audit.ts／contract-check-layout.tsx 同一条）。一个都认不出 ⇒ 判据坏了，不是「全登记了」。
+  const app = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'App.tsx'), 'utf8');
+  const inSource = [...app.matchAll(/export function (\w+EntryView)\b/g)].map((m) => m[1]);
+  const declared = new Set(Object.values(VIEWS).map(([f]) => (f as { name: string }).name));
+  const unlisted = inSource.filter((fn) => !declared.has(fn));
+  if (inSource.length === 0 || unlisted.length) {
+    console.error(inSource.length === 0
+      ? '🔴 判据坏了：App.tsx 里一个 `export function XxxEntryView` 都没认出来'
+      : `🔴 App.tsx 里有没登记进 VIEWS 的视图：${unlisted.join(', ')}`);
+    process.exit(1);
+  }
+}
 if (!VIEWS[lang]) {
   console.error(`🔴 认不出语种 ${JSON.stringify(lang)}。登记了的：`
     + `${Object.keys(VIEWS).join(' ')}\n`

@@ -123,8 +123,7 @@ def main():
     rows = con.execute(PAIR).fetchall()
 
     # ── 全量回核（非抽样）：文本比对，串起两轮已知修复 ──
-    import opencc
-    cv = opencc.OpenCC("t2s").convert
+    from fix_traditional_to_simplified import opencc_t2s, safe_t2s   # noqa: E402
     stat = collections.Counter()
     resid = []
     pairs = []
@@ -134,7 +133,9 @@ def main():
             stat["该义项没有这个语言的 definition"] += 1
         elif gloss_text == src_text:
             stat["文本完全一致"] += 1
-        elif tw_apply(t2s_convert(src_text, cv)[0]) == gloss_text:
+        # 🔴 B25（2026-10-29）：09-16 是整段 opencc，被它改错的 152 行已按安全版重算 ⇒ 两种都认
+        elif gloss_text in (tw_apply(t2s_convert(src_text, opencc_t2s)[0]),
+                            tw_apply(t2s_convert(src_text, safe_t2s)[0])):
             stat["文本不同，由两轮已知修复完全解释（繁简→台湾用词）"] += 1
         else:
             stat["🔴 文本对不上，且解释不了"] += 1

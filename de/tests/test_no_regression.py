@@ -85,6 +85,8 @@ from harvest_audio import FOREIGN                         # noqa: E402
 from harvest_relations import KIND                        # noqa: E402
 from recover_alt_of import REL_KIND                       # noqa: E402
 from infl_compose import klassen_run_together             # noqa: E402
+from fix_ipa_xsampa import BAD as XSAMPA_BAD, ENTITY as IPA_ENTITY   # noqa: E402
+from fix_traditional_to_simplified import t2s as safe_t2s, QUOTE as ZH_QUOTE, ext_targets  # noqa: E402
 from normalize_region import DOMAIN as REGION_DOMAIN      # noqa: E402
 from drop_article_forms import bad_rows as _article_forms # noqa: E402
 from drop_bad_comparatives import bad_rows as _bad_comparatives  # noqa: E402
@@ -126,6 +128,11 @@ FAKE_INFL = ({"variant"}, {"alternative"}, {"abbreviation"},
 # 允许的非零基线：`断言名 → (期望值, 理由)`。**每一条都要写清为什么**，
 # 否则就是掩盖回归的开关。锁的是**数字**：超了红、低了要求收紧。
 ACCEPT = {
+    "A8 中文里有 OpenCC 转出来的扩展平面字形（B25）": (
+        48,
+        "2026-10-29 B25 改回 6 条之后剩的 48 条，**都证明不了是转换造成的**：`unknown` 源 34 条（`𬭛`/`𬬻`/`𫟼` "
+        "这类化学元素名，规范简体字本来就在扩展平面）＋ 模型自己写的 14 条（答案文件里原样就是 `𫛭`，"
+        "`de/examples/example_zh.jsonl` 查过）。多了 ⇒ 有人又整段 t2s 了，或模型又写了生僻字形，逐条看"),
     "A3 义项没有中文": (
         416,   # 🔴 2026-09-05 从 436 收紧到 416：收尾单 C38 删掉 27 条「释义是解析残渣」
                #    的义项，其中 20 条本来就没有中文。**是闸自己报「⬇ 该收紧」我才来改的**，
@@ -335,6 +342,16 @@ def build(con, trace=None, only=None):
         + (sum(1 for (t,) in con.execute("SELECT text FROM collocation_gloss WHERE lang='zh'")
                if not CJK.search(t or "")) if _has(con, "collocation_gloss") else 0))
     add("A", "A3 义项没有中文", q1(Q_SENSE_NO_ZH))
+    # B25（2026-10-29）：繁简。判据 import `fix_traditional_to_simplified`（安全版 t2s），不在这儿重写。
+    #    09-18 两次**整段** opencc 把 6 条转成扩展平面豆腐块（`宽翅鵟→宽翅𫛭`），已从原文改回；
+    #    例句译文里模型写出的繁体 75 条（`兩倍`、`塞巴爾迪納群島`）同日转掉 —— 那张表此前没人查过。
+    _zh = [t for tb in ("sense_gloss", "example_gloss")
+           for (t,) in con.execute("SELECT text FROM %s WHERE lang='zh'" % tb) if t]
+    add("A", "A7 中文里还有可转的繁体（安全判据，B25）",
+        sum(1 for t in _zh if not ZH_QUOTE.search(t) and safe_t2s(t) != t))
+    _ext = ext_targets()
+    add("A", "A8 中文里有 OpenCC 转出来的扩展平面字形（B25）",
+        sum(1 for t in _zh if any(c in _ext for c in t)))
     add("A", "A4 sense_gloss 指向不存在的义项",
         q1("SELECT COUNT(*) FROM sense_gloss g LEFT JOIN sense s ON s.id=g.sense_id "
            "WHERE s.id IS NULL"))
@@ -424,6 +441,11 @@ def build(con, trace=None, only=None):
            "GROUP BY 1,2,3,4 HAVING COUNT(*)>1)"))
     # 🔴 分母是 `dict.ipa` ∪ `pronunciation` —— 老扁平列里的音标也算数（C21 就是这么量的）。
     add("D", "D6 有义项的词形没有读音（读者口径）", q1(Q_WORD_NO_IPA))
+    # B10（2026-10-28）：X-SAMPA 冒充 IPA（`IntEn"tsioːn`、`melaNko"liː`）7 行已删。
+    #    两处都查：`pronunciation` 与老扁平列 `dict.ipa`（D6 的分母里有它，读者口径也算它）。
+    add("D", "D7 音标里有 IPA 不会用的 ASCII 字符或 HTML 实体（B10）",
+        sum(1 for (x,) in con.execute("SELECT ipa FROM pronunciation UNION ALL SELECT ipa FROM dict")
+            if x and (XSAMPA_BAD.search(x) or IPA_ENTITY.search(x))))
 
     # ── E 组：例句层（阶段 5a / 5b）────────────────────────────
     # 🔴 判据的后半句不能丢：源头给了粗体位置就认，因为词常以**变形**出现
@@ -711,6 +733,15 @@ def mutate():
               "B2 变形悬空原形（base_id 为空）")
         check("M4", "UPDATE pronunciation SET ipa='/'||ipa||'/' WHERE rowid IN "
                     "(SELECT rowid FROM pronunciation LIMIT 25)", "D1 音标首尾还带定界符")
+        check("M-B25a", "UPDATE sense_gloss SET text='宽翅𫛭' WHERE rowid=(SELECT MIN(rowid) FROM sense_gloss "
+                         "WHERE lang='zh' AND src='model:def')",
+              "A8 中文里有 OpenCC 转出来的扩展平面字形（B25）")
+        check("M-B25b", "UPDATE example_gloss SET text='污染程度是两倍'||'。兩倍' WHERE rowid=(SELECT MIN(rowid) "
+                         "FROM example_gloss WHERE lang='zh')",
+              "A7 中文里还有可转的繁体（安全判据，B25）")
+        check("M-B10", "UPDATE pronunciation SET ipa='IntEn\"tsioːn' WHERE rowid IN "
+                       "(SELECT rowid FROM pronunciation LIMIT 1)",
+              "D7 音标里有 IPA 不会用的 ASCII 字符或 HTML 实体（B10）")
         check("M5", "UPDATE pronunciation SET is_primary=1 WHERE rowid IN "
                     "(SELECT rowid FROM pronunciation WHERE is_primary=0 LIMIT 90)",
               "D4 同（词形,词性）多个 is_primary")

@@ -563,6 +563,14 @@ def v9():
     for n in sorted(cur):
         bad.append(("V9", "闸「%s」欠着没跑（%s 弄脏的）⇒ `python3 vi/run_gates.py`"
                     % (n, cur[n].get("tag", "?"))))
+    # 🔴 B14（2026-10-27）：展示层汇总闸在**当前源码**上跑绿过没有。改代码不经过写库，
+    #    上面的欠账标不脏它（`css-audit` 红过一个月、etym/layout 红过三周，都没人看见）。
+    #    按文件加载，不插 `scripts/` 进 sys.path —— 那会遮掉本门的同名模块。
+    import importlib.util
+    _sp = importlib.util.spec_from_file_location("display_stamp", ROOT / "scripts" / "display_stamp.py")
+    _ds = importlib.util.module_from_spec(_sp)
+    _sp.loader.exec_module(_ds)
+    bad += [('V9', b) for b in _ds.check()]
     return bad
 
 
