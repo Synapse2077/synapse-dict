@@ -1,0 +1,189 @@
+{
+ "note": "B29 模型写的中文里的繁体：逐行裁决（2026-10-31）。没列进来的行＝有意保留（汉字原形／喃字原文／讲字本身／人名…）。orig 与库里当前原文逐字相同才生效。",
+ "rows": [
+  {
+   "table": "example_gloss",
+   "rowid": 25018,
+   "action": "convert",
+   "orig": "许多地方为了取柴和發展农业而砍伐森林。",
+   "new": "许多地方为了取柴和发展农业而砍伐森林。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70705,
+   "action": "convert",
+   "orig": "在國際社會上有威信",
+   "new": "在国际社会上有威信",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70706,
+   "action": "convert",
+   "orig": "固有詞：dài",
+   "new": "固有词：dài",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70707,
+   "action": "convert",
+   "orig": "長七尺，寬三尺。",
+   "new": "长七尺，宽三尺。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70708,
+   "action": "convert",
+   "orig": "派生詞：sở trường (所長) [長項]",
+   "new": "派生词：sở trường (所長) [长项]",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70709,
+   "action": "convert",
+   "orig": "固有詞：lâu",
+   "new": "固有词：lâu",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70710,
+   "action": "convert",
+   "orig": "我等了五年之久，但最終他還是背叛了我。",
+   "new": "我等了五年之久，但最终他还是背叛了我。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70711,
+   "action": "convert",
+   "orig": "固有詞：ruột",
+   "new": "固有词：ruột",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70712,
+   "action": "convert",
+   "orig": "派生詞：manh trường (盲腸)，can trường (肝腸)，đoạn trường (斷腸)",
+   "new": "派生词：manh trường (盲腸)，can trường (肝腸)，đoạn trường (斷腸)",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70713,
+   "action": "convert",
+   "orig": "候選人",
+   "new": "候选人",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 70714,
+   "action": "convert",
+   "orig": "縮寫：v. v.",
+   "new": "缩写：v. v.",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 111219,
+   "action": "convert",
+   "orig": "指老一輩的人",
+   "new": "指老一辈的人",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 124795,
+   "action": "convert",
+   "orig": "封建时代用于称呼都吏、提吏、书吏等衙门下級官员的词。",
+   "new": "封建时代用于称呼都吏、提吏、书吏等衙门下级官员的词。",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 135231,
+   "action": "convert",
+   "orig": "宇宙中按一定轨道运行的小块矿物质，被地球大气层吸引时产生通常称为流星的現象。",
+   "new": "宇宙中按一定轨道运行的小块矿物质，被地球大气层吸引时产生通常称为流星的现象。",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 138760,
+   "action": "convert",
+   "orig": "用糯米飯加酒曲发酵制成的食品",
+   "new": "用糯米饭加酒曲发酵制成的食品",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 141587,
+   "action": "convert",
+   "orig": "一种源自中古标准德语的語言，用希伯来字母书写，主要为生长于德国的犹太人使用。",
+   "new": "一种源自中古标准德语的语言，用希伯来字母书写，主要为生长于德国的犹太人使用。",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 142498,
+   "action": "convert",
+   "orig": "过分抬高人的意志作用的態度，认为只要有意志和决心就能不顾客观条件做到。",
+   "new": "过分抬高人的意志作用的态度，认为只要有意志和决心就能不顾客观条件做到。",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 146609,
+   "action": "convert",
+   "orig": "进入一个新时期所需的知識、技能、习惯等",
+   "new": "进入一个新时期所需的知识、技能、习惯等",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 158289,
+   "action": "convert",
+   "orig": "佛得角（西非的群岛和國家）",
+   "new": "佛得角（西非的群岛和国家）",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 177120,
+   "action": "convert",
+   "orig": "一种牛拉的無輪车，雪橇",
+   "new": "一种牛拉的无轮车，雪橇",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 189949,
+   "action": "convert",
+   "orig": "鎶",
+   "new": "鿔",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 189996,
+   "action": "convert",
+   "orig": "无产阶级专政（以争取实现共产主义社会为斗争特征的社會政治权力）",
+   "new": "无产阶级专政（以争取实现共产主义社会为斗争特征的社会政治权力）",
+   "why": "释义里的繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 16347,
+   "action": "edit",
+   "orig": "南國方言俗語備錄（Records of the Southern nation's local proverbs and common sayings），第13b页\n𧐖𥐇麻吱䖳𨱽\n船班𠶦𠰘吱𧕚嚦㕨\n黄鳝短却嫌泥鳅长，\n比目鱼嘴歪却嫌蚬嘴斜。",
+   "new": "南国方言俗语备录（Records of the Southern nation's local proverbs and common sayings），第13b页\n𧐖𥐇麻吱䖳𨱽\n船班𠶦𠰘吱𧕚嚦㕨\n黄鳝短却嫌泥鳅长，\n比目鱼嘴歪却嫌蚬嘴斜。",
+   "why": "只转书名；喃字原文一字不动"
+  }
+ ]
+}

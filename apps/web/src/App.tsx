@@ -2106,6 +2106,29 @@ function EtymBlock({ groups, i, order, texts, editions }: {
   );
 }
 
+/**
+ * B4（2026-11-01）：**配不上任何义项分组的词源正文，单独印一块。**
+ * 页面原来只在义项分组下面印词源（`EtymBlock`／ja 每组一段），按「版:词源号」配对 ——
+ * 而源头有正文、对应词条却**没有义项**的那批（ja 825 页整页没有义项、it 的构词说明挂在变形页上）
+ * 配不上任何分组，**数据在库里、一个字都到不了读者**。这里把 `etymologyTexts` 里没被分组用掉的键补印出来。
+ * 判据交给 `contract-check-etym.tsx`：这个词的每段词源正文，页面上都必须找得到。
+ */
+function OrphanEtym({ used, texts, editions }: {
+  used: (string | null | undefined)[]; texts?: Record<string, string>; editions?: string[];
+}) {
+  const seen = new Set(used.filter((k): k is string => !!k));
+  const keys = Object.keys(texts ?? {}).filter((k) => !seen.has(k)).sort();
+  if (keys.length === 0) return null;
+  return (
+    <section className="entry-section etym-orphan">
+      <h3>词源</h3>
+      {keys.map((k) => (
+        <EtymologyNote key={k} etymKey={k} texts={texts} editions={editions} quietIfNone />
+      ))}
+    </section>
+  );
+}
+
 function etymHeadOf(
   groups: { etym: string | null }[], i: number, order: Map<string, number>,
 ): string | null {
@@ -2413,6 +2436,8 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
           ))}
         </section>
       )}
+      <OrphanEtym used={senseGroups.map((g) => g.etym)} texts={entry.etymologyTexts}
+          editions={entry.etymologyEditions} />
 
       {/* 🔴🔴 **六成的词只有这个**（`legacy_gloss`，2,419,312 个词形）。
           `senses` 空而这里非空是**正常形态**，不是缺陷 —— 不显示它就是六成的空白页。
@@ -2780,6 +2805,8 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
           ))}
         </section>
       )}
+      <OrphanEtym used={esGroups.map((g) => g.etym)} texts={entry.etymologyTexts}
+          editions={entry.etymologyEditions} />
 
       {/* 同形词：拼写只差大小写的另一个词条，同页并列。
           放在本词条释义之后、其余区块之前 —— 它是"另一个词"，不是本词的补充。 */}
@@ -3291,6 +3318,8 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }
           ))}
         </section>
       )}
+      <OrphanEtym used={itGroups.map((g) => g.etym)} texts={entry.etymologyTexts}
+          editions={entry.etymologyEditions} />
 
       {/* 变位形式：指回原形；原形连带助动词/性别一起显示 */}
       {entry.baseForms.length > 0 && (
@@ -3767,6 +3796,8 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           ))}
         </section>
       )}
+      <OrphanEtym used={frGroups.map((g) => g.etym)} texts={entry.etymologyTexts}
+          editions={entry.etymologyEditions} />
 
       {/* 变位形式：指回原形；原形连带助动词/性别一起显示 */}
       {entry.baseForms.length > 0 && (
@@ -4145,6 +4176,8 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
           ))}
         </section>
       )}
+      <OrphanEtym used={ptGroups.map((g) => g.etym)} texts={entry.etymologyTexts}
+          editions={entry.etymologyEditions} />
 
       {/* 变形区块：指回原形（含人称不定式等葡语专属变位）；原形连带性别显示。
           🔴 标题不写死 —— `gamão → gamões`（名词复数）和 `acérrimo → acérrima`（形容词阴性）
@@ -4568,6 +4601,8 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           ))}
         </section>
       )}
+      <OrphanEtym used={deGroups.map((g) => g.etym)} texts={entry.etymologyTexts}
+          editions={entry.etymologyEditions} />
 
       {/* 🔴🔴 **2026-09-10：只印真的不一样的读音。**用户看 `schön` 页看出来的：
           读音区印着「/ʃøːn/ 形容词」「/ʃøːn/ **verb**」—— 同一个音印两遍，
@@ -5374,6 +5409,8 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
           前六门的版面语言是：释义 / 例句 / 语义关系 / 构词 / 变位形式，
           每一区一个 `<h3>`。日语照这个骨架对齐。 */}
       {senseSections}
+      <OrphanEtym used={groups.map((g) => g.senses[0]?.etymKey ?? null)}
+          texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
 
       {entryLevel.length > 0 && (
         <section className="entry-section">

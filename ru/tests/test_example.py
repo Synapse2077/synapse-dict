@@ -234,14 +234,13 @@ def checks(con):
     #   后一半问 `zh_pub.plan_model_text` 本身（同步脚本与闸同一个判据），它要改的行数必须是 0
     from pipeline import zh_pub
     bad13 = collections.Counter()
-    for text, src, pub, lang in con.execute("SELECT text, src, text_pub, lang FROM example_gloss "
-                                            "WHERE lang='zh' OR text_pub IS NOT NULL"):
-        if lang != "zh":
-            bad13["非 zh 行有 text_pub"] += 1
-            continue
-        z = criteria.zh_simp(text, src)
-        if pub != (z if z != text else None):
-            bad13["text_pub 与判据不一致"] += 1
+    bad13["非 zh 行有 text_pub"] = q("SELECT COUNT(*) FROM example_gloss WHERE lang<>'zh' AND text_pub IS NOT NULL")
+    # 🔴 2026-10-30（B30）：原来这里自己重算 `zh_simp(text)` —— `zh_pub` 学会了 B30 的改译而这里没学，
+    #    2,685 行报「与判据不一致」。⇒ 前一半也问同步脚本本身：它还要改几行（与后一半同一个写法）
+    plan, _st = zh_pub.plan_text_pub(con)
+    if plan["example_gloss"]:
+        bad13["text_pub 与判据不一致"] = len(plan["example_gloss"])
+    bad13 = collections.Counter({k: v for k, v in bad13.items() if v})
     up, st = zh_pub.plan_model_text(con)
     if up:
         bad13["模型译文仍是整段 t2s 的产物"] = len(up)
@@ -348,6 +347,13 @@ def _mutations():
         ("X13", "R29：一条模型译文退回整段 t2s 的产物（`覆上→复上`）", set(),
          ["UPDATE example_gloss SET text=replace(text,'覆上','复上') WHERE id=(SELECT MIN(id) FROM example_gloss "
           "WHERE src='model:deepseek-v4-flash' AND text LIKE '%覆上%')"]),
+        # 前一半改成问 `zh_pub.plan_text_pub` 之后（B30）：清空一条改译的出版正文 ⇒ 读者看回「租用」，必须红
+        ("X13", "B30：一条中文版错译的改译被清空（`давать напрокат` 回到「租用」）", set(),
+         ["UPDATE example_gloss SET text_pub=NULL WHERE id=43531"]),
+        # 反方向：一条普通繁体译文的简体出版正文被清空 ⇒ 原来那一半判据逮得到的，改写后也必须逮得到
+        ("X13", "R29：一条繁体译文的简体出版正文被清空", set(),
+         ["UPDATE example_gloss SET text_pub=NULL WHERE id=(SELECT MIN(id) FROM example_gloss "
+          "WHERE src='zh-edition-trad' AND text_pub IS NOT NULL AND id<>43531)"]),
         ("X12", "造一行 src_ref 形状不对的例句", set(),
          ["INSERT INTO example(id,word_id,entry_id,sense_id,text,text_pub,ref,hidden,hidden_why,src,src_ref) "
           # 合成行标成「同一格里重复」藏起来 ⇒ 只有 X12 该红（不藏的话 X8 也红，那是另一件事）

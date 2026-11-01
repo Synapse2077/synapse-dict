@@ -16,8 +16,12 @@
 ═══ 有意偏宽 ═══
 SOURCES 取的是 `apps/web/src` ／ `packages/*/src` ／ 闸自己的脚本整片，不按每道闸细分 ——
 宽的代价是改了不相干的文件也要多跑一次（两三分钟）；窄的代价是漏跑（`css-audit` 红了一个月）。
-⚠️ **它看不见库的变化**：跨门闸（B17 冗余关系、B12 录音重复）读十门的库，而写库那一侧
-   只有 ko/vi/ru 有欠账机制。那是另一笔账，别以为这里管了。
+═══ 库也进台账（B14②，2026-11-01）═══
+汇总闸里一大半读库（各门契约闸按库渲染、罕用字闸扫库、追踪清单闸对库）——原来台账只记源码，
+**写库不会让它过期**。现在十门库的主文件记成 `db:<门>` ＝「字节数:修改时间」，与源码同一套比法。
+不算 sha：库 0.2–5 GB，每次写库都整份读一遍不值；读库不会改主文件的修改时间（实测汇总闸跑一整轮，
+十个主文件的 mtime 一个没动；`-shm` 会动，所以不记它）。
+写库那一侧：十门 `dbtool.session` 写完调 `notice()` —— **只报不拦**（与账的闸同一个理由）。
 
 用法：
     python3 scripts/display_stamp.py            # 打当前状态，过期退出码 1
@@ -41,13 +45,37 @@ SOURCES = [
 ]
 SOURCE_FILES = ["package.json", "scripts/run_display_gates.py", "scripts/display_stamp.py", "scripts/redundant_related.py",
                 "scripts/test_redundant_related_gate.py", "scripts/test_audio_dup_gate.py",
-                "scripts/commons_filename.py", "scripts/test_first_build_gate.py", "scripts/consult.py", "scripts/test_backlog_gate.py", "scripts/test_backup_policy_gate.py", "scripts/query_plans_probe.py", "scripts/analyze_db.py",
+                "scripts/commons_filename.py", "scripts/test_first_build_gate.py", "scripts/consult.py", "scripts/zh_t2s.py", "scripts/test_track_gate.py", "scripts/rare_han_font.py", "scripts/schema_drift.py", "scripts/small_undo.py", "scripts/ingest_etymology.py", "scripts/test_small_undo.py", "scripts/test_schema_drift_gate.py", "apps/web/public/fonts/rare-han/manifest.json", "scripts/test_backlog_gate.py", "scripts/mutation_stamp.py", "scripts/batch_audit.py", "scripts/intake_layers.py",
+                *["%s/pipeline/ds_batch.py" % l for l in ("it", "ja", "ko", "pt", "ru", "vi")], "scripts/test_backup_policy_gate.py", "scripts/query_plans_probe.py", "scripts/analyze_db.py",
+                # B7：追踪清单住在各门 dbtool 里 —— 改了清单，`gate:track` 必须重跑
+                *["%s/dbtool.py" % l for l in ("en", "es", "it", "fr", "pt", "de", "ja", "ko", "vi", "ru")],
+                # B24：建表声明住在各门建表脚本里 —— 改了声明，`gate:schema-drift` 必须重跑
+                *["%s/pipeline/build_v3_schema.py" % l for l in ("en", "fr", "pt", "de", "ja", "ko", "vi", "ru")],
+                "it/pipeline/build_v2_schema.py",
                 "docs/BACKLOG.md", "docs/JA_PLAN.md", "docs/KO_PLAN.md", "docs/VI_PLAN.md", "docs/RU_PLAN.md",
                 "docs/DE_PLAN.md", "docs/PT_PLAN.md", "docs/FR_PLAN.md", "docs/EN_PLAN.md"]
 
 
+DB_LANGS = ("en", "es", "it", "fr", "pt", "de", "ja", "ko", "vi", "ru")
+
+
+def db_state():
+    """→ {"db:<门>": "字节数:mtime_ns"}。库还没建的门不出现（第一次建好 ⇒ 记成「新增」⇒ 欠一次）。"""
+    import importlib.util
+    out = {}
+    for l in DB_LANGS:
+        spec = importlib.util.spec_from_file_location("_paths_" + l, ROOT / l / "paths.py")
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        db = Path(m.DB)
+        if db.exists():
+            st = db.stat()
+            out["db:" + l] = "%d:%d" % (st.st_size, st.st_mtime_ns)
+    return out
+
+
 def current():
-    """→ {相对路径: sha16}。"""
+    """→ {相对路径: sha16} ∪ {"db:<门>": 字节数:mtime}。"""
     paths = set()
     for d, pats in SOURCES:
         for pat in pats:
@@ -58,8 +86,10 @@ def current():
     paths |= set(ROOT.glob("*/tests/test_plan_ledger.py"))   # 八门账的闸（也在汇总里跑）
     paths |= {ROOT / "ko/tests/test_dbtool_gate.py", ROOT / "ko/gates.py"}
     paths |= set(ROOT.glob("*/tests/test_prune_backups.py")) | {ROOT / "es/tests/test_backup_prune.py"}   # gate:backup-policy 跑的
-    return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()[:16]
-            for p in sorted(paths)}
+    files = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()[:16]
+             for p in sorted(paths)}
+    files.update(db_state())
+    return files
 
 
 def load():
@@ -97,8 +127,19 @@ def reasons(stamp, now):
         if xs:
             parts.append("%s %d 个（%s%s）" % (tag, len(xs), "、".join(xs[:4]),
                                              " …" if len(xs) > 4 else ""))
-    return ["展示层汇总闸跑绿之后源码变了：%s（上次 %s）%s"
+    return ["展示层汇总闸跑绿之后源码或库变了：%s（上次 %s）%s"
             % ("；".join(parts), stamp.get("when", "?"), fix)]
+
+
+def notice():
+    """十门 `dbtool.session` 写完调。**只报不拦**：台账读不动也只说一句，不许把写库后的收尾打断。"""
+    try:
+        bad = check()
+    except BaseException as e:            # load() 读不动台账时是 SystemExit
+        print("⚠️ 展示层台账查不了（%s）—— 这本身要查" % e)
+        return
+    for b in bad:
+        print("■ 🔴 " + b)
 
 
 def check():
@@ -112,6 +153,10 @@ if __name__ == "__main__":
     now = current()
     if "--mutate" in sys.argv:
         k = next(iter(now))
+        dbk = next((x for x in now if x.startswith("db:")), None)
+        if dbk is None:                   # 台账里一门库都没有 ⇒ 写库永远不会让它过期
+            print("  🔴 台账里没有任何 `db:` 条目")
+            sys.exit(1)
         green = {"ok": True, "files": dict(now), "when": "t"}
         cases = [
             ("从没跑过", None, now, True),
@@ -119,6 +164,7 @@ if __name__ == "__main__":
             ("改了一个文件", green, dict(now, **{k: "0" * 16}), True),
             ("新增一个文件", green, dict(now, **{"apps/web/src/__new__.tsx": "x"}), True),
             ("删掉一个文件", green, {x: v for x, v in now.items() if x != k}, True),
+            ("库被写过", green, dict(now, **{dbk: "0:0"}), True),
             ("（反控）没变", green, now, False),
         ]
         dead = 0

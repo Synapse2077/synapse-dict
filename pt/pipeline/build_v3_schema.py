@@ -250,6 +250,18 @@ ZH_SRC = "unknown"
 EN_SRC = "en-edition"       # `definition` 由 build.py 从 kaikki 英文版切片建，可证
 
 
+# 🔴 B24（2026-10-31）：**后来的脚本 `ALTER TABLE … ADD COLUMN` 加的列**，在这里登记 ——
+#    上面的 `CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，它们从来不会出现在上面的语句里，
+#    而跨门闸 `scripts/test_schema_drift_gate.py` 拿「上面的建表语句 ∪ 这里」与库里的 `sqlite_master` 逐表对账。
+#    ⚠️ 只是登记（声明库里该有什么），本脚本建库时**不**加它们 —— 加列的是右边注释里那个脚本。
+ADD_COLUMNS = [
+    ('collocation', 'text_norm', 'TEXT'),                        # scripts/build_collocation_search.py
+    ('sense', 'entry_id', 'INTEGER'),                            # pt/pipeline/build_entry_layer.py
+    ('sense', 'hidden', 'INTEGER NOT NULL DEFAULT 0'),           # pt/pipeline/build_entry_layer.py
+    ('sense_relation', 'hidden', 'INTEGER NOT NULL DEFAULT 0'),  # pt/fixes/hide_dup_word_level_relations.py
+]
+
+
 def lines(s):
     return [] if s is None or s == "" else s.split("\n")
 
@@ -258,7 +270,12 @@ def split_colloc(ln):
     """→ (葡语, 中文|None)。判据 = **第一个汉字之前的最后一个空格**（`SCHEMA` §7.1）。
     不是"第一个汉字处"——那样 `pH 值` / `do majeur C大调` 这类会切错，
     而跨语言的那个符号本来就属于中文那半。es 上旧判据 99.48%，fr 上 13,980/13,984；
-    pt 的实际切分率由试算时打印，**不预设**。"""
+    pt 的实际切分率由试算时打印，**不预设**。
+    ⚠️ **适用边界（B2，2026-10-31）**：只适用于**本语言文字里没有汉字**的语言（de/pt/fr/it/es）。
+       日语（汉字）、韩语（汉字表记）、越南语（喃字/汉字）的外语那一半里本身就可能有汉字 ⇒
+       「第一个汉字」落在外语一侧，切点静默错位。**空格不是问题**（越南语 `sinh viên 学生` 照样切对）。
+       那四门的搭配层现在都是空的且有锁（ko UNCLAIMED／ja A11／vi·ru 新建表会被 `gate:track` 判红）。
+    """
     m = CJK.search(ln)
     if not m:
         return ln, None

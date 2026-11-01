@@ -75,9 +75,9 @@ def check_brief():
     try:
         with dbtool.session("ingest-edition", expect={"__rows__": 150000}):
             pass
-        want("M2", "插 15 万行却不声明 invalidates", False, "**没拦住**")
+        want("M2", "插 15 万行却不声明 rerun（B3：门禁从 invalidates 移到 rerun=）", False, "**没拦住**")
     except SystemExit as e:
-        want("M2", "插 15 万行却不声明 invalidates", "invalidates" in str(e), str(e)[:60])
+        want("M2", "插 15 万行却不声明 rerun（B3：门禁从 invalidates 移到 rerun=）", "rerun" in str(e), str(e)[:60])
 
     # ── M3：`has_hangul` 按**内容**判，不按整块码位判 ──
     #    ja 在这条上栽过（`・` 落在片假名区 ⇒ 纯汉字日语被判成"带假名"）。
@@ -184,6 +184,8 @@ def check_brief():
         _real_ts = _G.SERVICE_TS
         _real_unclaimed = dict(_G.UNCLAIMED)
         _d = Path(_tmp.mkdtemp())
+        import atexit as _ax, shutil as _sh
+        _ax.register(_sh.rmtree, _d, True)   # 2026-11-01：用完即删
         _G.PENDING = _d / "pending.json"
         try:
             # ── M8a/M8b：依赖算得对不对（**方向两边都验**）──

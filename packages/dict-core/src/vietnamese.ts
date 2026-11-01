@@ -210,7 +210,8 @@ export class VietnameseDictService {
       // 🔴 pos 取 `entry.pos`（见文件头②）。
       search: this.db.prepare(`
         SELECT d.id, d.word,
-               (SELECT g.text FROM sense s JOIN sense_gloss g ON g.sense_id = s.id
+               -- B29：中文读出版正文 text_pub（简体；text 是源头原文，中文版白送的是繁体）
+               (SELECT g.text_pub FROM sense s JOIN sense_gloss g ON g.sense_id = s.id
                  WHERE s.word_id = d.id AND s.hidden = 0 AND g.lang = 'zh'
                  -- 🔴 W27：原先是 ORDER BY s.rank, s.id —— rank 恒 0，去掉它（见类型声明）
                  -- 🔴🔴 **这一行里不许出现反引号**：这是 SQL 模板串，反引号会当场截断字符串。
@@ -274,13 +275,16 @@ export class VietnameseDictService {
         --    ⇒ 留 NULL，让展示层分得开（[[it-display-layer-stage8]]：
         --      兜底越体面，缺陷越难发现）。
         SELECT s.id, CAST(e.etym_no AS INTEGER) AS etymNo, e.pos AS pos,
-               (SELECT text FROM sense_gloss WHERE sense_id = s.id AND lang='zh'
+               -- 2026-11-01：en/vi 也读出版正文 text_pub（去了 wiki 标记残渣：[[w:…|…]]、半截 {{place、行首 #；
+               --   text 是源头原文、外锚闸逐字比，不能改）。三种语言 text_pub 全有值（回归闸 P37），不写 COALESCE。
+               --   ⚠️ 这段在 SQL 模板串里：注释里不许出现反引号（2026-11-01 又截断过一次）
+               (SELECT text_pub FROM sense_gloss WHERE sense_id = s.id AND lang='zh'
                  ORDER BY id LIMIT 1) AS zh,
                (SELECT src  FROM sense_gloss WHERE sense_id = s.id AND lang='zh'
                  ORDER BY id LIMIT 1) AS zhSrc,
-               (SELECT text FROM sense_gloss WHERE sense_id = s.id AND lang='en'
+               (SELECT text_pub FROM sense_gloss WHERE sense_id = s.id AND lang='en'
                  ORDER BY id LIMIT 1) AS en,
-               (SELECT text FROM sense_gloss WHERE sense_id = s.id AND lang='vi'
+               (SELECT text_pub FROM sense_gloss WHERE sense_id = s.id AND lang='vi'
                  ORDER BY id LIMIT 1) AS vi
         FROM sense s LEFT JOIN entry e ON e.id = s.entry_id
         WHERE s.word_id = ? AND s.hidden = 0
@@ -294,7 +298,7 @@ export class VietnameseDictService {
       // 🔴 链接走 `target_id`（建库时解析好的），不在这里拿 target 去比 word_norm。
       relations: this.db.prepare(`
         SELECT r.sense_id AS senseId, r.kind, r.target, r.target_id AS targetId,
-               (SELECT g.text FROM sense s2 JOIN sense_gloss g ON g.sense_id = s2.id
+               (SELECT g.text_pub FROM sense s2 JOIN sense_gloss g ON g.sense_id = s2.id
                  WHERE s2.word_id = r.target_id AND g.lang='zh' AND s2.hidden = 0
                  -- 🔴 W27：原先是 ORDER BY s2.rank —— **恒 0 ＝ 根本没有 ORDER BY**，
                  --    取的是随便一条。改成 s2.id（确定的、可复现的那一条）。
@@ -322,7 +326,7 @@ export class VietnameseDictService {
       //    回归闸 **P17** 查「可出版行的 `text_pub` 全部非空」，忘填就判红。
       examples: this.db.prepare(`
         SELECT x.sense_id AS senseId, x.text_pub AS text, x.ref,
-               (SELECT text FROM example_gloss WHERE example_id = x.id AND lang='zh') AS zh,
+               (SELECT text_pub FROM example_gloss WHERE example_id = x.id AND lang='zh') AS zh,
                (SELECT text FROM example_gloss WHERE example_id = x.id AND lang='en') AS en
         FROM example x
         WHERE x.word_id = ? AND x.hidden = 0
@@ -330,7 +334,8 @@ export class VietnameseDictService {
       `),
 
       etymologies: this.db.prepare(`
-        SELECT CAST(etym_no AS INTEGER) AS etymNo, text, src FROM etymology
+        -- B29：词源正文读出版正文（全部行有值；中文版的框架文字转简体、引的汉字原形不动）
+        SELECT CAST(etym_no AS INTEGER) AS etymNo, text_pub AS text, src FROM etymology
         WHERE word_id = ? ORDER BY CAST(etym_no AS INTEGER), id
       `),
 
@@ -349,7 +354,9 @@ export class VietnameseDictService {
       // 🔴 `LEFT JOIN` 不是 `JOIN`：目标不在 `dict` 里时**仍然要印这一行**
       //    （照原文印成纯文本），只是不可点 —— 丢掉它等于把源头说过的话吞掉。
       pointers: this.db.prepare(`
-        SELECT s.lang, s.text, s.src, s.pointer_target AS target, d.id AS targetId
+        -- B29：中文行印出版正文（简体）；按语种分支，不是缺值兜底 —— zh 行 text_pub 全有值
+        SELECT s.lang, CASE WHEN s.lang = 'zh' THEN s.text_pub ELSE s.text END AS text,
+               s.src, s.pointer_target AS target, d.id AS targetId
         FROM sense_src s
         LEFT JOIN dict d ON d.word = s.pointer_target
         WHERE s.word_id = ? AND s.sense_id IS NULL AND s.ptr_class = 'pointer'

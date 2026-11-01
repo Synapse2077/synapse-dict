@@ -1,0 +1,469 @@
+{
+ "note": "B29 模型写的中文里的繁体：逐行裁决（2026-10-31）。没列进来的行＝有意保留（汉字原形／喃字原文／讲字本身／人名…）。orig 与库里当前原文逐字相同才生效。 另含 5 行句子重复（模型把同一句写了两遍）。",
+ "rows": [
+  {
+   "table": "example_gloss",
+   "rowid": 16785,
+   "action": "convert",
+   "orig": "“等着。今天我就送你去香港。”\n仙女的雙颊立刻泛起了红晕。",
+   "new": "“等着。今天我就送你去香港。”\n仙女的双颊立刻泛起了红晕。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 17311,
+   "action": "convert",
+   "orig": "– 请问有丁字裤吗？\n– 没有性感的內裤。",
+   "new": "– 请问有丁字裤吗？\n– 没有性感的内裤。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 26084,
+   "action": "convert",
+   "orig": "經就是契經，上面所说的……便安地……又……契字……",
+   "new": "经就是契经，上面所说的……便安地……又……契字……",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 32406,
+   "action": "convert",
+   "orig": "此外，有时也指某种气流的東西向分量。",
+   "new": "此外，有时也指某种气流的东西向分量。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 34697,
+   "action": "convert",
+   "orig": "我因为个子比別人矮而有自卑情结，但很多时候这反而成了我的优势。",
+   "new": "我因为个子比别人矮而有自卑情结，但很多时候这反而成了我的优势。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38087,
+   "action": "convert",
+   "orig": "在過去時態上加上輔助語幹 -었- 構成過去完成。",
+   "new": "在过去时态上加上辅助语干 -었- 构成过去完成。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38088,
+   "action": "convert",
+   "orig": "根據大韓民國刑法第267條，過失致死處以兩年以下有期徒刑、禁錮或罰金刑。",
+   "new": "根据大韩民国刑法第267条，过失致死处以两年以下有期徒刑、禁锢或罚金刑。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38089,
+   "action": "convert",
+   "orig": "減少過度消費。",
+   "new": "减少过度消费。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38091,
+   "action": "convert",
+   "orig": "在口語中常發音為 [꽈대] 或 [꽈데]。",
+   "new": "在口语中常发音为 [꽈대] 或 [꽈데]。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38092,
+   "action": "convert",
+   "orig": "因過勞而倒下。",
+   "new": "因过劳而倒下。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38093,
+   "action": "convert",
+   "orig": "近來因過勞而患病的上班族越來越多。",
+   "new": "近来因过劳而患病的上班族越来越多。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38094,
+   "action": "convert",
+   "orig": "過敏反應。",
+   "new": "过敏反应。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38095,
+   "action": "convert",
+   "orig": "引擎過熱。",
+   "new": "引擎过热。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38096,
+   "action": "convert",
+   "orig": "哈維爾·庫姆波利奧斯讓馬特的電腦過熱了。",
+   "new": "哈维尔·库姆波利奥斯让马特的电脑过热了。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38097,
+   "action": "convert",
+   "orig": "果肉軟糯，內裡十分飽滿。",
+   "new": "果肉软糯，内里十分饱满。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38098,
+   "action": "convert",
+   "orig": "宴席桌上擺滿了豐盛的果肉。",
+   "new": "宴席桌上摆满了丰盛的果肉。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 39227,
+   "action": "convert",
+   "orig": "在位于北韩寺的道詵寺供奉着父母的牌位。",
+   "new": "在位于北韩寺的道诜寺供奉着父母的牌位。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 42642,
+   "action": "convert",
+   "orig": "說是如果果子或明日（有）就想着分給奴僕吧，兩人哭着說不這樣做，焉能想着（如此）",
+   "new": "说是如果果子或明日（有）就想着分给奴仆吧，两人哭着说不这样做，焉能想着（如此）",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 43208,
+   "action": "convert",
+   "orig": "令人厌烦的梅雨刚一结束，暑热便一齐袭来，近来首尔气温在華氏96、97度上下徘徊。≪郑飞石，石碑与金刚山的对话≫",
+   "new": "令人厌烦的梅雨刚一结束，暑热便一齐袭来，近来首尔气温在华氏96、97度上下徘徊。≪郑飞石，石碑与金刚山的对话≫",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 43463,
+   "action": "convert",
+   "orig": "封面褪色、破旧的書。",
+   "new": "封面褪色、破旧的书。",
+   "why": "模型把中文译文写成了繁体"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38086,
+   "action": "edit",
+   "orig": "會同、拜爵、洗爵，揖讓升降 聚在一起就向酒杯行禮，洗淨酒杯，互相行禮推讓，把（酒杯）端起放下。",
+   "new": "會同、拜爵、洗爵，揖讓升降 聚在一起就向酒杯行礼，洗净酒杯，互相行礼推让，把（酒杯）端起放下。",
+   "why": "汉文原文保留，只转后面的中文译文"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 38090,
+   "action": "edit",
+   "orig": "樂盡死力 甘願竭盡死力。",
+   "new": "樂盡死力 甘愿竭尽死力。",
+   "why": "汉文原文保留，只转后面的中文译文"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 45206,
+   "action": "dedupe",
+   "orig": "你昨天为什么没来？ 你昨天為什麼沒有來？",
+   "new": "你昨天为什么没来？",
+   "why": "模型简繁各写一遍，删掉繁体那一半"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 45208,
+   "action": "dedupe",
+   "orig": "再也没有什么可说的了。 再也沒有什麼可說的了。",
+   "new": "再也没有什么可说的了。",
+   "why": "模型简繁各写一遍，删掉繁体那一半"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 45209,
+   "action": "dedupe",
+   "orig": "一年有四个季节。 一年有四個季節。",
+   "new": "一年有四个季节。",
+   "why": "模型简繁各写一遍，删掉繁体那一半"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 45211,
+   "action": "dedupe",
+   "orig": "全党团结。 團結全黨",
+   "new": "全党团结。",
+   "why": "模型简繁各写一遍，删掉繁体那一半"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 45213,
+   "action": "dedupe",
+   "orig": "我有车。 我有車。",
+   "new": "我有车。",
+   "why": "模型简繁各写一遍，删掉繁体那一半"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 45215,
+   "action": "dedupe",
+   "orig": "她是个漂亮的姑娘。 她是個漂亮的姑娘。",
+   "new": "她是个漂亮的姑娘。",
+   "why": "模型简繁各写一遍，删掉繁体那一半"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284422,
+   "action": "convert",
+   "orig": "鸊鷉",
+   "new": "䴙䴘",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284423,
+   "action": "convert",
+   "orig": "小鸊鷉，Tachybaptus ruficollis",
+   "new": "小䴙䴘，Tachybaptus ruficollis",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284430,
+   "action": "convert",
+   "orig": "赤颈鸊鷉，Podiceps grisegena",
+   "new": "赤颈䴙䴘，Podiceps grisegena",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284431,
+   "action": "convert",
+   "orig": "凤头鸊鷉，Podiceps cristatus",
+   "new": "凤头䴙䴘，Podiceps cristatus",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284432,
+   "action": "convert",
+   "orig": "角鸊鷉，Podiceps auritus",
+   "new": "角䴙䴘，Podiceps auritus",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284433,
+   "action": "convert",
+   "orig": "黑颈鸊鷉（Podiceps nigricollis）",
+   "new": "黑颈䴙䴘（Podiceps nigricollis）",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284586,
+   "action": "convert",
+   "orig": "鸊鷉",
+   "new": "䴙䴘",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284686,
+   "action": "convert",
+   "orig": "蟾津鰟鮍，Acheilognathus somjinensis",
+   "new": "蟾津鳑鲏，Acheilognathus somjinensis",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284687,
+   "action": "convert",
+   "orig": "油鰟鮍，Tanakia limbata（异名 Acheilognathus limbatus）或 Tanakia koreensis（异名 Acheilognathus koreensis）",
+   "new": "油鳑鲏，Tanakia limbata（异名 Acheilognathus limbatus）或 Tanakia koreensis（异名 Acheilognathus koreensis）",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284688,
+   "action": "convert",
+   "orig": "朝鲜鰟鮍，Tanakia signifer",
+   "new": "朝鲜鳑鲏，Tanakia signifer",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284689,
+   "action": "convert",
+   "orig": "大线鰟鮍，Acheilognathus majusculus",
+   "new": "大线鳑鲏，Acheilognathus majusculus",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284691,
+   "action": "convert",
+   "orig": "朝鲜线鰟鮍，Acheilognathus yamatsutae",
+   "new": "朝鲜线鳑鲏，Acheilognathus yamatsutae",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 284782,
+   "action": "convert",
+   "orig": "油鯿或琵琶湖油鮈，Sarcocheilichthys variegatus microoculus",
+   "new": "油鳊或琵琶湖油鮈，Sarcocheilichthys variegatus microoculus",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 286968,
+   "action": "convert",
+   "orig": "朝鲜王朝图畵署九品杂职画员",
+   "new": "朝鲜王朝图画署九品杂职画员",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 298331,
+   "action": "convert",
+   "orig": "鎶",
+   "new": "鿔",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 301833,
+   "action": "convert",
+   "orig": "蝟岛（韩国全罗北道的一个岛）",
+   "new": "猬岛（韩国全罗北道的一个岛）",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 305859,
+   "action": "convert",
+   "orig": "指训民正音初声体系中共同语音特征的一个词：ㆁ、ㄴ、ㅁ、ㅇ、ㄹ、ㅿ，分别对应汉语音韵学中的疑母、泥母、孃母、明母、微母、喩母",
+   "new": "指训民正音初声体系中共同语音特征的一个词：ㆁ、ㄴ、ㅁ、ㅇ、ㄹ、ㅿ，分别对应汉语音韵学中的疑母、泥母、娘母、明母、微母、喩母",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 309945,
+   "action": "convert",
+   "orig": "蚁鴷",
+   "new": "蚁䴕",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 312737,
+   "action": "convert",
+   "orig": "젤 (jel，“제일(第一) (jeil，“最”)的缩略”)的黃海道和平安道形式",
+   "new": "젤 (jel，“제일(第一) (jeil，“最”)的缩略”)的黄海道和平安道形式",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 312738,
+   "action": "convert",
+   "orig": "젤 (jel，“제일(第一) (jeil，“第一，头号”)的缩略”)的黃海道和平安道形式",
+   "new": "젤 (jel，“제일(第一) (jeil，“第一，头号”)的缩略”)的黄海道和平安道形式",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 329791,
+   "action": "convert",
+   "orig": "在飞机起降航路上，地面高度500米（1600英尺）以内探测到或预计出现妨碍航空运行的風切变，或从正在起降的飞机接到该现象报告时发布的航空特报",
+   "new": "在飞机起降航路上，地面高度500米（1600英尺）以内探测到或预计出现妨碍航空运行的风切变，或从正在起降的飞机接到该现象报告时发布的航空特报",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 341121,
+   "action": "convert",
+   "orig": "增减刑罚时作为标准的原則。",
+   "new": "增减刑罚时作为标准的原则。",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 350263,
+   "action": "convert",
+   "orig": "投掷小而坚硬石头的行爲，或指如此投掷的石块",
+   "new": "投掷小而坚硬石头的行为，或指如此投掷的石块",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 350314,
+   "action": "convert",
+   "orig": "大学建筑内特定学科的房間。该学科的学生可以使用。主要由学生会或与学生会亲近的学生使用。",
+   "new": "大学建筑内特定学科的房间。该学科的学生可以使用。主要由学生会或与学生会亲近的学生使用。",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 351565,
+   "action": "convert",
+   "orig": "国音，国訛",
+   "new": "国音，国讹",
+   "why": "释义里的繁体（鸟名鱼名／元素名／个别字）"
+  },
+  {
+   "table": "sense_gloss",
+   "rowid": 333168,
+   "action": "dedupe",
+   "orig": "架桥连接的。连接的。",
+   "new": "架桥连接的。",
+   "why": "模型把句子写了两遍（非繁简问题，2026-10-31 顺带）"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 45207,
+   "action": "dedupe",
+   "orig": "我妈妈不是医生。 我妈妈不是医生。",
+   "new": "我妈妈不是医生。",
+   "why": "模型把句子写了两遍（非繁简问题，2026-10-31 顺带）"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 45214,
+   "action": "dedupe",
+   "orig": "我想剪中长波波头。 我想剪中长波波头。",
+   "new": "我想剪中长波波头。",
+   "why": "模型把句子写了两遍（非繁简问题，2026-10-31 顺带）"
+  },
+  {
+   "table": "example_gloss",
+   "rowid": 46584,
+   "action": "dedupe",
+   "orig": "星期六和星期天是休息日。 星期六和星期天是休息日。",
+   "new": "星期六和星期天是休息日。",
+   "why": "模型把句子写了两遍（非繁简问题，2026-10-31 顺带）"
+  },
+  {
+   "table": "etymology_gloss",
+   "rowid": 1089,
+   "action": "dedupe",
+   "orig": "1459年，首见于《月印释谱》，作中世韩语 그ᅀᅳ다〮（耶鲁式：kùzù-tá）。作为首见。作为首见。",
+   "new": "1459年，首见于《月印释谱》，作中世韩语 그ᅀᅳ다〮（耶鲁式：kùzù-tá）。",
+   "why": "模型把句子写了两遍（非繁简问题，2026-10-31 顺带）"
+  }
+ ]
+}

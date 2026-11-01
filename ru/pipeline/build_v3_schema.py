@@ -521,50 +521,9 @@ def cols(conn, tbl):
 
 
 
-def _norm_sql(s):
-    """把建表语句归一到可比较的形状：去注释、去 `IF NOT EXISTS`、压空白。
-
-    🔴 **只做这三种归一，绝不调用任何业务转换器**（`PLAYBOOK` 7.2 的那条设计要点）。
-    """
-    import re as _re
-    s = _re.sub(r"--[^\n]*", " ", s or "")
-    s = _re.sub(r"\bIF\s+NOT\s+EXISTS\b", " ", s, flags=_re.I)
-    s = _re.sub(r"\s+", " ", s)
-    return s.strip().rstrip(";").lower()
-
-
-_CONSTRAINT_KW = ("unique", "primary key", "foreign key", "check", "constraint")
-
-
-def _split_table(sql):
-    """建表语句 → (列定义集合, 约束集合)。**按顶层逗号切，括号内不切。**
-
-    🔴 为什么不比整串：后补的列（`ADD_COLUMNS`）是 `ALTER TABLE` 加的，
-       SQLite 把它们**插在最后一个列定义之后、约束之前** ——
-       比整串会把这当成不一致（S6 第一版就是这样假红了一次）。
-    ⚠️ 这里用「顶层逗号」切，而不是 `split(",")`：`NUMERIC(10,2)` 那种括号里有逗号。
-    """
-    s = _norm_sql(sql)
-    i = s.index("(")
-    body = s[i + 1:s.rindex(")")]
-    items, buf, depth = [], [], 0
-    for ch in body:
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-        if ch == "," and depth == 0:
-            items.append("".join(buf).strip())
-            buf = []
-            continue
-        buf.append(ch)
-    items.append("".join(buf).strip())
-    cols, cons = set(), set()
-    for it in items:
-        if not it:
-            continue
-        (cons if it.startswith(_CONSTRAINT_KW) else cols).add(it)
-    return cols, cons
+# 🔴 B24（2026-10-31）：对账判据搬到 `scripts/schema_drift.py`，九门共用一份 —— 这里只是别名，别再写第二份。
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from schema_drift import norm_sql as _norm_sql, split_table as _split_table  # noqa: E402
 
 
 def check(verbose=True):

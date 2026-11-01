@@ -36,7 +36,8 @@ def dbtool_of(lang):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lang", required=True, choices=("es", "fr", "it"))
+    # B3（2026-11-01）：收词后「统计信息」要重跑 ⇒ 扩到除 ja/ko 以外的八门（ja/ko 各有自己的 ANALYZE 脚本）
+    ap.add_argument("--lang", required=True, choices=("en", "es", "it", "fr", "pt", "de", "vi", "ru"))
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
     dbt = dbtool_of(a.lang)
@@ -62,6 +63,9 @@ def main():
     print("   ✅ 写前写后快照逐项相等（%d 项）" % len(before))
     con = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
     print("   sqlite_stat1 %d 行" % con.execute("SELECT COUNT(*) FROM sqlite_stat1").fetchone()[0])
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import intake_layers
+    intake_layers.done(a.lang, "统计信息")     # 不走 session ⇒ 自己销收词欠账（B3）
 
 
 if __name__ == "__main__":

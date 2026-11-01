@@ -282,6 +282,19 @@ _VI_MARKUP_GLOSS = {
 }
 
 
+# ── ⑩b 源头的「缺定义」占位模板 —— 2026-11-01（B21 的 wiki 标记桶顺带逮到）────────────────
+# `phở` 的一条义项整段是越南语版的 `{{rfdef}}` 模板展开「Mục từ này cần một định nghĩa…」（本词条需要一个定义），
+#   模型还把它译成了中文「此词条需要定义。请…添加定义」—— 两条都印在 vi 最常用的词之一的页面上。
+# 判据锚**模板名** `rfdef`（维基词典「request for definition」的固定名字），不锚越南语行文 ——
+#   行文会变、模板名不会。全库实测只有这 1 个义项（越语＋中文两条释义）。
+_RFDEF = re.compile(r"\{\{\s*rfdef\b|\brfdef\s*\}\}")
+
+
+def is_placeholder_gloss(text: str) -> bool:
+    """这条释义是不是源头的「缺定义」占位模板（不是释义，是「这里还没有释义」）。"""
+    return bool(_RFDEF.search(text or ""))
+
+
 def is_vi_markup_gloss(text: str) -> bool:
     """这条释义是不是**源头的词典标记缩写**（`Trgt.` `Ph.` `X.`），不是释义。
 
@@ -491,10 +504,13 @@ def dup_sense_groups(con):
     """
     import collections as _c
     zh = _c.defaultdict(list)
+    # 🔴 B29（2026-10-30）：比**读者看到的**那一列。中文版简体／繁体两个切片是同一份内容两种字形，
+    #    `text` 里 `體現`／`体现` 不相等 ⇒ 523 组重复义项一直被字形差藏着；转简体之后页面上就是两条一样的
+    has_pub = any(c[1] == "text_pub" for c in con.execute("PRAGMA table_info(sense_gloss)"))
     for wid, sid, eid, t in con.execute(
-            "SELECT s.word_id, s.id, s.entry_id, g.text FROM sense s "
+            "SELECT s.word_id, s.id, s.entry_id, %s FROM sense s "
             "  JOIN sense_gloss g ON g.sense_id = s.id AND g.lang = 'zh' "
-            " WHERE s.hidden = 0"):
+            " WHERE s.hidden = 0" % ("g.text_pub" if has_pub else "g.text")):
         zh[(wid, eid, (t or "").strip())].append(sid)
     cand = {k: v for k, v in zh.items() if len(v) > 1 and k[1] is not None}
     stat = _c.Counter()

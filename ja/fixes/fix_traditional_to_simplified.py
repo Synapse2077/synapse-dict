@@ -90,7 +90,9 @@ def _fix(cv, s, cap=5):
 OPENCC_RIGHT = ("反覆", "重覆", "覆信", "乾性", "乾燥", "乾田", "乾苔")
 ALWAYS = frozenset("後於夥摺醣菸麽捱徵藉彷俱")
 OPENCC_WRONG = ("覆上", "覆住", "覆育", "慰藉", "狼藉", "枕藉")
-NEVER = frozenset("薹")
+# 樫／俥（2026-10-30）：OpenCC 给扩展 A `㭴`／`伡` —— 前者是日文姓氏（八重樫），后者是象棋红方的车。
+#   跨门那份 `scripts/zh_t2s.py` 已收；ja 自己这份要跟（`fix_ext_a_damage.py`）
+NEVER = frozenset("薹樫俥")
 _OPENCC = None
 
 

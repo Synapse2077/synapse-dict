@@ -194,6 +194,8 @@ UNCLAIMED = {
     "collocation":      "搭配层 ko 没做（0 行）。前五门那层 99.3% 是模型凭记忆写的，"
                         "ko 有意不做（`[[collocation-layer-is-llm-generated]]`）。",
     "collocation_gloss": "同上（0 行）。",
+    "field_src":        "建表时建了、ko 一行字段来源都没写（0 行）。B7（2026-10-31）进了追踪清单；"
+                        "第一次往里写之前先登记盯着它的闸。",
     # ✅ `etymology_gloss` 2026-10-28 建表（日文版词源的中文译文 3,093 行），由外锚闸认领 —— 下面是拿掉时的原话：
     # ⚠️ `etymology_gloss` 2026-10-27 从这里拿掉（与 `dbtool.TRACK_TABLES` 同步）：09-27 这里写着
     #    「表建了」，而库里**这张表不存在**（`test_dbtool_gate` M7 自 09-28 红到 10-27）。

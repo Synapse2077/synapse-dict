@@ -262,6 +262,15 @@ DDL = [
          UNIQUE(word, file)
        )""",
 ]
+# 🔴 B24（2026-10-31）：**后来的脚本 `ALTER TABLE … ADD COLUMN` 加的列**，在这里登记 ——
+#    上面的 `CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，它们从来不会出现在上面的语句里，
+#    而跨门闸 `scripts/test_schema_drift_gate.py` 拿「上面的建表语句 ∪ 这里」与库里的 `sqlite_master` 逐表对账。
+#    ⚠️ 只是登记（声明库里该有什么），本脚本建库时**不**加它们 —— 加列的是右边注释里那个脚本。
+ADD_COLUMNS = [
+    ('collocation', 'text_norm', 'TEXT'),  # scripts/build_collocation_search.py
+]
+
+
 def _register_where():
     """语域标预筛的谓词 —— 与 `test_plan_ledger._c36` 用的是同一串（都由 `REGISTER` 生成）。"""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -324,6 +333,10 @@ def split_colloc(ln):
 
     不是"第一个汉字处"—— 那样 `großes A 大写A` 这类会切错。
     实测 de：16,783 行**全部切得开**（切不开 0 行）。
+    ⚠️ **适用边界（B2，2026-10-31）**：只适用于**本语言文字里没有汉字**的语言（de/pt/fr/it/es）。
+       日语（汉字）、韩语（汉字表记）、越南语（喃字/汉字）的外语那一半里本身就可能有汉字 ⇒
+       「第一个汉字」落在外语一侧，切点静默错位。**空格不是问题**（越南语 `sinh viên 学生` 照样切对）。
+       那四门的搭配层现在都是空的且有锁（ko UNCLAIMED／ja A11／vi·ru 新建表会被 `gate:track` 判红）。
     """
     m = CJK.search(ln)
     if not m:

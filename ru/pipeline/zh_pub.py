@@ -84,15 +84,22 @@ def plan_model_text(con):
 def plan_text_pub(con, model_text=None):
     """→ {表: [(text_pub, id)]}、统计。model_text：①要改的 {gloss.id: 新 text}（干跑时据它算）。"""
     model_text = model_text or {}
+    # B30（2026-10-30）：中文版例句译文的错译改译（两层判官都判错），当作 `text` 进来算简体 —— `text` 原文一字不动
+    from pipeline.judge_zh_edition_examples import fixes as _b30
+    b30 = _b30(con)
     plan, st = {}, collections.Counter()
+    st["example_gloss：B30 改译"] = len(b30)
     for tbl in TABLES:
         up = []
         for rid, text, src, pub in con.execute(
                 "SELECT id, text, src, text_pub FROM %s WHERE lang = 'zh'" % tbl):
             if tbl == "example_gloss" and rid in model_text:
                 text = model_text[rid]
+            stored = text                         # ① 改的是 `text` 列本身；B30 不动 `text` ⇒ 要拿库里那列比
+            if tbl == "example_gloss" and rid in b30:
+                text = b30[rid]
             s = criteria.zh_simp(text, src)
-            want = s if s != text else None
+            want = s if s != stored else None     # 🔴 第一版比的是改译自己 ⇒ 已是简体的改译被「清空」，读者看回错译
             if want != pub:
                 up.append((want, rid))
                 st["%s：%s" % (tbl, "填简体" if want else "清空")] += 1

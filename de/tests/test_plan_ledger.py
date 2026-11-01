@@ -972,6 +972,8 @@ def _broken_db(*sqls):
        这样同一条变异在阶段做完之前和之后都成立。
     """
     d = tempfile.mkdtemp()
+    import atexit
+    atexit.register(shutil.rmtree, d, True)   # 2026-11-01：每次 3.5 GB 的库副本原来用完不删（一轮漏两份）
     db = Path(d) / "m.db"
     shutil.copy(paths.DB, db)
     w = sqlite3.connect(db)

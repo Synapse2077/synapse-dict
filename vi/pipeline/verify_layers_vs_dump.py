@@ -73,7 +73,9 @@ QUIET = False   # 变异验证期间把层内的报数行闭嘴（否则 10 条�
 #    实测值由收割器给出（`stat[S6.TEXT_MUTATED_IN_PLACE]`）。
 #    ⚠️ 写成常量而不是「从现状读」：`[[expectation-must-be-declared]]` ——
 #      期望值必须独立声明，从现状推出来的期望逮不到任何东西。
-TEXT_MUTATED_BASELINE = 2041
+# 2,041 → 2,042（2026-11-01）：`clean_markup` 补了「去 `'''`」，例句 `Cao đình'''` 在 text 上被清（例句层四种清洗仍原地改 text，W22 的形状），
+#   清完与词头相同 ⇒ 已隐藏。涨的这 1 行就是它。
+TEXT_MUTATED_BASELINE = 2042
 
 
 def ro():

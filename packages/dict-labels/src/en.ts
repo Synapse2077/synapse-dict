@@ -204,6 +204,8 @@ export const EN_SENSE_REGION_LABELS: Record<string, string> = {
   Geordie: '泰恩赛德方言', Cockney: '伦敦东区腔',
   'Multicultural-London-English': '伦敦多元文化英语',
   Singlish: '新加坡式英语', Manglish: '马来西亚式英语',
+  // B1（2026-10-31）：源头把「Middle East」拆成 `Middle`＋`East` 两个 tag，建标签层时合并回这一个值
+  'Middle-East': '中东',
   // ── 泛指方位（源头就这么泛，照实印）──
   North: '北部', South: '南部', East: '东部', West: '西部',
   Northeastern: '东北部', Southwestern: '西南部',

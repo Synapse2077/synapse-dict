@@ -35,6 +35,7 @@ import collections
 import gzip
 import importlib
 import json
+import re
 import sqlite3
 import sys
 import time
@@ -42,6 +43,48 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LANGS = ["en", "es", "it", "fr", "pt", "de", "ja"]
+
+# ══════ 「这段正文不是词源」—— 判据只此一份（B4，2026-11-01）══════
+# 去掉下面这些**已知套话**之后一个字母都不剩 ⇒ 不是词源，不收。
+#   · 「See the etymology of the corresponding lemma form.」—— 变形词条上的指路句，**不说是哪个原形**
+#     （it 宽桥新增的 4,449 段里 74.7% 是它）；带具体目标的「See miser.」「→ voir flûte.」**保留**（读者能顺着找）
+#   · 「Inflected forms.」
+#   · it／fr 版占位模板「→ Etimologia mancante. Se vuoi, aggiungila tu.」「Étymologie manquante ou incomplète. …」——
+#     **后面跟着真内容的那些保留**（`Febronia` 后接一大段希腊语来源），只有整段就是模板时才不收
+#   · 维基编辑提示「(The following entry does not have a page created for it yet: …)」
+#   · 只有标点（「.」「:」）
+# ⚠️ 「Unknown.」「Uncertain.」「Onomatopoeic.」「From Old Japanese.」很短，但**是在讲来源**，照收。
+_NOT_ETYM = [re.compile(p, re.I) for p in (
+    r"\bsee (the )?etymology of the (corresponding )?(lemma|main entry|main form|base form)( forms?)?\.?",
+    r"^\s*inflected forms?\.?\s*$",
+    r"(→\s*)?etimologia mancante\.?\s*(se vuoi,?\s*aggiungila tu\.?)?",
+    # fr 版占位模板（「词源缺失或不完整，知道的话点这里补」）—— fr 法语版宽桥抽样时撞见
+    r"étymologie manquante ou incomplète\.?\s*(si vous la connaissez,?\s*vous pouvez l[’']ajouter en cliquant ici\.?)?",
+    r"\(the following entr(y|ies) do(es)? not have (a )?pages? created for (it|them) yet:[^)]*\)",
+)]
+
+
+# 判据自测（`--selftest`，进 `gate:display`）：每条套话一例 ＋ **该保留的**每种一例（反控）
+NOT_ETYM_CASES = {
+    "See the etymology of the corresponding lemma form.": True,
+    "Inflected forms.": True,
+    "→ Etimologia mancante. Se vuoi, aggiungila tu.": True,
+    "Étymologie manquante ou incomplète. Si vous la connaissez, vous pouvez l’ajouter en cliquant ici.": True,
+    "(The following entry does not have a page created for it yet: 左揆.)": True,
+    ".": True, ":": True,
+    "See miser.": False, "→ voir flûte.": False, "Voir à Montsérétais.": False,
+    "Unknown.": False, "Onomatopoeic.": False, "From Old Japanese.": False, "Du latin idioma.": False,
+    "From pentola + -ino.": False,
+    "→ Etimologia mancante. Se vuoi, aggiungila tu. Carbonia significa terra del carbone": False,
+}
+
+
+def not_etymology(text):
+    """去掉已知套话后一个字母都不剩 ⇒ True（不是词源）。抽取、闸、展示层都 import 这一份。"""
+    core = text or ""
+    for p in _NOT_ETYM:
+        core = p.sub(" ", core)
+    return not any(ch.isalpha() for ch in core)
 
 # 🔴 `paths.KK`（英文版 per-language 切片）在**这门库里**对应哪个来源前缀。
 #    en/es/it/fr/pt 记成 `en-edition`，de 记成 `kk-en` —— 建库那几轮各自定的，
@@ -160,6 +203,32 @@ def num_of_ref(ref):
     return parts[-trail]
 
 
+def misaligned(want, seen):
+    """闸① 的判据：→ (对不齐的源头词形, 豁免的「无号占位」词形)。`want`/`seen`：词形 → 词源号集合（库／dump）。
+
+    pt（B4，2026-11-01）：阶段 3 收词（`pt/pipeline/intake_edition_words.py --edition en`）给英文版
+    每条 JSON 又建了一条**不带号**的词条（`etym_no='0'`、`src_ref` 形如 `kk-en:-a:suffix#0`），
+    与原有带号的词条（`kk-en:-a:suffix:1:0`）重复。宽桥把它们也带进来 ⇒ 库 {0,1,2} 对 dump {1,2}。
+    「0」＝源头没编号；而 dump 里这个词**每一条都有号** ⇒ 这一支在源头不存在，它取不到正文、什么也不写。
+    只豁免这一种形状：多出来的**恰好只有 `0`**（⇒ dump 里这个词没有 `0`）、库里同词另有带号的支。其余照判。
+    """
+    stray0 = {w for w, v in want.items()
+              if w in seen and v - seen[w] == {"0"} and len(v) > 1}
+    bad = sorted(w for w, v in want.items() if w in seen and not v <= seen[w] and w not in stray0)
+    return bad, stray0
+
+
+# 判据自测（与 `NOT_ETYM_CASES` 一起跑）：(库, dump) → 是否判对不齐；豁免只认那一种形状
+MISALIGN_CASES = [
+    ({"0", "1", "2"}, {"1", "2"}, False),   # pt 的无号占位：豁免
+    ({"1", "2", "3"}, {"1", "2"}, True),    # 多一支带号的：照判
+    ({"0", "1", "3"}, {"1", "2"}, True),    # 占位之外还错一支：照判
+    ({"0"}, {"1", "2"}, True),              # 只有占位、没有带号的兄弟：照判
+    ({"0", "1"}, {"0", "2"}, True),         # dump 自己有 0：不是那种形状
+    ({"1", "2"}, {"1", "2", "3"}, False),   # 库是 dump 的子集：本来就对得上
+]
+
+
 def db_keys(con):
     """库里每条「词源支」：(word_id, dict 词形, 来源前缀, 源头词形, 词源号)。
 
@@ -201,9 +270,13 @@ def db_keys(con):
     #    🔴 **改之前必须先拆回归闸 Z3**：它要求每条词源行都能被**义项**那一侧找到，
     #      而新增的行恰恰挂不到义项 ⇒ 直接写会把闸打红。**不许为了让改动通过而放宽它**，
     #      拆法写在欠账 25 里（Z3a 结构 / Z3b 页面口径原样保留 / Z3c 存档行记基线）。
-    sql = ("""SELECT s.word_id, d.word, e.src, e.etym_no, e.src_ref FROM sense s
-              JOIN dict d ON d.id = s.word_id
-              JOIN entry e ON e.id = s.entry_id
+    # ✅ B4（2026-11-01）：改成按**词条**取（`FROM entry JOIN dict`，原来的严格超集）——
+    #    无义项的词条也有源头词源正文（ja 825 页整页没有义项，词源就是它们唯一的内容）。
+    #    页面那一侧：配不上任何义项分组的词源由 `OrphanEtym`（App.tsx）单独印一块。
+    #    pt 那批 `etym_no='0'` 的无义项词条（见上）查清是阶段 3 收词建的**无号占位**，与带号词条重复；
+    #    闸① 只豁免这一种形状（`misaligned()`，带自测），其余照判 ⇒ pt 已跑（+583，对不齐 0）。
+    sql = ("""SELECT e.word_id, d.word, e.src, e.etym_no, e.src_ref FROM entry e
+              JOIN dict d ON d.id = e.word_id
               WHERE e.etym_no IS NOT NULL AND e.etym_no <> ''"""
            if has_entry else
            """SELECT s.word_id, d.word, NULL, NULL, ss.src_ref FROM sense s
@@ -380,13 +453,24 @@ def scan_edition_seq(dump, lang_code):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lang", required=True, choices=LANGS)
+    ap.add_argument("--lang", required="--selftest" not in sys.argv, choices=LANGS)
+    ap.add_argument("--selftest", action="store_true", help="只跑 `not_etymology` 判据自测")
     ap.add_argument("--edition", help="非英文版，如 it-edition；不给就抽英文版那一支")
     ap.add_argument("--run", action="store_true")
     # 🔴 重跑用：先把**这一版**已有的行删干净再插。判据变了就必须能重跑，
     #    否则「发现抽错了」等于「永远改不了」。只删本版，别版一行不碰。
     ap.add_argument("--replace", action="store_true",
                     help="先删掉本版已有的行再写（重跑用）")
+    if "--selftest" in sys.argv:
+        bad = [(k, v) for k, v in NOT_ETYM_CASES.items() if not_etymology(k) != v]
+        for k, v in bad:
+            print("🔴 `not_etymology` 判错：%r 应为 %s" % (k, v))
+        print("%s 词源套话判据自测 %d/%d" % ("🔴" if bad else "✅", len(NOT_ETYM_CASES) - len(bad), len(NOT_ETYM_CASES)))
+        bad2 = [c for c in MISALIGN_CASES if bool(misaligned({"w": c[0]}, {"w": c[1]})[0]) != c[2]]
+        for c in bad2:
+            print("🔴 `misaligned` 判错：库 %s ｜ dump %s 应为 %s" % (sorted(c[0]), sorted(c[1]), c[2]))
+        print("%s 对齐判据自测 %d/%d" % ("🔴" if bad2 else "✅", len(MISALIGN_CASES) - len(bad2), len(MISALIGN_CASES)))
+        return 1 if bad or bad2 else 0
     a = ap.parse_args()
     paths, dbtool = load(a.lang)
     prefix = a.edition or EN_PREFIX[a.lang]
@@ -501,7 +585,9 @@ def main():
                 return 1
             bad = []
     else:
-        bad = sorted(w for w, v in want.items() if w in seen and not v <= seen[w])
+        bad, stray0 = misaligned(want, seen)
+        print("   多出一支「无号占位」的词形（源头每条都有号，这一支取不到正文）%s，不算错位"
+              % format(len(stray0), ","))
         print("   英文版有份的源头词形 %s｜对不齐 %s（%.3f%%）"
               % (format(len(want), ","), format(len(bad), ","), 100 * len(bad) / max(len(want), 1)))
         for w in bad[:8]:
@@ -535,13 +621,16 @@ def main():
     have = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     con.close()
 
-    skip, seen_slot, rows, missing = set(bad), set(), [], 0
+    skip, seen_slot, rows, missing, boiler = set(bad), set(), [], 0, 0
     for wid, _, wsrc, no in mine:
         if wsrc in skip or (wid, no) in clash or (wid, no) in seen_slot:
             continue
         t = got.get((wsrc, no))
         if not t:
             missing += 1            # 源头这一支没写正文 —— 正常，不是错
+            continue
+        if not_etymology(t):
+            boiler += 1             # B4：整段是套话（见 `not_etymology`），不收
             continue
         seen_slot.add((wid, no))
         rows.append((wid, prefix, no, t,
@@ -553,6 +642,7 @@ def main():
     print("   落库              %12s 行   %.1f MB" % (format(len(rows), ","), nbytes / 1024 ** 2))
     print("   覆盖词形          %12s" % format(len({r[0] for r in rows}), ","))
     print("   源头这一支没写正文 %12s（正常，页面照实说）" % format(missing, ","))
+    print("   整段是套话、不收   %12s（`not_etymology`：指路句／占位模板／只有标点…）" % format(boiler, ","))
     print("   带 Etymology tree %12s"
           % format(sum(1 for r in rows if r[3].lstrip().lower().startswith("etymology tree")), ","))
     if not a.run:
@@ -585,6 +675,8 @@ def main():
     checks = [("本版行数", q("SELECT COUNT(*) FROM etymology WHERE edition='%s'" % prefix),
                len(rows)),
               ("空正文", q("SELECT COUNT(*) FROM etymology WHERE TRIM(text)=''"), 0),
+              ("本版套话", sum(1 for (x,) in con.execute(
+                  "SELECT text FROM etymology WHERE edition=?", (prefix,)) if not_etymology(x)), 0),
               ("孤儿 word_id", q("SELECT COUNT(*) FROM etymology e WHERE NOT EXISTS"
                                  "(SELECT 1 FROM dict d WHERE d.id=e.word_id)"), 0),
               ]

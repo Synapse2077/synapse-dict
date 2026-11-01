@@ -90,6 +90,7 @@ def _cover(c):
 #    W12 的两个 ＋ W25 的一个。
 HIDDEN_WHY_DOM = ("gloss-is-punctuation-only",      # W12：整串是标点的释义
                   "gloss-is-source-markup",         # W12：源头的词典标记缩写
+                  "gloss-is-placeholder",           # 2026-11-01：源头的「缺定义」占位模板（`phở`，`criteria.is_placeholder_gloss`）
                   DUP_SENSE_WHY)                    # W25：同一个义项被两版各描述一遍
 
 
@@ -114,9 +115,12 @@ def _mute_duplicate_senses(c):
        （这也是为什么它能当 W26 那条否定结论的推翻条件。）
     """
     import collections as _c
+    # 🔴 2026-11-01 改：比**读者看到的** `text_pub`，不是源头原文 `text`。B29（10-30）之后页面印的是简体出版正文，
+    #    W25 的折叠也随之改比 `text_pub`，**唯独这里没跟** ⇒ `科學的`（原文）／`科学的` 在页面上一模一样而本条判成不同，
+    #    E19 自 10-30 起对这一类失明 —— 是 B14① 并进 B20 的变异台账逼着重跑变异时，它自己的变异报「没逮到」才露出来。
     zh = _c.defaultdict(list)
     for wid, sid, eid, t in c.execute(
-            "SELECT s.word_id, s.id, s.entry_id, g.text FROM sense s "
+            "SELECT s.word_id, s.id, s.entry_id, g.text_pub FROM sense s "
             "  JOIN sense_gloss g ON g.sense_id = s.id AND g.lang = 'zh' "
             " WHERE s.hidden = 0 AND s.entry_id IS NOT NULL"):
         zh[(wid, eid, (t or "").strip())].append(sid)

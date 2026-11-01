@@ -109,7 +109,10 @@ def mutate():
     """判据变异：拿构造数据验「什么算重复、什么不算」。"""
     print("═══ 变异验证：判据本体 ═══")
     import tempfile
-    db = Path(tempfile.mkdtemp()) / "m.sqlite"
+    import atexit, shutil
+    _d = tempfile.mkdtemp()
+    atexit.register(shutil.rmtree, _d, True)       # 2026-10-31：用完即删（原来不删）
+    db = Path(_d) / "m.sqlite"
     con = sqlite3.connect(db)
     con.executescript("""
       CREATE TABLE sense(id INTEGER PRIMARY KEY, word_id INT, rank INT, hidden INT DEFAULT 0);

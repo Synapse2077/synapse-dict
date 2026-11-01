@@ -148,7 +148,10 @@ DDL_PRONUNCIATION = """CREATE TABLE pronunciation (
     is_primary INTEGER NOT NULL DEFAULT 0,
     src        TEXT NOT NULL,         -- en-edition | en-selfgen（项目自产 115,955 条）
     src_ref    TEXT NOT NULL,
-    UNIQUE(word_id, entry_id, ipa, notation)
+    -- 🔴 B24（2026-10-31）：唯一键必须含 `region`。`build_pronunciation.py` 2026-09-08 就按带 region 的唯一键
+    --    重建了这张表（英美两读同一 IPA 是两行），而这里一直写着旧的四列 ⇒ 按本脚本重建一个新库，
+    --    英美同音的那批读音会撞唯一键被丢掉。库是对的，这里跟着库改。跨门闸 `test_schema_drift_gate` 逮到的。
+    UNIQUE(word_id, entry_id, ipa, notation, region)
 )"""
 
 DDL_EXAMPLE = """CREATE TABLE example (

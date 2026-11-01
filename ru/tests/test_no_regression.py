@@ -109,7 +109,8 @@ CHECKS = [
     ("P21", "屈折层行数", "SELECT COUNT(*) FROM inflection", 6387251, "阶段 3；数变了 ⇒ 屈折判据或词元判据被动过"),
     ("P22", "R29：中文简体出版正文", "SELECT (SELECT COUNT(*) FROM sense_gloss WHERE text_pub IS NOT NULL)"
      "+(SELECT COUNT(*) FROM example_gloss WHERE text_pub IS NOT NULL)"
-     "+(SELECT COUNT(*) FROM sense_src WHERE text_pub IS NOT NULL)", 138188,
+     "+(SELECT COUNT(*) FROM sense_src WHERE text_pub IS NOT NULL)", 139082,
+     "2026-10-30 B30 ＋894：中文版错译的改译 2,685 行写进 `text_pub`，其中 894 行原来没有出版正文（原文已是简体）。"
      "2026-10-25 `zh_pub.py`：释义 25,920（5c 新译文里模型漏转的繁体 ＋52）＋ 例句译文 16,883（R24 借来的 3806 ＋1）＋ 指针说明 95,385；掉了 ⇒ 页面回到繁简混排"),
     ("P23", "R29：「覆上」没被改成「复上」", "SELECT (SELECT COUNT(*) FROM sense_gloss WHERE lang='zh' AND "
      "COALESCE(text_pub,text) LIKE '%覆上%')+(SELECT COUNT(*) FROM example_gloss WHERE lang='zh' AND "
@@ -132,7 +133,7 @@ ZH_READ = ("COALESCE(g.text_pub, g.text) FROM sense s JOIN sense_gloss g",
 #    ⇒ 独立写死。加一条检查 ⇒ 这里也要加，不加就红 —— 那正是它存在的理由（`[[expectation-must-be-declared]]`）。
 ROSTER = ["R0",
           "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P12",
-          "P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21", "P22", "P23", "P24",
+          "P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21", "P22", "P23", "P24", "P25",
           "RP1", "RP2", "RP3", "RP4", "RP5", "RP6", "RP7",
           "R0b", "R0c"]
 
@@ -145,6 +146,16 @@ def run_all(con):
                 "`%s` 一出现就必须补 READ_PATH（写入列 vs 展示层 WHERE 的差额）" % DISPLAY.name))
     for cid, name, sql, want, why in CHECKS:
         out.append((cid, name, con.execute(sql).fetchone()[0], want, why))
+    # P25（B30，2026-10-30）：两层判官都判错的改译必须是读者看到的那一句 —— `zh_pub` 重跑、有人清空 `text_pub` 都会让错译回来
+    from pipeline.judge_zh_edition_examples import fixes as _b30
+    from pipeline import criteria as _crit
+    fx = _b30(con)
+    pub = {i: (t, sr) for i, t, sr in con.execute(
+        "SELECT id, COALESCE(text_pub, text), src FROM example_gloss WHERE lang='zh' AND id IN (%s)"
+        % (",".join(map(str, fx)) or "NULL"))}
+    out.append(("P25", "B30：中文版错译的改译没印出来", sum(1 for i, t in fx.items()
+                if i not in pub or pub[i][0] != _crit.zh_simp(t, pub[i][1])), 0,
+                "2,685 行（两层判官都判错 1,465 ＋ 同句借用跟着改 1,220）；红 ⇒ 读者看回「建造房屋」那种错译"))
     for cid, name, wsql, rsql, want, why in READ_PATH:
         out.append((cid, name, con.execute(wsql).fetchone()[0] - con.execute(rsql).fetchone()[0], want, why))
     # R0b：READ_PATH 的读取路径条件必须**真的出现在 russian.ts 里**（抠不到 ⇒ 展示层换了口径而这里没跟）
@@ -262,6 +273,8 @@ def _mutations():
          "FROM sense_src WHERE text_pub IS NOT NULL)"),
         ("P23", "一条「覆上」又被改成「复上」", "UPDATE example_gloss SET text=replace(text,'覆上','复上') WHERE id=("
          "SELECT MIN(id) FROM example_gloss WHERE text_pub IS NULL AND text LIKE '%覆上%')"),
+        ("P25", "一条 B30 改译的出版正文被清空（`давать напрокат` 回到「租用」）",
+         "UPDATE example_gloss SET text_pub=NULL WHERE id=43531"),
         ("R0b", "展示层换了口径（russian.ts 里没有 hidden = 0 了）", "DISPLAY"),
         ("R0c", "展示层的中文回到读 text（不读 text_pub）", "DISPLAY_ZH"),
     ]
@@ -271,7 +284,8 @@ def _mutations():
 #    RP 锁的就是「写入 − 展示」的差额，任何「藏/放出一行」的变异都**必然**同时动它，这正是两个数一起锁的意义。
 ALSO = {
     "P3": {"RP6"}, "RP6": {"P3"},          # 藏着的读音：P3 数 hidden=1、RP6 数差额 —— 同一批行
-    "P24": {"RP6"},                        # B10 那 4 条也在 RP6 的差额里
+    "P24": {"RP6"},
+    "P25": {"P22"},                        # 清空一条出版正文 ⇒ 简体出版正文总数 −1                        # B10 那 4 条也在 RP6 的差额里
     "P4": {"RP1"},                         # 藏一条义项 ⇒ 差额 +1
     "P12": {"RP2"},                        # 放出构词示意式 ⇒ 差额 −1
     "P13": {"RP4"}, "P14": {"RP4"},        # 录音放出/多插一行藏着的

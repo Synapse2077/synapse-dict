@@ -162,7 +162,9 @@ def main():
 
     with dbtool.session("ja-build-search-prefix", expect={
             "__rows__": 0, "#entry": 0, "#sense": 0, "#example": 0,
-            "#sense_relation": 0}) as con:
+            "#sense_relation": 0,
+            # B7（2026-10-31）：两张前缀表进了 TRACK_TABLES ⇒ 整表重建在这里声明（None＝不定值）
+            "#search_prefix": None, "#search_prefix_meta": None}) as con:
         con.execute(DDL)
         con.execute(DDL_META)
         con.execute("DELETE FROM search_prefix")

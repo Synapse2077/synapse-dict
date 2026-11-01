@@ -1219,6 +1219,8 @@ def main():
     import gates as _G
     _real_pending = _G.PENDING
     _G.PENDING = Path(_tmp.mkdtemp()) / "pending.json"
+    import atexit as _ax, shutil as _sh
+    _ax.register(_sh.rmtree, _G.PENDING.parent, True)   # 2026-11-01：用完即删
     try:
         _G.mark(["外锚闸·义项"], "m11-fake-tag", {"sense"})
         expect("P12", "有闸欠着没跑（09-25 那两条红了一天就是因为这里不说话）", p12)

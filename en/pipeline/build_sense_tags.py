@@ -100,6 +100,7 @@ REGION = {
     "Japan", "East-Anglia", "Zimbabwe", "Orkney", "London", "Midwestern-US",
     "Texas", "Northern-US", "Southern-England", "Russia", "Europe",
     "East", "West", "South", "Southern", "Northeastern", "Southwestern",
+    "Middle-East",            # B1：由 `merge_split_tags()` 从 `Middle`＋`East` 合成
 }
 
 REGISTER = {
@@ -110,12 +111,16 @@ REGISTER = {
     "nonstandard", "standard", "proscribed", "neologism", "nonce-word",
     "mildly", "excessive", "Internet", "Polari", "jargon", "technical",
     # ── 补：时代层 / 网络变体 / 亲疏 ──
-    # 🔴 2026-09-15 补 `Late`/`Middle`：源头把「Early Modern English」「Late Modern
+    # 🔴 2026-09-15 补 `Late`：源头把「Early Modern English」「Late Modern
     #    English」拆成两个 tag（`ablatitious` 的 tags 是 `['Late','Modern','obsolete']`），
-    #    第一版只收了 `Early`+`Modern`，`Late`(10) 和 `Middle`(10) 落进了 drop-ledger
-    #    —— 又一次「只补闸报出来的那一个，不看兄弟项」。
-    #    ⚠️ 这两个值**要等下次重跑本脚本才会进库**；现库里还没有。
-    "Modern", "Early", "Late", "Middle", "Leet", "familiar",
+    #    第一版只收了 `Early`+`Modern`，`Late`(10) 落进了 drop-ledger。
+    #    （库里由 `fixes/fill_late_middle_register.py` 定点补录，B1。）
+    # 🔴🔴 B1（2026-10-31）：09-15 同时补进来的 `Middle` **是错的** —— 回源 10 条**全部**与 `East` 成对
+    #    （`mandi` ['East','Middle','Yemen']、`democratic wedding` ['East','Middle','Palestine']），
+    #    是「Middle East」被拆开，一条中古英语都没有。当成时代层补进来，页面会给中东用法印「中古」。
+    #    ⇒ 拿掉；`Middle`＋`East` 由 `merge_split_tags()` 合成地区 `Middle-East`（中东）。
+    #    （又一次「同一批被丢的，就当成同一族」—— 两个值的形状一样，意思完全不同。）
+    "Modern", "Early", "Late", "Leet", "familiar",
 }
 
 USAGE = {
@@ -138,6 +143,18 @@ TOPIC_TAG = {
 
 BUCKETS = [("grammar", GRAMMAR), ("region", REGION), ("register", REGISTER),
            ("usage", USAGE), ("topic", TOPIC_TAG)]
+
+
+def merge_split_tags(tags):
+    """源头把多词专名拆成单词 tag 时，合回一个值。B1（2026-10-31）。
+
+    只合**确认过的**一对：`Middle`＋`East` ⇒ `Middle-East`（源头 10 条全是中东，`East` 在这里不是「东部」）。
+    ⚠️ `East`＋`Africa`／`East`＋`Midlands` 等同形状的另 53 处**有意不合**：印成「非洲 · 东部」不精确但不错，
+       逐对确认之前不扩大（判据别比它要描述的东西宽）。
+    """
+    if "Middle" in tags and "East" in tags:
+        return [t for t in tags if t not in ("Middle", "East")] + ["Middle-East"]
+    return tags
 
 
 def bucket_of(tag, se):
@@ -194,7 +211,7 @@ def collect():
                 stat["pointer_skipped"] += 1
                 continue
             stat["real"] += 1
-            for t in se["tags"]:
+            for t in merge_split_tags(se["tags"]):
                 if is_source_error(t):
                     stat["source_error"] += 1
                     continue

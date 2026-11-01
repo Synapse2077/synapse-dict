@@ -36,6 +36,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import paths
+sys.path.insert(0, str(paths.ROOT / "scripts"))
+from small_undo import Undo, Refuse  # noqa: E402  —— 小改动模式（2026-10-31），见 session 的 `small`
 
 HERE = Path(__file__).resolve().parent
 DB = paths.DB
@@ -45,6 +47,23 @@ TRACK = ['phonetic', 'phonetic_raw', 'phonetic_src', 'phonetic_confirm',
          'definition', 'definition_es', 'translation', 'gender', 'pos', 'infl',
          'exchange', 'level', 'meta',
          'freq_zipf', 'freq_lemma_zipf', 'freq_src']
+
+# 🔴🔴 B7（2026-10-31）：es 原来**一张表都不数** —— 写库闸只看 `dict` 的列，
+#    而 v2 之后数据主体在下面这十九张表里（另八门 2026-08 起就有这张清单）。
+#    三个收割器的文档串写着「`snapshot()` 只统计 `dict` 的列，新表不在它视野里，本脚本自己做计数断言」
+#    ⇒ 每个脚本各管各的，**别的脚本误删这些表，没有任何东西会响**。
+#    跨门闸 `scripts/test_track_gate.py` T3（库里有、清单没有的表）当场判红 19 张。
+#    规矩与另八门相同：**没在 expect 里显式声明的表，行数必须零变化**。
+TRACK_TABLES = ['entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sense_relation',
+                'sense_add', 'sense_es', 'sense_owner',
+                'inflection', 'etymology',
+                'pronunciation', 'example', 'example_gloss',
+                'collocation', 'collocation_gloss', 'audio',
+                'search_prefix', 'search_prefix_meta']
+
+
+def _tables(conn):
+    return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
 def _cols(conn):
@@ -69,6 +88,10 @@ def snapshot(conn=None):
             out[c] = conn.execute(
                 "SELECT COUNT(*) FROM %s WHERE TRIM(COALESCE(%s,''))<>''" % (TABLE, c)
             ).fetchone()[0]
+        tabs = _tables(conn)
+        for t in TRACK_TABLES:                   # B7：出版层各表的行数（键前缀 `#`）
+            if t in tabs:
+                out["#" + t] = conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0]
         return out
     finally:
         if own:
@@ -111,6 +134,23 @@ MAX_BACKUPS = 12          # 同一语种保留的备份数上限（**含 keep**�
 #  ⚠️ 这条规则 8-20 当天就写进 it 了，却**没同步到 es** —— 加公共规则要一次改全语种，
 #     否则就是「修了一个、其余五个还坏着」。
 MAX_BACKUP_BYTES = 3 * 1024 ** 3   # 非 keep 备份的总量上限（带 keep 的不计入）
+
+# 🔴 B19（2026-10-31）：**完结之后预算收紧** —— en/pt/de/fr/ja/ko/vi/ru 都有，es 原来没有。
+#    跨门闸 `scripts/test_backup_policy_gate.py` 以前对 es 判绿，只因两边都是「未完结」（两个 False 相等）；
+#    哪天在计划表标 `# ✅ es 完结`，预算不会跟着收紧 —— fr 那行 ✅ 白写半个月的原形。
+#    ⚠️ 只加开关、不换规则：③「至少留 1 个」照旧（所以 B27「完结预算小于库本身 ⇒ 删掉刚打的唯一备份」在这里不咬）。
+DONE_BACKUP_BYTES = 1.5 * 1024 ** 3
+# 判据是**计划表里那一行**，不是手工开关。es 至今没有计划表 ⇒ 永远按未完结（预算宽松）。
+PLAN_DOC = paths.ROOT / "docs" / "ES_PLAN.md"
+
+
+def _language_is_done():
+    """本语种是否已在计划表里标注完结。读不到文件一律按**未完结**（删数据的默认值偏保守）。
+    ⚠️ 正则里的语种代码是硬编码的，复制到别的语种必须跟着改（跨门闸用临时计划表正反验这一条）。"""
+    try:
+        return bool(re.search(r"^#+\s*✅\s*es\s*完结", PLAN_DOC.read_text("utf-8"), re.M))
+    except OSError:
+        return False
 
 
 def _backup_time(p, day, hms):
@@ -172,13 +212,14 @@ def prune_backups(verbose=True, dry=False):
 
     # ③ 总量封顶：从新到旧累加，超了的淘汰。**至少留 1 个**。
     #    keep 不计入总量、也不被这条淘汰。
+    budget = DONE_BACKUP_BYTES if _language_is_done() else MAX_BACKUP_BYTES   # B19
     total, survive, seen_plain = 0, [], False
     for p in pool:
         if p in exempt:
             survive.append(p)
             continue
         total += p.stat().st_size
-        if not seen_plain or total <= MAX_BACKUP_BYTES:
+        if not seen_plain or total <= budget:
             survive.append(p)
         else:
             drop.append(p)
@@ -200,6 +241,10 @@ def prune_backups(verbose=True, dry=False):
         return len(drop), freed
     for p in drop:
         p.unlink()
+        # 2026-10-31：连带删同名的 `-wal`／`-shm`。有人以 sqlite 打开过备份（回备份里找原文时）就会生成它们，
+        #   原来只删 `.bak` ⇒ 伴生文件成了孤儿（备份目录里清点出 en 三组）。
+        for side in ("-wal", "-shm"):
+            p.with_name(p.name + side).unlink(missing_ok=True)
     if verbose and drop:
         print("■ 备份保留策略：清掉 %d 个旧备份，释放 %.1f GB（保留 %d 个）"
               % (len(drop), freed / 1024 ** 3, len(keep)))
@@ -229,6 +274,14 @@ def _line(snap, d=None):
         if d and c in d:
             s += " ({:+,})".format(d[c])
         parts.append(s)
+    for t in TRACK_TABLES:
+        k = "#" + t
+        if k not in snap:
+            continue
+        s = "{} {:,}".format(k, snap[k])
+        if d and k in d:
+            s += " ({:+,})".format(d[k])
+        parts.append(s)
     return " | ".join(parts)
 
 
@@ -238,14 +291,20 @@ class _S:
     def __init__(self, conn):
         self.conn = conn
         self.written = 0
+        self.undo = None          # 小改动模式：每条写语句执行前先记前像（`scripts/small_undo.py`）
 
     def executemany(self, sql, seq):
+        if self.undo:
+            seq = list(seq)
+            self.undo.statements(sql, seq)
         seq = list(seq)
         self.conn.executemany(sql, seq)
         self.written += len(seq)
         return len(seq)
 
     def addcolumn(self, name, decl="TEXT"):
+        if self.undo:
+            raise Refuse("小改动模式不许加列（DDL 撤不了）—— 去掉 `small=` 用整库备份")
         """幂等加列。加列本身不改任何行，不计入 written。"""
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(%s)" % TABLE)}
         if name in cols:
@@ -254,11 +313,13 @@ class _S:
         return True
 
     def execute(self, sql, args=()):
+        if self.undo:
+            self.undo.statement(sql, args)
         return self.conn.execute(sql, args)
 
 
 @contextmanager
-def session(tag, expect=None, dry=False, verbose=True):
+def session(tag, expect=None, dry=False, verbose=True, small=None, rerun=None):
     """写库闸门。
 
     expect: {列名: 期望的非空计数变化}
@@ -272,6 +333,10 @@ def session(tag, expect=None, dry=False, verbose=True):
           所以那一批列也必须逐个写进 expect，闸门才拦得住"多写了一列"。
     """
     expect = dict(expect or {})
+    # B3（2026-11-01）：插新词形必须声明 `rerun=[层名]`（只认 `scripts/intake_layers.py` 登记过的）；
+    #    写成功后记欠账，那几层的重跑脚本写过库才销账。`invalidates=` 只是备注。
+    import intake_layers as _IL
+    _IL.check_rerun(__file__, tag, expect, rerun)
     before = snapshot()
     if verbose:
         print("■ 写库前不变量：" + _line(before))
@@ -285,18 +350,28 @@ def session(tag, expect=None, dry=False, verbose=True):
             conn.close()
         return
 
-    bak = backup(tag)
-    if verbose:
+    # 小改动模式（`small=N`，2026-10-31）：不复制整库，写之前把要动的行原样存进撤销文件（`scripts/small_undo.py`）
+    if small:
+        bak = paths.BACKUPS / ("%s.undo-%s-%s.json" % (DB.stem, tag, time.strftime("%Y%m%d-%H%M%S")))
+        if verbose:
+            print("■ 小改动模式（前像上限 %d 行）：不复制整库，撤销文件 → %s" % (small, bak.name))
+    else:
+        bak = backup(tag)
+    if verbose and not small:
         print("■ 已备份 → " + bak.name)
     conn = sqlite3.connect(DB)
     s = _S(conn)
+    if small:
+        s.undo = Undo(conn, small)
     try:
         yield s
+        if small:
+            s.undo.save(bak, DB, tag)      # 提交之前落盘：撤销文件不在，就不许提交
         conn.commit()
     except BaseException:
         conn.rollback()
         conn.close()
-        print("\n🔴 写库异常，已 rollback。备份仍在：" + bak.name, file=sys.stderr)
+        print("\n🔴 写库异常，已 rollback（小改动模式：撤销文件只在提交前落盘，这次没有生成，库已回到写入前）" if small else "\n🔴 写库异常，已 rollback。备份仍在：" + bak.name, file=sys.stderr)
         raise
     after = snapshot(conn)
     conn.close()
@@ -314,6 +389,15 @@ def session(tag, expect=None, dry=False, verbose=True):
                 bad.append("{} 变化 {:+,}，期望 {:+,}".format(c, got, want))
         elif got:
             bad.append("🔴 未声明的列 {} 变了 {:+,} —— 改到了不该改的地方".format(c, got))
+    for t in TRACK_TABLES:                       # B7：出版层表的行数，判据同上
+        key = "#" + t
+        got = d.get(key, 0)
+        if key in expect:
+            want = expect[key]
+            if want is not None and got != want:
+                bad.append("{} 行数变化 {:+,}，期望 {:+,}".format(t, got, want))
+        elif got:
+            bad.append("🔴 未声明的表 {} 行数变了 {:+,} —— 动到了不该动的表".format(t, got))
     if verbose:
         print("■ 写入 {:,} 条".format(s.written))
         print("■ 写库后不变量：" + _line(after, d))
@@ -321,10 +405,14 @@ def session(tag, expect=None, dry=False, verbose=True):
         print("\n🔴 不变量核对未通过：", file=sys.stderr)
         for b in bad:
             print("   " + b, file=sys.stderr)
-        print("   回滚：cp '%s' '%s'" % (bak, DB), file=sys.stderr)
+        print((("   回滚：python3 scripts/small_undo.py '%s' --apply" % bak) if str(bak).endswith(".json") else ("   回滚：cp '%s' '%s'" % (bak, DB))), file=sys.stderr)
         raise SystemExit(1)
     if verbose:
         print("■ 不变量核对通过 ✓")
+    _IL.after_commit(__file__, tag, rerun)   # B3：销账／记账，打这一门还欠哪几层重跑（只报不拦）
+    if verbose:                         # B14②：写库让展示层汇总闸过期 —— 只报不拦（`scripts/display_stamp.py`）
+        import display_stamp
+        display_stamp.notice()
     _regression_check(verbose)
 
 
@@ -436,7 +524,7 @@ if __name__ == "__main__":
     #    跨门闸 `scripts/test_first_build_gate.py` 锁住它。
     if not DB.exists():
         print("%s  （库还不存在 —— 尚未建库，不变量为空。这不是异常。）" % DB.name)
-        print("  TRACK 现在声明了 %d 个列（es 没有 TRACK_TABLES）。" % len(TRACK))
+        print("  TRACK 现在声明了 %d 个列 / %d 张表。" % (len(TRACK), len(TRACK_TABLES)))
         raise SystemExit(0)
     s = snapshot()
     print("%s  表 %s" % (DB.name, TABLE))
@@ -445,3 +533,6 @@ if __name__ == "__main__":
         if c in s:
             print("  {:16}{:>12,}  {:>6.2f}%".format(
                 c, s[c], 100 * s[c] / max(s["__rows__"], 1)))
+    for t in TRACK_TABLES:
+        if "#" + t in s:
+            print("  #{:15}{:>12,}".format(t, s["#" + t]))

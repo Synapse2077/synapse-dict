@@ -191,7 +191,10 @@ def main():
         print("\n(未加 --apply，不写库)")
         return 0
 
-    with dbtool.session("keep-v3-9-search-prefix", expect={}) as s:
+    # B7（2026-10-31）：两张前缀表进了 TRACK_TABLES ⇒ 整表重建由本脚本**声明**（None＝行数随词表变，
+    #   不定值）；别的脚本碰它们仍然判红。
+    with dbtool.session("keep-v3-9-search-prefix", expect={"#search_prefix": None,
+                                           "#search_prefix_meta": None}) as s:
         s.execute("DROP TABLE IF EXISTS search_prefix")
         s.execute("DROP TABLE IF EXISTS search_prefix_meta")
         s.execute(DDL)

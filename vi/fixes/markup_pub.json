@@ -1,0 +1,13 @@
+{
+  "note": "vi 释义出版正文（text_pub）里通用清洗（stage6_sources.clean_markup）还原不了的残缺 wiki 模板：逐行裁决（2026-11-01）。text 一字不动（源头原文，外锚闸逐字比）。orig 与库里当前 text 逐字相同才生效，否则 zh_pub 炸。只删残缺的模板壳，不补任何源头没给的字。",
+  "rows": [
+    {"table": "sense_gloss", "id": 12538,
+     "orig": "Oceania ({{place|en|A <> composed of the islands of the central and southern Pacific Ocean, principally divided into Melanesia, Micronesia and Polynesia)",
+     "new": "Oceania (composed of the islands of the central and southern Pacific Ocean, principally divided into Melanesia, Micronesia and Polynesia)",
+     "why": "`Châu Đại Dương`：{{place}} 模板没展开、只剩半截（`<>` 是源头渲染丢掉的类别词）—— 删模板壳，不猜那个词"},
+    {"table": "sense_gloss", "id": 87050,
+     "orig": "(context|Phương ngữ}}) bánh cuốn.",
+     "new": "(Phương ngữ) bánh cuốn.",
+     "why": "`bánh mướt`：{{context|Phương ngữ}}（语域标签「方言」）开头的 {{ 被吞掉，只剩 `context|` 与 `}}`"}
+  ]
+}

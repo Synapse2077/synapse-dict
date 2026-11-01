@@ -54,6 +54,8 @@ from fix_geo_parent_zh import DESC_PARENT, LAT           # noqa: E402
 from strip_pos_label_in_gloss import LAB, TAIL           # noqa: E402
 from fix_unclosed_paren import classify as paren_class   # noqa: E402
 from hide_junk_pronunciation import is_junk_ipa            # noqa: E402
+sys.path.insert(0, str(HERE.parent.parent / "scripts"))
+from zh_t2s import t2s as zh_t2s                           # noqa: E402
 from fix_ipa_xsampa import BAD as XSAMPA_BAD, ENTITY as IPA_ENTITY   # noqa: E402
 from fix_cross_edition_sense import REWRITE as XED_REWRITE  # noqa: E402
 
@@ -156,6 +158,11 @@ def checks():
          IT_WRITE, IT_READ, lambda t: bool(PLACEHOLDER.search(t))),
         ("B5", "fix_surgical_suffix.py", "08-16", "-ectomia 译成「切开」/ -tomia 译成「切除」",
          ZH_WRITE, ZH_READ, None),        # 需要词形，单独处理，见 special()
+        # B29（2026-10-30）：跑批模型写出的繁体（`鸊鷉` `風險`）30 行，判据 import 跨门共用的安全版
+        ("B9", "scripts/fix_zh_t2s.py", "10-30", "中文里还有可转的繁体（安全判据，B29）",
+         ZH_WRITE + " UNION ALL SELECT text FROM example_gloss WHERE lang='zh'"
+         " UNION ALL SELECT text FROM collocation_gloss WHERE lang='zh'",
+         ZH_READ, lambda t: zh_t2s(t) != t),
 
         # ── C 组：结构（各自的写入表 / App 读取形状）──────────────────────
         ("C1", "normalize_sense_pos.py", "08-15", "sense.pos 用了 kaikki 长写法",
@@ -559,6 +566,8 @@ def mutate(only=()):
     import shutil
     import tempfile
     tmp = Path(tempfile.mkdtemp()) / "m.sqlite"
+    import atexit
+    atexit.register(shutil.rmtree, tmp.parent, True)   # 2026-11-01：1.2 GB 的库副本原来用完不删
     muts = [
         ("A1", "A1 音标里塞回定界符",
          "UPDATE dict SET ipa='/ˈka.sa/' WHERE word='casa'"),
@@ -576,6 +585,9 @@ def mutate(only=()):
         ("A6", "A6 读取侧非主读音塞回 `_h`（B10）",
          "UPDATE pronunciation SET ipa='ˈkat_hto' WHERE id=(SELECT id FROM pronunciation "
          "WHERE is_primary=0 AND COALESCE(hidden,0)=0 LIMIT 1)"),
+        ("B9", "B9 义项中文塞回一个繁体词（B29）",
+         "UPDATE sense_gloss SET text='國際'||text WHERE rowid=(SELECT g.rowid FROM sense_gloss g "
+         "JOIN sense s ON s.id=g.sense_id WHERE g.lang='zh' AND COALESCE(s.hidden,0)=0 LIMIT 1)"),
         ("B1", "B1 中文写成拉丁字母",
          "UPDATE sense_gloss SET text='house' WHERE rowid=(SELECT g.rowid FROM sense_gloss g "
          "JOIN sense s ON s.id=g.sense_id WHERE g.lang='zh' AND g.kind='equivalent' "

@@ -545,6 +545,11 @@ _STRAY_LINK = re.compile(r"\[\[|\]\]")
 # `^([sic])` → `[sic]`。**只认方括号那一族** —— `^(https://…)` 是另一回事（W18），
 #   而且它在 `ref` 里不在正文里。
 _SUPERSCRIPT_NOTE = re.compile(r"\^\((\[[^\]]*\])\)")
+# 2026-11-01（B21 顺带逮到的那一族）：
+#   `[[目标|显示文字]]` ⇒ 只留显示文字 —— 要在拆落单括号**之前**做，否则剩下 `w:I_Ching…|||||||`（`càn khôn`）
+#   `'''粗体'''`／`''斜体''` ⇒ 去掉引号（例句 `Cao đình'''`）。⚠️ 越语／中文里不用撇号，实测全库只有这 1 处两个以上连写
+_PIPED_LINK = re.compile(r"\[\[[^\]|]*\|([^\]]*)\]\]")
+_BOLD_ITALIC = re.compile(r"'{2,}")
 
 
 def clean_markup(text):
@@ -562,7 +567,8 @@ def clean_markup(text):
     """
     out = []
     for line in (text or "").split("\n"):
-        new = _STRAY_LINK.sub("", _WIKI_PREFIX.sub("", _SUPERSCRIPT_NOTE.sub(r"\1", line)))
+        new = _BOLD_ITALIC.sub("", _STRAY_LINK.sub("", _PIPED_LINK.sub(r"\1", _WIKI_PREFIX.sub(
+            "", _SUPERSCRIPT_NOTE.sub(r"\1", line)))))
         if new != line:                      # 只有被我改过的行才整理空白
             new = " ".join(new.split())
         out.append(new)

@@ -81,7 +81,7 @@ body {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', 'SD Rare Han', sans-serif;
   background: var(--bg);
   background-image: var(--bg-gradient);
   background-attachment: fixed;
@@ -561,7 +561,7 @@ button.brand:focus-visible {
   /* IPA 需含 ˈ(U+02C8) 等修饰字符的字体：系统字体(SF/Segoe)优先，再退 IPA 专用字体。
      旧值 'Noto Sans' 未加载 → 回退老 Helvetica，缺 IPA 字形导致重音符/连结弧不可见。 */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Charis SIL',
-    'Doulos SIL', 'Gentium Plus', 'Lucida Grande', 'Arial Unicode MS', sans-serif;
+    'Doulos SIL', 'Gentium Plus', 'Lucida Grande', 'Arial Unicode MS', 'SD Rare Han', sans-serif;
 }
 
 /* ---- Definition sections ---- */
@@ -578,41 +578,6 @@ button.brand:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 12px;
-}
-
-.definition-list {
-  display: grid;
-  gap: 8px;
-}
-
-.def-item {
-  display: flex;
-  gap: 12px;
-  line-height: 1.65;
-  font-size: 15.5px;
-}
-
-.def-item dt {
-  color: var(--accent);
-  font-weight: 700;
-  font-size: 13px;
-  min-width: 26px;
-  padding-top: 3px;
-  flex-shrink: 0;
-  text-align: right;
-}
-
-.def-item dd {
-  margin: 0;
-  color: var(--text);
-}
-
-.definition-list.en .def-item dt {
-  color: var(--en-accent);
-}
-
-.definition-list.en .def-item dd {
-  color: var(--text-secondary);
 }
 
 /* ---- Exchange / word forms ---- */
@@ -650,40 +615,7 @@ button.brand:focus-visible {
   gap: 8px;
 }
 
-.exchange-words {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.exchange-link {
-  color: var(--accent);
-  text-decoration: none;
-  font-size: 14px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  transition: background 0.12s;
-}
-
-.exchange-link:hover {
-  background: var(--accent-soft);
-}
-
 /* ---- Frequency ---- */
-.freq-row {
-  display: flex;
-  gap: 24px;
-  flex-wrap: wrap;
-}
-
-.freq-item {
-  font-size: 14px;
-  color: var(--text-secondary);
-}
-
-.freq-item strong {
-  color: var(--text);
-}
 
 /* ============================================================
    Language switcher (left column)
@@ -722,7 +654,7 @@ button.brand:focus-visible {
 .badge.pos {
   background: var(--accent-soft);
   color: var(--accent);
-  font-family: 'Noto Sans', sans-serif;
+  font-family: 'Noto Sans', 'SD Rare Han', sans-serif;
   letter-spacing: 0.02em;
 }
 
@@ -781,13 +713,23 @@ button.brand:focus-visible {
   border-left: 2px solid var(--border);
 }
 
+/* B4（2026-11-01）：配不上任何义项分组的词源单独成块（`OrphanEtym`）。
+   块里最后一段不留底边距 —— 否则和下一区之间叠出两份空白。 */
+.etym-orphan .etym-text:last-child {
+  margin-bottom: 0;
+}
+
 /* 源头没给正文的那 20%：照实说出来，不留白（留白读者会以为页面坏了）。 */
 .etym-text-none {
   color: var(--text-tertiary);
   font-style: italic;
 }
 
-.pos-group:first-child .etym-label {
+/* 第一组的词源标签紧贴「释义」标题，不要分隔线。
+   🔴 B16（2026-10-31）：原来写的是 `.pos-group:first-child` —— 而十门的 `.pos-group` 前面都有 `<h3>释义</h3>`，
+      第一组**永远不是 first-child** ⇒ 这条规则从写下起一个元素都没匹配到过，多词源页面上标题下面一直多一条线。
+      类名全在、`css-audit` 照样绿 —— 正是 B16 说的那种；渲染测量（469 页 × 491 条选择器）逮到的。 */
+.entry-section > h3 + .pos-group .etym-label {
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
@@ -822,21 +764,6 @@ button.brand:focus-visible {
 
 /* 义项折叠开关。产品是划词弹窗，`mano` 的 26 条义项一屏铺不下，
    冷僻义会把「手」淹掉；折叠的只是显示，数据仍可检索、展开即见。 */
-.sense-more {
-  margin-top: 12px;
-  padding: 5px 12px;
-  font: inherit;
-  font-size: 13px;
-  color: var(--text-secondary);
-  background: var(--surface-soft);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-}
-.sense-more:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
 
 .sense-zh {
   font-size: 16px;
@@ -845,12 +772,6 @@ button.brand:focus-visible {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.sense-en {
-  font-size: 13.5px;
-  color: var(--text-tertiary);
-  margin-top: 2px;
 }
 
 /* 义项副行：同一条义项的定义式中文（标题行是最短的那条，这里是明显更长的那条）。
@@ -1049,7 +970,7 @@ button.brand:focus-visible {
   margin-left: 6px;
   font-size: 12px;
   color: var(--text-tertiary);
-  font-family: 'Noto Sans', sans-serif;
+  font-family: 'Noto Sans', 'SD Rare Han', sans-serif;
 }
 
 .base-senses {
@@ -1391,121 +1312,15 @@ button.brand:focus-visible {
 /* ══ 西语版释义（sense_es，2026-08-05）══
    默认折叠：hacer 有 59 条，平铺出来会把上面的中文释义挤没。
    视觉上刻意比主释义弱一档 —— 它是「另一版怎么说」的旁证，不是本词典的结论。 */
-.es-senses {
-  margin-top: 14px;
-}
-
-.es-senses-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-soft);
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
-}
-
-.es-senses-toggle:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.es-senses-caret {
-  display: inline-block;
-  transition: transform 0.15s;
-  font-size: 11px;
-}
-
-.es-senses-caret.open {
-  transform: rotate(90deg);
-}
-
-.es-senses-count {
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-  font-weight: 600;
-}
 
 /* 来源就写在按钮上：用户该一眼看出这不是我们编的 */
-.es-senses-src {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  font-family: ui-monospace, Menlo, monospace;
-}
-
-.es-senses-body {
-  padding: 10px 4px 2px;
-}
-
-.es-sense-group + .es-sense-group {
-  margin-top: 12px;
-}
 
 /* 西语版自己的语法口径（Sustantivo ambiguo / Verbo pronominal），比我们的短码细，原样保留 */
-.es-sense-pos {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--accent);
-  text-transform: uppercase;
-  margin-bottom: 4px;
-}
-
-.es-sense-list {
-  margin: 0;
-  padding-left: 20px;
-}
-
-.es-sense-list li {
-  margin-bottom: 5px;
-  line-height: 1.55;
-}
 
 /* 中文在上、西语原文在下 —— 与主释义区同一套阅读顺序。
    原文视觉上弱一档，但不能省：它才是这条义项的权威源，中文是我们译的。 */
-.es-sense-zh {
-  font-size: 13.5px;
-  color: var(--text);
-}
-
-.es-sense-gloss {
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  margin-top: 1px;
-  line-height: 1.5;
-}
 
 /* 「英文版没有这个义项」——这批才是展开之后真正的新内容 */
-.es-sense-new {
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--accent);
-  background: var(--accent-soft);
-  vertical-align: 1px;
-}
-
-.es-senses-extra {
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.es-sense-tags {
-  margin-left: 6px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
 
 /* ---- 例句（2026-08-07 接入）----
    挂在义项下面而不是堆在词条末尾 —— `example.sense_id` 已由 `src_gloss`
@@ -1633,15 +1448,6 @@ button.brand:focus-visible {
   border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
-button.rel-link {
-  background: none;
-  border: 0;
-  border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent);
-  padding: 0;
-  font: inherit;
-  cursor: pointer;
-}
-
 .rel-link:hover { border-bottom-style: solid; }
 
 .rel-plain { color: var(--text-secondary); }
@@ -1654,7 +1460,7 @@ button.rel-link {
   font-weight: 400;
   color: var(--text-secondary);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Charis SIL',
-    'Doulos SIL', 'Gentium Plus', 'Lucida Grande', 'Arial Unicode MS', sans-serif;
+    'Doulos SIL', 'Gentium Plus', 'Lucida Grande', 'Arial Unicode MS', 'SD Rare Han', sans-serif;
 }
 
 /* 同形异义提示：变位形式那一块与上面的释义不是同一个词 */
@@ -1662,26 +1468,13 @@ button.rel-link {
   margin-bottom: 8px;
 }
 
-/* 截断提示：`buono` 有 763 个近义词，只铺前 12 个 —— 但必须告诉用户还有多少，
-   否则「只收了 12 个」是个假印象。 */
-/* 角色：弱色小字附注 —— 「+3」「… 共 N 种」「（中文）」「标题旁的计数」。
-   🔴 `.section-count` 没有规则时，`<h3>词形变化<span>9</span></h3>` 里那个 9
-      会用 h3 的字号和字重印出来，看着像标题的一部分（用户看到的「词形变化9」）。 */
-.rel-more,
-.alt-zh,
-.form-more,
-.phonetic-context,
-.phonetic-region {
+/* 角色：弱色小字附注 —— 「… 共 N 种」「（中文）」。
+   B16（2026-10-31）：原来这组里还有 `.rel-more`（关系截断提示，关系已按项目决定不封顶）和
+   `.section-count`（标题旁的条数，用户 2026-09-12 要求去掉）—— 源码里早就不用了，规则删掉。 */
+.alt-zh, .form-more, .phonetic-context, .phonetic-region {
   font-size: 11.5px;
   color: var(--text-tertiary);
   white-space: nowrap;
-}
-
-.section-count {
-  margin-left: 6px;
-  font-size: 11.5px;
-  font-weight: 400;
-  color: var(--text-tertiary);
 }
 
 /* 角色：意语例句里的上标注（`^(Pas clair)` 一类）。 */
@@ -1753,7 +1546,6 @@ button.rel-link {
   font-size: 11px;
   opacity: 0.75;
 }
-
 
 /* 异体指针（fr 与 pt 共用这批类名）。
    🔴 **这一族此前一个字的样式都没有** —— 所以 `异体 → banco de dados数据库`
@@ -1941,7 +1733,7 @@ button.rel-link {
 /* 声调标记 `[néꜜkò]` ＋ 声调型。`ꜜ` 是下降符，必须与前后字母同基线，
    所以整块用等宽族，避免比例字体把它挤歪。 */
 .ja-pitch {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, 'SD Rare Han', monospace;
   font-size: 12.5px;
   color: var(--text-secondary);
   background: var(--surface-soft);
@@ -2180,7 +1972,7 @@ button.rel-link {
 
 /* 作用域钩子。本身不画任何东西，只用来把下面几条限制在韩语页内。 */
 .ko-entry {
-  --ko-hanja-font: 'Noto Serif KR', 'Songti SC', serif;
+  --ko-hanja-font: 'Noto Serif KR', 'Songti SC', 'SD Rare Han', serif;
 }
 
 /* ---- 词头旁：罗马字 ----
@@ -2417,7 +2209,7 @@ button.rel-link {
   flex-direction: column;
   gap: 18px;
   /* 汉字/喃字表记要上衬线体：喃字笔画比汉字更密，无衬线里糊成一团 */
-  --vi-han-font: 'Noto Serif CJK SC', 'Songti SC', serif;
+  --vi-han-font: 'Noto Serif CJK SC', 'Songti SC', 'SD Rare Han', serif;
 }
 
 /* ---- 词头 ---- */
@@ -2438,8 +2230,7 @@ button.rel-link {
   line-height: 1.45;
 }
 
-.vi-speak,
-.vi-pron-play {
+.vi-speak {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text-secondary);
@@ -2449,8 +2240,7 @@ button.rel-link {
   cursor: pointer;
 }
 
-.vi-speak:hover,
-.vi-pron-play:hover {
+.vi-speak:hover {
   background: var(--surface-hover);
   color: var(--vi-accent);
 }
@@ -2550,7 +2340,7 @@ button.rel-link {
 }
 
 .vi-ipa {
-  font-family: 'Charis SIL', 'Doulos SIL', 'Gentium Plus', serif;
+  font-family: 'Charis SIL', 'Doulos SIL', 'Gentium Plus', 'SD Rare Han', serif;
   font-size: 15px;
   color: var(--text-secondary);
 }
@@ -2842,10 +2632,10 @@ button.rel-link {
   border-radius: 4px; padding: 0 5px; margin: 0 4px 0 0; vertical-align: 1px;
 }
 /* 重音符是组合字符：字体缺字形时会画成方框 —— 用带完整西里尔扩展的字体栈 */
-.ru-stressed { font-size: 17px; color: var(--text); font-family: 'PT Serif', 'Noto Serif', Georgia, serif; }
+.ru-stressed { font-size: 17px; color: var(--text); font-family: 'PT Serif', 'Noto Serif', Georgia, 'SD Rare Han', serif; }
 .ru-prons { display: inline-flex; flex-wrap: wrap; gap: 8px; }
 .ru-prons-form { font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; }
-.ru-ipa { font-family: 'Charis SIL', 'Doulos SIL', 'Gentium Plus', serif; font-size: 15px; color: var(--text-secondary); }
+.ru-ipa { font-family: 'Charis SIL', 'Doulos SIL', 'Gentium Plus', 'SD Rare Han', serif; font-size: 15px; color: var(--text-secondary); }
 .ru-senses { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 12px; }
 .ru-sense { line-height: 1.6; }
 .ru-zh { color: var(--text); font-size: 15px; margin-right: 8px; }

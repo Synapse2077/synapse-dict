@@ -28,8 +28,10 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -63,6 +65,16 @@ GATES = {
     "gate:first-build": "scripts/test_first_build_gate.py",   # B6/B22：库不存在时 dbtool 的三条路径
     "gate:consult": "scripts/consult.py",                       # B8/B9：咨询工具的离线自检
     "gate:backlog": "scripts/test_backlog_gate.py",             # B5：顶层账本与各门计划表对得上
+    "gate:zh-t2s": "scripts/zh_t2s.py",                         # B29：跨门繁→简判据的自测（65 条真句子）
+    "gate:rare-han": "scripts/rare_han_font.py",               # B29：罕用汉字兜底字体 —— 库里每个扩展 B+ 字都有切片、三份字表对得上、字体栈都带它（＋变异）
+    "gate:etym-criterion": "scripts/ingest_etymology.py",       # B4：「这段不是词源」判据自测（套话各一例＋该保留的反控）
+    "gate:small-undo": "scripts/test_small_undo.py",             # 写库闸门的小改动模式：撤销后逐行一致、撤不干净的必须拒绝
+    "gate:schema-drift": "scripts/test_schema_drift_gate.py",   # B24：九门库里的建表语句与建表脚本逐表对账（列＋约束/唯一键，＋变异）
+    "gate:track": "scripts/test_track_gate.py",                 # B7：十门写库闸门的追踪清单与库两个方向对得上（＋变异）
+    "gate:intake-layers": "scripts/intake_layers.py",           # B3：十门收词层表核表（脚本在／销账前缀真在脚本里／verify 真在 COVERAGE 里）＋机制自检
+    "gate:intake-pending": "scripts/intake_layers.py",          # B3：收词后声明要重跑的层还有没还的 ⇒ 红
+    "gate:batch-audit": "scripts/batch_audit.py",               # B21：付费跑批花钱前量输入、回收后逐条列异常（＋六门接线，假传输层不花钱）
+    "gate:mutation-debt": "scripts/mutation_stamp.py",            # B20：八门 18 个变异档 —— 闸代码或计划表改了没重跑变异，点名
     "gate:backup-policy": "scripts/test_backup_policy_gate.py",  # 完结预算生效＋十门删除行为测试（2026-10-28 前没人跑）
     # B11：es/fr/it 没有各自的 `gates.py`，查询计划闸与页面计时闸挂在这里（ko/vi/ru 的在各门名单里）
     "gate:es-plans": "scripts/query_plans_probe.py",
@@ -126,15 +138,23 @@ def run(g):
     return code, out, time.time() - t0
 
 
+# 2026-10-31：本次汇总专用的临时目录，所有闸的 TMPDIR 都指向它，全部跑完一并删掉。
+#   起因：清点系统临时目录时查出各道闸漏下 1,244 个目录、2.75 GB（含 it 修复脚本漏的两份 1.2 GB 整库副本），
+#   源头 19 处 `mkdtemp` 不一定清理 —— 逐处补了一批，但下一处新写的还会漏 ⇒ 在入口兜住。
+#   Python `tempfile` 与 Node `os.tmpdir()` 都认 `TMPDIR`。
+_RUN_TMP = tempfile.mkdtemp(prefix="gate-display-")
+
+
 def _run(g):
     if not g.startswith("gate:"):
         # ko/vi/ru 的账的闸自己会查展示层台账，而本闸跑的途中台账必然是过期的
         # ⇒ 不拆这个环它们永远红、台账永远记红。用环境变量告诉它们「是汇总闸在跑你」。
-        env = dict(os.environ, DISPLAY_GATES_RUNNING="1")
+        env = dict(os.environ, DISPLAY_GATES_RUNNING="1", TMPDIR=_RUN_TMP)
         p = subprocess.run([sys.executable, "-u", GATES[g]], cwd=ROOT, capture_output=True,
                            text=True, env=env)
         return p.returncode, p.stdout + p.stderr
-    p = subprocess.run(["npm", "run", "-s", g], cwd=ROOT, capture_output=True, text=True)
+    p = subprocess.run(["npm", "run", "-s", g], cwd=ROOT, capture_output=True, text=True,
+                       env=dict(os.environ, TMPDIR=_RUN_TMP))
     return p.returncode, p.stdout + p.stderr
 
 
@@ -233,5 +253,15 @@ def main():
     sys.exit(1 if dead or red else 0)
 
 
+def _cleanup_tmp():
+    leaked = sum(1 for _ in Path(_RUN_TMP).iterdir()) if Path(_RUN_TMP).exists() else 0
+    shutil.rmtree(_RUN_TMP, ignore_errors=True)
+    if leaked:
+        print("■ 本次各闸在临时目录留下 %d 项，已随汇总一并删除" % leaked)
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        _cleanup_tmp()

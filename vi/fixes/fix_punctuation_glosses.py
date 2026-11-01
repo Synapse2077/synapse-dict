@@ -64,11 +64,12 @@ sys.path.insert(0, str(HERE.parent / "pipeline"))
 
 import dbtool                                                     # noqa: E402
 import paths                                                      # noqa: E402
-from criteria import gloss_has_content, is_vi_markup_gloss         # noqa: E402
+from criteria import gloss_has_content, is_vi_markup_gloss, is_placeholder_gloss   # noqa: E402
 
 F = lambda n: format(n, ",")                                      # noqa: E731
 HIDDEN_WHY = "gloss-is-punctuation-only"
 HIDDEN_WHY_MARKUP = "gloss-is-source-markup"
+HIDDEN_WHY_PLACEHOLDER = "gloss-is-placeholder"   # 2026-11-01：源头的「缺定义」占位模板（`phở`），见 criteria.is_placeholder_gloss
 
 
 def find(con):
@@ -81,6 +82,8 @@ def find(con):
             out.append((sid, lang, t, HIDDEN_WHY))
         elif lang == "vi" and is_vi_markup_gloss(t):
             out.append((sid, lang, t, HIDDEN_WHY_MARKUP))
+        elif is_placeholder_gloss(t):                # 任何语言：模型把占位模板也译成了中文
+            out.append((sid, lang, t, HIDDEN_WHY_PLACEHOLDER))
     return out
 
 

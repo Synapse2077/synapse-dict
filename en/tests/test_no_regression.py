@@ -44,6 +44,10 @@ from hide_non_examples import WHERE as NOT_EXAMPLE              # noqa: E402
 from split_quote_ref import YEAR, ref_leaked                    # noqa: E402
 from translate_examples import SRC as EX_SRC                    # noqa: E402
 from build_legacy_sense import PHON_LINE, POS_LINE, SECTION_LINE  # noqa: E402
+_sys.path.insert(0, str(_ROOT.parent / "scripts"))
+from zh_t2s import t2s as zh_t2s                                # noqa: E402
+from fix_chem_e import CHEM as ZH_CHEM_E                         # noqa: E402
+from fix_ecdict_garbled import MAP as ECDICT_GARBLED              # noqa: E402
 
 TS = _ROOT.parent / "packages" / "dict-core" / "src" / "english.ts"
 V3 = ("dict", "entry", "sense", "sense_src", "sense_gloss", "sense_tag",
@@ -231,6 +235,28 @@ def build(con, only=None):
     # 🔴 A9（2026-10-29，§16.7④）：老词典释义里**嵌着整条别的词条**（`G.O.S.` 752 条义项＝`go` 的全文），
     #    逐行拆开后音标行 `[ɡəu]`、单独的 `vi.`、`变形：` 都成了「义项」（1 万多条）。
     #    凡是嵌入词条都带这几种格式行 ⇒ 数格式行就守住了「嵌入词条又被逐行拆进来」。判据 import 生成脚本。
+    # B29（2026-10-30）：ECDICT 的中文本身带台湾用字（`桿` `週` `鍊接`）8,836 行＋模型写出的 665 行，
+    #    同一页两种字形。判据 import 跨门共用的安全版（`鍊` 分「链／炼」、括号里的外语原词形不动）。
+    add("A", "A11 中文里还有可转的繁体（安全判据，B29）",
+        sum(1 for tb in ("sense_gloss", "example_gloss", "collocation_gloss")
+            for (t,) in con.execute("SELECT text FROM %s WHERE lang='zh'" % tb) if t and zh_t2s(t) != t))
+    # 2026-10-30：ECDICT 的乱码字（扩展 C 区一簇，`仅能𪤛口` `螲𪤅科`）按上下文改回 41 行；映射表 import 修复脚本。
+    #    上下文定不了的 12 来个**有意没改**（单字科名），不在这条里。
+    add("A", "A12 出版层还有 ECDICT 的乱码字（已裁决的 25 个）",
+        sum(1 for (t,) in con.execute("SELECT text FROM sense_gloss WHERE lang='zh'")
+            if t and any(c in ECDICT_GARBLED for c in t)))
+    # 2026-10-30：B29 第一版把规范字「噁」转成「恶」（`异噁唑→异恶唑` 511 处），已改回；判据 import 修复脚本。
+    add("A", "A13 化学名里的「噁」被写成「恶」（`异恶唑` `二恶烷`）",
+        sum(1 for tb in ("sense_gloss", "example_gloss", "collocation_gloss")
+            for (t,) in con.execute("SELECT text FROM %s WHERE lang='zh' AND text LIKE '%%恶%%'" % tb)
+            if t and ZH_CHEM_E.search(t)))
+    # B1（2026-10-31）：源头把「Middle East」拆成 `Middle`＋`East`；`Middle` 不是时代层（09-15 误补进 REGISTER）。
+    #   标签层由 `merge_split_tags()` 合成地区 `Middle-East`（中东）。两种回潮各算一条：
+    #   ① 语域里出现 `Middle`（会给中东用法印「中古」）② 中东义项上又单独挂 `East`（页面印「东部」）
+    add("A", "A14 `Middle East` 被拆开回潮（语域 Middle／中东义项上单独的 East）",
+        q("SELECT COUNT(*) FROM sense_tag WHERE kind='register' AND value='Middle'")
+        + q("SELECT COUNT(*) FROM sense_tag a JOIN sense_tag b ON b.sense_id=a.sense_id"
+            " AND b.kind='region' AND b.value='Middle-East' WHERE a.kind='region' AND a.value='East'"))
     add("A", "A10 老词典层义项超过 50 条的词（§16.7④ 残差）",
         q("SELECT COUNT(*) FROM (SELECT word_id FROM sense_src WHERE src='ecdict' GROUP BY word_id HAVING COUNT(*)>50)"))
     add("A", "A9 老词典层的义项是格式行（音标/单独词性/栏目标签，§16.7④）",
@@ -490,6 +516,20 @@ def mutate():
          lambda c: (c.execute("INSERT INTO sense(id,word_id,rank) VALUES(1,1,0)"),
                     c.execute("INSERT INTO sense_src(id,sense_id,word_id,src,raw_tags)"
                               " VALUES(1,1,1,'ecdict','{}')")))
+    case("出版层塞回一个乱码字", "A12 出版层还有 ECDICT 的乱码字（已裁决的 25 个）",
+         lambda c: (c.execute("INSERT INTO sense(id,word_id,rank) VALUES(1,1,0)"),
+                    c.execute("INSERT INTO sense_gloss(sense_id,lang,text) VALUES(1,'zh','仅能𪤛口的生活')")))
+    case("化学名又被转成「恶」", "A13 化学名里的「噁」被写成「恶」（`异恶唑` `二恶烷`）",
+         lambda c: (c.execute("INSERT INTO sense(id,word_id,rank) VALUES(1,1,0)"),
+                    c.execute("INSERT INTO sense_gloss(sense_id,lang,text) VALUES(1,'zh','[化] 二恶烷')")))
+    case("语域里又出现 Middle（09-15 那次误补）", "A14 `Middle East` 被拆开回潮（语域 Middle／中东义项上单独的 East）",
+         lambda c: c.execute("INSERT INTO sense_tag(sense_id,kind,value) VALUES(1,'register','Middle')"))
+    case("中东义项上又挂回单独的 East", "A14 `Middle East` 被拆开回潮（语域 Middle／中东义项上单独的 East）",
+         lambda c: c.executemany("INSERT INTO sense_tag(sense_id,kind,value) VALUES(1,'region',?)",
+                                 [("Middle-East",), ("East",)]))
+    case("中文释义塞回一个繁体词", "A11 中文里还有可转的繁体（安全判据，B29）",
+         lambda c: (c.execute("INSERT INTO sense(id,word_id,rank) VALUES(1,1,0)"),
+                    c.execute("INSERT INTO sense_gloss(sense_id,lang,text) VALUES(1,'zh','抽油桿')")))
     case("一整条大词条又被逐行拆进来", "A10 老词典层义项超过 50 条的词（§16.7④ 残差）",
          lambda c: (c.executemany("INSERT INTO sense(id,word_id,rank) VALUES(?,1,?)", [(i, i) for i in range(1, 52)]),
                     c.executemany("INSERT INTO sense_src(id,sense_id,word_id,src,raw_tags) VALUES(?,?,1,'ecdict','{}')",

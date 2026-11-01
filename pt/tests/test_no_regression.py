@@ -76,6 +76,8 @@ from ingest_examples import clean_bold                # noqa: E402
 from ingest_relations import SEM, SKIP                # noqa: E402
 from link_table_forms import BARE_TABLE_CELL          # noqa: E402
 from translate_examples import is_formula             # noqa: E402
+sys.path.insert(0, str(HERE.parent.parent / "scripts"))
+from zh_t2s import t2s as zh_t2s                       # noqa: E402
 
 f = lambda n: format(n, ",")
 TS = str  # 占位，保持行短
@@ -270,6 +272,18 @@ def build(con):
                 "  JOIN sense_gloss g ON g.sense_id=s.id AND g.lang='zh' "
                 " WHERE COALESCE(s.hidden,0)=0 AND ss.text LIKE '%estado do Rio Grande do Norte%'")
             if "北里奥格兰德" not in zh and ("里约格兰德" in zh or "里奥格兰德" in zh or "北大河" in zh)))
+    # B29（2026-10-30）：中文版白送的变位说明原样是繁体（`第一人稱單數…`）605 行，判据 import 跨门共用的安全版。
+    add("A", "A10 中文里还有可转的繁体（安全判据，B29）",
+        sum(1 for tb in ("sense_gloss", "example_gloss", "collocation_gloss")
+            for (t,) in con.execute("SELECT text FROM %s WHERE lang='zh'" % tb) if t and zh_t2s(t) != t))
+    # B30（2026-10-30）：中文版错译的改译（两层判官都判错、写前逐条读过）34 行。账本是答案文件 `applied.jsonl`；
+    #    回滚/重建把源头原译写回来（「艰辛岁月」）就红。
+    _ap = paths.WORK / "b30_zh_judge" / "applied.jsonl"
+    _new = {json.loads(l)["id"]: json.loads(l)["new"] for l in _ap.open(encoding="utf-8")} if _ap.exists() else {}
+    _cur = dict(con.execute("SELECT example_id, text FROM example_gloss WHERE lang='zh' AND example_id IN (%s)"
+                            % (",".join(map(str, _new)) or "NULL")))
+    add("A", "A11 B30 中文版错译的改译没印出来", sum(1 for i, t in _new.items() if _cur.get(i) != t)
+        + (0 if len(_new) == 34 else 1000))          # 账本自己少了／多了也红（独立声明 34）
     add("H", "H1 🔴 有表的 UNIQUE 含可空列且无 COALESCE 兜底索引（NULL≠NULL ⇒ 约束失效）",
         len(set(nullable_unique)))
     # 🔴🔴 **2026-08-31：这条闸在报自己的 bug，报了 0。**
@@ -427,7 +441,7 @@ def run(trace=False):
 
 # 🔴 变异条数**独立声明**（原来写死在 `print` 和 `return` 里两处）。加一条 `check()` 就改这里 ——
 #    pt 账的闸 2026-10-27 栽过同一个形状：写死 `== 6` 而变异是 8 条 ⇒ 全过也永远退 1。
-N_MUT = 12
+N_MUT = 14
 
 
 def mutate():
@@ -461,6 +475,12 @@ def mutate():
                                         name, hit[0] if hit else 0))
             con.execute("ROLLBACK") if False else None
 
+        check("B30 一条改译被源头原译盖回去",
+              "UPDATE example_gloss SET text='艰辛岁月' WHERE example_id=30212 AND lang='zh'",
+              "A11 B30 中文版错译的改译没印出来")
+        check("义项中文改回中文版的繁体",
+              "UPDATE sense_gloss SET text='第一人稱單數' WHERE rowid=(SELECT MIN(rowid) FROM sense_gloss WHERE lang='zh')",
+              "A10 中文里还有可转的繁体（安全判据，B29）")
         check("把假词 `metaphonic` 放回去",
               "INSERT INTO dict (id,word,word_norm,pos,is_lemma) "
               "VALUES (9999001,'metaphonic','metaphonic','n',0)",

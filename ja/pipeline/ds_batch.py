@@ -227,6 +227,11 @@ async def run(sys_prompt, batches, meta, out_path, mode="flash", conc=12,
           flush=True)
     if not todo:
         return 0
+    # B21：花钱前先量被加工的那一列（没量过就写报告、停下）；回收后把异常输出逐条列出来 —— 判据在 `scripts/batch_audit.py`
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    import batch_audit
+    batch_audit.preflight([batches[i] for i in todo], [meta[i] for i in todo], out_path)
+    _audit_off = out_path.stat().st_size if out_path.exists() else 0
     print("■ 模型 %s  并发 %d  思考 %s" % (model, conc, thinking), flush=True)
 
     q = asyncio.Queue()
@@ -301,6 +306,7 @@ async def run(sys_prompt, batches, meta, out_path, mode="flash", conc=12,
         await asyncio.gather(*[asyncio.create_task(worker(cl))
                                for _ in range(min(conc, len(todo)))])
     fh.close()
+    batch_audit.postflight([batches[i] for i in todo], [meta[i] for i in todo], out_path, _audit_off)
     print("■ 完成 %s 批 / 失败 %d 批 / token %s"
           % (f"{ctr['done']:,}", ctr["fail"], f"{ctr['tok']:,}"), flush=True)
     return ctr["tok"]

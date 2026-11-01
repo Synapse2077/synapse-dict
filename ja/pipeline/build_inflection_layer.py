@@ -245,7 +245,8 @@ def main():
     allw = set(have) | set(new)
     exp_base = (sum(1 for r in rows if r[1] in allw)
                 + sum(1 for b in foreign_base if b in allw))
-    with dbtool.session("ja-inflection-layer", expect={
+    # B3：插的是变形词形（is_lemma=0，只指回原形）—— 不带新读音／义项／例句；要搜得到 ⇒ 搜索前缀，行数变了 ⇒ 统计信息
+    with dbtool.session("ja-inflection-layer", rerun=["搜索前缀", "统计信息"], expect={
             "__rows__": len(new), "pos": 0,
             "#inflection": len(rows) - (n_infl - n_foreign),
             "inflection.label_zh": len(rows) + n_foreign - n_label_before,

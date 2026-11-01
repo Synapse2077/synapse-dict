@@ -461,6 +461,8 @@ def mutate():
     keep = ANCHOR
     try:
         d = Path(tempfile.mkdtemp())
+        import atexit, shutil
+        atexit.register(shutil.rmtree, d, True)   # 2026-11-01：用完即删
         bad = d / "a.txt"
         bad.write_text("kaikki.org-dictionary-English-20250424.jsonl 1\n", "utf-8")
         ANCHOR = bad

@@ -560,7 +560,15 @@ def v9():
         cur = gates.load()
     except BaseException as e:                   # noqa: BLE001
         return bad + [("V9", "欠账文件读不动：%s" % e)]
+    # 🔴 2026-10-30：**自己那一笔不计入红**，照 ru 的 V9（那边 10 月就修了，vi 一直没跟 ——
+    #    `[[decision-not-propagated-across-editions]]`）。不然：跑红一次 ⇒ `run_gates` 给它记
+    #    「run-red」⇒ 下次跑它报自己欠着 ⇒ 退 1 ⇒ 账划不掉 ⇒ 永远红（B29 那天真卡住了）。
+    #    按文件认自己，不按名字。
+    me = str(Path(__file__).resolve().relative_to(ROOT))
+    self_names = {g["name"] for g in gates.GATES if g.get("file") == me}
     for n in sorted(cur):
+        if n in self_names:
+            continue
         bad.append(("V9", "闸「%s」欠着没跑（%s 弄脏的）⇒ `python3 vi/run_gates.py`"
                     % (n, cur[n].get("tag", "?"))))
     # 🔴 B14（2026-10-27）：展示层汇总闸在**当前源码**上跑绿过没有。改代码不经过写库，

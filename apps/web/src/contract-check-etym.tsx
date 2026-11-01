@@ -213,6 +213,24 @@ function render(lang: Lang, entry: Entry): string {
 
 const CIRCLED = '⓪①②③④⑤⑥⑦⑧⑨';
 
+// B4（2026-11-01）：`OrphanEtym` 那一块（配不上任何义项分组的词源，单独印）。
+//   H1–H4 守的是**分组下的**正文，判之前先剥掉它，含义一字不变；这一块由 I1/I2 守。
+const ORPHAN_RX = /<section class="entry-section etym-orphan">[\s\S]*?<\/section>/g;
+const stripOrphan = (h: string) => h.replace(ORPHAN_RX, '');
+const orphanOf = (h: string) => (h.match(ORPHAN_RX) || []).join('');
+const unescape = (x: string) => x.replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>').replace(/&#x27;/g, "'").replace(/&quot;/g, '"');
+const shownTexts = (h: string) => [...h.matchAll(
+  /class="etym-text(?: etym-text-none)?"[^>]*>([\s\S]*?)<\/div>/g)]
+  .map((m) => unescape(m[1].replace(/<span class="sense-src-lang">[^<]*<\/span>/g, '')
+    .replace(/<[^>]*>/g, '')).trim());
+// ko 的汇总块（K36①，2026-10-27）：同一件事 ko 早做过，段落类名是 `ko-etym-orphan-text`、前面带来源标签。
+//   🔴 I1 第一版只认 `etym-text` ⇒ ko 26 页假红（它们**印着**，只是换了类名）。读者口径要认页面上所有词源正文段。
+const koOrphanTexts = (h: string) => [...h.matchAll(
+  /class="ko-etym-orphan-text"[^>]*>([\s\S]*?)<\/div>/g)]
+  .map((m) => unescape(m[1].replace(/<span class="ko-etym-src">[^<]*<\/span>/g, '')
+    .replace(/<[^>]*>/g, '')).trim());
+
 /** HTML 里实际印出来的「词源/词性」标题序列。 */
 function headsInHtml(h: string): string[] {
   const out: string[] = [];
@@ -479,7 +497,7 @@ const CHECKS: Array<{
       //    ⇒ 期望条数 ＝ 词源支里**所属版已抽过**的那些，不是全部标题。
       //    （fr 实测 40 个词里就有 7 个这样的块，判据不区分就会恒红。）
       const want = etymBlocksOf(senses, shape, textsOf(e)).filter((k) => ed.includes(editionOf(k))).length;
-      const notes = (h.match(/class="etym-text/g) || []).length;
+      const notes = (stripOrphan(h).match(/class="etym-text/g) || []).length;
       return want !== notes ? `该有 ${want} 条正文/说明，页面上 ${notes} 条` : null;
     },
   },
@@ -505,7 +523,7 @@ const CHECKS: Array<{
       //    于是徽标里的文字 `EN` 粘在正文前面（`ENA representation of…`），
       //    22 条真词条当场报红 —— **闸自己的 bug 长得和"贴错支"一模一样**。
       //    （同一个文件里 `headsInHtml` 的圈号那次也是这样，注释就在上面。）
-      const shown = [...h.matchAll(
+      const shown = [...stripOrphan(h).matchAll(
         /class="etym-text(?: etym-text-none)?"[^>]*>([\s\S]*?)<\/div>/g)]
         .map((m) => m[1]
           .replace(/<span class="sense-src-lang">[^<]*<\/span>/g, '')
@@ -544,7 +562,7 @@ const CHECKS: Array<{
       if (all.length < (shape.noteMode === 'multi-only' ? 2 : 1)) return null;
       const keys = [...new Set(all.filter((k) => ed.includes(editionOf(k))))];
       const have = keys.filter((k) => etymologyBrief(texts[k])).length;
-      const none = (h.match(/etym-text-none/g) || []).length;
+      const none = (stripOrphan(h).match(/etym-text-none/g) || []).length;
       return none > keys.length - have
         ? `${keys.length} 支里库中 ${have} 支有正文，页面却有 ${none} 条「源头未给出」` : null;
     },
@@ -557,14 +575,54 @@ const CHECKS: Array<{
     name: '🔴 H4 词源正文前面没有标题（无主段落）',
     hit: (_senses, h, _e, shape) => {
       if (shape.noteMode === 'group') return null;
-      const notes = (h.match(/class="etym-text/g) || []).length;
-      const owned = (h.match(/<div class="etym-(?:label|title)">[^<]*<\/div><div class="etym-text/g) || []).length;
+      const hs = stripOrphan(h);
+      const notes = (hs.match(/class="etym-text/g) || []).length;
+      const owned = (hs.match(/<div class="etym-(?:label|title)">[^<]*<\/div><div class="etym-text/g) || []).length;
       return notes !== owned ? `${notes} 段正文里 ${notes - owned} 段前面没有「词源」标题` : null;
+    },
+  },
+  {
+    // ══ I 组：读者口径（B4，2026-11-01）═══════════════════════════════════
+    // 🔴🔴 **库里这个词的每段有内容的词源正文，页面上都必须找得到 —— 不管印在哪。**
+    //    B4 之前：页面只在义项分组下印词源，源头有正文、词条没义项的那批（ja 825 页整页没义项）
+    //    **数据在库里、一个字都到不了读者**，而 G/H 组全绿 —— 它们只比「分组下该有几段」。
+    name: '🔴 I1 库里有的词源正文，页面上找不到（读者口径）',
+    hit: (_senses, h, e) => {
+      const texts = (e as { etymologyTexts?: Record<string, string> }).etymologyTexts;
+      if (!texts) return null;
+      const page = [...shownTexts(h), ...koOrphanTexts(h)].join('\n');
+      const lost = Object.entries(texts).map(([k, v]) => [k, etymologyBrief(v)] as const)
+        .filter(([, b]) => b && !page.includes(unescape(b).trim().slice(0, 40)));
+      return lost.length ? `${lost.length} 段没印出来（如 ${lost[0][0]}「${lost[0][1]!.slice(0, 30)}」）` : null;
+    },
+  },
+  {
+    // 单独那一块印的**恰好是**没被分组用掉、且有正文的键，每段是它自己的正文（配对，同 H2 的理由）。
+    name: '🔴 I2 单独印的词源块与「分组没用掉的那些」对不上',
+    hit: (senses, h, e, shape) => {
+      const texts = (e as { etymologyTexts?: Record<string, string> }).etymologyTexts;
+      if (!texts) return null;
+      // 页面用的是 ko 那种「按正文去重」的汇总块 ⇒ 配对契约不同（同正文只印一次），本条不管；I1 照样守「印没印」
+      if (h.includes('ko-etym-orphan')) return null;
+      const used = new Set(etymBlocksOf(senses, shape, textsOf(e)));
+      const want = Object.keys(texts).filter((k) => !used.has(k) && etymologyBrief(texts[k])).sort();
+      const shown = shownTexts(orphanOf(h));
+      if (shown.length !== want.length) return `应单独印 ${want.length} 段，页面上 ${shown.length} 段`;
+      for (let k = 0; k < want.length; k += 1) {
+        const b = unescape(etymologyBrief(texts[want[k]])!).trim();
+        if (!shown[k].startsWith(b.slice(0, 40))) return `第 ${k + 1} 段（${want[k]}）印的不是它自己的`;
+      }
+      return null;
     },
   },
 ];
 
 const MUTS: Array<[string, (h: string) => string]> = [
+  ['M-I1 单独印的词源块整块不见（B4 之前的样子）', (h) => h.replace(ORPHAN_RX, '')],
+  ['M-I1b ko 的汇总词源块整块不见（I1 认了它的类名，得证明它没了会红）',
+    (h) => h.replace(/<section class="entry-section ko-etym-orphan">[\s\S]*?<\/section>/g, '')],
+  ['M-I2 单独块里的正文换成别的', (h) => h.replace(ORPHAN_RX, (s) => s.replace(
+    /(class="etym-text"[^>]*>(?:<span class="sense-src-lang">[^<]*<\/span>)?)([^<]{3})/, '$1ZZZ'))],
   ['M1 抹掉所有词源标题（改前那个样子）',
     (h) => h.replace(/<div class="etym-label">[^<]*<\/div>/g, '')],
   ['M2 少印一个词源标题', (h) => h.replace(/<div class="etym-label">[^<]*<\/div>/, '')],
@@ -626,13 +684,22 @@ for (const lang of LANGS) {
      ) x ON x.word_id = d.id`);
   const multi = sample('>1');
   const single = sample('=1');
-  for (const [kind, words] of [['多词源', multi], ['单词源', single]] as const) {
+  // B4：词源挂在**无义项词条**上的词（ja 整页没义项的那批）—— 不取这一桶，I1/I2 一页都走不到新代码
+  let orphan: string[] = [];
+  try {
+    orphan = q(`SELECT d.word FROM dict d JOIN (
+       SELECT DISTINCT e.word_id FROM etymology e JOIN entry en
+         ON en.word_id = e.word_id AND en.src = e.edition AND en.etym_no = e.etym_no
+        WHERE NOT EXISTS (SELECT 1 FROM sense s WHERE s.entry_id = en.id) LIMIT ${PER}
+     ) x ON x.word_id = d.id`);
+  } catch { /* 这门没有 entry/etymology 表 */ }
+  for (const [kind, words] of [['多词源', multi], ['单词源', single], ['孤立词源', orphan]] as const) {
     let n = 0;
     for (const w of words) {
       const e = svc.getEntry(w);
       if (!e) continue;
       const senses = (e[SENSE_FIELD[lang]] ?? []) as Sense[];
-      if (senses.length === 0) continue;
+      if (senses.length === 0 && kind !== '孤立词源') continue;
       pages.push([`${lang} ${w}`, senses, render(lang, e), kind === '多词源', e, SHAPE[lang]]);
       n += 1;
     }

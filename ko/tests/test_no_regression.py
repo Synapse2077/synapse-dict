@@ -281,6 +281,19 @@ CHECKS = [
      "1,883 条藏起来的例句各带原因（crammed／占位标签／构词公式／词条成分拆解／"
      "K33 那六类）"),
 
+    # 🔴 R26／R27（2026-10-30，B29）：出版层中文里漏转的繁体。判据 import 跨门共用的
+    #    `scripts/zh_t2s.t2s`（汉字表记 `현시〈顯示〉`、`개체 수 피라미드（個體 數 피라미드）` 这类原形不动）。
+    #    中文版白送的 3,234 行已转；**模型写的那几批大半在讲汉字原形**（词源 `운동<運動>`、
+    #    派生词表 `獨居/독거`、`借自日语 東京`）—— 逐行裁决之前不碰，锁成名册。
+    ("R26", "中文版白送的中文里没有可转的繁体（B29）", "@zh_trad_edition", 0,
+     "`厭倦，厭煩，發膩` 与付费的简体释义印在同一页"),
+    # ⭐ 2026-10-31 逐行裁决完：词源书名 646 行（`fixes/fix_etym_book_titles.py`）＋53 行（`fixes/b29_model_zh.json`）
+    #    改了；剩下 238 行是**有意保留**（汉字词表／韩文汉字注／汉文原文／讲字本身／人名李熙昇／五音「徵」…）。
+    ("R27", "模型写的中文里「可转的繁体」仍是逐行裁决后有意保留的 238 行（B29）", "@zh_trad_model", 238,
+     "数字变了就去读：少了可能是有人转了（要核是不是转坏了汉字原形），多了是新写入的繁体"),
+    ("R28", "B29 逐行裁决清单（`fixes/b29_model_zh.json`）全部生效、原文没漂", "@b29_decisions", 0,
+     "非 0 ⇒ 有人重跑了旧脚本把裁决改掉的行盖回去，或原文变了而裁决还挂在旧句子上"),
+
     ("R8", "`entry.hanja` 没有被搬到 `dict` 上",
      "SELECT COUNT(*) FROM pragma_table_info('dict') WHERE name='hanja'", 0,
      "1,944 个词形对应 ≥2 个不同汉字（`양` → 壤/兩/良/陽/孃/洋/量/羊），"
@@ -289,7 +302,7 @@ CHECKS = [
 
 
 # 🔴 回归闸应该有多少条。**这个数是声明，不是数出来的** —— 见 `_audit_checks`。
-R_ROSTER = 25
+R_ROSTER = 28
 
 
 def _audit_checks():
@@ -369,6 +382,26 @@ def _wrong_audio(con):
         if not (all(sets) and set.intersection(*sets)):
             bad |= {r[0] for r in rs}
     return len(bad)
+
+
+def _zh_trad(con, edition):
+    import sys as _s
+    _s.path.insert(0, str(HERE.parent.parent / "scripts"))
+    from zh_t2s import t2s
+    n = 0
+    for tb in ("sense_gloss", "example_gloss", "etymology_gloss", "collocation_gloss"):
+        for t, src in con.execute("SELECT text, src FROM %s WHERE lang='zh'" % tb):
+            if t and (src or "").startswith("zh-edition") == edition and t2s(t) != t:
+                n += 1
+    return n
+
+
+def _b29_decisions(con):
+    """裁决清单里没生效的条数。读法只有一份：`scripts/fix_model_zh_trad.status`。"""
+    import sys as _s
+    _s.path.insert(0, str(HERE.parent.parent / "scripts"))
+    from fix_model_zh_trad import status
+    return sum(1 for _d, s in status(con, "ko") if s != "done")
 
 
 def _empty_gloss(con):
@@ -607,7 +640,10 @@ _FUNCS = {"@schema_drift": _schema_drift,
           "@foreign_audio": _foreign_audio,
           "@audio_unrelated": _audio_unrelated,
           "@wrong_audio": _wrong_audio,
-          "@empty_gloss": _empty_gloss}
+          "@empty_gloss": _empty_gloss,
+          "@zh_trad_edition": lambda con: _zh_trad(con, True),
+          "@zh_trad_model": lambda con: _zh_trad(con, False),
+          "@b29_decisions": lambda con: _b29_decisions(con)}
 
 
 def check_brief():

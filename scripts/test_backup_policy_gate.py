@@ -58,6 +58,40 @@ def behavior_tests():
     return bad
 
 
+_SIDECAR = r'''
+import sys, tempfile, shutil
+from pathlib import Path
+import dbtool
+d = Path(tempfile.mkdtemp(prefix="sidecar-"))
+try:
+    dbtool.paths.BACKUPS = d
+    st = dbtool.DB.stem
+    old = d / ("%s.pre-zz-20260101-000001.bak" % st); new = d / ("%s.pre-zz-20260101-000002.bak" % st)
+    for f in (old, new, old.with_name(old.name + "-wal"), old.with_name(old.name + "-shm")):
+        f.write_bytes(b"x")
+    import io, contextlib
+    with contextlib.redirect_stdout(io.StringIO()):
+        dbtool.prune_backups(verbose=False)
+    left = sorted(x.name.replace(st, "") for x in d.iterdir())
+    print("LEFT", left)
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+'''
+
+
+def sidecar_tests():
+    """十门：备份被保留策略删掉时，同名 `-wal`／`-shm` 必须一起删（2026-10-31：原来只删 `.bak`，伴生文件成孤儿）。
+    构造「同一天同一 tag 两个备份」⇒ 规则①删旧的那个；旧的带着 -wal/-shm。临时目录，真备份不碰。"""
+    bad = []
+    for lang in LANGS:
+        r = subprocess.run([sys.executable, "-B", "-c", _SIDECAR], cwd=ROOT / lang, capture_output=True, text=True)
+        line = [x for x in r.stdout.splitlines() if x.startswith("LEFT")]
+        want = "LEFT ['.pre-zz-20260101-000002.bak']"
+        if not line or line[-1] != want:
+            bad.append((lang, (line[-1] if line else (r.stderr.strip().splitlines() or ["无输出"])[-1])[:160]))
+    return bad
+
+
 def _discover():
     """仓库里**实际存在**的语种目录（有自己 `dbtool.py` 的就算一门）。
 
@@ -199,7 +233,7 @@ def main():
     # ⚠️ **登记在册的豁免要大声印**，不许静默跳过（否则它和「通过」长得一样）
     for lang, why in skipped:
         print("  ⚠️ %s：%s" % (lang, why))
-    tests_bad = behavior_tests()
+    tests_bad = behavior_tests() + [(l, "伴生文件没跟着删：" + w) for l, w in sidecar_tests()]
     print("■ 十门删除行为测试：%s" % ("✅ 全部存在且全绿" if not tests_bad else "🔴 %d 门不过" % len(tests_bad)))
     for lang, why in tests_bad:
         print("  ❌ %s：%s" % (lang, why))

@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
-EXPECT_MAX = 29          # 新增一条 B 就改这里 —— 删掉最后一条时它是唯一会响的东西
+EXPECT_MAX = 30          # 新增一条 B 就改这里 —— 删掉最后一条时它是唯一会响的东西
 
 # (门, 计划表, 节起始标题, 编号前缀)。节＝起始标题到下一个同级或更高级标题。
 SECTIONS = [

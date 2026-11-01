@@ -24,6 +24,7 @@
    ⇒ 本脚本跑完**必须**接着跑：
         python3 -u vi/pipeline/build_example_layer.py  --sync --apply
         python3 -u vi/pipeline/build_relation_layer.py --sync --apply
+        python3 -u vi/pipeline/zh_pub.py --apply          # 并过去的释义没有出版正文（B29，P37 会红）
    而「必须接着跑」做成了机制：`dbtool` 的 `invalidates` 会把两道闸标成过期。
 
 ═══ ⭐ 完全可逆 ═══
@@ -83,6 +84,22 @@ def plan(con):
     return fold, add, stat, listed
 
 
+def chains(con):
+    """→ [(链尾, sense_id)]：`merged_into` 指向的义项自己也被折了（E18 要的是直接指向可见义项）。
+    2026-10-30（B29）真事：中文出版正文转简体后多折 523 条，其中 #93108 本身是 10-05 那轮的「留下来那条」
+    ⇒ #93109 → #93108 → #1620 成了两段链。解析器沿链能走到底，但 E18 锁的是一段。"""
+    m = dict(con.execute("SELECT id, merged_into FROM sense WHERE merged_into IS NOT NULL"))
+    out = []
+    for sid, tgt in m.items():
+        end, seen = tgt, {sid}
+        while end in m and end not in seen:
+            seen.add(end)
+            end = m[end]
+        if end != tgt:
+            out.append((end, sid))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
@@ -118,7 +135,9 @@ def main():
     if not a.apply:
         print("\n(只报不写。加 --apply。)")
         return
-    if not fold:
+    pre = chains(sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True))
+    print("   折叠链（需要拉平）：%d" % len(pre))
+    if not fold and not pre:
         return
     with dbtool.session(
             "vi-w25-fold-duplicate-senses",
@@ -144,6 +163,8 @@ def main():
                       "VALUES (?,?,?,?)", add)
         s.executemany("UPDATE sense SET hidden=1, hidden_why=?, merged_into=? WHERE id=?",
                       [(DUP_SENSE_WHY, k, d) for k, d in fold])
+        # 拉平：被这一轮折掉的义项若是以前某条的「留下来那条」，以前那条要直接指到链尾
+        s.executemany("UPDATE sense SET merged_into=? WHERE id=?", chains(s.conn))
 
 
 if __name__ == "__main__":

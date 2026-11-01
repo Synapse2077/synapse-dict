@@ -192,14 +192,17 @@ def mutate():
     passed = 0
     for name, sql in cases:
         d = Path(tempfile.mkdtemp())
-        shutil.copy(paths.DB, d / "m.sqlite")
-        con = sqlite3.connect(d / "m.sqlite")
-        con.execute(sql)
-        con.commit()
-        print("\n── 变异：%s" % name)
-        red = not gate(con)
-        con.close()
-        shutil.rmtree(d)
+        # 2026-10-31：清理放进 finally —— 原来中途抛错就跳过 rmtree，留下一份 1.2 GB 的整库副本（10-29、10-30 各一次）
+        try:
+            shutil.copy(paths.DB, d / "m.sqlite")
+            con = sqlite3.connect(d / "m.sqlite")
+            con.execute(sql)
+            con.commit()
+            print("\n── 变异：%s" % name)
+            red = not gate(con)
+            con.close()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
         print("   %s" % ("✅ 闸报红" if red else "🔴 闸没报 —— 这道检查是假的"))
         passed += red
     print("\n■ 变异 %s/%s" % (passed, len(cases)))

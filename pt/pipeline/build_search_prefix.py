@@ -305,7 +305,10 @@ def main():
     if not a.apply:
         print("\n(未加 --apply，没有写库)")
         return 0
-    with dbtool.session("search-prefix", expect={}) as s:
+    # B7（2026-10-31）：两张前缀表进了 TRACK_TABLES ⇒ 整表重建由本脚本**声明**（None＝行数随词表变，
+    #   不定值）；别的脚本碰它们仍然判红。
+    with dbtool.session("search-prefix", expect={"#search_prefix": None,
+                                           "#search_prefix_meta": None}) as s:
         apply(s.conn, rows)
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     bad = gate(con)

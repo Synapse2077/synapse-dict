@@ -39,25 +39,73 @@ SYS = ("你是资深词典工程师与语言学顾问。回答要具体、可执
 # 咨询与跑批的区别就在于量，量一大它就不再是咨询了。
 MAX_KB = 64
 
+# 流式（B9②）：多久没收到一个字节算卡住／一次咨询总时长封顶
+READ_IDLE = 300
+TOTAL_CAP = 2400
+
 
 def env():
     return dict(l.split("=", 1) for l in (ROOT / ".env").read_text().splitlines()
                 if "=" in l and not l.startswith("#"))
 
 
+class Broken(Exception):
+    """流式请求半路断了 —— 带着**断在哪**：用时、离上一个字节多久、已收到的思考／正文字数、原始异常。
+
+    🔴 B9②（2026-11-01）：原来是非流式，思考的整段时间里连接上**一个字节都没有**，
+       ko 那轮豆包跑满 1200s 挂掉时只知道「超时」——分不出是「模型还在写」还是「连接早断了、空等 20 分钟」。
+       流式之后两者看得见：`离上一个字节` 小 ⇒ 还在产出、是总时长不够；大 ⇒ 卡住了。
+       已收到的正文不丢（`report` 落成 `.partial.md`）—— 那些 token 已经付过钱了。
+    """
+    def __init__(self, cause, elapsed, idle, reasoning, content, model):
+        self.cause, self.elapsed, self.idle = cause, elapsed, idle
+        self.reasoning, self.content, self.model = reasoning, content, model
+        super().__init__("%s: %r｜用时 %.0fs｜离上一个字节 %.0fs｜已收思考 %d 字、正文 %d 字"
+                         % (type(cause).__name__, cause, elapsed, idle, reasoning, len(content)))
+
+
+async def ask_stream(cl, url, key, body, cap=None):
+    """OpenAI 兼容接口的流式调用（deepseek 与方舟同一种 SSE）。→ (正文, usage, 实际模型)；半路断了 raise `Broken`。"""
+    body = dict(body, stream=True, stream_options={"include_usage": True})
+    cap = TOTAL_CAP if cap is None else cap
+    t0 = last = time.time()
+    content, reasoning, usage, model = [], 0, {}, "?"
+    try:
+        async with cl.stream("POST", url, headers={"Authorization": "Bearer " + key}, json=body) as r:
+            if r.status_code != 200:
+                raise RuntimeError("HTTP %s: %s" % (r.status_code, (await r.aread())[:200].decode("utf-8", "replace")))
+            async for line in r.aiter_lines():
+                last = time.time()
+                # 总时长封顶放在**循环里**而不是外面套 `wait_for`：外面取消走的是 CancelledError，
+                # 不经过下面的 `except`，断在哪就又丢了
+                if last - t0 > cap:
+                    raise TimeoutError("总时长超过 %ds 封顶" % cap)
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                d = json.loads(data)
+                model = d.get("model") or model
+                usage = d.get("usage") or usage
+                for ch in d.get("choices") or []:
+                    delta = ch.get("delta") or {}
+                    reasoning += len(delta.get("reasoning_content") or "")
+                    content.append(delta.get("content") or "")
+    except Exception as ex:
+        now = time.time()
+        raise Broken(ex, now - t0, now - last, reasoning, "".join(content), model) from ex
+    return "".join(content), usage, model
+
+
 async def ask_deepseek(cl, e, text, think):
     body = {"model": "deepseek-v4-pro",
             "messages": [{"role": "system", "content": SYS},
                          {"role": "user", "content": text}],
-            "temperature": 0, "stream": False,
+            "temperature": 0,
             "thinking": {"type": "enabled" if think else "disabled"}}
-    r = await cl.post("https://api.deepseek.com/chat/completions",
-                      headers={"Authorization": "Bearer " + e["DEEPSEEK_API_KEY"].strip()},
-                      json=body)
-    if r.status_code != 200:
-        raise RuntimeError("HTTP %s: %s" % (r.status_code, r.text[:200]))
-    d = r.json()
-    return d["choices"][0]["message"]["content"], d.get("usage") or {}, d.get("model", "?")
+    return await ask_stream(cl, "https://api.deepseek.com/chat/completions",
+                            e["DEEPSEEK_API_KEY"].strip(), body)
 
 
 def doubao_model(e, lite=False):
@@ -74,15 +122,10 @@ async def ask_doubao(cl, e, text, think, lite=False):
     body = {"model": model,
             "messages": [{"role": "system", "content": SYS},
                          {"role": "user", "content": text}],
-            "temperature": 0, "stream": False,
+            "temperature": 0,
             "thinking": {"type": "enabled" if think else "disabled"}}
-    r = await cl.post("https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-                      headers={"Authorization": "Bearer " + e["ARK_API_KEY"].strip()},
-                      json=body)
-    if r.status_code != 200:
-        raise RuntimeError("HTTP %s: %s" % (r.status_code, r.text[:200]))
-    d = r.json()
-    return d["choices"][0]["message"]["content"], d.get("usage") or {}, d.get("model", "?")
+    return await ask_stream(cl, "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+                            e["ARK_API_KEY"].strip(), body)
 
 
 def report(names, res, out, doc, t0, err=sys.stderr):
@@ -101,8 +144,16 @@ def report(names, res, out, doc, t0, err=sys.stderr):
             #    ⇒ 打**类型名 ＋ repr**，空 `str()` 的异常也说得出自己是谁。
             #    ⚠️ 同一形状：`[[residual-bucket-is-not-evidence]]` 的反面 ——
             #      **"什么都没打印"被我读成了"没什么可说的"**，而它其实是信息丢了。
-            print("🔴 %s 失败：%s: %r（用时 %.0fs）"
-                  % (name, type(r).__name__, r, time.time() - t0), file=err)
+            if isinstance(r, Broken):
+                print("🔴 %s 失败：%s" % (name, r), file=err)
+                if r.content:
+                    pp = out / ("%s.%s.partial.md" % (doc.stem, name))
+                    pp.write_text("<!-- model: %s ｜ 🔴 未完成：%s -->\n%s" % (r.model, r, r.content),
+                                  encoding="utf-8")
+                    print("   已收到的正文落盘 → %s（不完整，不能当答案引用）" % pp, file=err)
+            else:
+                print("🔴 %s 失败：%s: %r（用时 %.0fs）"
+                      % (name, type(r).__name__, r, time.time() - t0), file=err)
             continue
         content, usage, model = r
         # 答案文件第一行写明**实际是谁答的**（接口回报的 model），B8 那种档次漂移日后查得到
@@ -130,7 +181,8 @@ def selftest():
         bad.append("B8 默认豆包端点不是 pro：%r" % doubao_model(e))
     if doubao_model(e, lite=True) != "ep-lite":
         bad.append("B8 --lite 没走 lite")
-    out = pathlib.Path(tempfile.mkdtemp())
+    _td = tempfile.TemporaryDirectory()          # 2026-10-31：用完即删（原来每跑一次留一个目录）
+    out = pathlib.Path(_td.name)
     doc = out / "q.md"
     for res, want_code, must in [
         ([("答", {}, "m1"), TimeoutError()], 2, ["TimeoutError", "不构成两家交叉验证"]),
@@ -147,10 +199,82 @@ def selftest():
                 bad.append("B9 stderr 里没有「%s」：%r" % (m, err.getvalue()))
     if not (out / "q.v4pro.md").read_text(encoding="utf-8").startswith("<!-- model: m1 -->"):
         bad.append("B8 答案文件第一行没写实际模型")
+    bad += asyncio.run(_stream_selftest(out, doc))
     for b in bad:
         print("🔴 " + b)
-    print("✅ consult.py 自检通过（6 项）" if not bad else "🔴 %d 项失败" % len(bad))
+    print("✅ consult.py 自检通过（B8 端点／B9 失败降级／B9② 流式四种结局）" if not bad else "🔴 %d 项失败" % len(bad))
     return 1 if bad else 0
+
+
+
+
+async def _stream_selftest(out, doc):
+    """B9②：流式三种结局，用假的传输层，一个请求都不发。"""
+    import io
+    import httpx
+    bad = []
+
+    def sse(*objs):
+        return [("data: " + json.dumps(o, ensure_ascii=False) + "\n\n").encode() for o in objs]
+
+    ok_chunks = sse({"model": "m-x", "choices": [{"delta": {"reasoning_content": "想想"}}]},
+                    {"model": "m-x", "choices": [{"delta": {"content": "答"}}]},
+                    {"model": "m-x", "choices": [{"delta": {"content": "案"}}]},
+                    {"model": "m-x", "choices": [], "usage": {"total_tokens": 7}}) + [b"data: [DONE]\n\n"]
+
+    async def gen(chunks, then=None, delay=0.0):
+        for c in chunks:
+            if delay:
+                await asyncio.sleep(delay)
+            yield c
+        if then:
+            raise then
+
+    def client(handler):
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    # ① 正常：正文拼对、usage／实际模型取到
+    async with client(lambda req: httpx.Response(200, content=gen(ok_chunks))) as cl:
+        got = await ask_stream(cl, "https://x/", "k", {})
+    if got != ("答案", {"total_tokens": 7}, "m-x"):
+        bad.append("B9② 流式正常结局拼错：%r" % (got,))
+    # ② 半路断（读超时）：说得出断在哪、已收的正文落成 .partial.md、退出码 2
+    async with client(lambda req: httpx.Response(200, content=gen(
+            ok_chunks[:2], then=httpx.ReadTimeout("")))) as cl:
+        try:
+            await ask_stream(cl, "https://x/", "k", {})
+            r2 = None
+        except Broken as ex:
+            r2 = ex
+    if r2 is None or r2.content != "答" or r2.reasoning != 2:
+        bad.append("B9② 半路断没带进度：%r" % (r2,))
+    else:
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = report(["v4pro", "doubao"], [("答", {}, "m1"), r2], out, doc, time.time(), err=err)
+        for m in ("ReadTimeout", "离上一个字节", "已收思考 2 字", ".partial.md"):
+            if m not in err.getvalue():
+                bad.append("B9② stderr 里没有「%s」：%r" % (m, err.getvalue()))
+        pp = out / ("%s.doubao.partial.md" % doc.stem)
+        if code != 2 or not pp.exists() or "未完成" not in pp.read_text(encoding="utf-8"):
+            bad.append("B9② 半路断：退出码 %d／partial 文件 %s" % (code, pp.exists()))
+    # ③ 总时长封顶：在循环里触发，同样带进度
+    async with client(lambda req: httpx.Response(200, content=gen(ok_chunks, delay=0.02))) as cl:
+        try:
+            await ask_stream(cl, "https://x/", "k", {}, cap=0.03)
+            bad.append("B9② 总时长封顶没触发")
+        except Broken as ex:
+            if not isinstance(ex.cause, TimeoutError) or "封顶" not in str(ex):
+                bad.append("B9② 封顶触发了但没说清：%r" % ex)
+    # ④ HTTP 错误：状态码与响应体前 200 字进消息
+    async with client(lambda req: httpx.Response(429, content=b"rate limited")) as cl:
+        try:
+            await ask_stream(cl, "https://x/", "k", {})
+            bad.append("B9② HTTP 429 没报错")
+        except Broken as ex:
+            if "429" not in str(ex) or "rate limited" not in str(ex):
+                bad.append("B9② HTTP 错误没带状态码／响应体：%s" % ex)
+    return bad
 
 
 async def main():
@@ -166,8 +290,6 @@ async def main():
     ap.add_argument("--big", action="store_true",
                     help="材料超过 %d KB 时必须显式加上，见文件头「豆包的边界」" % MAX_KB)
     a = ap.parse_args()
-    if a.selftest:
-        sys.exit(selftest())
     if not a.doc:
         ap.error("要给材料文件")
 
@@ -188,7 +310,8 @@ async def main():
     print("■ v4pro → deepseek-v4-pro ／ doubao → %s%s" % (
         doubao_model(e, a.lite), "（--lite）" if a.lite else "（pro）"))
 
-    async with httpx.AsyncClient(timeout=1200) as cl:
+    # 流式之后 read 超时量的是「多久没收到一个字节」（卡住），不再是总时长；总时长另封顶。
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=READ_IDLE)) as cl:
         t0 = time.time()
         # ⚠️ 协程要**按需创建**：先建两个再丢掉一个，会留下 "never awaited" 警告，
         #    而那条警告长得跟"请求失败了"很像。
@@ -205,4 +328,7 @@ async def main():
 
 
 if __name__ == "__main__":
+    # 自检要自己开事件循环（流式那几项是协程），不能套在 main() 的循环里
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     asyncio.run(main())

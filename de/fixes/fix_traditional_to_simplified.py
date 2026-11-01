@@ -70,85 +70,12 @@ def t2s_opencc(s, cap=6):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  安全的繁→简（B25，2026-10-29）—— 照 ru `criteria` ⑮ 的判据，de 自己一份
+#  安全的繁→简（B25，2026-10-29）—— 判据 2026-10-30 搬到 `scripts/zh_t2s.py`（B29：八门共用一份）
 # ══════════════════════════════════════════════════════════════════════════
-# 🔴 整段 `t2s_opencc` 在**本来就是简体**的文本上会改错。2026-10-29 用原文（答案文件 ＋ 证据层经
-#    `clean_gloss` 重算）对出 de 改错 10 条：6 条转成**扩展平面**字形（`宽翅鵟→宽翅𫛭`、`二噁英→二𫫇英`，
-#    多数字体显示成豆腐块）＋ 4 条 GB2312 里的歧义字（`鼠麴草`、`反覆`×2、`重覆` —— 这 4 条 OpenCC 是对的）。
-# ⇒ 逐个位置决定收不收 OpenCC 的改动：
-#    ① 目标字不在 BMP ⇒ 不收；
-#    ② 原字不在 GB2312（方向无歧义，`國→国`）⇒ 收；
-#    ③ 原字在 GB2312 而 OpenCC 要改它（歧义区：`乾覆薹吒甯麴…`）⇒ 只有「这行是繁体文本」（含②那种字）才收，
-#       另有两张逐条裁决过的短语表：`OPENCC_RIGHT` 在简体文本里也收，`OPENCC_WRONG` 永远不收；
-#    ④ 繁简对举（`習 /习`）⇒ 不收。
-OPENCC_RIGHT = ("反覆", "重覆", "覆信", "乾性", "乾燥", "乾田", "乾苔", "鼠麴")   # `反复`/`干燥`…是规范写法
-# 规范简体里**没有独立用法**的字：简体文本里出现就是漏转，照收（ru 同一张，从 OpenCC 字表枚举）。
-# 🔴 第一版从 ru 抄判据时漏了这张 ⇒ 干跑当场把 `征收→徵收`、`借口→藉口`、`存折→存摺`、`糖蛋白→醣蛋白` 列成「要改回」。
-ALWAYS = frozenset("後於夥摺醣菸麽捱徵藉彷俱")
-OPENCC_WRONG = ("覆上", "覆住", "覆育", "慰藉", "狼藉", "枕藉")                   # 「盖」「养育」；`慰藉`仍写藉
-NEVER = frozenset("薹")                                                          # OpenCC 字表错：`薹草`是规范简体
-
-
-def _gb(ch):
-    try:
-        ch.encode("gb2312")
-        return True
-    except UnicodeEncodeError:
-        return False
-
-
-def _hit(text, i, phrases):
-    return any(text[j:j + len(p)] == p for p in phrases for j in range(max(0, i - len(p) + 1), i + 1))
-
-
-def _t2s_once(text):
-    out = _T2S.convert(text)
-    if out == text or len(out) != len(text):      # OpenCC t2s 逐字等长；不等长就别信它
-        return text
-    trad_row = any(a != b and not _gb(a) for a, b in zip(text, out))
-    res = []
-    for i, (a, b) in enumerate(zip(text, out)):
-        if a == b or ord(b) > 0xFFFF or a in NEVER or _hit(text, i, OPENCC_WRONG):
-            res.append(a)
-        elif _gb(a) and not (trad_row or a in ALWAYS or _hit(text, i, OPENCC_RIGHT)):
-            res.append(a)
-        elif re.match(r"\s*[/／（(、]\s*" + re.escape(b), text[i + 1:i + 5]) or \
-                re.search(re.escape(b) + r"\s*[/／（(、]\s*$", text[max(0, i - 4):i]):
-            res.append(a)
-        else:
-            res.append(b)
-    return "".join(res)
-
-
-_EXT = None
-
-
-def ext_targets():
-    """OpenCC 字表里「常用平面字 → **扩展平面**字」的目标字集合（815 个，从 OpenCC 自己的字表读，不手抄）。
-    页面上出现它们，多半是整段 t2s 转出来的豆腐块（`鮟鱇→𩽾𩾌`）；回归闸拿它锁住 B25 不回来。"""
-    global _EXT
-    if _EXT is None:
-        import os
-        _EXT = set()
-        for root, _d, fs in os.walk(os.path.dirname(opencc.__file__)):
-            for f in fs:
-                if f.startswith("TSCharacters") and f.endswith(".txt"):
-                    for line in open(os.path.join(root, f), encoding="utf-8"):
-                        a, b = line.rstrip("\n").split("\t")
-                        _EXT.update(x for x in b.split() if len(x) == 1 and ord(x) > 0xFFFF
-                                    and len(a) == 1 and ord(a) <= 0xFFFF)
-        assert len(_EXT) > 500, "🔴 OpenCC 字表没读到（%d）—— 闸会空过" % len(_EXT)
-    return _EXT
-
-
-def t2s(s, cap=6):
-    """**安全的**繁→简，转到收敛（`opencc` 短语切分依赖上下文，转一遍邻字变了下一遍会再变）。"""
-    for _ in range(cap):
-        out = _t2s_once(s)
-        if out == s:
-            return s
-        s = out
-    raise RuntimeError("t2s %d 轮仍不收敛：%r" % (cap, s[:60]))
+# 逐个位置决定收不收 OpenCC 的改动（扩展平面不收／GB2312 歧义字只在繁体行里收／逐条裁决的短语表），
+# 详见那个文件头。de 这边一个字都不再写。
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parents[2] / "scripts"))
+from zh_t2s import ALWAYS, NEVER, OPENCC_RIGHT, OPENCC_WRONG, ext_targets, t2s  # noqa: E402,F401
 
 
 def _assert_de():

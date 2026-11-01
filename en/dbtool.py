@@ -49,6 +49,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import paths
+sys.path.insert(0, str(paths.ROOT / "scripts"))
+from small_undo import Undo, Refuse  # noqa: E402  —— 小改动模式（2026-10-31），见 session 的 `small`
 
 HERE = Path(__file__).resolve().parent
 DB = paths.DB
@@ -94,14 +96,17 @@ TRACK_TABLES = ['entry', 'sense', 'sense_src', 'sense_gloss', 'sense_tag', 'sens
                 # 词源正文层（2026-09-14）。列进来闸才守得住 —— 不在清单里的表
                 # 增删多少行都不会被发现，那正是这张清单存在的理由。
                 'etymology',
-                'pronunciation', 'pronunciation_entry', 'example', 'example_gloss',
+                'pronunciation', 'example', 'example_gloss',
                 'collocation', 'collocation_gloss', 'audio',
                 'search_prefix', 'search_prefix_meta', 'field_src',
-                # ⬇ en 独有的两张，见 FROZEN_TABLES
-                'stardict', 'legacy_dict']
+                # ⬇ en 独有：冻结的老库底片（见 FROZEN_TABLES）＋它的释义表
+                #   🔴 B7（2026-10-31）：`stardict` 阶段 0 已改名 `legacy_dict`，留在这里是死条目 ⇒ 删
+                #   （`FROZEN_TABLES` 里照留：那是写入拦截，名字回来了也拦）；
+                #   `legacy_gloss` 有 `intake_legacy.py` 声明行数而一直不在清单里（T3 逮到）⇒ 补
+                'legacy_dict', 'legacy_gloss']
 
-# 🔴 `pronunciation_entry` 列在这里**不代表决定要建**（`EN_PLAN` §2.2② 还没量）。
-#    列进清单只有一个效果：万一建了，闸立刻开始守。
+# 🔴 B7（2026-10-31）：`pronunciation_entry` 原先「先写进清单、万一建了闸立刻守」——
+#    而它一直没建，快照静默跳过。已删；「建了要守」改由 `scripts/test_track_gate.py` T3 接手。
 
 # ══════ en 独有：冻结表 ══════
 # 老库那张表是**只读底片**，不是数据源也不是主干（`EN_PLAN` §1.6 三层「源」）。
@@ -362,6 +367,10 @@ def prune_backups(verbose=True, dry=False):
         return len(drop), freed
     for p in drop:
         p.unlink()
+        # 2026-10-31：连带删同名的 `-wal`／`-shm`。有人以 sqlite 打开过备份（回备份里找原文时）就会生成它们，
+        #   原来只删 `.bak` ⇒ 伴生文件成了孤儿（备份目录里清点出 en 三组）。
+        for side in ("-wal", "-shm"):
+            p.with_name(p.name + side).unlink(missing_ok=True)
     if verbose and drop:
         print("■ 备份保留策略：清掉 %d 个旧备份，释放 %.1f GB（保留 %d 个）"
               % (len(drop), freed / 1024 ** 3, len(keep)))
@@ -400,6 +409,7 @@ class _S:
         self.conn = conn
         self.written = 0
         self.unfreeze = set(unfreeze or ())
+        self.undo = None          # 小改动模式：每条写语句执行前先记前像（`scripts/small_undo.py`）
 
     def _guard(self, sql):
         t = _frozen_hit(sql, self.unfreeze)
@@ -415,6 +425,8 @@ class _S:
     def executemany(self, sql, seq):
         self._guard(sql)
         seq = list(seq)
+        if self.undo:
+            self.undo.statements(sql, seq)
         self.conn.executemany(sql, seq)
         self.written += len(seq)
         return len(seq)
@@ -423,6 +435,8 @@ class _S:
         """幂等加列。加列本身不改任何行，不计入 written。"""
         tbl = table or TABLE
         self._guard("ALTER TABLE %s" % tbl)
+        if self.undo:
+            raise Refuse("小改动模式不许加列（DDL 撤不了）—— 去掉 `small=` 用整库备份")
         if name in _cols(self.conn, tbl):
             return False
         self.conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (tbl, name, decl))
@@ -430,16 +444,20 @@ class _S:
 
     def execute(self, sql, args=()):
         self._guard(sql)
+        if self.undo:
+            self.undo.statement(sql, args)
         return self.conn.execute(sql, args)
 
     def executescript(self, sql):
         """建表脚本入口（阶段 0 要用）。整段一起过闸。"""
         self._guard(sql)
+        if self.undo:
+            raise Refuse("小改动模式不许跑建表脚本（DDL 撤不了）—— 去掉 `small=` 用整库备份")
         return self.conn.executescript(sql)
 
 
 @contextmanager
-def session(tag, expect=None, dry=False, verbose=True, unfreeze=()):
+def session(tag, expect=None, dry=False, verbose=True, unfreeze=(), small=None, rerun=None):
     """写库闸门。
 
     expect: {列名: 期望的非空计数变化}；表用 `"#表名"`。
@@ -451,10 +469,19 @@ def session(tag, expect=None, dry=False, verbose=True, unfreeze=()):
              插行时所有列的非空计数都会跟着涨，那批列必须逐个写进 expect，
              闸门才拦得住"多写了一列"。
 
+    small: **小改动模式**（2026-10-31）—— 给一个行数上限 N，就不复制整库，改为写之前把要动的行原样存进
+        撤销文件（`<库名>.undo-<tag>-<时间>.json`，在备份目录）。前像超过 N、或语句撤不干净（DDL、
+        `INSERT OR REPLACE`、无 WHERE、显式写 rowid…）⇒ 拒绝、整个事务回滚，库不动。见 `scripts/small_undo.py`。
+        🔴 只给真正的小修用：几十行、能说清动了哪几张表。大改动照旧整库备份。
+
     unfreeze: 本次会话允许写入的冻结表集合，例如阶段 0 的 `{"stardict"}`。
         🔴 **不要图省事常开** —— 它一开，`EN_PLAN` 承诺的"老表一个字节不动"就没人守了。
     """
     expect = dict(expect or {})
+    # B3（2026-11-01）：插新词形必须声明 `rerun=[层名]`（只认 `scripts/intake_layers.py` 登记过的）；
+    #    写成功后记欠账，那几层的重跑脚本写过库才销账。`invalidates=` 只是备注。
+    import intake_layers as _IL
+    _IL.check_rerun(__file__, tag, expect, rerun)
     before = snapshot()
     if verbose:
         print("■ 写库前不变量：" + _line(before))
@@ -468,9 +495,14 @@ def session(tag, expect=None, dry=False, verbose=True, unfreeze=()):
             conn.close()
         return
 
-    bak = backup(tag)
-    if verbose:
-        print("■ 已备份 → " + bak.name)
+    if small:
+        bak = paths.BACKUPS / ("%s.undo-%s-%s.json" % (DB.stem, tag, time.strftime("%Y%m%d-%H%M%S")))
+        if verbose:
+            print("■ 小改动模式（前像上限 %d 行）：不复制整库，撤销文件 → %s" % (small, bak.name))
+    else:
+        bak = backup(tag)
+        if verbose:
+            print("■ 已备份 → " + bak.name)
     conn = sqlite3.connect(DB)
     # 🔴🔴 **必须自己控事务，不能用 Python 的默认模式。**
     #    2026-09-07 en 阶段 0 第一次 `--run` 当场踩到：`CREATE INDEX` 撞名抛错，
@@ -483,8 +515,12 @@ def session(tag, expect=None, dry=False, verbose=True, unfreeze=()):
     conn.isolation_level = None
     conn.execute("BEGIN")
     s = _S(conn, unfreeze)
+    if small:
+        s.undo = Undo(conn, small)
     try:
         yield s
+        if small:
+            s.undo.save(bak, DB, tag)      # 提交之前落盘：撤销文件不在，就不许提交
         conn.execute("COMMIT")
     except BaseException:
         try:
@@ -509,6 +545,9 @@ def session(tag, expect=None, dry=False, verbose=True, unfreeze=()):
         # ⚠️ 只删「异常回滚」这一路。**闸核对未通过那一路不能删** ——
         #    那时数据已经在库里，备份是唯一的回滚点。
         try:
+            if small and not bak.exists():
+                print("\n🔴 写库异常，已 rollback（小改动模式：撤销文件只在提交前落盘，这次没有生成，库已回到写入前）", file=sys.stderr)
+                raise
             bak.unlink()
             print("\n🔴 写库异常，已 rollback；本次备份是冗余的，已删除（%s）"
                   % bak.name, file=sys.stderr)
@@ -560,7 +599,9 @@ def session(tag, expect=None, dry=False, verbose=True, unfreeze=()):
             for b in bad:
                 print("   " + b, file=out)
             # 🔴 **回滚命令必须先确认那个文件还在。说得出的回滚点必须是存在的回滚点。**
-            if bak.exists():
+            if bak.exists() and bak.suffix == ".json":
+                print("   回滚：python3 scripts/small_undo.py '%s' --apply" % bak, file=out)
+            elif bak.exists():
                 print("   回滚：cp '%s' '%s'" % (bak, DB), file=out)
             else:
                 print("   🔴🔴 **没有回滚点** —— 本次备份 %s 已不在（被保留策略清掉，"
@@ -573,6 +614,10 @@ def session(tag, expect=None, dry=False, verbose=True, unfreeze=()):
     # 🔴 三道闸**各叫各的，谁也不挂在谁末尾** ——
     #    fr 那份把账的闸挂在回归闸末尾，而回归闸在文件不存在时提前 return，
     #    于是账的闸从建好起就是死的。一道闸的执行不许由另一道闸的存在与否决定。
+    _IL.after_commit(__file__, tag, rerun)   # B3：销账／记账，打这一门还欠哪几层重跑（只报不拦）
+    if verbose:                         # B14②：写库让展示层汇总闸过期 —— 只报不拦（`scripts/display_stamp.py`）
+        import display_stamp
+        display_stamp.notice()
     _regression_check(verbose)
     _ledger_gate(verbose)
     _literal_gate(verbose)

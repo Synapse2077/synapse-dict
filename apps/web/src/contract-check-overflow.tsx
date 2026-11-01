@@ -27,7 +27,7 @@
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -121,9 +121,15 @@ addEventListener('DOMContentLoaded', () => { const o = document.getElementById('
   const dir = mkdtempSync(join(tmpdir(), 'overflow-'));
   const file = join(dir, 'index.html');
   writeFileSync(file, top);
-  const dom = execFileSync(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run',
-    '--virtual-time-budget=20000', '--dump-dom', `file://${file}`],
-    { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+  // 2026-10-31：用完即删 —— 原来每跑一次在系统临时目录留一个 ~9 MB 的目录，从不清
+  let dom: string;
+  try {
+    dom = execFileSync(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run',
+      '--virtual-time-budget=20000', '--dump-dom', `file://${file}`],
+      { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
   const got = new Map<string, Result>();
   for (const m of dom.matchAll(/<pre>([\s\S]*?)<\/pre>/g)) {
     const r = JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')) as Result;

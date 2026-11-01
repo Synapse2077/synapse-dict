@@ -75,6 +75,11 @@ TABLES = ("entry", "sense_src", "sense", "sense_gloss", "sense_tag", "sense_rela
 # ══════════════════════════════════════════════════════════════════
 # 允许的非零基线：`断言名 → (期望值, 理由)`。**锁数字不锁名字。**
 ACCEPT = {
+    "Z3c 挂在无义项词条上的词源正文（B4，页面单独一块）": (
+        1155,
+        "2026-11-01 B4：源头英文版有词源正文、对应词条却没有义项的那批（`ウドゥ`／`アーチスト`／`火に油`…，"
+        "宽桥干跑 1,177 − 套话 7 − 折叠碰撞等跳过），页面由 `OrphanEtym` 单独印一块、展示层闸 I1/I2 守。"
+        "涨了 ⇒ 收词或重抽带进新的一批，先看是不是真词源；降了 ⇒ 有词条被补了义项或词源被删"),
     "A9 中文里有 OpenCC 转出来的扩展平面字形（B25）": (
         14,
         "2026-10-29 B25 从原文改回 128 条之后剩的 14 条，**都找不到原文、证明不了是转换造成的**："
@@ -233,8 +238,22 @@ def build(con):
             1 for tbl in ("sense_gloss", "example_gloss")
             for (t,) in con.execute("SELECT text FROM %s WHERE lang='zh'" % tbl)
             if t and any(c in _ext for c in t))))
+        # 2026-10-30：A9 只认 BMP 之外的目标字，而扩展 A 在 BMP 里 ⇒ `八重樫→八重㭴`、`俥→伡` 漏网 7 行，
+        #   已按 `fix_ext_a_damage.py` 的清单改回（证据：模型答案文件写的就是 `樫`）。
+        #   不写成「扩展 A 一律红」：`䴙䴘` 这类是规范简体。锁的是这两个已知坏字。
+        a(("A", "A10 日文汉字被转成扩展 A 字形（`樫→㭴`、`俥→伡`）", sum(
+            1 for tbl in ("sense_gloss", "example_gloss")
+            for (t,) in con.execute("SELECT text FROM %s WHERE lang='zh'" % tbl)
+            if t and ("㭴" in t or "伡" in t))))
     except ImportError:
         pass
+
+    # 🔴 A11（B2，2026-10-31）：ja 的搭配层**有意为空**（欠账 24）。
+    #    ⚠️ 四门（de/pt/fr/it）的 `split_colloc` 以「第一个汉字前的最后一个空格」切外语／中文 ——
+    #       **日语自己的文字里就有汉字**，第一个汉字可能落在日语那一半，切点静默错位。
+    #       哪天要做 ja 的搭配层，先换切分判据，再改这里的期望值。
+    a(("A", "A11 ja 搭配层出现了数据（有意为空：出处问题未解决，且四门的切分器不适用于含汉字的日语）",
+       con.execute("SELECT COUNT(*) FROM collocation").fetchone()[0]))
 
     # 🔴 A7：台湾说法。判据 import 修复侧那一份（**手工清单，判据只许一份**）。
     #    ⚠️ 这是一张手工表，**清单漏掉的下次不会有人发现** —— 它守的只是
@@ -526,8 +545,19 @@ def build(con):
     #    入库对齐闸全绿、写后回核全绿、tsc 全绿，**而页面上一条词源都印不出来且一声不吭**
     #    （`[[correct-steps-can-compose-a-hole]]`：每步都对、跨步假设失效＝谁都没负责的洞）。
     #    ⇒ 判据必须是「词源行能不能被义项那一侧的键找到」。
-    a(("Z", "Z3 词源正文与义项对不上（键拼起来查不到，页面静默空白）", q(
+    # ✅ B4（2026-11-01）拆成两条，**合起来恰好等于原来的 Z3**（没放宽）：
+    #    Z3a 键在**词条**侧就找不到 ⇒ 拼错了（原 Z3 要防的就是这个），容忍 0；
+    #    Z3c 键找得到、但那个词条没有义项 ⇒ B4 有意补进来的那批（源头有词源正文、整页没有义项），
+    #        页面由 `OrphanEtym` 单独印一块 —— **锁基线，不许悄悄长**。
+    #    「印出来了没有」从读者那一侧查：展示层契约闸 `contract-check-etym.tsx`。
+    #    ⚠️ 9 月拆法里的 Z3b（有义项的词条能被义项侧找到）在 Z3a 成立时**恒为 0**，单列就是一道永远绿的假闸 ⇒ 不列。
+    a(("Z", "Z3a 词源正文的键在词条侧找不到（拼起来查不到，页面静默空白）", q(
         "SELECT COUNT(*) FROM etymology e WHERE NOT EXISTS("
+        "  SELECT 1 FROM entry en WHERE en.word_id=e.word_id AND en.src=e.edition AND en.etym_no=e.etym_no)")))
+    a(("Z", "Z3c 挂在无义项词条上的词源正文（B4，页面单独一块）", q(
+        "SELECT COUNT(*) FROM etymology e WHERE EXISTS("
+        "  SELECT 1 FROM entry en WHERE en.word_id=e.word_id AND en.src=e.edition AND en.etym_no=e.etym_no)"
+        " AND NOT EXISTS("
         "  SELECT 1 FROM sense s JOIN entry en ON en.id=s.entry_id"
         "   WHERE s.word_id=e.word_id AND en.src=e.edition AND en.etym_no=e.etym_no)")))
 
@@ -808,6 +838,12 @@ MUT = [
      ["UPDATE sense_gloss SET text='𩽾𩾌' WHERE lang='zh' AND rowid=(SELECT MIN(rowid) FROM sense_gloss"
       " WHERE lang='zh' AND src LIKE 'model:%')"],
      "A9 中文里有 OpenCC 转出来的扩展平面字形（B25）"),
+    ("M-A10", "A10 `八重樫` 又被转成 `八重㭴`",
+     ["UPDATE sense_gloss SET text='八重㭴（姓氏）' WHERE rowid=223006"],
+     "A10 日文汉字被转成扩展 A 字形（`樫→㭴`、`俥→伡`）"),
+    ("M-A11", "A11 搭配层被写进一行",
+     ["INSERT INTO collocation (word_id, text, rank, src) VALUES (1, '水を飲む 喝水', 1, 'mut')"],
+     "A11 ja 搭配层出现了数据（有意为空：出处问题未解决，且四门的切分器不适用于含汉字的日语）"),
     ("M11", "🔴 A6 保护段失效：日文词形被一起转成简体", [_unprotect],
      "A6 日文词形（【】内）的原字被一起转成简体了"),
     ("M3", "A2 释义变成空串",
@@ -873,7 +909,14 @@ MUT = [
      "Z2 词源行的 word_id 悬空"),
     ("M49", "🔴🔴 Z3 键的两侧各自改一个字（各自自洽、拼起来对不上、页面静默空白）",
      ["UPDATE etymology SET edition='kk-ja' WHERE edition='en-edition'"],
-     "Z3 词源正文与义项对不上（键拼起来查不到，页面静默空白）"),
+     "Z3a 词源正文的键在词条侧找不到（拼起来查不到，页面静默空白）"),
+    ("M-Z3c", "Z3c 无义项词条上的词源悄悄长了一行",
+     ["INSERT INTO etymology (word_id, edition, etym_no, text, src) "
+      "SELECT en.word_id, en.src, en.etym_no, 'mut', 'mut' FROM entry en "
+      "WHERE en.etym_no <> '' AND NOT EXISTS (SELECT 1 FROM sense s WHERE s.entry_id=en.id) "
+      "AND NOT EXISTS (SELECT 1 FROM etymology e WHERE e.word_id=en.word_id AND e.edition=en.src "
+      "AND e.etym_no=en.etym_no) LIMIT 1"],
+     "Z3c 挂在无义项词条上的词源正文（B4，页面单独一块）"),
     # ── 关系目标的成词性（2026-09-19，欠账 15/16）──
     ("M44", "🔴 Y1 关系目标里又长回了空格（罗马字回显/并列表没拆）",
      ["UPDATE sense_relation SET target=target||' (mut)' WHERE id IN"

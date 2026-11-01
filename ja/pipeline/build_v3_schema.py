@@ -246,6 +246,17 @@ DDL_INDEX = [
 TABLES = [q.split("CREATE TABLE ")[1].split(" ")[0].strip() for q in DDL]
 
 
+# 🔴 B24（2026-10-31）：**后来的脚本 `ALTER TABLE … ADD COLUMN` 加的列**，在这里登记 ——
+#    上面的 `CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，它们从来不会出现在上面的语句里，
+#    而跨门闸 `scripts/test_schema_drift_gate.py` 拿「上面的建表语句 ∪ 这里」与库里的 `sqlite_master` 逐表对账。
+#    ⚠️ 只是登记（声明库里该有什么），本脚本建库时**不**加它们 —— 加列的是右边注释里那个脚本。
+ADD_COLUMNS = [
+    ('entry', 'vclass', 'TEXT'),   # ja/pipeline/fill_vclass.py
+    ('example', 'roman', 'TEXT'),  # ja/pipeline/harvest_examples.py
+    ('example', 'ruby', 'TEXT'),   # ja/pipeline/harvest_examples.py
+]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")

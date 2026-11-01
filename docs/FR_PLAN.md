@@ -2582,7 +2582,7 @@ gender 这一列则是**多余的**：
 ## 阶段 8 评审 — 两家模型读渲染成品（2026-08-27）
 
 `[[render-review-with-models]]` 的做法：`render-dump.tsx --lang fr` 导 37 个词条
-（按数据分层抽样，不手挑），分四份问豆包 pro 与 deepseek-v4-pro，**我逐条回源裁决**。
+（按数据分层抽样，不手挑），分四份问豆包 pro（🔴 B8 更正 2026-10-31：实为豆包 **lite** —— `consult.py` 09-21 之前一直发 `DOUBAO_MODEL_ONLINE_LITE`）与 deepseek-v4-pro，**我逐条回源裁决**。
 成本：4 份 × 2 家，约 12 万 token，走 `scripts/consult.py` 咨询通路。
 
 ### 分工再次验证：模型看语言，判据看形式

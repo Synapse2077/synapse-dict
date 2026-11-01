@@ -48,6 +48,8 @@ from fix_unclosed_paren import classify as paren_class   # noqa: E402
 _sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent / "fixes"))
 from hide_english_relation_notes import is_english_note   # noqa: E402
 from fix_ipa_xsampa import BAD as XSAMPA_BAD, ENTITY as IPA_ENTITY   # noqa: E402
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent.parent / "scripts"))
+from zh_t2s import t2s as zh_t2s   # noqa: E402
 
 # ══════════════════════════════════════════════════════════════════════════
 #  落点：同一个「缺陷」要在哪两个地方查
@@ -416,6 +418,10 @@ def run_infl(con):
         "SELECT target FROM sense_relation WHERE COALESCE(hidden,0)=0") if is_english_note(t))
     out.append(("D4", "hide_english_relation_notes.py", "08-21",
                 "关系区里混进英语说明文字（读取路径）", n))
+    # B29（2026-10-30）：跑批模型写出的繁体（`鸊鷉` `黃海`）34 行，判据 import 跨门共用的安全版
+    n = sum(1 for tb in ("sense_gloss", "example_gloss", "collocation_gloss")
+            for (t,) in con.execute("SELECT text FROM %s WHERE lang='zh'" % tb) if t and zh_t2s(t) != t)
+    out.append(("D5", "scripts/fix_zh_t2s.py", "10-30", "中文里还有可转的繁体（安全判据，B29）", n))
     return out
 
 
@@ -606,6 +612,8 @@ MUTATIONS = [
     ("A15b 修复列塞回一条葡语版的 `R`（读取列不动）",
      "UPDATE dict SET phonetic='ˈRo.ða' WHERE id=(SELECT MIN(id) FROM dict"
      "  WHERE TRIM(COALESCE(phonetic,''))<>'')"),
+    ("D5 义项中文塞回一个繁体词（B29）",
+     "UPDATE sense_gloss SET text='國際'||text WHERE rowid=(SELECT MIN(rowid) FROM sense_gloss WHERE lang='zh')"),
     ("C6 造一条重复的 (word_id,seq)",
      "INSERT INTO inflection(word_id,seq,base,base_id,label_zh,src,src_ref)"
      " SELECT word_id,seq,base,base_id,label_zh,src,src_ref||'-mut' FROM inflection LIMIT 1"),

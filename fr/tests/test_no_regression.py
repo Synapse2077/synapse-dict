@@ -62,6 +62,8 @@ import clean_reading_intruders as _intr                   # noqa: E402
 import strip_zh_gloss_period as _per                      # noqa: E402
 import build_search_prefix as _pref                       # noqa: E402
 from intake_fr_words import norm_apos                     # noqa: E402
+sys.path.insert(0, str(HERE.parent.parent / "scripts"))
+from zh_t2s import t2s as _t2s                            # noqa: E402
 
 f = lambda n: format(n, ",")
 
@@ -244,6 +246,11 @@ def checks():
         #    ⚠️ 只认中文句号 `。`：`Anthericum ramosum L.` 的拉丁点是词的一部分。
         ("C4", "strip_zh_gloss_period", "08-28", "中文释义句末带句号（全库体例是不带）",
          ZH_ALL, ZH_PUB, lambda t: _per.trailing_period(t) is not None),
+        # B29（2026-10-30）：跑批模型写出的繁体（`組織` `經濟`）、中文版白送的（`鸊鷉`）309 行，同一页两种字形。
+        #    判据 import 跨门共用的安全版（日文、「讲这个字本身」的、`宫商角徵羽` 不动）。
+        ("C5", "scripts/fix_zh_t2s", "10-30", "中文里还有可转的繁体（安全判据，B29）",
+         ZH_ALL + " UNION ALL " + EXZH_ALL + " UNION ALL SELECT text FROM collocation_gloss WHERE lang='zh'",
+         ZH_PUB + " UNION ALL " + EXZH_VIS, lambda t: _t2s(t) != t),
 
         # ── D 组：撇号归一（全库约定）──────────────────────────────────
         ("D1", "normalize_apostrophes", "08-22", "词形里有未归一的弯撇号",
@@ -528,6 +535,10 @@ MUTATIONS = [
     ("C4", "UPDATE sense_gloss SET text=text||'。' WHERE rowid=("
            "SELECT g.rowid FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
            " WHERE g.lang='zh' AND COALESCE(s.hidden,0)=0 AND g.text NOT LIKE '%。' LIMIT 1)"),
+    # C5：例句译文里塞回一个繁体词（读取侧是例句表 ⇒ 打的是 UNION 的第二支）
+    ("C5", "UPDATE example_gloss SET text='經濟'||text WHERE rowid=("
+           "SELECT g.rowid FROM example_gloss g JOIN example e ON e.id=g.example_id "
+           "JOIN sense s ON s.id=e.sense_id WHERE g.lang='zh' AND COALESCE(s.hidden,0)=0 LIMIT 1)"),
     # F8：让指纹对不上 —— 往 dict 插一行就等于「数据变了没重算」
     ("F8", "INSERT INTO dict (word, word_norm, is_lemma, pos) "
            "VALUES ('__pfx__','__pfx__',1,'n')"),

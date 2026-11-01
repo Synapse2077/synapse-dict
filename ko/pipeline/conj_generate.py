@@ -383,6 +383,8 @@ def main():
     newlist = sorted(newforms)
     with dbtool.session(
             "ko-generate-conjugation",
+            # B3：插的是规则生成的活用形（is_lemma=0，只指回原形）—— 不带新读音／义项；ko 没有搜索前缀表 ⇒ 只有统计信息
+            rerun=["统计信息"],
             expect={"__rows__": len(newlist), "pos": 0,
                     "#inflection": len(rows),
                     "inflection.base_id": len(rows),

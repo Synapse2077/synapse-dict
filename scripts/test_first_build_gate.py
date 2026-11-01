@@ -63,7 +63,10 @@ def probe(lang, case, inject):
     sys.path.insert(0, str(lang_dir))
     import paths
     real_db = paths.DB
-    paths.DB = Path(tempfile.mkdtemp()) / "nope.sqlite"
+    _td = tempfile.mkdtemp()
+    import atexit, shutil
+    atexit.register(shutil.rmtree, _td, True)    # 2026-10-31：用完即删（原来每门每跑留一个目录）
+    paths.DB = Path(_td) / "nope.sqlite"
     out = io.StringIO()
     if case == "main":
         mod, code = _load(lang_dir, inject, as_main=True)
@@ -89,7 +92,11 @@ def probe(lang, case, inject):
                                     "AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%'")]
     ro.close()
     ran = []
-    kw = {"invalidates": []} if "invalidates" in mod.session.__code__.co_varnames else {}
+    # B3（2026-11-01）：插行的门禁从 `invalidates` 移到 `rerun=`（十门都有）—— 探针插行是建库，显式声明一层都不受影响
+    #    ⚠️ 用 `inspect.signature` 不用 `__code__.co_varnames`：`session` 套着 @contextmanager，后者读到的是包装函数，
+    #       原来那句 `"invalidates" in …co_varnames` 因此**一直是 False**（ja/ko/vi/ru 靠 build 前缀豁免才没暴露）
+    import inspect
+    kw = {"rerun": []} if "rerun" in inspect.signature(mod.session).parameters else {}
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             if case == "exc":
