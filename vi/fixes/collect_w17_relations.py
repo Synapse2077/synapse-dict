@@ -141,7 +141,9 @@ def parse(con):
     ins, listed = [], []
     seen = set()
     for wid, w, text in con.execute(
-            "SELECT e.word_id, d.word, e.text FROM example e JOIN dict d ON d.id = e.word_id "
+            # W22（2026-11-01）：读出版正文（清洗后的；隐藏行也填）。`text` 改存 dump 原文后带着清洗前的标记，
+            #   3 行解析不出来 ⇒ 外锚闸 R17源 报「库里有 3 条追不回源头」
+            "SELECT e.word_id, d.word, e.text_pub FROM example e JOIN dict d ON d.id = e.word_id "
             " WHERE e.hidden = 1 AND e.hidden_why = ? ORDER BY e.id",
             (S6.HIDDEN_META_NOT_EXAMPLE,)):
         if ":" not in text:

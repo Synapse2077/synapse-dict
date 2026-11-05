@@ -71,40 +71,9 @@ import harvest_relations_from_examples as H
 
 f = lambda n: format(n, ",")
 
-# 认括号的切分：只在**括号外**的分隔符上切。
-# ⚠️ 分隔符集合与 `H.SPLIT` **一字不差**（`，,、；;/`、` - `、`｜`）——
-#    这里改的是「在哪儿切」，不是「切什么」。判据借来，不重写。
-_SEP = re.compile(r"[，,、；;/]|\s-\s|｜")
-_OPEN, _CLOSE = "（([【", "）)]】"
-
-
-def split_outside_parens(s):
-    """按 `H.SPLIT` 的同一套分隔符切，但**跳过括号内部**。"""
-    out, buf, depth = [], [], 0
-    i = 0
-    while i < len(s):
-        ch = s[i]
-        if ch in _OPEN:
-            depth += 1
-            buf.append(ch)
-            i += 1
-            continue
-        if ch in _CLOSE:
-            depth = max(0, depth - 1)
-            buf.append(ch)
-            i += 1
-            continue
-        if depth == 0:
-            m = _SEP.match(s, i)
-            if m:
-                out.append("".join(buf))
-                buf = []
-                i = m.end()
-                continue
-        buf.append(ch)
-        i += 1
-    out.append("".join(buf))
-    return [x for x in out if x.strip()]
+# 认括号的切分器 2026-11-03 搬回收割器（K27 改收割器时一起改的），这里 import —— 判据只有一份。
+#   ⚠️ 回归闸 `_paren_split` 拿 `H.SPLIT.split`（旧切分器）与它求差，锚在常量 9 上。
+split_outside_parens = H.split_outside_parens
 
 
 # 🔴 **10 条全部逐条对上源文读过**（`[[judge-output-must-be-adjudicable]]`：

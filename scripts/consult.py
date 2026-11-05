@@ -98,8 +98,16 @@ async def ask_stream(cl, url, key, body, cap=None):
     return "".join(content), usage, model
 
 
+def deepseek_model(e):
+    """→ DeepSeek 模型名，配在 `.env` 的 `DEEPSEEK_MODEL_PRO`（2026-11-02，与豆包同一规矩；DeepSeek 会升级改名）。"""
+    name = (e.get("DEEPSEEK_MODEL_PRO") or "").strip()
+    if not name:
+        raise SystemExit("🔴 .env 里没有 DEEPSEEK_MODEL_PRO —— DeepSeek 的模型名配在 .env，不在代码里")
+    return name
+
+
 async def ask_deepseek(cl, e, text, think):
-    body = {"model": "deepseek-v4-pro",
+    body = {"model": deepseek_model(e),
             "messages": [{"role": "system", "content": SYS},
                          {"role": "user", "content": text}],
             "temperature": 0,
@@ -307,8 +315,8 @@ async def main():
     e = env()
     think = not a.no_think
     # B8：发出去之前把**实际端点**说出来 —— 档次漂移不报错，只能靠看得见
-    print("■ v4pro → deepseek-v4-pro ／ doubao → %s%s" % (
-        doubao_model(e, a.lite), "（--lite）" if a.lite else "（pro）"))
+    print("■ v4pro → %s ／ doubao → %s%s" % (
+        deepseek_model(e), doubao_model(e, a.lite), "（--lite）" if a.lite else "（pro）"))
 
     # 流式之后 read 超时量的是「多久没收到一个字节」（卡住），不再是总时长；总时长另封顶。
     async with httpx.AsyncClient(timeout=httpx.Timeout(30, read=READ_IDLE)) as cl:

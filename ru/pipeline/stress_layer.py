@@ -102,6 +102,7 @@ def collect(limit=None, verbose=True):
         "rej": collections.Counter(),           # 被拒的分桶（只统计「源头声称的」那批）
         "rej_eg": collections.defaultdict(list),
         "kept_w": set(),
+        "rejoined": 0,                          # R15② 拼回来的候选
     }
     for src, p in SRC:
         t0 = time.time()
@@ -114,12 +115,32 @@ def collect(limit=None, verbose=True):
             w = e["word"]
             no, sub = criteria.etym_no_pair(e)
             sref, _seq = ref.take(src, w, pos, no, sub)
+            run = []                        # R15②：连续的「片段」行 [(行序, 来源, 原样)]
+
+            def flush():
+                # 两行以上的连续片段 ⇒ 拼回去试（判据的家是 `criteria.rejoin_fragments`）
+                if len(run) >= 2:
+                    good, _kind, val = criteria.rejoin_fragments(w, [x[2] for x in run])
+                    if good:
+                        order0, prov0 = run[0][0], run[0][1]
+                        st["rows"][(src, prov0)] += 1
+                        st["rejoined"] += 1
+                        st["kept_w"].add(w)
+                        key = (PROV_RANK[prov0], False, order0, src)
+                        if val not in cand[sref] or key < cand[sref][val][0]:
+                            cand[sref][val] = (key, prov0, src)
+                run.clear()
+
             for order, f in enumerate(e.get("forms") or []):
                 form = (f.get("form") or "").strip()
                 if not form:
                     continue
                 prov = provenance(f.get("tags") or [])
                 good, kind, val = criteria.stressed_spelling(w, form)
+                if kind == criteria.FRAGMENT and prov in ("canonical", "stressed"):
+                    run.append((order, prov, form))
+                else:
+                    flush()
                 if not good:
                     # 🔴 只给「源头**声称**这是词头拼写」的那批分桶。带语法标签的行
                     #    被拒是**正常**的（它们是别的词形），算进残渣桶会让
@@ -136,10 +157,14 @@ def collect(limit=None, verbose=True):
                     continue
                 st["rows"][(src, prov)] += 1
                 st["kept_w"].add(w)
-                key = (PROV_RANK[prov], order, src)
+                # R15①：靠「拉丁同形字换回西里尔」才修出来的候选，排在同档正常候选**之后** ——
+                #   被同形字污染过的源头行更不可信，不许因为行序靠前就顶掉正常的主行
+                #   （第一版没排：`частиковый` 的主行从 `частико́вый` 换成了污染行修出来的 `ча́стиковый`）
+                key = (PROV_RANK[prov], kind == "ok-拉丁同形字换回西里尔", order, src)
                 # 同一个串被多行给出 ⇒ 留**档位最好、行序最前**的那一个来源
                 if val not in cand[sref] or key < cand[sref][val][0]:
                     cand[sref][val] = (key, prov, src)
+            flush()
         if verbose:
             print("  · %-16s %9s 行  %5.1fs" % (src, format(n, ","),
                                                 time.time() - t0), file=sys.stderr)
@@ -265,6 +290,7 @@ def report(cand, st, srows, bst, notes):
     for k, v in st["rej"].most_common():
         print("      %-30s %8s   例：%s" % (k, format(v, ","),
                                            st["rej_eg"][k][0] if st["rej_eg"][k] else ""))
+    print("   其中「片段」按源头行序拼回、过了等式而收下的（R15②）：%s 个候选" % format(st["rejoined"], ","))
     if bst["orphan"]:
         print("\n   🔴🔴 **%s 个候选的 `src_ref` 在库里找不到 entry** —— "
               "探针 §0 证明过这不该发生，不许静默跳过，查完再跑"

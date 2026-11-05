@@ -112,8 +112,8 @@ def plan(con):
             w = want(text, src, cited=t == "etymology") if (not only_ptr or ptr == "pointer") else text
             if (t, rid) in ov:
                 w = ov[(t, rid)]
-            if t == "sense_gloss":           # 2026-11-01：释义的出版正文去 wiki 标记；清洗还原不了的走逐行裁决
-                w = mk.get((t, rid)) or clean_markup(w)
+            if t in ("sense_gloss", "etymology"):   # 2026-11-01：释义／词源的出版正文去 wiki 标记（W18 的 `^(…)` 也在这里）；
+                w = mk.get((t, rid)) or clean_markup(w)   #   清洗还原不了的走逐行裁决
             if w != pub:
                 up.append((w, rid))
                 st["%s：%s" % (t, "改写（转简体／去标记／裁决）" if w != text else "照抄")] += 1

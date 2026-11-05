@@ -43,7 +43,8 @@ READ_PATH = [
     ("RP1", "义项：写入 vs 展示", "SELECT COUNT(*) FROM sense", "SELECT COUNT(*) FROM sense WHERE hidden = 0",
      12779, "藏的义项：zh 元描述／中俄混排待切（R3）／只有语体标签／没有字母"),
     ("RP2", "例句：写入 vs 展示", "SELECT COUNT(*) FROM example", "SELECT COUNT(*) FROM example WHERE hidden = 0",
-     2483, "构词示意式 1,280／R3 切不开 615／关系元数据 169／同格重复 151／整条是词头 126／其余"),
+     2486, "构词示意式 1,280／R3 切不开 615／关系元数据 169／同格重复 151／整条是词头 126／其余。"
+     "2026-11-05 R28 +3：vi 版源头残渣 `матерскаяие`／`выходит‚в,`／`посадки`（`criteria.EXAMPLE_JUNK_ADJUDICATED`）"),
     ("RP3", "关系：写入 vs 展示", "SELECT COUNT(*) FROM sense_relation",
      "SELECT COUNT(*) FROM sense_relation WHERE hidden = 0", 244130, "B17 108,451 ＋ 同条目重复 135,679"),
     ("RP4", "录音：写入 vs 展示", "SELECT COUNT(*) FROM audio", "SELECT COUNT(*) FROM audio WHERE hidden = 0",
@@ -54,14 +55,51 @@ READ_PATH = [
      "SELECT COUNT(*) FROM pronunciation WHERE hidden = 0", 249,
      "源头标错/不推荐 245（P3）＋ 内容不是 IPA 4（P24，B10，2026-10-29）"),
     ("RP7", "指针：证据层 vs 展示的指针", "SELECT COUNT(*) FROM sense_src",
-     "SELECT COUNT(*) FROM sense_src WHERE sense_id IS NULL AND pointer_target IS NOT NULL", 1168141,
-     "已出版的义项（sense_id 有值）＋ 不出版语言的普通释义证据 ＋ 没有结构目标的指针（R22 形动词页）"),
+     "SELECT COUNT(*) FROM sense_src WHERE sense_id IS NULL AND (pointer_target IS NOT NULL OR inferred_target IS NOT NULL) "
+     "AND ptr_hidden_why IS NULL", 767620,
+     "2026-11-05 R32 +2：人工裁决不印的指针 `они`／`нет`（展示层加 `ptr_hidden_why IS NULL`，读取条件跟着改）。"
+     "2026-11-02 R22 −400,521：展示层的指针改取 `COALESCE(pointer_target, inferred_target)`，词形页上源头没给目标的指针有 400,521 行反查到了目标（读取条件跟着展示层改）。"
+     "2026-11-02 R19 −2：移出不是俄语的词头 `且聽下回分解`（2 条义项证据）。已出版的义项（sense_id 有值）＋ 不出版语言的普通释义证据 ＋ 没有结构目标的指针（R22 形动词页）"),
 ]
 
 # (编号, 名称, SQL, 期望, 当初怎么坏的／为什么是这个数)
 CHECKS = [
-    ("P1", "词元数", "SELECT COUNT(*) FROM dict WHERE is_lemma=1", 368849,
-     "三次修 is_lemma（ru-crit-9 形动词 62,576／crit-10 姓氏变格 132,938／crit-15 副动词 75,782），"
+    # R22 ＋ 空白词形页（2026-11-02）：词形页指针的**反查目标**（屈折层反查唯一 ＋ 释义点名一致，`criteria` ⑯）。
+    #   逐行重算在义项闸 E14（重，只在 sense_src 被写时跑）；这里只锁数 —— 掉了 ⇒ 23 万个词形页又变回空白。
+    ("P26", "R22：词形页指针的反查目标（`inferred_target` 有值）",
+     "SELECT COUNT(*) FROM sense_src WHERE inferred_target IS NOT NULL", 400521,
+     "源头只在释义散文里写原形（`от взбулгачить`／`de Янков`），没给 `form_of`。两个信号一致 400,521 行；"
+     "留空：屈折层查不到 2,530／反查不唯一 2,136／两信号不一致 36／释义没点名 15"),
+    # R32（2026-11-02）：页面上**照印非三语原文**的指针说明（展示层：`ptr_tags` 有值印中文，否则印 `text`）。
+    ("P28", "R32：指针区照印非三语原文的条数（fr 认不全／vi／pl）",
+     "SELECT COUNT(*) FROM sense_src WHERE sense_id IS NULL AND lang NOT IN ('zh','en','ru') "
+     "AND (pointer_target IS NOT NULL OR inferred_target IS NOT NULL) AND ptr_tags IS NULL AND ptr_zh IS NULL "
+     "AND ptr_hidden_why IS NULL", 0,
+     "2026-11-02 之前 fr 307,135 条法语说明照印（`Accusatif masculin singulier de Янков.`）。"
+     "fr 版说明是闭合词汇拼的模板 ⇒ `criteria.fr_pointer_tags` 解析成标签、展示层用 `RU_INFL_TAG_LABELS` 印中文；"
+     "剩下的是 fr 认不全 234（`(inusité)`／`et`／`ou` 并列／散文）＋ vi 901 ＋ pl 67。**只许往下走**。"
+     "2026-11-03 1,202 → 40：这 1,202 行按说法去重译成中文（`fixes/translate_r32_pointers.py`，`sense_src.ptr_zh`），"
+     "**过了术语核对才落**（术语表推出的应有术语 vs 译文、俄语词逐字照抄、外语原文不许漏进来）；"
+     "40 行不过（pl 把中性译成阳性／fr 原文没译完／vi 源头自相矛盾），照印原文"
+     "。2026-11-05 40 → 2：38 行人工逐条裁决成标签（`criteria.POINTER_TAGS_ADJUDICATED`，能对上屈折层的 15 行逐条对过），"
+     "剩 `они`（源头目标是法语词 `elles`）／`нет`（散文释义），不是语法形式。"
+     "2026-11-05 2 → 0（R32 结清，用户确认）：这 2 行不印（`ptr_hidden_why`，P33 锁）"),
+    # 读者口径：词形页上**什么释义/指针都印不出来**的（义项闸 E13 只数词元，这批它看不见）
+    ("P27", "空白词形页：is_lemma=0、无可出版义项、无可印指针",
+     "SELECT COUNT(*) FROM dict d WHERE d.is_lemma = 0 "
+     "AND NOT EXISTS (SELECT 1 FROM sense s WHERE s.word_id = d.id AND s.hidden = 0) "
+     "AND NOT EXISTS (SELECT 1 FROM sense_src x WHERE x.word_id = d.id AND x.sense_id IS NULL "
+     "                AND (x.pointer_target IS NOT NULL OR x.inferred_target IS NOT NULL) AND x.ptr_hidden_why IS NULL)", 3374,
+     "2026-11-02 R22 之前约 23 万（13.3 万 fr 版姓氏变格形 ＋ 9.7 万 ru 版形动词/副动词），从来没被数到；"
+     "反查目标落库后剩 3,374（屈折层查不到／反查不唯一／两信号不一致的那些）。**只许往下走**"),
+    # P33（R32 结清，2026-11-05）：人工裁决不印的指针 —— 清掉理由 ⇒ `они` 页又出一个指向法语词 `elles` 的链接
+    ("P33", "R32：人工裁决不印的指针", "SELECT COUNT(*) FROM sense_src WHERE ptr_hidden_why IS NOT NULL", 2,
+     "`они`（源头目标指向法语词）／`нет`（法语散文释义）；裁决表 `criteria.POINTER_HIDDEN_ADJUDICATED`"),
+    # P34（R25／B31，2026-11-05）：源头给的例句标签（搭配／谚语／口语…）—— 掉了 ⇒ 页面上搭配又与整句例句混着印
+    ("P34", "R25：带源头标签的例句", "SELECT COUNT(*) FROM example WHERE tags IS NOT NULL", 1095,
+     "en 版 986／zh-t 77／fr 32；`collocation` 867。判据 `criteria.example_tags`（raw_tags 只认逐字白名单）"),
+    ("P1", "词元数", "SELECT COUNT(*) FROM dict WHERE is_lemma=1", 368848,
+     "2026-11-02 R19 −1：移出不是俄语的词头 `且聽下回分解`（1 个词元）。三次修 is_lemma（ru-crit-9 形动词 62,576／crit-10 姓氏变格 132,938／crit-15 副动词 75,782），"
      "分母虚胖过 42%。**锁数**：判据再动一次它就变，变了必须有人解释"),
     ("P2", "带重音符的词头", "SELECT COUNT(*) FROM dict WHERE instr(word, char(769))>0 OR instr(word, char(768))>0",
      1, "R13 并掉 7 个；剩的 1 个是 `◌́`（维基词典给重音符本身建的条目，重音闸 T11 白名单）"),
@@ -69,8 +107,8 @@ CHECKS = [
     ("P3", "源头标错的读音藏而不删",
      "SELECT COUNT(*) FROM pronunciation WHERE hidden=1 AND hidden_why IN ('源头标为错误读音','源头标为不推荐')", 245,
      "源头 `неправильно`/proscribed 等；删掉就找不回，清零 hidden 就印给读者"),
-    ("P4", "可出版义项", "SELECT COUNT(*) FROM sense WHERE hidden=0", 625800,
-     "5a 落库 ＋ 5b 破例 11,496。`--rebuild` 改判据会动它"),
+    ("P4", "可出版义项", "SELECT COUNT(*) FROM sense WHERE hidden=0", 625798,
+     "2026-11-02 R19 −2：移出不是俄语的词头 `且聽下回分解`（它的 2 条义项）。5a 落库 ＋ 5b 破例 11,496。`--rebuild` 改判据会动它"),
     ("P5", "🔴 付费：5b+5c 模型中文释义", "SELECT COUNT(*) FROM sense_gloss WHERE src='model:deepseek-v4-flash'", 515689,
      "5b 331,639（≈106 元）＋ 5c 184,050（2026-10-26，≈59 元，答案 `ru-C1`/`en-C1`）。**少一条都是付费数据丢了**"
      "（答案文件在 `data/work/ru/gloss_zh/`，可按 id 回收）"),
@@ -79,8 +117,9 @@ CHECKS = [
     ("P7", "破例义项挂在没有字母的证据上", "SELECT COUNT(*) FROM sense_src x JOIN sense s ON s.id=x.sense_id "
      "WHERE x.lang IN ('fr','vi','pl') AND x.text NOT GLOB '*[A-Za-zА-яЁё0-9]*'", 0,
      "5b 那一跤：破例盘子漏过判据，55 条 `:` 证据被模型照词头盲推，义项闸 E4 拦下、已撤"),
-    ("P8", "🔴 付费：6d 模型中文例句", "SELECT COUNT(*) FROM example_gloss WHERE src='model:deepseek-v4-flash'", 292571,
-     "≈108 元。答案文件 `data/work/ru/example_zh/{all,redo}.jsonl`。2026-10-25 R24：292,566 −1（3806 出处搬走后与 zh-t "
+    ("P8", "🔴 付费：6d 模型中文例句", "SELECT COUNT(*) FROM example_gloss WHERE src='model:deepseek-v4-flash'", 292628,
+     "≈108 元。答案文件 `data/work/ru/example_zh/{all,redo}.jsonl`。2026-11-05 R28 +57：形状不过的 66 条人读裁决"
+     "（36 条原样放行／21 条人工改译 `translate_examples.R28_FIXED`；6 条不需要译文、3 条残渣隐藏）。2026-10-25 R24：292,566 −1（3806 出处搬走后与 zh-t "
      "一句一字不差 ⇒ 源头中文替换模型中文）＋6（出处搬走后行数对上、从答案文件免费落库，R28 的 6 条）"),
     ("P9", "同句借中文", "SELECT COUNT(*) FROM example_gloss WHERE src LIKE '%:同句'", 11834,
      "6a：同词形一字不差的句子借 zh 版的中文（例句闸 X9 逐条找出处）；R24 +1（3806）"),
@@ -106,11 +145,34 @@ CHECKS = [
      "('fr-edition','vi-edition','pl-edition')", 0, "三语方针"),
     ("P20", "体对", "SELECT COUNT(*) FROM sense_relation WHERE kind='aspect_pair' AND hidden=0", 16483,
      "按字段分支（en/zh 的 forms）；`noun-from-verb` 不收"),
-    ("P21", "屈折层行数", "SELECT COUNT(*) FROM inflection", 6387251, "阶段 3；数变了 ⇒ 屈折判据或词元判据被动过"),
+    # 2026-11-03 R18（ru-crit-21）：6,387,251 → 6,387,345（+94，0 行消失）：不换行连字符／软连字符／拉丁 ë／
+    #   词头自带的希腊字母与破折号放行（`ВИЧ-диссидент`、`берёза`、`α-частица`、`конденсат Бозе — Эйнштейна`）。
+    ("P21", "屈折层行数", "SELECT COUNT(*) FROM inflection", 6387345, "阶段 3；数变了 ⇒ 屈折判据或词元判据被动过"),
+    # R18（2026-11-03）：被拒的合法屈折形放行之后，两个方向用**常量样本**锁 —— 该收的在（不换行连字符／希腊字母／
+    #   破折号专名／拉丁 ë），戏谑拼写（`Микро$офт`／`Роᛋᛋия`）的变格**不许**跟着进来（第一版判据宽到收了它们 20 行）。
+    # R15②（2026-11-03）：源头把一条谚语的带重音拼写按逗号拆成多行，`criteria.rejoin_fragments` 按行序拼回
+    #   （仍过「剥重音 ＝ 词头」那个等式）⇒ 95 个原来一条重音都没有的词条有了。常量样本锁。
+    ("P30", "R15②：拼回的谚语重音写法还在（样本）",
+     "SELECT COUNT(*) FROM entry e JOIN dict d ON d.id=e.word_id WHERE d.word IN ('око за око, зуб за зуб',"
+     "'куй железо, пока горячо','в гостях хорошо, а дома лучше') AND e.stressed LIKE '%,%' AND e.stressed LIKE '%́%'", 3,
+     "变小 ⇒ 重音层重跑时没拼（`stress_layer` 的 `flush()` 被拿掉，或判据改回逐行判）"),
+    # R15①（2026-11-03）：拉丁同形字冒充西里尔（fr 版 `Лéнин`）换回去、仍过等式 ⇒ 1,023 个词条有了重音写法；
+    #   污染行修出来的候选排在同档正常候选之后（第一版没排，`частиковый` 的主行被顶成 `ча́стиковый`）。两个方向各一个样本。
+    #   期望 6 ＝ `Ленин` 的 9 个 entry（一源一个）里印 `Ле́нин` 的 5 个 ＋ `частиковый` 那 1 个（2026-11-03 实测）。
+    ("P31", "R15①：同形字修复还在（`Ле́нин`），且没顶掉正常主行（`частико́вый`）",
+     "SELECT (SELECT COUNT(*) FROM entry e JOIN dict d ON d.id=e.word_id WHERE d.word='Ленин' AND e.stressed='Ле́нин')"
+     " + (SELECT COUNT(*) FROM entry e JOIN dict d ON d.id=e.word_id WHERE d.word='частиковый' AND e.stressed='частико́вый')", 6,
+     "变小 ⇒ 同形字修复被撤（`_repairs` 末一步），或污染行又排到了正常候选前面（`stress_layer` 的排序键）"),
+    ("P29", "R18：合法屈折形样本在、戏谑拼写的变格不在",
+     "SELECT CASE WHEN j = 0 THEN p ELSE -j END FROM (SELECT (SELECT COUNT(*) FROM inflection WHERE form IN "
+     "('ВИЧ-диссидента','α-частицы','конденсата Бозе — Эйнштейна','берёзой')) p, (SELECT COUNT(*) FROM inflection i "
+     "JOIN entry e ON e.id=i.entry_id JOIN dict d ON d.id=e.word_id WHERE d.word IN ('Микро$офт','Роᛋᛋия')) j)", 14,
+     "变小 ⇒ 归一或白名单被撤；负数 ⇒ 戏谑拼写的变格进来了（白名单又宽回「词头里有的字符都放行」）"),
     ("P22", "R29：中文简体出版正文", "SELECT (SELECT COUNT(*) FROM sense_gloss WHERE text_pub IS NOT NULL)"
      "+(SELECT COUNT(*) FROM example_gloss WHERE text_pub IS NOT NULL)"
-     "+(SELECT COUNT(*) FROM sense_src WHERE text_pub IS NOT NULL)", 139082,
-     "2026-10-30 B30 ＋894：中文版错译的改译 2,685 行写进 `text_pub`，其中 894 行原来没有出版正文（原文已是简体）。"
+     "+(SELECT COUNT(*) FROM sense_src WHERE text_pub IS NOT NULL)", 139077,
+     "2026-11-03 R33 −1：sense_gloss 1081521（格陵兰岛）旧译文带繁体、出版列是「格陵兰岛[1]及…」，重译成纯简体后 `zh_pub` 不再需要出版列"
+     "（对照 15:24 备份，三张表只有这一行变了）。2026-11-02 R19 −4：移出不是俄语的词头 `且聽下回分解`（2 条 sense_gloss ＋ 2 条 sense_src 的简体出版列）。2026-10-30 B30 ＋894：中文版错译的改译 2,685 行写进 `text_pub`，其中 894 行原来没有出版正文（原文已是简体）。"
      "2026-10-25 `zh_pub.py`：释义 25,920（5c 新译文里模型漏转的繁体 ＋52）＋ 例句译文 16,883（R24 借来的 3806 ＋1）＋ 指针说明 95,385；掉了 ⇒ 页面回到繁简混排"),
     ("P23", "R29：「覆上」没被改成「复上」", "SELECT (SELECT COUNT(*) FROM sense_gloss WHERE lang='zh' AND "
      "COALESCE(text_pub,text) LIKE '%覆上%')+(SELECT COUNT(*) FROM example_gloss WHERE lang='zh' AND "
@@ -126,14 +188,16 @@ CHECKS = [
 ZH_READ = ("COALESCE(g.text_pub, g.text) FROM sense s JOIN sense_gloss g",
            "COALESCE(g.text_pub, g.text) AS text, g.src FROM sense_gloss g",
            "COALESCE(text_pub, text) FROM example_gloss WHERE example_id = x.id AND lang = 'zh'",
-           "COALESCE(x.text_pub, x.text) AS text, x.src, x.pointer_target")
+           # R22（2026-11-02）：指针查询的目标列改成 COALESCE(pointer_target, inferred_target) 换了行 ⇒ 锚只取说明那一段
+           "COALESCE(x.text_pub, x.text) AS text, x.src,\n")
 # 🔴🔴 2026-10-30（B23 那一类）：原来是 `["R0"] + [c[0] for c in CHECKS] + …` —— **从检查列表推出来的**，
 #    于是从 CHECKS 里删掉一条，花名册跟着少一条，`roster_check` 照样对得上：它只逮得到「列表里有而没跑」，
 #    逮不到「整条被删了」（vi 栽过的正是后者：P12/P13 被整段替换切走，正常跑报全绿）。
 #    ⇒ 独立写死。加一条检查 ⇒ 这里也要加，不加就红 —— 那正是它存在的理由（`[[expectation-must-be-declared]]`）。
 ROSTER = ["R0",
+          "P26", "P28", "P27", "P33", "P34",   # 2026-11-02 R22／R32：在 CHECKS 最前面（花名册按输出顺序比对）；P33 2026-11-05
           "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P12",
-          "P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21", "P22", "P23", "P24", "P25",
+          "P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21", "P30", "P31", "P29", "P22", "P23", "P24", "P25", "P32",
           "RP1", "RP2", "RP3", "RP4", "RP5", "RP6", "RP7",
           "R0b", "R0c"]
 
@@ -156,6 +220,13 @@ def run_all(con):
     out.append(("P25", "B30：中文版错译的改译没印出来", sum(1 for i, t in fx.items()
                 if i not in pub or pub[i][0] != _crit.zh_simp(t, pub[i][1])), 0,
                 "2,685 行（两层判官都判错 1,465 ＋ 同句借用跟着改 1,220）；红 ⇒ 读者看回「建造房屋」那种错译"))
+    # P32（R33，2026-11-03）：读者看到的模型中文里还带义项编号 `[1]`／`［1］`／`[I.1]`／`[1, 2]`
+    #   判据 import `criteria.SENSE_REF`（与修复脚本同一个）；库里留着化学命名 `[4,5-d]`／出处 `[ГОСТ …]` 等 ⇒ 基线 0 本身是反向控制
+    out.append(("P32", "R33：模型中文释义里印着义项编号", sum(1 for (t,) in con.execute(
+        "SELECT COALESCE(z.text_pub, z.text) FROM sense s JOIN sense_gloss z ON z.sense_id = s.id AND z.lang = 'zh' "
+        "AND z.src LIKE 'model:%' WHERE s.hidden = 0") if _crit.SENSE_REF.search(t)), 0,
+        "ru 版 `червя [1.]`＝前一个词的第 n 义，机翻照抄（`〈植〉[1]的果实`／`工厂［1］的建筑物`）。"
+        "745 条重译（`fixes/retranslate_r33_footnotes.py`）＋ 第一版判据漏的 42 条直接剥（全角／`[I.1]`／`[1, 2]`）"))
     for cid, name, wsql, rsql, want, why in READ_PATH:
         out.append((cid, name, con.execute(wsql).fetchone()[0] - con.execute(rsql).fetchone()[0], want, why))
     # R0b：READ_PATH 的读取路径条件必须**真的出现在 russian.ts 里**（抠不到 ⇒ 展示层换了口径而这里没跟）
@@ -273,8 +344,28 @@ def _mutations():
          "FROM sense_src WHERE text_pub IS NOT NULL)"),
         ("P23", "一条「覆上」又被改成「复上」", "UPDATE example_gloss SET text=replace(text,'覆上','复上') WHERE id=("
          "SELECT MIN(id) FROM example_gloss WHERE text_pub IS NULL AND text LIKE '%覆上%')"),
+        ("P26", "清掉一个词形页的反查目标（`взбулгаченный` 又印不出「взбулгачить 的形动词」）",
+         "UPDATE sense_src SET inferred_target=NULL WHERE id=(SELECT x.id FROM sense_src x JOIN dict d ON d.id=x.word_id "
+         "WHERE d.word='взбулгаченный' AND x.inferred_target IS NOT NULL LIMIT 1)"),
+        ("P28", "清掉一条 fr 指针的标签（页面回到印法语原文）",
+         "UPDATE sense_src SET ptr_tags=NULL WHERE id=(SELECT MIN(id) FROM sense_src WHERE ptr_tags IS NOT NULL)"),
+        ("P30", "一条拼回的谚语重音写法被清空（`око за око, зуб за зуб` 又没有重音）",
+         "UPDATE entry SET stressed=NULL WHERE word_id=(SELECT id FROM dict WHERE word='око за око, зуб за зуб')"),
+        ("P31", "污染行修出来的候选顶掉正常主行（`частиковый` 印成 `ча́стиковый`）",
+         "UPDATE entry SET stressed='ча́стиковый' WHERE word_id=(SELECT id FROM dict WHERE word='частиковый')"),
+        ("P29", "删掉一行放行的屈折形（`ВИЧ-диссидента` 又被当残渣拒掉）",
+         "DELETE FROM inflection WHERE id=(SELECT MIN(id) FROM inflection WHERE form='ВИЧ-диссидента')"),
+        ("P27", "插一个什么都没挂的词形页",
+         "INSERT INTO dict(word,word_norm,entry_type,is_lemma) VALUES('«变异»','«变异»','word',0)"),
         ("P25", "一条 B30 改译的出版正文被清空（`давать напрокат` 回到「租用」）",
          "UPDATE example_gloss SET text_pub=NULL WHERE id=43531"),
+        ("P32", "一条模型中文释义又带上全角义项编号（`завод`「工厂［1］的建筑物」那一类）",
+         "UPDATE sense_gloss SET text=text||'［1］' WHERE id=(SELECT MIN(z.id) FROM sense_gloss z JOIN sense s "
+         "ON s.id=z.sense_id WHERE s.hidden=0 AND z.lang='zh' AND z.src LIKE 'model:%' AND z.text_pub IS NULL)"),
+        ("P33", "清掉一条不印指针的理由（`они` 页又出指向法语词 `elles` 的链接）",
+         "UPDATE sense_src SET ptr_hidden_why=NULL WHERE id=(SELECT MIN(id) FROM sense_src WHERE ptr_hidden_why IS NOT NULL)"),
+        ("P34", "清掉一条例句的源头标签（`без обиняков` 不再标「搭配」那一类）",
+         "UPDATE example SET tags=NULL WHERE id=(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)"),
         ("R0b", "展示层换了口径（russian.ts 里没有 hidden = 0 了）", "DISPLAY"),
         ("R0c", "展示层的中文回到读 text（不读 text_pub）", "DISPLAY_ZH"),
     ]
@@ -287,12 +378,15 @@ ALSO = {
     "P24": {"RP6"},
     "P25": {"P22"},                        # 清空一条出版正文 ⇒ 简体出版正文总数 −1                        # B10 那 4 条也在 RP6 的差额里
     "P4": {"RP1"},                         # 藏一条义项 ⇒ 差额 +1
+    "P33": {"P28", "RP7"},                 # 放出一条不印的指针 ⇒ 照印法语原文 +1、读取差额 −1
     "P12": {"RP2"},                        # 放出构词示意式 ⇒ 差额 −1
     "P13": {"RP4"}, "P14": {"RP4"},        # 录音放出/多插一行藏着的
     "P16": {"RP5"}, "P19": {"RP5"},        # 词源藏/放
     "P18": {"RP3"},                        # 藏一条词族
     # 假的 russian.ts 一行源码都没有 ⇒ 中文读取路径（R0c）必然一起找不到
     "R0": {"R0c"}, "R0b": {"R0c"},
+    "P26": {"RP7", "P27"},
+    "P29": {"P21"},                        # 删一行屈折形 ⇒ 总行数 −1                 # 清掉 взбулгаченный 的反查目标 ⇒ 展示差额 +1、它又成了空白词形页
 }
 
 

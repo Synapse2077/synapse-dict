@@ -57,6 +57,8 @@ import sqlite3
 
 import dbtool
 import paths
+import relation_writers
+WRITER = relation_writers.name(__file__)    # K14：`sense_relation.writer`
 
 f = lambda n: format(n, ",")
 BATCH = 20000
@@ -120,6 +122,53 @@ DROP = {"학명", "화학식", "위키데이터", "위키백과", "부록", "(�
 SUF = ("하다", "되다", "시키다", "스럽다", "롭다", "답다", "거리다", "대다",
        "이다", "히다", "기", "음", "히", "이")
 SPLIT = re.compile(r"[，,、；;/]|\s-\s|｜")
+_OPEN, _CLOSE = "（([【", "）)]】"
+_BRACKETS = re.compile(r"[（(\[【].*?[)\]）】]")
+
+
+def split_outside_parens(s):
+    """按 `SPLIT` 的同一套分隔符切，但**跳过括号内部**（K19：先切再去括号会把
+    `굿재이(강원, 경남, 전남, 충북)` 切成 `굿재이(강원`／`경남`／`전남`／`충북)`，道名成了假目标）。"""
+    out, buf, depth = [], [], 0
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch in _OPEN:
+            depth += 1
+            buf.append(ch)
+            i += 1
+            continue
+        if ch in _CLOSE:
+            depth = max(0, depth - 1)
+            buf.append(ch)
+            i += 1
+            continue
+        if depth == 0:
+            m = SPLIT.match(s, i)
+            if m:
+                out.append("".join(buf))
+                buf = []
+                i = m.end()
+                continue
+        buf.append(ch)
+        i += 1
+    out.append("".join(buf))
+    return [x for x in out if x.strip()]
+
+
+def shown(frag, t):
+    """→ 这条边的 `target`（展示用的源头原文）。K27，2026-11-03。
+
+    与建库那一支同一个约定：`target` ＝ 源头原文（`경마(競馬)`），`target_norm` 只管链接落点。
+    这一支原来存的是 `clean()` 剥过括号的 `t` ⇒ 括号里的汉字表记／地区／语态整段丢了：
+        `성두(星斗)`  `굿재이(강원, 경남, 전남, 충북)`  `부정되다 (피동)`  `기(箕)키`
+    判据：片段**只多了括号组**（去掉括号组 ＝ `t`），且没有空括号 —— `() 도시락밥` 那种是源头残渣，
+    不印；散文、`>` 记法、句末标点这些 `clean()` 做的别的事一律不算「只多了括号」。
+    """
+    fr = frag.strip()
+    if "()" in fr or "（）" in fr or not _BRACKETS.search(fr):
+        return t
+    return fr if _BRACKETS.sub("", fr).strip() == t else t
 
 
 def clean(t):
@@ -149,12 +198,9 @@ def load_rows():
     return out
 
 
-def build(con):
-    indict = {w: i for i, w in con.execute("SELECT id, word FROM dict")}
-    have = {(w, k, t) for w, k, t in con.execute(
-        "SELECT word_id, kind, target FROM sense_relation")}
-    edges, stat, unknown = [], collections.Counter(), collections.Counter()
-    seen = set()
+def candidates(indict, stat, unknown):
+    """→ 逐条产出 (起点 id, kind, 目标, tag, 版, 起点词, 源文片段, clean 后的目标)。
+    判据（标签映射／切分／方向／改判）只在这里；`build()` 只管去重，K27 的修复脚本 import 它。"""
     for src, word, lab, payload in load_rows():
         if lab in DROP:
             stat["丢弃·不是词间关系·" + lab if stat["丢弃·不是词间关系"] < 0 else "丢弃·不是词间关系"] += 1
@@ -167,7 +213,7 @@ def build(con):
         if wid is None:
             stat["跳过·词条不在 dict"] += 1
             continue
-        for raw in SPLIT.split(payload):
+        for raw in split_outside_parens(payload):
             t = clean(raw)
             if not t or not (HANGUL.search(t) or CJK.search(t)):
                 continue
@@ -197,18 +243,31 @@ def build(con):
             if aid is None:
                 stat["跳过·边的起点不在 dict"] += 1
                 continue
-            key = (aid, k, b)
-            if key in seen:
-                stat["跳过·本批内重复"] += 1
-                continue
-            seen.add(key)
-            if key in have:
-                stat["跳过·库里已有这条边"] += 1
-                continue
-            edges.append((aid, None, k, b,
-                          json.dumps([g], ensure_ascii=False) if g else None,
-                          src, "%s:%s:rel:%s:%s" % (src, a, k, b)))
-            stat["✅ 新边·" + k] += 1
+            yield aid, k, b, g, src, a, raw, t
+
+
+def build(con):
+    indict = {w: i for i, w in con.execute("SELECT id, word FROM dict")}
+    # ⚠️ K27 之后库里的 `target` 可能带括号（源文原样）⇒ 去掉括号组的那个也算「已有」，否则重跑会重复插
+    have = set()
+    for w, k, t in con.execute("SELECT word_id, kind, target FROM sense_relation"):
+        have.add((w, k, t))
+        have.add((w, k, _BRACKETS.sub("", t).strip()))
+    edges, stat, unknown = [], collections.Counter(), collections.Counter()
+    seen = set()
+    for aid, k, b, g, src, a, raw, t in candidates(indict, stat, unknown):
+        key = (aid, k, b)
+        if key in seen:
+            stat["跳过·本批内重复"] += 1
+            continue
+        seen.add(key)
+        if key in have:
+            stat["跳过·库里已有这条边"] += 1
+            continue
+        edges.append((aid, None, k, shown(raw, t) if b == t else b,
+                      json.dumps([g], ensure_ascii=False) if g else None,
+                      src, "%s:%s:rel:%s:%s" % (src, a, k, b)))
+        stat["✅ 新边·" + k] += 1
     return edges, stat, unknown
 
 
@@ -235,7 +294,8 @@ def main():
     with dbtool.session(
             "ko-relations-from-examples",
             expect={"#sense_relation": len(edges),
-                    "sense_relation.target": len(edges)},
+                    "sense_relation.target": len(edges),
+                    "sense_relation.writer": len(edges)},
             invalidates=[
                 "关系层新增三个 kind：`abbreviation` / `sound_variant`，"
                 "以及 `alt_hanja` 首次有行 ⇒ **展示层要给它们中文标签**，"
@@ -246,8 +306,8 @@ def main():
         for i in range(0, len(edges), BATCH):
             s.executemany(
                 "INSERT OR IGNORE INTO sense_relation "
-                "(word_id, sense_id, kind, target, tags, src, src_ref)"
-                " VALUES (?,?,?,?,?,?,?)", edges[i:i + BATCH])
+                "(word_id, sense_id, kind, target, tags, src, src_ref, writer)"
+                " VALUES (?,?,?,?,?,?,?,'%s')" % WRITER, edges[i:i + BATCH])
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     q = lambda sql: con.execute(sql).fetchone()[0]
     print("\n■ 写后回核（从库里重算）")

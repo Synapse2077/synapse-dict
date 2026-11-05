@@ -54,6 +54,8 @@ export type RussianSense = {
 };
 
 export type RussianExample = {
+  /** R25：源头例句标签，竖线分隔（`collocation|colloquial`）；中文名 `RU_EXAMPLE_TAG_LABELS`。 */
+  tags: string | null;
   senseId: number | null;
   entryId: number;
   text: string;
@@ -93,9 +95,13 @@ export type RussianPointer = {
   lang: string;
   text: string;
   src: string;
-  /** 源头 form_of/alt_of 的目标词形；没有结构字段时是 null（R22）。 */
+  /** 源头 form_of/alt_of 的目标词形；源头没给时取屈折层反查的（R22），两者都没有是 null。 */
   target: string | null;
   targetId: number | null;
+  /** R32：fr 版说明解析出的语法标签（已拆好）；空数组＝没解析（照印原文）。 */
+  ptrTags: string[];
+  /** R32 收尾（2026-11-03）：解析不成标签的 vi/pl/fr 说明的**机翻中文**（过了术语核对才有）；null ＝ 照印原文。 */
+  ptrZh: string | null;
 };
 
 export type RussianEntryPart = {
@@ -221,6 +227,8 @@ export class RussianDictService {
       `),
       examples: this.db.prepare(`
         SELECT x.sense_id AS senseId, x.entry_id AS entryId, COALESCE(x.text_pub, x.text) AS text, x.ref, x.src,
+               -- R25（2026-11-05）：源头例句标签（搭配／谚语／口语…，竖线分隔，受控值域）
+               x.tags,
                (SELECT COALESCE(text_pub, text) FROM example_gloss WHERE example_id = x.id AND lang = 'zh') AS zh,
                (SELECT src FROM example_gloss WHERE example_id = x.id AND lang = 'zh') AS zhSrc,
                (SELECT text FROM example_gloss WHERE example_id = x.id AND lang = 'en') AS en
@@ -246,14 +254,22 @@ export class RussianDictService {
         WHERE word_id = ? AND hidden = 0 ORDER BY id
       `),
       // 指针：证据层的指针义项（源头给了、出版层有意不收）。目标解析到 dict 才可点
+      // R22（2026-11-02）：源头没给目标的词形页指针，目标取**反查列** inferred_target
+      //   （屈折层反查唯一 ＋ 释义点名一致才有值，见 criteria ⑯）。源头给的 pointer_target 优先。
       pointers: this.db.prepare(`
-        SELECT x.entry_id AS entryId, x.lang, COALESCE(x.text_pub, x.text) AS text, x.src, x.pointer_target AS target,
+        SELECT x.entry_id AS entryId, x.lang, COALESCE(x.text_pub, x.text) AS text, x.src,
+               COALESCE(x.pointer_target, x.inferred_target) AS target,
+               -- R32：fr 版说明解析出的语法标签（|分隔，与变位表 tags 同一值域）；有值时展示层印中文、不印法语原文
+               x.ptr_tags AS ptrTags, x.ptr_zh AS ptrZh,
                -- 源头的目标带重音符（воды 页上的目标是 вода́），dict.word 不带 ⇒ 先剥再解析（与关系层同一条规矩）
                (SELECT d.id FROM dict d
-                 WHERE d.word = replace(replace(x.pointer_target, char(769), ''), char(768), '')
+                 WHERE d.word = replace(replace(COALESCE(x.pointer_target, x.inferred_target), char(769), ''), char(768), '')
                  ORDER BY d.id LIMIT 1) AS targetId
         FROM sense_src x
-        WHERE x.word_id = ? AND x.sense_id IS NULL AND x.pointer_target IS NOT NULL
+        WHERE x.word_id = ? AND x.sense_id IS NULL
+          AND (x.pointer_target IS NOT NULL OR x.inferred_target IS NOT NULL)
+          -- R32 结清（2026-11-05）：人工裁决不印的指针（不是语法形式，见 criteria.pointer_hidden_why）
+          AND x.ptr_hidden_why IS NULL
         ORDER BY x.id
       `),
     };
@@ -332,7 +348,8 @@ export class RussianDictService {
       relations: this.q.relations.all(id) as unknown as RussianRelation[],
       etymologies: this.q.etymologies.all(id) as unknown as RussianEntry['etymologies'],
       audios: this.q.audios.all(id) as unknown as RussianEntry['audios'],
-      pointers: this.q.pointers.all(id) as unknown as RussianPointer[],
+      pointers: (this.q.pointers.all(id) as Array<Omit<RussianPointer, 'ptrTags'> & { ptrTags: string | null }>)
+        .map((p) => ({ ...p, ptrTags: (p.ptrTags ?? '').split('|').filter(Boolean) })),
       homographs: this.q.homographs.all(normRu(hit.word), id) as unknown as Array<{ id: number; word: string }>,
       yoVariants: this.q.yoVariants.all(foldRu(hit.word), normRu(hit.word)) as unknown as Array<{ id: number; word: string }>,
       foldedFrom,

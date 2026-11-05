@@ -100,12 +100,17 @@ def _decide(zh):
 def plan(con):
     """→ [(gloss 行 rowid, example_id, 词, 原文, 出版正文, 旧中文, 新中文, 情形)]"""
     rows = []
-    for gid, eid, w, t, pub, zh in con.execute(
-            "SELECT g.rowid, x.id, d.word, x.text, x.text_pub, g.text "
+    syl = S6.vi_syllables(con)
+    for gid, eid, w, t, pub, zh, src in con.execute(
+            "SELECT g.rowid, x.id, d.word, x.text, x.text_pub, g.text, x.src "
             "  FROM example x JOIN dict d ON d.id = x.word_id "
             "  JOIN example_gloss g ON g.example_id = x.id AND g.lang = 'zh' "
             " WHERE x.hidden = 0 AND x.text_pub IS NOT NULL AND x.text_pub <> x.text "
             " ORDER BY x.id"):
+        # W22（2026-11-01）：`text` 改存 dump 原文后，`text_pub <> text` 还包括四种清洗那 2,040 行 ——
+        #   W16 切过尾巴的 ＝ 出版正文**也不等于清洗后的正文**
+        if pub in S6.example_cleaned_variants(t, src, syl):
+            continue
         new, kind = _decide(zh)
         rows.append((gid, eid, w, t, pub, zh, new if new else zh, kind))
     return rows

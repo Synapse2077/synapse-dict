@@ -28,7 +28,7 @@ sys.path.insert(0, str(HERE.parent))
 import paths                                                    # noqa: E402
 from pipeline import criteria                                   # noqa: E402
 
-ROSTER = tuple("E%d" % i for i in range(1, 16))
+ROSTER = tuple("E%d" % i for i in range(1, 18))
 ACCEPT = HERE / ".sense_accept.json"
 SRC_DOMAIN = frozenset(criteria.SENSE_LANG)
 BUCKETS = frozenset({"grammar", "label", "raw", "topic"})
@@ -264,6 +264,26 @@ def checks(con):
         if criteria.zh_simp(*src_t) != want:
             bad15["已知答案错：%s" % src_t[0]] += 1
     out.append(("E15", not bad15, "" if not bad15 else "%s %s" % (dict(bad15), " ｜ ".join(eg15))))
+
+    # ── E16 R22：`inferred_target` 是判据的不动点（2026-11-02）——
+    #    库里的反查目标必须**逐行**等于 `infer_pointer_targets.collect()` 重算的结果（import 同一个函数，不重写判据）。
+    #    两个方向都算：库里有而重算没有（判据收紧了没同步／有人手填）、重算有而库里没有（漏写／被清空）。
+    from pipeline.infer_pointer_targets import collect as _infer
+    want16, _st16 = _infer(con)
+    have16 = dict(con.execute("SELECT id, inferred_target FROM sense_src WHERE inferred_target IS NOT NULL"))
+    bad16 = [i for i in set(want16) | set(have16) if want16.get(i) != have16.get(i)]
+    out.append(("E16", not bad16, "" if not bad16 else
+                "%d 行反查目标与判据重算不一致（例 sense_src.id %s）—— 跑 `ru/pipeline/infer_pointer_targets.py --apply`"
+                % (len(bad16), sorted(bad16)[:5])))
+
+    # ── E17 R32：`ptr_tags` 是 `fr_pointer_tags` 的不动点（同 E16 的两个方向）
+    from pipeline.infer_pointer_targets import collect_tags as _ptags
+    want17, _st17 = _ptags(con)
+    have17 = dict(con.execute("SELECT id, ptr_tags FROM sense_src WHERE ptr_tags IS NOT NULL"))
+    bad17 = [i for i in set(want17) | set(have17) if want17.get(i) != have17.get(i)]
+    out.append(("E17", not bad17, "" if not bad17 else
+                "%d 行指针标签与判据重算不一致（例 sense_src.id %s）—— 跑 `ru/pipeline/infer_pointer_targets.py --apply`"
+                % (len(bad17), sorted(bad17)[:5])))
     return out
 
 
@@ -362,6 +382,10 @@ def _mutations():
         ("E14", "给一条模型中文造一条重复", set(),
          ["INSERT INTO sense_gloss(sense_id,lang,text,src) SELECT sense_id,'zh',text||'«变异»',src "
           "FROM sense_gloss WHERE src LIKE 'model:%' LIMIT 1"]),
+        ("E17", "把一条 fr 指针的标签改成错的格", set(),
+         ["UPDATE sense_src SET ptr_tags='vocative' WHERE id=(SELECT MIN(id) FROM sense_src WHERE ptr_tags IS NOT NULL)"]),
+        ("E16", "把一个词形页的反查目标改成错的原形", set(),
+         ["UPDATE sense_src SET inferred_target='«变异»' WHERE id=(SELECT MIN(id) FROM sense_src WHERE inferred_target IS NOT NULL)"]),
         ("E15", "R29：一条简体出版正文被清空（页面回到繁体）", set(),
          ["UPDATE sense_src SET text_pub=NULL WHERE id=(SELECT MIN(id) FROM sense_src WHERE text_pub IS NOT NULL)"]),
         ("E13", "把一批词元的出版义项全部删掉（空白页涨）",

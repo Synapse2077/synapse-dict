@@ -64,6 +64,8 @@ import sqlite3
 
 import dbtool
 import paths
+import relation_writers
+WRITER = relation_writers.name(__file__)    # K14：`sense_relation.writer`
 
 f = lambda n: format(n, ",")
 
@@ -253,6 +255,7 @@ def main():
             expect={"#sense_gloss": -len(uniq) - len(multi),
                     "#sense_relation": len(edges),
                     "sense_relation.target": len(edges),
+                    "sense_relation.writer": len(edges),
                     "entry.hanja": len(uniq),
                     "entry.hanja_src": len(uniq)},
             invalidates=[
@@ -277,7 +280,8 @@ def main():
         for i in range(0, len(edges), BATCH):
             s.executemany(
                 "INSERT OR IGNORE INTO sense_relation "
-                "(word_id, sense_id, kind, target, src, src_ref) VALUES (?,?,?,?,?,?)",
+                "(word_id, sense_id, kind, target, src, src_ref, writer) VALUES (?,?,?,?,?,?,'%s')"
+                % WRITER,
                 edges[i:i + BATCH])
             s.written += len(edges[i:i + BATCH])
         # ③ 出版层删掉元描述。

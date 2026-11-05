@@ -219,13 +219,14 @@ def want_example():
     con = _open()
     rows, glosses, _st = XL.collect(con, verbose=False)
     con.close()
-    return dict(row={r[9]: (r[0],) + tuple(r[1:9]) for r in rows},
+    # R25（2026-11-05）：末尾加 `tags`（r[10]）—— 库里的例句标签必须逐行等于从 dump 重算的（三向恒等的第三向会逮「改了」）
+    return dict(row={r[9]: (r[0],) + tuple(r[1:9]) + (r[10],) for r in rows},
                 gloss={(g[0], g[1]): (g[2], g[3]) for g in glosses})
 
 
 def check_example(con, W):
     have = {r[0]: tuple(r[1:]) for r in con.execute(
-        "SELECT src_ref, id, word_id, entry_id, sense_id, text, text_pub, ref, hidden_why, src FROM example")}
+        "SELECT src_ref, id, word_id, entry_id, sense_id, text, text_pub, ref, hidden_why, src, tags FROM example")}
     out = _diff("X", W["row"], have)
     have_g, model, third = {}, 0, 0
     for eid, lang, text, src, hid in con.execute(
@@ -350,6 +351,8 @@ MUTATIONS = [
      ["UPDATE sense_gloss SET text=text||'«变异»' WHERE id=(SELECT MIN(id) FROM sense_gloss WHERE src<>'%s')" % MODEL]),
     ("example", "X③", "把一条例句的 hidden_why 静默清掉",
      ["UPDATE example SET hidden_why=NULL, hidden=0 WHERE id=(SELECT MIN(id) FROM example WHERE hidden=1)"]),
+    ("example", "X③", "把一条例句的源头标签静默清掉（R25：`搭配` 不印了）",
+     ["UPDATE example SET tags=NULL WHERE id=(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)"]),
     ("example", "X·gloss④", "模型中文盖到一条有源头中文的例句上",
      ["UPDATE example_gloss SET src='%s' WHERE id=(SELECT MIN(id) FROM example_gloss WHERE lang='zh' AND src LIKE 'zh-%%')"
       % MODEL]),

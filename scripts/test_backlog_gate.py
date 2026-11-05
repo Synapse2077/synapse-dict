@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
-EXPECT_MAX = 30          # 新增一条 B 就改这里 —— 删掉最后一条时它是唯一会响的东西
+EXPECT_MAX = 31          # 新增一条 B 就改这里（2026-11-05 B31 十门例句标签） —— 删掉最后一条时它是唯一会响的东西
 
 # (门, 计划表, 节起始标题, 编号前缀)。节＝起始标题到下一个同级或更高级标题。
 SECTIONS = [
@@ -40,7 +40,7 @@ LOCKED = [
     ("pt 收尾单", "PT_PLAN.md", "# 📋 pt 收尾单", 67),
     ("fr 收尾单", "FR_PLAN.md", "# 📋 fr 收尾单", 46),
 ]
-EN_UNFIXED = ("EN_PLAN.md", "### 16.7 顺带记账", 3)   # 「未修」的条数
+EN_UNFIXED = ("EN_PLAN.md", "### 16.7 顺带记账", 0)   # 「未修」的条数（2026-11-02：3→2→1；11-03 ⑤ 修完 1→0，① 结清时新开的 ⑤ 抵了一次）
 
 ROW = re.compile(r"^\|\s*(~~)?\**([A-Z]{0,2}\d+[a-z]?)\**(~~)?\s*\|")
 CLOSED = re.compile(r"✅\s*\**\s*(已结|已完成|已做|已解决|已否决|结清|已修|已还|完成)|已结清|⚪\s*\**已裁决|"

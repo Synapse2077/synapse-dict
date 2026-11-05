@@ -87,6 +87,17 @@ IPA_RE = re.compile(r"\[[ˈˌa-zA-Zɑɒəɜɪʊʌθðŋʃʒæːˑ'.:]{2,}\]")
 OPEN, CLOSE = "（〔([【<《", "）〕)]】>》"
 
 
+# 🔴 **数字字符实体先解码再切**（2026-11-02，EN_PLAN §16.7②）：ECDICT 偶尔用 `&#xe193;` 写一个它字体里没有的字，
+#    而实体自带的 `;` 正好是 `split_top` 的分隔符 ⇒ `[地名] "飞&#xe193;川" ( 日 )` 被拆成 `"飞&#xe193` ＋ `川" ( 日 )`
+#    两条半截义项（`Hida-gawa`／`Hida-sanmyaku`）。只解**数字**实体：`html.unescape` 会连带把没分号的
+#    `&para`/`&copy` 这类串也改掉，判据比目的宽。全库 `legacy_gloss` 里只有这 2 行带 `&#`。
+_NUM_ENT = re.compile(r"&#(?:[xX]([0-9a-fA-F]+)|([0-9]+));")
+
+
+def decode_num_entities(s):
+    return _NUM_ENT.sub(lambda m: chr(int(m.group(1), 16) if m.group(1) else int(m.group(2))), s or "")
+
+
 def split_top(s):
     """按「；/;」切，**括号内不切**。
 
@@ -220,7 +231,7 @@ def parse(text):
     """→ ([(pos_raw, marks, gloss)], 残渣[])，按展示顺序"""
     items, resid = [], []
     for ln in (text or "").split("\n"):
-        ln = ln.strip()
+        ln = decode_num_entities(ln.strip())
         if not ln:
             continue
         pos_raw = None

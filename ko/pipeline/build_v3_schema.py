@@ -207,6 +207,9 @@ DDL = [
          --    展示用、一个字不许动；`target_norm` ＝ 解析后的词头（`경마`、`팔도`），
          --    **只管链接落点**，查不到就 NULL（页面上印成不可点文本）。
          target_norm TEXT,
+         -- 🔴 写这一行的**脚本**（K14，2026-11-03）。`src` 是「哪一版 dump」，8 个写入方填的是同一批版名，
+         --    分不开；取值只许是 `relation_writers.WRITERS` 登记过的（回归闸 R29）。
+         writer   TEXT,
          UNIQUE(word_id, sense_id, kind, target)
        )""",
     # ── 变形层（阶段 2 填）。🔴 韩语的活用表在**英文版** ────────────────

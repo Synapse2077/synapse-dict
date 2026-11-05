@@ -174,11 +174,25 @@ def etym_skip_why(word, text):
         return SKIP_TEMPLATE
     if len(t) < MIN_LEN:
         return SKIP_TOO_SHORT
+    if (word, t) in PRON_SECTION_LEAKS:
+        return SKIP_PRON_SECTION
     return None
 
 
+# W11（2026-11-02）：源头把**读音章节**倒进了 `etymology_texts`（vi 版 `cá` 的三段：注音／两条「音频（文件）」）。
+# 🔴 **逐字登记的名单，不是形式判据**：形式上「像音标/录音数据」的词源段共 12 段，另外 9 段是**真词源在引用历史注音**
+#    （`sặc sỡ` 引 1651 年《越葡拉词典》的 `[ʂakᴮ¹ ʂəː^(C2)]`、`bơi`/`tơi` 的原始形式构拟）—— 按模式删＝为了去 3 段删掉 9 段真词源。
+#    词源闸 Y17 仍按形式看守上界（现在 9 段），涨了就回来逐条读、该进名单的进名单。比对的是**清洗后**的正文（与存库的同一次清洗）。
+SKIP_PRON_SECTION = "pronunciation-section-leak"
+PRON_SECTION_LEAKS = frozenset({
+    ("cá", '(Quảng Nam) IPA^((ghi chú)): [kɑː˦˥]'),
+    ("cá", 'Âm thanh (Hà Nội): (tập tin)'),
+    ("cá", 'Âm thanh (Thành phố Hồ Chí Minh): (tập tin)'),
+})
+
+
 SKIP_DOMAIN = (SKIP_EMPTY, SKIP_MAGIC, SKIP_BARE_TABLE, SKIP_ALL_HAN,
-               SKIP_SAME_AS_WORD, SKIP_TEMPLATE, SKIP_TOO_SHORT)
+               SKIP_SAME_AS_WORD, SKIP_TEMPLATE, SKIP_TOO_SHORT, SKIP_PRON_SECTION)
 
 
 # ── ④ `etym_type`：**只认 en 版的 `etymology_templates`** ───────────────

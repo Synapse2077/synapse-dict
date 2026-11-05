@@ -150,8 +150,9 @@ READ_PATH = [
 
     ("P4", "录音：写入列 vs 展示层（`hidden = 0`）",
      "SELECT COUNT(*) FROM audio",
-     "SELECT COUNT(*) FROM audio WHERE hidden = 0", 7,
-     "差额 7 ＝ W8 的张冠李戴（判据精确度只有 ~57%，3 条是假阳）。"
+     "SELECT COUNT(*) FROM audio WHERE hidden = 0", 4,
+     "差额 4 ＝ W8 的张冠李戴，人工逐条确认都是别的词（`sáo`←`sáu` 等）。"
+     "2026-11-05 7→4：判据命中的 7 行里 3 行是同一个词（`X`←`ích xì` 等），裁决名单 `S6.AUDIO_SAME_WORD_ADJUDICATED` 放出。"
      "⚠️ 这 7 条**有意不删** —— 展示层永不播一条读错的音，而证据留着（可逆）"),
 ]
 
@@ -171,7 +172,9 @@ READ_SCALE = [
 
     ("P7", "W10：带 `ref`（出处）的出版例句",
      "SELECT COUNT(*) FROM example WHERE hidden = 0 AND ref IS NOT NULL"
-     " AND TRIM(ref) <> ''", 5274,
+     " AND TRIM(ref) <> ''", 5296,
+     "🔴 **基线 5,274 → 5,296（2026-11-02，W21）**：+22，出处判据第四次收窄（汉喃文献的叶码 `page 6b`/`folio 13b`、"
+     "`published in 1998 by …`、`translated into English as …`）⇒ 22 条首行出处从出版正文搬进 `ref`，22 条的 `ref` 原先全是空的。"
      "🔴 **基线 5,282 → 5,274（2026-10-30，B29 的连带）**：那 33 条里 8 条带中文格式的出处，同格留下来那条都带同一出处的英文格式（逐条对过：`Exodus 20:2`、`Mạnh Quân`…）⇒ 读者仍看得到出处，只是不印两遍。"
      "🔴 **基线 5,290 → 5,282（2026-10-05，W25 的连带）**：新隐藏的 46 条里 8 条带出处。"
      "🔴 **基线 5,293 → 5,290（2026-10-05，W24）**：3 组重复例句**两行都带同一条出处**，隐藏一行就少一条。⚠️ 另外 5 组只有一行有出处 —— 那 5 组一条都没少：「有出处的优先留」是 `dup_survivor_rank` 的第③条（决定 4 组），剩下 1 组被①②盖过、由**出处并到留下来那行**兜住。⭐ 这个 −3 是**能逐位对上的**，而「对得上」正是我敢改基线的唯一理由。"
@@ -246,35 +249,6 @@ READ_SCALE = [
      "`Win XP`、`Lôm lốp` 叠音形式）。📋 那 3 条 JS 残渣记在 **W20**。"
      "⚠️ 这一条与 P14 **必须一起锁**：只锁总量的话，"
      "「译文还在但挂到隐藏例句上了」不会变红（而那正是 X8 要治的）"),
-
-    # 🔴🔴 **6e 的残留账，数字和读法一起锁。**
-    #    625 条多行例句里 17 条「译文行数 ≠ 原文行数」。逐条读完是**三类混在一起**，
-    #    而只看总数这三类都看不见（`[[residual-bucket-is-not-evidence]]`）：
-    #      ① **行数少是对的**：`Bàn Cổ` 的原文两行是「汉越音转写」＋「同一句的越南语」，
-    #         模型给出汉文原文 `史臣吳士連曰：天地開肇之時…` 一行，正是读者要的那句
-    #      ② **真的丢了内容**：`uất hận` 9 行→8 行，而丢掉的那一行**正含词头**
-    #      ③ **我的清洗判据还漏**：`cò` 的首行是**不以年份开头的出处**
-    #         （`Tú Xương, "Ông Cò (Mister Superintendent…)"`）、末行是**带越南语人名
-    #         的英译**（`Hà Nam's most honoured person…` 里 `Hà` 带声调符
-    #         ⇒ 我的「这一行一个越南语标记都没有」判据放过了它）
-    #    ⚠️ **重译一轮不收敛**：17 条里 14 条仍然对不上，有几条更糟 ——
-    #      `[[retry-must-converge-or-drop-loud]]`：不跑第三轮，大声记账。
-    #      答案文件 `redo3.jsonl` 留着当证据，**没有入库**。
-    #    ⇒ 根因在**数据层**：这 17 条的 `text` 不是「N 行平行的越南语」，
-    #      而是出处/喃字/汉越音转写/英译混在不同的行上，模型建不起行对应。
-    #      📋 欠账 **W21**：补两条判据（不以年份开头的出处；带越南语专名的英译行）。
-    #    🔴 这个数**只许往下走**。它往上走意味着新的付费译文又开始丢行。
-    ("P16", "6e 残留：多行例句里译文行数对不上的（**锁上限**）",
-     "SELECT COUNT(*) FROM (SELECT e.id FROM example e "
-     " JOIN example_gloss g ON g.example_id=e.id AND g.lang='zh' AND g.src LIKE 'model%' "
-     " WHERE e.hidden=0 AND instr(e.text, char(10))>0 "
-     "   AND LENGTH(e.text)-LENGTH(REPLACE(e.text, char(10), '')) "
-     "    <> LENGTH(g.text)-LENGTH(REPLACE(g.text, char(10), '')))", 17,
-     "见上面那段注释：三类混在一起，而只看总数三类都看不见。"
-     "⭐ 逮到它的是一条**本来空过的**契约检查 —— 「多行例句的译文行数与原文一致」"
-     "原先挂在 `mai` 上，而六个样本词**一条多行例句都没有** ⇒ `bad.length===0` 是"
-     "白捡的、它永远绿。给样本词表加了 `thối` 之后它当场判红。"
-     "⇒ ⭐ **样本词表不只是「好看的词」，它决定哪些代码路径被走到**"),
 
     ("P10", "B18：词源号与义项组对不上的词形（展示层必须单独成区印）",
      "SELECT COUNT(*) FROM (SELECT e.word_id FROM etymology e WHERE EXISTS"
@@ -463,7 +437,9 @@ def py_checks(con):
     #    ⇒ ⭐ **变异验证是闸的闸**（ko 的 K31 同一课）；
     #      ⇒ 并且这一次逼出了 `ROSTER` —— 见文件末尾 `run_all` 的花名册自检。
     syl = S6.vi_syllables(con)
-    _ex = list(con.execute("SELECT id, text, ref, src FROM example WHERE hidden = 0"))
+    # 🔴 W22（2026-11-01）：读**出版正文**。`text` 改存 dump 原文后，P12 的条件「`ref` 空且首行像出处」对那 304 行恒不成立
+    #    （它们的出处早已搬进 `ref`）⇒ 读 `text` 的话 P12 **静默空转而报绿** —— 没有报红，是读代码时才看见的（B20 的形状）。
+    _ex = list(con.execute("SELECT id, text_pub, ref, src FROM example WHERE hidden = 0"))
     left_cite = sum(1 for _i, t, r, _s in _ex
                     if not (r or "").strip() and S6.split_citation_prefix(t, syl)[0])
     out.append(("P12", "6e 清洗：出版正文里不许还有「首行是出处」的（残留）", left_cite, 0,
@@ -479,7 +455,7 @@ def py_checks(con):
     #    ⇒ P12 的变异一注入 P13 就跟着响。**不是连带，是我两处判据不同序。**
     left_en = sum(1 for _i, t, _r, sc in _ex
                   if sc in S6.INLINE_EN_IN_TEXT
-                  and S6.split_inline_english(S6.split_citation_prefix(t, syl)[1])[1])
+                  and S6.split_inline_english(S6.split_citation_prefix(t, syl)[1], syl)[1])
     out.append(("P13", "6e 清洗：出版正文里不许还有内嵌英译行（残留）", left_en, 0,
                 "355 行英译夹在 `text` 里，**262 条库里原本没有英译** ⇒ 剥掉就丢数据，"
                 "动作是搬进 `example_gloss(en)`。"
@@ -488,6 +464,42 @@ def py_checks(con):
                 "🔴 而 `INLINE_EN_IN_TEXT` 这张**按版登记表**也是栽出来的："
                 "没有它的时候 nl 版 2 行**荷兰语**被判成英译、存成 `lang='en'` ——"
                 "**绕过了三语闸 X9**（X9 查 lang 不在三语里，而荷兰语被贴了 `en` 的标签）"))
+
+    # 🔴🔴 **6e 的残留账，数字和读法一起锁。**
+    #    625 条多行例句里 17 条「译文行数 ≠ 原文行数」。逐条读完是**三类混在一起**，
+    #    而只看总数这三类都看不见（`[[residual-bucket-is-not-evidence]]`）：
+    #      ① **行数少是对的**：`Bàn Cổ` 的原文两行是「汉越音转写」＋「同一句的越南语」，
+    #         模型给出汉文原文 `史臣吳士連曰：天地開肇之時…` 一行，正是读者要的那句
+    #      ② **真的丢了内容**：`uất hận` 9 行→8 行，而丢掉的那一行**正含词头**
+    #      ③ **我的清洗判据还漏**：`cò` 的首行是**不以年份开头的出处**
+    #         （`Tú Xương, "Ông Cò (Mister Superintendent…)"`）、末行是**带越南语人名
+    #         的英译**（`Hà Nam's most honoured person…` 里 `Hà` 带声调符
+    #         ⇒ 我的「这一行一个越南语标记都没有」判据放过了它）
+    #    ⚠️ **重译一轮不收敛**：17 条里 14 条仍然对不上，有几条更糟 ——
+    #      `[[retry-must-converge-or-drop-loud]]`：不跑第三轮，大声记账。
+    #      答案文件 `redo3.jsonl` 留着当证据，**没有入库**。
+    #    ⇒ 根因在**数据层**：这 17 条的 `text` 不是「N 行平行的越南语」，
+    #      而是出处/喃字/汉越音转写/英译混在不同的行上，模型建不起行对应。
+    #      📋 欠账 **W21**：补两条判据（不以年份开头的出处；带越南语专名的英译行）。
+    #    🔴 这个数**只许往下走**。它往上走意味着新的付费译文又开始丢行。
+    # ✅ **W21 结清（2026-11-02）：锁上限 17 → 残留型 0。** 三类各归各位：
+    #    ③「判据还漏」补了三支（汉喃文献的叶码出处／`published in`／带越南语专名的英译行，
+    #      见 `stage6_sources.is_citation_line` 与 `_is_english_line`）＋ nl 版多行「越南语 – 荷兰语」；
+    #    ①「行数少是对的」不再靠豁免 —— 口径改成 `S6.translation_lines`（有国语字的行），
+    #      送去译的载荷、`normalize_zh`、跑批审计和这一条**调同一个函数**；
+    #    ② 真丢内容的那几条随判据修好后重译（`redo-w21`）。
+    # ⚠️ 读法：残留型，期望天然是 0 —— 它往上走就是新的付费译文又开始丢行或多行。
+    _ml = list(con.execute(
+        "SELECT e.text_pub, g.text FROM example e "
+        "JOIN example_gloss g ON g.example_id=e.id AND g.lang='zh' AND g.src LIKE 'model%' "
+        "WHERE e.hidden=0 AND instr(e.text_pub, char(10))>0"))
+    n16 = sum(1 for t, z in _ml if len(S6.translation_lines(t)) != len(z.split("\n")))
+    out.append(("P16", "6e 残留：多行例句里译文行数与「要对齐的行」对不上的", n16, 0,
+                "见上面那段注释：三类混在一起，而只看总数三类都看不见。"
+                "⭐ 逮到它的是一条**本来空过的**契约检查 —— 「多行例句的译文行数与原文一致」"
+                "原先挂在 `mai` 上，而六个样本词**一条多行例句都没有** ⇒ `bad.length===0` 是"
+                "白捡的、它永远绿。给样本词表加了 `thối` 之后它当场判红。"
+                "⇒ ⭐ **样本词表不只是「好看的词」，它决定哪些代码路径被走到**"))
 
     # ── 🔴🔴 **W16：出版正文（`text_pub`）—— 四条，两种类型各两条** ──
     # 🔴🔴🔴 **P17 是读者口径里最硬的一条**：`vietnamese.ts` 的例句查询 SELECT 的是
@@ -509,20 +521,26 @@ def py_checks(con):
     #   判据被删掉／改坏，这条当场变红（基线型则库和判据一起变、照样绿）。
     _w16 = list(con.execute("SELECT e.id, d.word, e.text, e.text_pub, e.src "
                             "FROM example e JOIN dict d ON d.id=e.word_id"))
+    # W22（2026-11-01）：`text` 是 dump 原文 ⇒ 先过四种清洗（`S6.clean_example_text`，收割器同一份）再切本版释义尾巴
     mismatch = 0
+    n_cut = 0
     for _i, w, t, pub, sc in _w16:
-        want = S6.split_edition_gloss(t, w, sc, syl)[0]
-        if (pub or "") != want:
+        if (pub or "") not in S6.example_pub_variants(t, w, sc, syl):
             mismatch += 1
     out.append(("P18", "W16：`text_pub` 与判据重算的结果逐行相等（残留）", mismatch, 0,
                 "判据住在 `stage6_sources.split_edition_gloss()`，**本条 import 它**，"
                 "不自己重写（ko 的外锚闸正是栽在「闸自己重写收割器的判据」上）。"
                 "🔴 它逮的是两种事：① 判据改了而库没同步（`--sync` 没跑）"
                 "② 库被别的路径改过而判据不知道。两种都会让页面与证据层漂开"))
-    n_cut = con.execute("SELECT COUNT(*) FROM example "
-                        "WHERE hidden=0 AND text_pub <> text").fetchone()[0]
-    out.append(("P19", "W16：出版正文摘掉了本版释义尾巴的行", n_cut, 52,
-                "fr 版 44 ／ en 版 6 ／ nl 版 2。fr 版维基词典本身是一部**越→法双语词典**，"
+    # W16 切过尾巴的 ＝ 出版正文不等于清洗后的正文（`text <> text_pub` 自 W22 起还包括四种清洗那 2,040 行）
+    _vis19 = {i for (i,) in con.execute("SELECT id FROM example WHERE hidden=0")}
+    n_cut = sum(1 for _i, w, t, pub, sc in _w16
+                if _i in _vis19 and pub is not None and pub not in S6.example_cleaned_variants(t, sc, syl))
+    out.append(("P19", "W16：出版正文摘掉了本版释义尾巴的行", n_cut, 56,
+                "🔴 **基线 52 → 56（2026-11-02，W21）**：nl 版又切出 4 条 —— `_SEP_GLOSS` 原先不认 en dash"
+                "（`con đường – de weg`，2 条单行），以及「荷兰语用法说明 ⏎ 越南语句 – 荷兰语译文」的多行形状（2 条）。"
+                "它们的中文列原来印着 `道路——de weg`／`Chuyện ấy xảy ra từ bao giờ? —— 那件事…`，已重译。"
+                "fr 版 44 ／ en 版 6 ／ nl 版 2（＋W21 的 4）。fr 版维基词典本身是一部**越→法双语词典**，"
                 "它的例句一格里装着「越南语搭配 : 法语释义」(`Nắng to : il fait grand soleil.`)"
                 "—— 法语是**那一版的释义语言**，不是越南语里的法语借词"
                 "（真的法语借词在**词源层**，1,115 个词形，早就收齐了）。"
@@ -726,42 +744,26 @@ def py_checks(con):
     #    于是两个方向都有信号 —— 清洗伸到这三列上 ⇒ 数字掉 ⇒ 红；
     #    `_SUPERSCRIPT_NOTE` 被删掉 ⇒ 例句正文那 58 处又冒出来 ⇒ 红。
     #    写成 `LIKE '%^(%'` 的话第一个方向就哑了（判据与被判的东西脱钩）。
-    _w18 = {}
-    for _tag, _t, _c, _want in (("P29", "example", "ref", 90),
-                                ("P30", "sense_gloss", "text", 46),
-                                ("P31", "etymology", "text", 2)):
-        _vals = [v for (v,) in con.execute("SELECT %s FROM %s" % (_c, _t)) if v]
-        _w18[_tag] = (sum(1 for v in _vals if S6.sup_residue(v)),
-                      sum(1 for v in _vals if "^(" in v), _want)
-    out.append(("P29", "W18：`example.ref` 里残留的 `^(…)` 上标（残留型）",
-                _w18["P29"][0], 90,
-                "🔴 **已接受基线 90**（原始计数 93，差的 3 条是 `clean_markup` 现成就能"
-                "修的方括号那一族）。`^(https://vi.wikisource.org/wiki/Truyện_Kiều_…)` ——"
-                "Truyện Kiều 的 wikisource 链接。有意不在 6e 那一轮处理："
-                "它们**不在付费载荷里**（6e 只翻 `example.text`），"
-                "而「`ref` 里的 URL 该不该上页面」是另一个问题。"
-                "⚠️ **这个数掉下去也要红** —— 掉了说明清洗伸过来了，那时账要跟着改"))
-    out.append(("P30", "W18：`sense_gloss.text` 里残留的 `^(…)` 上标（残留型）",
-                _w18["P30"][0], 46,
-                "46 行。与 P29 同一族、不同列。⚠️ 三列分开锁不合成一个总数："
-                "`[[dont-say-source-lacks-what-we-skipped]]` 的同一个道理 ——"
-                "合成总数之后「某一列整个被清空」和「另一列长出同样多」互相抵消，"
-                "而那两件事一个是修复一个是回归"))
-    out.append(("P31", "W18：`etymology.text` 里残留的 `^(…)` 上标（残留型）",
-                _w18["P31"][0], 2,
-                "2 行（原始计数 3）。量级最小的一列，而它**必须单独有一条** ——"
-                "W18 的结清动作是「`clean_markup` 施用到三列上」，三列各一条"
-                "才分得出「做了一列」和「三列都做了」"))
-    out.append(("P32", "W18：`clean_markup` 还没有被施用到这三列上（原始−残留）",
-                sum(raw - res for res, raw, _w in _w18.values()), 4,
-                "🔴🔴 **这一条锁的是「这笔账还开着」本身。** 4 ＝ `ref` 3 ＋ "
-                "`etymology` 1 ＝ 现成的 `_SUPERSCRIPT_NOTE`（方括号那一族）"
-                "**已经能修而还没有被调用**的那部分。"
-                "⇒ 哪天有人把 `clean_markup` 接到这三列上，这个差额归 0 ⇒ 当场红 ⇒ "
-                "**逼人回来把 W18 划掉**。`[[lesson-must-become-mechanism]]`："
-                "「结清条件写在账上」不是机制，「做完了会有东西红」才是。"
-                "⭐ 它与 P29–P31 响的是**两件不同的事**："
-                "P29–P31 红＝有人写了 URL 版的清洗；P32 红＝有人把现成的清洗接过来了"))
+    # ✅ **2026-11-01 W18 结清**：`clean_markup` 补了通用的 `^(…)` 展开（`S6.expand_superscripts`：带括号去壳／短字母数字印成上标／
+    #    其余含链接改成 ` (…)`，一个字不丢），接到 ①出处（例句层 `collect()`）②释义与词源的出版正文（`zh_pub`）。
+    #    原来的 90／46／2 与「差额 4」锁的是「这笔账还开着」—— 结清当天按设计四条一起红，逼着来改这里。
+    #    ⇒ 改成「结清后」口径：P29–P31 **读者口径**（三列读者看得见的那一格里没有 `^(`）；
+    #       P32 **清洗器口径**（库里原文出现的每一处 `^(…)`，清洗之后都不留 —— 源头冒出一种它展不开的就红）。
+    _n29 = con.execute("SELECT COUNT(*) FROM example WHERE hidden=0 AND instr(ref,'^(')>0").fetchone()[0]
+    _n30 = con.execute("SELECT COUNT(*) FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
+                       "WHERE s.hidden=0 AND instr(g.text_pub,'^(')>0").fetchone()[0]
+    _n31 = con.execute("SELECT COUNT(*) FROM etymology WHERE instr(text_pub,'^(')>0").fetchone()[0]
+    _n32 = sum(1 for q in ("SELECT text FROM sense_gloss", "SELECT text FROM etymology", "SELECT text FROM example")
+               for (v,) in con.execute(q) if v and "^(" in v and S6.sup_residue(v))
+    out.append(("P29", "W18：读者看得见的例句**出处**里有 `^(…)` 上标残渣", _n29, 0,
+                "结清前 90 行（Truyện Kiều 的 wikisource 链接，89 行在隐藏例句上）；现在印成 ` (https://…)`"))
+    out.append(("P30", "W18：读者看得见的**释义**出版正文里有 `^(…)` 上标残渣", _n30, 0,
+                "结清前 46 行，全是 `^((xem từ nguyên 1))`（见词源 1）⇒ 现在印 `(xem từ nguyên 1)`"))
+    out.append(("P31", "W18：**词源**出版正文里有 `^(…)` 上标残渣", _n31, 0,
+                "结清前 2 行：`ʂəː^(C2)` ⇒ `ʂəːᶜ²`（古越南语声调类）／`IPA^((ghi chú))` ⇒ `IPA (ghi chú)`"))
+    out.append(("P32", "W18：库里原文出现的 `^(…)`，`clean_markup` 有展不开的", _n32, 0,
+                "清洗器口径（`S6.sup_residue` 残留型）：源头冒出一种没收口／新形状的上标，这里先红，"
+                "而不是悄悄印到页面上。三列分开的读者口径在 P29–P31"))
     # ── W20：fr 版的 JS 实参残渣（2026-10-06 当天结清）────────────────
     out.append(("P33", "🔴 W20：出版层没有整条只是 JS 标记残渣的例句",
                 sum(1 for (t,) in con.execute(
@@ -987,7 +989,7 @@ ROSTER = (
     #   P27 是它的关系层那一半／P28 基线 1,631 ／P25 是「删付费数据」那个决定的不变量。
     "P22", "P23", "P24", "P25", "P26", "P27", "P28",
     # 2026-10-06 给「开着而没有闸盯着」的那几笔账配闸：
-    #   W18 → P29/P30/P31（三列各一条，残留型）＋ **P32**（锁「这笔账还开着」本身）
+    #   W18 → P29/P30/P31（三列各一条）＋ P32 —— 2026-11-01 结清后改为读者口径＋清洗器口径（见检查本体）
     #   W20 → P33（当天结清，锁 0 不锁 3）
     #   W23 → P34（残留型，判据 import 自 W17 的收割器）
     #   W27 → P35/P36（**一对**，带锁的豁免；缺一条就不是机制）
@@ -1171,11 +1173,16 @@ def mutate():
         "p11": con.execute("SELECT id, hidden, hidden_why FROM example "
                            "WHERE hidden_why='source-has-no-vietnamese' "
                            "ORDER BY id LIMIT 1").fetchone(),
-        "p12": con.execute("SELECT id, text, ref FROM example WHERE hidden=0 "
+        "p12": con.execute("SELECT id, text, ref, text_pub FROM example WHERE hidden=0 "   # W22：注入改到 text_pub
                            "AND ref IS NOT NULL AND TRIM(ref)<>'' "
-                           "AND instr(text, char(10))=0 ORDER BY id LIMIT 1").fetchone(),
-        "p13": con.execute("SELECT id, text FROM example WHERE hidden=0 "
-                           "AND src='en-edition' AND instr(text, char(10))=0 "
+                           "AND instr(text_pub, char(10))=0 ORDER BY id LIMIT 1").fetchone(),
+        # W21：P16 的锚 —— 一条**行数对得上**的多行例句的付费中文；undo 要的原文在 do 之前取齐
+        "p16": next((gid, z) for gid, t, z in con.execute(
+            "SELECT g.id, e.text_pub, g.text FROM example e JOIN example_gloss g ON g.example_id=e.id "
+            "AND g.lang='zh' AND g.src LIKE 'model%' WHERE e.hidden=0 AND instr(e.text_pub, char(10))>0 "
+            "ORDER BY e.id") if len(S6.translation_lines(t)) == len(z.split("\n"))),
+        "p13": con.execute("SELECT id, text, text_pub FROM example WHERE hidden=0 "   # W22：注入改到 text_pub
+                           "AND src='en-edition' AND instr(text_pub, char(10))=0 "
                            "ORDER BY id LIMIT 1").fetchone(),
         # 🔴 P14/P15：**花钱买来的**那批。undo 要把整行原样插回去
         #    ⇒ 四列全部在 do 之前取齐（这套变异真丢过一行数据，就是因为 undo 回查已删行）
@@ -1188,10 +1195,9 @@ def mutate():
         #    「NULL」会和 P19 纠缠在一起）；`p20` 要一条**切过且有中文**的。
         "p17": con.execute("SELECT id, text_pub FROM example WHERE hidden=0 "
                            "AND text_pub = text ORDER BY id LIMIT 1").fetchone(),
-        "p20": con.execute(
-            "SELECT g.rowid, g.text, e.text FROM example e "
-            "JOIN example_gloss g ON g.example_id=e.id AND g.lang='zh' "
-            "WHERE e.hidden=0 AND e.text_pub <> e.text ORDER BY e.id LIMIT 1").fetchone(),
+        # W22（2026-11-01）：「W16 切过的行」不再是 `text_pub <> text`（那还包括四种清洗的 2,040 行，原来这里因此挑到了
+        #   一条不相干的行 ⇒ P20 没逮到）⇒ 取自 `FIXW16.plan()`，与 P20 同一个口径
+        "p20": next(((r[0], r[5], r[3]) for r in FIXW16.plan(con)), None),
         "p21": con.execute("SELECT id, word_id, sense_id, kind, target, target_id, src, "
                            "src_ref FROM sense_relation WHERE src='w17-from-examples' "
                            "ORDER BY id LIMIT 1").fetchone(),
@@ -1231,15 +1237,15 @@ def mutate():
         # ⚠️ W18 那三条的锚要求「这一格里**现在没有** `^(`」—— 往已经有残渣的格里
         #    再塞一个，残留计数**不变** ⇒ 那是 B20 记的那种**空操作变异**：
         #    什么都没注入而检查「通过」。
-        "p29": con.execute("SELECT id, ref FROM example WHERE ref IS NOT NULL "
+        "p29": con.execute("SELECT id, ref FROM example WHERE hidden=0 AND ref IS NOT NULL "
                            "AND instr(ref,'^(')=0 ORDER BY id LIMIT 1").fetchone(),
-        "p30": con.execute("SELECT id, text FROM sense_gloss WHERE instr(text,'^(')=0 "
+        "p30": con.execute("SELECT g.id, g.text_pub FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
+                           "WHERE s.hidden=0 AND instr(g.text_pub,'^(')=0 ORDER BY g.id LIMIT 1").fetchone(),
+        "p31": con.execute("SELECT id, text_pub FROM etymology WHERE instr(text_pub,'^(')=0 "
                            "ORDER BY id LIMIT 1").fetchone(),
-        "p31": con.execute("SELECT id, text FROM etymology WHERE instr(text,'^(')=0 "
-                           "ORDER BY id LIMIT 1").fetchone(),
-        # 🔴 P32 的锚要**另一条** ref（与 p29 不同的行）—— 同一行两次变异会互相干扰。
-        "p32": con.execute("SELECT id, ref FROM example WHERE ref IS NOT NULL "
-                           "AND instr(ref,'^(')=0 ORDER BY id DESC LIMIT 1").fetchone(),
+        # P32 的锚要**另一条**释义（与 p30 不同的行）—— 同一行两次变异会互相干扰
+        "p32": con.execute("SELECT id, text FROM sense_gloss WHERE instr(text,'^(')=0 "
+                           "ORDER BY id DESC LIMIT 1").fetchone(),
         "p33": con.execute("SELECT id, hidden, hidden_why FROM example WHERE hidden_why=? "
                            "ORDER BY id LIMIT 1", (S6.HIDDEN_JS_RESIDUE,)).fetchone(),
         "p35": con.execute("SELECT id, rank FROM sense ORDER BY id LIMIT 1").fetchone(),
@@ -1399,11 +1405,12 @@ def mutate():
               also=("P2", "P7"))   # 放出来会同时动「隐藏差额」和「带 ref 的出版例句」
     q = pick["p12"]
     ok &= one("P12", "🔴 把出处串回 `text` 首行并清空 `ref`（清洗那步被去掉的样子）",
+              # W22（2026-11-01）：注入点改到 `text_pub`（P12 自 W22 起读出版正文；注入 `text` 会是空操作）
               lambda c: c.execute(
-                  "UPDATE example SET text=?, ref=NULL WHERE id=?",
-                  ("Analects, 7.34; 1861 English translation by James Legge\n" + q[1], q[0])),
-              lambda c: c.execute("UPDATE example SET text=?, ref=? WHERE id=?",
-                                  (q[1], q[2], q[0])),
+                  "UPDATE example SET text_pub=?, ref=NULL WHERE id=?",
+                  ("Analects, 7.34; 1861 English translation by James Legge\n" + q[3], q[0])),
+              lambda c: c.execute("UPDATE example SET text_pub=?, ref=? WHERE id=?",
+                                  (q[3], q[2], q[0])),
               # ⚠️ 连带四条，**都是声明过的**：`ref` 被清空 ⇒ P7 少一条；
               #    往 `text` 里加一行 ⇒ 行数与译文不再相等 ⇒ P16 多一条。
               # 🔴🔴 P18/P19 是 **2026-10-05 加 `text_pub` 之后才出现的连带**，
@@ -1415,13 +1422,23 @@ def mutate():
               also=("P7", "P16", "P18", "P19"))
     r = pick["p13"]
     ok &= one("P13", "🔴 把内嵌英译行塞回 `text`（判据被去掉的样子）",
+              # W22：注入点改到 `text_pub`（同 P12）
               lambda c: c.execute(
-                  "UPDATE example SET text=? WHERE id=?",
-                  (r[1] + "\nThe cold autumn pond; the clear water;", r[0])),
-              lambda c: c.execute("UPDATE example SET text=? WHERE id=?", (r[1], r[0])),
+                  "UPDATE example SET text_pub=? WHERE id=?",
+                  (r[2] + "\nThe cold autumn pond; the clear water;", r[0])),
+              lambda c: c.execute("UPDATE example SET text_pub=? WHERE id=?", (r[2], r[0])),
               # 往 `text` 里加一行 ⇒ 行数与译文不再相等（P16）；
               # 改了 `text` 没同步 `text_pub` ⇒ P18/P19（见 P12 上方那段）
               also=("P16", "P18", "P19"))
+
+    # W21：P16 自 2026-11-02 起是残留型（期望 0），**此前它没有自己的变异**（只被 P12/P13 连带响过）
+    _g16, _z16 = pick["p16"]
+    ok &= one("P16", "🔴 给一条多行例句的中文多拆一行（模型在逗号处断行、归一没并回的样子）",
+              lambda c: c.execute("UPDATE example_gloss SET text=? WHERE id=?",
+                                  (_z16 + "\n多出来的一行", _g16)),
+              lambda c: c.execute("UPDATE example_gloss SET text=? WHERE id=?", (_z16, _g16)),
+              # 改了译文正文没同步出版列 ⇒ P37 一起响（与 R1c/P20 同一个连带，响得对）
+              also=("P37",))
 
     # ── W15：指针区的分类 ──
     # 🔴 **一条变异同时验两个数**，而那正是它们必须成对存在的理由：
@@ -1487,8 +1504,20 @@ def mutate():
     #    重跑了 `--sync` —— 那时库与判据**一致地**都不切了，P18 照样绿。
     #    这与 `[[gate-registers-status-quo-as-spec]]` 同形：一致不等于对。
     #    ⇒ 这条变异必须把两边**一起**翻掉：登记表清空 ＋ 那 52 行的 `text_pub` 抹平。
+    # 🔴🔴 2026-11-01 重写（W22 之后它**真的写坏了库**）：原来是「`text_pub <> text` 的全抹成 `text`」＋「还原 = 从 `text` 重算」，
+    #    而 W22 让 `text` 改存 dump 原文 ⇒ 抹平的范围从 52 行变成 2,092 行，还原又跳过了四种清洗 ⇒ **1,903 条可见例句的
+    #    出版正文被写成原文**（韩语译文／出处首行／内嵌英译回到页面上）。后面每一条变异都连带报出同一组，才看出来。
+    #    ⇒ ① 只抹平 W16 **真正切过**的行（出版正文不等于清洗后的正文）；② **undo 的值在 do 之前取齐**（vi 丢过一行数据的同一课）。
     c = sqlite3.connect(paths.DB)
-    c.execute("UPDATE example SET text_pub=text WHERE text_pub <> text")
+    syl19 = S6.vi_syllables(c)
+    _snap19 = []
+    for i, w, raw, sc, pub in c.execute("SELECT e.id, d.word, e.text, e.src, e.text_pub FROM example e "
+                                        "JOIN dict d ON d.id=e.word_id"):
+        cl = S6.example_cleaned_variants(raw, sc, syl19)
+        if pub is not None and pub not in cl:
+            _snap19.append((i, pub, sorted(cl)[0]))
+    assert _snap19, "P19 的前提（W16 切过尾巴的行）不成立 —— 变异要重写"
+    c.executemany("UPDATE example SET text_pub=? WHERE id=?", [(cl, i) for i, _pub, cl in _snap19])
     c.commit()
     c.close()
     try:
@@ -1497,22 +1526,16 @@ def mutate():
     finally:
         S6.EDITION_GLOSS_SEP = _sep_saved
         c = sqlite3.connect(paths.DB)
-        # 还原：判据恢复之后重算一遍写回去（**不存快照** —— 它就是派生列，
-        # 而「重算得回来」正是 `ADD_COLUMNS` 注释里给它的定义）
-        rs = list(c.execute("SELECT e.id, d.word, e.text, e.src FROM example e "
-                            "JOIN dict d ON d.id=e.word_id"))
-        syl2 = S6.vi_syllables(c)
-        c.executemany("UPDATE example SET text_pub=? WHERE id=?",
-                      [(S6.split_edition_gloss(t, w, sc, syl2)[0], i)
-                       for i, w, t, sc in rs])
+        c.executemany("UPDATE example SET text_pub=? WHERE id=?", [(pub, i) for i, pub, _cl in _snap19])
         c.commit()
         c.close()
-    g19 = hit19 == {"P19"}
+    # 连带 P16 已声明（W22 起 P16 按出版正文数行）：52 行抹平回「没切尾巴」⇒ 行数跟着变，本来就该响
+    g19 = "P19" in hit19 and hit19 <= {"P19", "P16"}
     ok &= g19
     print("   %s P19   登记表清空**且**库跟着抹平（P18 的盲点：一致地都不切了）%s"
           % ("✅" if g19 else ("🔴 连带未声明" if "P19" in hit19 else "🔴 没逮到"),
-             ("   🔴 **未声明的连带 %s**" % "、".join(sorted(hit19 - {"P19"})))
-             if hit19 - {"P19"} else ""))
+             ("   🔴 **未声明的连带 %s**" % "、".join(sorted(hit19 - {"P19", "P16"})))
+             if hit19 - {"P19", "P16"} else ""))
     _p20 = pick["p20"]
     ok &= one("P20", "🔴 把一条中文译文还原成「法语尾巴也译进去」的样子",
               lambda c: c.execute("UPDATE example_gloss SET text=? WHERE rowid=?",
@@ -1613,36 +1636,29 @@ def mutate():
     # ══ 2026-10-06：给那几笔「开着而没有闸盯着」的账配的闸，逐条验它逮得到东西 ══
     # ⚠️ 没有这一段，上面那八条 ✅ 只说明「检查还在」，不说明「检查逮得到东西」。
     #    `[[lesson-must-become-mechanism]]`：**变异验证是闸的闸**。
-    # ── W18 四条 ──
+    # ── W18 四条（2026-11-01 结清后的口径：P29–P31 往读者看得见的那一格塞；P32 往原文塞一个清洗展不开的）──
     _k29 = pick["p29"]
-    ok &= one("P29", "往一条 `ref` 里塞 `^(…)` 上标残渣（URL 那一族，清洗够不到）",
-              lambda c: c.execute("UPDATE example SET ref=? WHERE id=?",
-                                  ((_k29[1] or "") + " ^(https://x/y)", _k29[0])),
+    ok &= one("P29", "往一条可见例句的出处里塞 `^(…)` 上标残渣",
+              lambda c: c.execute("UPDATE example SET ref=? WHERE id=?", (_k29[1] + " ^(https://x/y)", _k29[0])),
               lambda c: c.execute("UPDATE example SET ref=? WHERE id=?", (_k29[1], _k29[0])))
     _k30 = pick["p30"]
-    ok &= one("P30", "往一条释义里塞 `^(…)` 上标残渣",
-              lambda c: c.execute("UPDATE sense_gloss SET text=? WHERE id=?",
-                                  (_k30[1] + " ^(https://x/y)", _k30[0])),
-              lambda c: c.execute("UPDATE sense_gloss SET text=? WHERE id=?",
-                                  (_k30[1], _k30[0])),
-              # 连带 P37 已声明（2026-11-01 起 en/vi 释义也有出版正文）：改了 `text` 而 `text_pub` 没跟 ⇒ 出版正文与判据不一致，本来就该响
+    ok &= one("P30", "往一条可见释义的出版正文里塞 `^(…)`",
+              lambda c: c.execute("UPDATE sense_gloss SET text_pub=? WHERE id=?", (_k30[1] + " ^(x)", _k30[0])),
+              lambda c: c.execute("UPDATE sense_gloss SET text_pub=? WHERE id=?", (_k30[1], _k30[0])),
+              # 连带 P37 已声明：出版正文与判据不一致
               also=("P37",))
     _k31 = pick["p31"]
-    ok &= one("P31", "往一段词源里塞 `^(…)` 上标残渣",
-              lambda c: c.execute("UPDATE etymology SET text=? WHERE id=?",
-                                  (_k31[1] + " ^(https://x/y)", _k31[0])),
-              lambda c: c.execute("UPDATE etymology SET text=? WHERE id=?",
-                                  (_k31[1], _k31[0])),
-              # 连带 P37 已声明（B29）：改了 `text` 而 `text_pub` 没跟 ⇒ 出版正文与判据不一致，本来就该响
+    ok &= one("P31", "往一段词源的出版正文里塞 `^(…)`",
+              lambda c: c.execute("UPDATE etymology SET text_pub=? WHERE id=?", (_k31[1] + " ^(x)", _k31[0])),
+              lambda c: c.execute("UPDATE etymology SET text_pub=? WHERE id=?", (_k31[1], _k31[0])),
               also=("P37",))
-    # 🔴🔴 P32 的变异必须注入**方括号那一族**（`^([sic])`），不是 URL 那一族 ——
-    #    它量的是「原始 − 残留」，而 URL 两边各加 1、差额不变 ⇒ **空操作变异**。
-    #    ⭐ 这正是 B20 那一族的形状：变异要动**判据真正读的那个量**。
+    # 🔴 P32 要注入**清洗展不开的**那种（没收口的 `^(`）—— 注入能展开的，`sup_residue` 照样 0 ⇒ 空操作变异（B20 的形状）
     _k32 = pick["p32"]
-    ok &= one("P32", "🔴 往一条 `ref` 里塞 `^([sic])`（现成清洗能修的那一族 ⇒ 差额变 5）",
-              lambda c: c.execute("UPDATE example SET ref=? WHERE id=?",
-                                  ((_k32[1] or "") + " ^([sic])", _k32[0])),
-              lambda c: c.execute("UPDATE example SET ref=? WHERE id=?", (_k32[1], _k32[0])))
+    ok &= one("P32", "往一条释义原文里塞一个没收口的 `^(`（源头冒出新形状的样子）",
+              lambda c: c.execute("UPDATE sense_gloss SET text=? WHERE id=?", (_k32[1] + " ^(open", _k32[0])),
+              lambda c: c.execute("UPDATE sense_gloss SET text=? WHERE id=?", (_k32[1], _k32[0])),
+              # 连带 P37 已声明：改了原文而出版正文没跟
+              also=("P37",))
     # ── W20：把那 2 条 JS 残渣之一放回出版层 ──
     _k33 = pick["p33"]
     assert _k33 is not None, "库里找不到 `js-markup-residue` 的行 —— W20 的落点变了，重瞄"

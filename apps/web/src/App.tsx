@@ -17,10 +17,11 @@ import {
   jaVclassLabel, mostSpecificTopics,
   KO_POS_LABELS, KO_RELATION_LABELS, KO_ANNOTATION_KINDS, koRelationTagLabels,
   KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE, KO_EDITION_LABELS,
+  koConjMeaningDependent, koHanjaIsMixed,
   VI_POS_LABELS, VI_RELATION_LABELS, VI_DIALECT_LABELS, VI_ETYM_TYPE_LABELS,
   VI_SPELLING_RULE, VI_EDITION_LABELS, viEditionRank,
   RU_POS_LABELS, RU_RELATION_LABELS, RU_ASPECT_SUBKIND_LABELS, RU_FAMILY_POS_LABELS, RU_FAMILY_FORM_LABELS,
-  RU_ASPECT_LABELS, RU_GENDER_LABELS, RU_INFL_TAG_LABELS, RU_GRAMMAR_LABELS, RU_USAGE_LABELS,
+  RU_ASPECT_LABELS, RU_GENDER_LABELS, RU_INFL_TAG_LABELS, RU_GRAMMAR_LABELS, RU_USAGE_LABELS, RU_EXAMPLE_TAG_LABELS,
   RU_EDITION_LABELS, RU_DIALECT_LABELS, RU_ETYM_TYPE_LABELS,
 } from '@synapse-dict/dict-labels';
 
@@ -2188,6 +2189,8 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                记在账上的未修项）。`curious` 英式三条里印出来的 `/ˈkjɵːɹɪjəs/` 是个边缘转写，
                最常见的 `/ˈkjʊəriəs/` 反而被折进了 `+2`。
                ⇒ **在没有"主读音"这个事实之前，把其中一条摆成唯一的那条就是造事实。**
+               ✅ 2026-11-02（§16.7①）`is_primary` 已填（源头列在第一位的那条），服务层改按「主读音在前、其余源头顺序」排 ——
+                  每个地区第一条可点的现在是源头的首选读音（`curious` 英式 → `/ˈkjʊə.ɹi.əs/`）。仍然**全部印出**，不折叠。
             ③ 用户 2026-09-10 定的规矩：「**不要擅自折叠信息**，只有展示了全部信息，
                我才能从全貌判断思考如何优化」。
           实测代价可接受：（词形×地区）分组里 **78.60% 只有 1 条**、16.95% 有 2 条，
@@ -5837,16 +5840,21 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
             回归闸扫本文件的源码盯这一条 —— 别为了「顺手」把另三套一起端出来。 */}
         {entry.roman && <span className="ko-roman">{entry.roman}</span>}
         {/* 汉字表记：`한국` → 韓國。中文读者靠它一眼认词，是 ko 最有价值的一格。 */}
-        {hanja && (
-          <span className="badge hanja" title="这个词的汉字表记">{hanja}</span>
-        )}
+        {/* K28：混写形（`鸚鵡새`）如实说明是「汉字混写」，不冒充纯汉字表记 */}
+        {hanja && (koHanjaIsMixed(hanja)
+          ? <span className="badge hanja hanja-mixed" title="汉字混写表记：汉字词素写汉字，固有词素保留谚文">{hanja}<small>（汉字混写）</small></span>
+          : <span className="badge hanja" title="这个词的汉字表记">{hanja}</span>)}
         {/* 🔴 活用类印在**词头旁边**，不印在每一行变形上 —— 它是词元的属性。
             `conjClassSrc` 如实说明它是推定的：源头没有「活用类」这个字段，
             我们是按活用形反推 / 按构词后缀推的（K8）。 */}
+        {/* K17：同形词的活用类可能不同（`걷다`「走」ㄷ不规则／「卷起」规则）⇒ 如实标注，不冒充确定结论 */}
         {conj?.conjClass && (
           <span className="badge vclass"
-            title={KO_CONJ_SRC_LABELS[conj.conjClassSrc ?? ''] ?? undefined}>
+            title={koConjMeaningDependent(entry.entries)
+              ? `${KO_CONJ_SRC_LABELS[conj.conjClassSrc ?? ''] ?? ''}；这个词形有几个同形词，活用类按它们的变形合在一起推定，可能只适用于其中某个词义`
+              : (KO_CONJ_SRC_LABELS[conj.conjClassSrc ?? ''] ?? undefined)}>
             {KO_CONJ_CLASS_LABELS[conj.conjClass] ?? conj.conjClass}
+            {koConjMeaningDependent(entry.entries) ? <small>（同形词可能不同）</small> : null}
           </span>
         )}
       </header>
@@ -6313,7 +6321,7 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
                 ? <button type="button" className="vi-link vi-pointer-go"
                     onClick={() => onWord(p.target as string)}>→ {p.target}</button>
                 : null}
-              <span className="vi-pointer-src">{p.lang === 'zh' ? '中文版' : p.lang === 'en' ? '英文版' : p.lang}</span>
+              <span className="vi-pointer-src">{p.lang === 'zh' ? VI_EDITION_LABELS['zh-edition-simp'] : p.lang === 'en' ? VI_EDITION_LABELS['en-edition'] : p.lang}</span>
             </p>
           ))}
           {/* ⚠️ 诚实地说出这一页为什么没有释义，**不要用体面的兜底盖住** */}
@@ -6481,7 +6489,7 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
 type RuGloss = { lang: string; text: string; src: string; model: boolean };
 type RuSense = { id: number; entryId: number; rank: number; glosses: RuGloss[]; tags: Array<{ bucket: string; value: string }> };
 type RuExample = { senseId: number | null; entryId: number; text: string; ref: string | null; zh: string | null;
-  zhSrc: string | null; en: string | null; src: string };
+  zhSrc: string | null; en: string | null; src: string; tags: string | null };
 type RuRelation = { entryId: number; senseId: number | null; kind: string; subkind: string | null;
   relGroup: string | null; formGroup: string | null; target: string; targetId: number | null; src: string };
 type RuInfl = { entryId: number; form: string; stressed: string | null; tags: string[]; tableTag: string | null; src: string };
@@ -6494,7 +6502,7 @@ type RuEntry = {
   inflections: RuInfl[]; examples: RuExample[]; relations: RuRelation[];
   etymologies: Array<{ entryId: number; etymNo: number; text: string; etymType: string | null; src: string }>;
   audios: Array<{ entryId: number | null; url: string; commonsKey: string; src: string }>;
-  pointers: Array<{ entryId: number | null; lang: string; text: string; src: string; target: string | null; targetId: number | null }>;
+  pointers: Array<{ entryId: number | null; lang: string; text: string; src: string; target: string | null; targetId: number | null; ptrTags: string[]; ptrZh: string | null }>;
   homographs: Array<{ id: number; word: string }>;
   yoVariants: Array<{ id: number; word: string }>;
   foldedFrom: string | null;
@@ -6503,6 +6511,25 @@ type RuEntry = {
 // 版的展示顺序：中文版先（读者是中文读者）、俄文版次之（内容最全）、英文版再次
 const RU_EDITION_ORDER = ['zh-edition-trad', 'zh-edition-simp', 'ru-edition', 'en-edition', 'fr-edition', 'vi-edition', 'pl-edition'];
 const ruEdRank = (src: string) => { const i = RU_EDITION_ORDER.indexOf(src); return i < 0 ? 99 : i; };
+// R31（2026-11-03）：同一组（词性＋重音）里**中文一字不差**的义项只印一行 —— `ель` 的「云杉」「冷杉」中文版给一遍、
+//   英文版机翻又给一遍，读者看见各两次。判据只认中文完全相同（「云杉」「冷杉」不并；意思近而写法不同的不碰）。
+//   留排在前面的那条（中文版优先，`RU_EDITION_ORDER`），被并那条的外文释义、例句、关系挂到它身上，来源一起标出。
+//   🔴 只在展示层并：数据层每一版各自一行（不跨版合并是项目既有决定，合并就是编）。
+type RuFoldedSense = { sense: RuSense; merged: RuSense[] };
+function ruFoldSenses(senses: RuSense[]): RuFoldedSense[] {
+  const out: RuFoldedSense[] = [];
+  const byKey = new Map<string, RuFoldedSense>();
+  for (const s of senses) {
+    const zh = s.glosses.filter((x) => x.lang === 'zh').map((x) => x.text.trim()).filter(Boolean);
+    const key = zh.length ? [...new Set(zh)].sort().join('\u0000') : '';
+    const hit = key ? byKey.get(key) : undefined;
+    if (hit) { hit.merged.push(s); continue; }
+    const f = { sense: s, merged: [] as RuSense[] };
+    out.push(f);
+    if (key) byKey.set(key, f);
+  }
+  return out;
+}
 const RU_REL_ORDER = ['synonym', 'antonym', 'aspect_pair', 'hypernym', 'hyponym', 'coordinate', 'meronym', 'holonym',
   'derived', 'word_family', 'related', 'proverb', 'abbreviation', 'paronym', 'descendant', 'troponym'];
 // 变位表标签的规范顺序（源头顺序不稳定：`nominative|singular` 与 `plural|prepositional` 都有）
@@ -6609,6 +6636,9 @@ function RuExamples({ items, word }: { items: RuExample[]; word: string }) {
   if (!items.length) return null;
   const one = (x: RuExample) => (
     <div key={`${x.src}-${x.text.slice(0, 40)}`} className="ru-example">
+      {/* R25：源头例句标签（搭配／谚语／口语…）。键没映射就不印 —— 不拿英文键兜底（契约闸 C11 全值域查漏） */}
+      {x.tags ? x.tags.split('|').filter((t) => RU_EXAMPLE_TAG_LABELS[t]).map((t) => (
+        <span key={t} className="ru-chip">{RU_EXAMPLE_TAG_LABELS[t]}</span>)) : null}
       <span className="ru-example-text"><RuTilde text={x.text} word={word} /></span>
       {x.zh ? <span className="ru-example-zh"><RuTilde text={x.zh} word={word} />{x.zhSrc?.startsWith('model:') ? <span className="ru-mt">机翻</span> : null}</span> : null}
       {x.en ? <span className="ru-example-en">{x.en}</span> : null}
@@ -6721,7 +6751,7 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
   const ptrSeen = new Set<string>();
   const pointers = [...entry.pointers]
     .sort((a, b) => (a.lang === 'zh' ? -1 : a.lang === 'ru' ? 1 : 0) - (b.lang === 'zh' ? -1 : b.lang === 'ru' ? 1 : 0))
-    .filter((p) => { const k = `${p.target}\u0000${p.text}`; if (ptrSeen.has(k)) return false; ptrSeen.add(k); return true; });
+    .filter((p) => { const k = `${p.target}\u0000${p.ptrTags.length ? ruTagLabel(p.ptrTags) : p.ptrZh ?? p.text}`; if (ptrSeen.has(k)) return false; ptrSeen.add(k); return true; });
   const audioSeen = new Set<string>();
   const audios = entry.audios.filter((a) => (audioSeen.has(a.commonsKey) ? false : (audioSeen.add(a.commonsKey), true)));
 
@@ -6762,7 +6792,10 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
           <h3 className="ru-sec-title">{entry.isLemma ? '也是另一个词的变化形式' : '这个词形是'}</h3>
           {pointers.map((p) => (
             <p key={`${p.src}-${p.text}`} className="ru-pointer">
-              <span className="ru-pointer-text">{p.text}</span>
+              {/* R32：fr 版说明解析得出标签时印中文（与变格表表头同一张映射表），法语原文不上页面；解析不了照印原文 */}
+              {/* R32 收尾：标签解析不了的 vi/pl/fr 说明有过了术语核对的机翻中文就印它（标「机翻」），都没有才照印原文 */}
+              <span className="ru-pointer-text">{p.ptrTags.length > 0 ? ruTagLabel(p.ptrTags) : p.ptrZh ?? p.text}</span>
+              {p.ptrTags.length === 0 && p.ptrZh ? <span className="ru-mt">机翻</span> : null}
               {/* 目标解析得到才可点（点下去是空白页比不能点更坏） */}
               {p.targetId !== null && p.target
                 ? <button type="button" className="ru-link ru-pointer-go" onClick={() => onWord(p.target as string)}>→ {p.target}</button>
@@ -6832,19 +6865,33 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
             ) : null}
             {senses.length > 0 && (
               <ol className="ru-senses">
-                {senses.map((s) => {
-                  const zh = s.glosses.filter((x) => x.lang === 'zh');
-                  const orig = s.glosses.filter((x) => x.lang !== 'zh');
-                  const usage = s.tags.filter((t) => t.bucket === 'label').map((t) => RU_USAGE_LABELS[t.value] ?? null).filter(Boolean);
-                  const gram = s.tags.filter((t) => t.bucket === 'grammar').map((t) => RU_GRAMMAR_LABELS[t.value] ?? null).filter(Boolean);
+                {ruFoldSenses(senses).map(({ sense: s, merged }) => {
+                  const all = [s, ...merged];
+                  // 中文：同一串只印一次；**任一版是源头给的就不标「机翻」**（两个独立来源说的是同一个意思）
+                  const zhMap = new Map<string, boolean>();
+                  for (const x of all.flatMap((m) => m.glosses).filter((x) => x.lang === 'zh')) zhMap.set(x.text, (zhMap.get(x.text) ?? true) && x.model);
+                  const zh = [...zhMap].map(([text, model]) => ({ text, model }));
+                  const origSeen = new Set<string>();
+                  const orig = all.flatMap((m) => m.glosses).filter((x) => x.lang !== 'zh')
+                    .filter((x) => (origSeen.has(x.text) ? false : (origSeen.add(x.text), true)));
+                  const tagSeen = new Set<string>();
+                  const tags = all.flatMap((m) => m.tags).filter((t) => { const k = `${t.bucket}|${t.value}`; return tagSeen.has(k) ? false : (tagSeen.add(k), true); });
+                  const usage = tags.filter((t) => t.bucket === 'label').map((t) => RU_USAGE_LABELS[t.value] ?? null).filter(Boolean);
+                  const gram = tags.filter((t) => t.bucket === 'grammar').map((t) => RU_GRAMMAR_LABELS[t.value] ?? null).filter(Boolean);
+                  const rels = all.flatMap((m) => relSense.get(m.id) ?? []);
+                  const exs = all.flatMap((m) => exBySense.get(m.id) ?? []);
+                  const srcs = merged.length > 0
+                    ? [...new Set(all.map((m) => g.entries.find((e) => e.id === m.entryId)?.src ?? ''))].filter(Boolean)
+                    : [];
                   return (
                     <li key={s.id} className="ru-sense">
                       {[...usage, ...gram].map((t) => <span key={t as string} className="ru-chip">{t}</span>)}
                       {zh.map((x) => <span key={x.text} className="ru-zh"><RuTilde text={x.text} word={entry.word} />{x.model ? <span className="ru-mt">机翻</span> : null}</span>)}
                       {orig.map((x) => <span key={x.text} className={x.lang === 'ru' ? 'ru-gloss-ru' : 'ru-gloss-en'}>{x.text}</span>)}
+                      {srcs.length > 0 ? <span className="ru-src ru-sense-srcs">{srcs.map((x) => RU_EDITION_LABELS[x] ?? x).join(' · ')}</span> : null}
                       {/* 关系在例句之前 —— 十门共同的块序（`contract-check-layout.tsx`）。 */}
-                      {(relSense.get(s.id) ?? []).length > 0 ? <RuRelations rels={relSense.get(s.id)!} onWord={onWord} /> : null}
-                      <RuExamples items={exBySense.get(s.id) ?? []} word={entry.word} />
+                      {rels.length > 0 ? <RuRelations rels={rels} onWord={onWord} /> : null}
+                      <RuExamples items={exs} word={entry.word} />
                     </li>
                   );
                 })}

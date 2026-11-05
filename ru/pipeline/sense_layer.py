@@ -59,6 +59,17 @@ def collect(conn, limit=None, verbose=True):
             n += 1
             ok, _skip, pos = criteria.entry_accept(e)
             if not ok:
+                # 🔴 **发出去的义项号不回收**（R19，2026-11-02）：`且聽下回分解` 当初被收进来、占了 2 个号，
+                #    后来被 ②b 判据退役、从库里移出。若这里直接 continue，后面每条义项的号都往前挪 2 ——
+                #    外锚闸（import 本函数重放）当场报 4,038 条「键对上而内容不一样」，库里一行都没错。
+                #    ⇒ 退役的词条照原样消耗它本来会消耗的号，但不产出任何行（库里留洞，与重放一致）。
+                if _skip and _skip[0] == "script":
+                    _ent_via = criteria.is_inflected_form(e)[1]
+                    for s in e.get("senses") or []:
+                        if (criteria.sense_text(s.get("glosses"))
+                                and not criteria.sense_pointer_via(s, _ent_via)
+                                and lang in criteria.PUBLISH_LANGS):
+                            sid += 1
                 continue
             w = e["word"]
             no, sub = criteria.etym_no_pair(e)

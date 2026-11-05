@@ -236,6 +236,31 @@ export const KO_CONJ_CLASS_LABELS: Record<string, string> = {
 };
 
 /**
+ * K17（2026-11-02）：**会因词义而不同**的活用类。同一个词形有几个同形词时，`conj_class_src='forms'` 是把几个词条的
+ * 活用形**混在一起反推**的 ⇒ 只要其中一个不规则，全都判成不规则：`걷다`「走」ㄷ不规则／「卷起」规则，
+ * `묻다`「问」／「埋」，`굽다`「烤」／「弯」，`이르다`「到达」러不规则／「告诉」르不规则。
+ * ⚠️ **只列这 6 类**：여불규칙（凡 -하다）／ㄹ탈락（词干末 ㄹ）／으탈락（词干末 ㅡ）由**发音**决定，同形词必然一样，
+ *    列进来就是把对的也标成可疑。2026-11-02 实测：按此判据 22 个词形／54 个词条（账上原写 33／76 是没排除那三类的数）。
+ * 源头没给义项级活用类 ⇒ 不猜是哪个词义，只如实标注（不许放宽判据让这批消失）。
+ */
+export const KO_CONJ_MEANING_DEPENDENT: ReadonlySet<string> = new Set([
+  'ㄷ불규칙', 'ㅂ불규칙', 'ㅅ불규칙', '르불규칙', '러불규칙', 'ㅎ불규칙',
+]);
+
+/** K17：这个词形的活用类**可能只适用于其中某个同形词**（多个词条 ＋ 按活用形反推 ＋ 会因词义而不同的类）。 */
+export function koConjMeaningDependent(entries: ReadonlyArray<{ conjClass: string | null; conjClassSrc: string | null }>): boolean {
+  const withConj = entries.filter((e) => e.conjClass);
+  return withConj.length > 1
+    && withConj.some((e) => e.conjClassSrc === 'forms' && KO_CONJ_MEANING_DEPENDENT.has(e.conjClass as string));
+}
+
+/** K28（2026-11-02）：汉字表记里混着谚文（`鸚鵡새`／`到着하다`，33,968 条）。这是韩语标注半汉字词的**正规写法**
+ *  （汉字词素写汉字、固有词素保留谚文），不是错 —— 错的是把它当成纯汉字印。判据交给 Unicode 文字属性，不手抄码位。 */
+export function koHanjaIsMixed(hanja: string): boolean {
+  return /\p{Script=Hangul}/u.test(hanja);
+}
+
+/**
  * 活用类是怎么来的。🔴 **读者有权知道哪一格是源头给的、哪一格是我们算的。**
  * 把两者印成一样就是拿生成物冒充源头。
  */
@@ -264,10 +289,11 @@ export const KO_PRON_SRC_NOTE: Record<string, string> = {
  * **不标来源就像同一个词有两个来历** —— 它们是两部词典各自的说法（照 vi 的 `VI_EDITION_LABELS`）。
  */
 export const KO_EDITION_LABELS: Record<string, string> = {
-  'zh-edition-trad': '中文版',
-  'zh-edition-simp': '中文版',
-  'en-edition': '英文版',
-  'ko-edition': '韩文版',
+  // 2026-11-03：「中文版」→「中文维基词典」—— 「版」没说是哪部书的版，读者会当成某本书的中文版（ru 那边是「维基」被读成维基百科）
+  'zh-edition-trad': '中文维基词典',
+  'zh-edition-simp': '中文维基词典',
+  'en-edition': '英文维基词典',
+  'ko-edition': '韩文维基词典',
   // 日文版只印中文译文（原文是日语，三语方针不印）⇒ 标签要说清这段是**译过来的**，别和源头白送的中文版混。
-  'ja-edition': '日文版·中译',
+  'ja-edition': '日文维基词典·中译',
 };

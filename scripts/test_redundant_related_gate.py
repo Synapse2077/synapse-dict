@@ -30,7 +30,11 @@ LANGS = ["en", "es", "it", "fr", "pt", "de", "ja", "ko", "vi", "ru"]
 #    en/it/fr/pt 是 0 **因为库里根本没有 `related` 这个 kind**，不是治理过 —— 别拿它们当「已修」的证据。
 #    ko：K34 只修了词条级，剩下的是义项内／跨范围那两种形状；判据要按 ko 自己的值域登记后才能动。
 #    vi：`SUBSUME` 是建库时定的、只看词级，同上。ru：1 条。
-DEBT = {"en": 0, "it": 0, "fr": 0, "pt": 0, "ko": 542, "vi": 124, "ru": 1}
+#    🔴 2026-11-03 ko 542 → 638：**口径改了不是变坏了**。ko K27 把例句标签那一支的 `target` 存回源文原样
+#       （`성두(星斗)`），按文本比，`related 성두(星斗)` 与 `synonym 성두` 不再相等 ⇒ 计数掉到 536（6 组「消失」）。
+#       而读者点进去是同一页 ⇒ 有 `target_norm`（链接落点）的门按落点比（`load()`）。改完多出的 96 条
+#       不是新造的：建库那一支早就是原文进 `target`（`경마(競馬)`），按文本比**一直没看见**它们。
+DEBT = {"en": 0, "it": 0, "fr": 0, "pt": 0, "ko": 638, "vi": 124, "ru": 1}
 
 
 def load(lang):
@@ -43,8 +47,10 @@ def load(lang):
         return None
     hid = "COALESCE(hidden,0)=0" if "hidden" in cols else "1"
     sid = "sense_id" if "sense_id" in cols else "NULL"
-    rows = con.execute("SELECT id, word_id, %s, kind, target FROM sense_relation WHERE %s"
-                       % (sid, hid)).fetchall()
+    # 「同一个目标」按读者口径＝**点进去是同一页**：有链接落点列的门用它（`target` 是展示用的源文原样，会带括号注）
+    tgt = "COALESCE(target_norm, target)" if "target_norm" in cols else "target"
+    rows = con.execute("SELECT id, word_id, %s, kind, %s FROM sense_relation WHERE %s"
+                       % (sid, tgt, hid)).fetchall()
     con.close()
     return rows
 

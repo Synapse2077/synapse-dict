@@ -294,6 +294,26 @@ CHECKS = [
     ("R28", "B29 逐行裁决清单（`fixes/b29_model_zh.json`）全部生效、原文没漂", "@b29_decisions", 0,
      "非 0 ⇒ 有人重跑了旧脚本把裁决改掉的行盖回去，或原文变了而裁决还挂在旧句子上"),
 
+    # 🔴 R29／R30（2026-11-03，K14＋K29）：关系边的身份。
+    #    `src` 列是「哪一版 dump」，8 个脚本往这张表写而填的是同一批版名 ⇒ 每个写入方各写了多少问不出来，
+    #    只能靠 `src_ref` 的形状碰巧不同去猜。`writer` 取值只许是 `relation_writers.WRITERS` 登记过的；
+    #    新写入方没登记就跑会在 `relation_writers.name()` 停机，登记了而 INSERT 漏写这一列就是这里红。
+    ("R29", "每条关系边都说得出是哪个脚本写的（`writer` 非空且已登记）", "@relation_writer", 0,
+     "起点：260,148 行全部说不出（K14），2026-11-03 按形状＋id 段回填，补新词那一支靠第二个信号"
+     "（当时的新词）认"),
+    #    一个指针义项对多个目标时几条边共用 `…#ptr:0`（9 组），K33 一行「例句」拆出的边共用一个
+    #    `#k33`（250 组）⇒ 追不回是源头第几个。现在第 2 个起带序号。
+    ("R30", "`sense_relation.src_ref` 全表唯一（一条边一个身份）",
+     "SELECT COUNT(*) FROM (SELECT 1 FROM sense_relation GROUP BY src_ref HAVING COUNT(*)>1)", 0,
+     "259 组（K33 250／指针 9）2026-11-03 补了序号；生成器（`build_relation_layer` 指针／`reclass_nonexamples`）同步改了"),
+
+    # 🔴 R31（2026-11-03，K27）：例句标签那一支的关系边，`target` 是源文原样（括号里的汉字表记／地区／语态不丢），
+    #    认括号的切分器新切出的边已收，链接落点判据认全角括号与方括号。
+    #    判据全部 import 自 `fixes/fix_k27_relation_paren_text`（它再 import 收割器的 `shown()`／`candidates()`）。
+    ("R31", "例句标签收来的关系边存的是源文原样、新切分器的边已收、可解的落点已补", "@paren_text", 0,
+     "起点：560 行括号内容整段丢了（`성두(星斗)`→`성두`、`굿재이(강원, 경남, 전남, 충북)`→`굿재이`）＋"
+     "1 条边（`우기다 → 우격`）＋ 7 个落点；非 0 ⇒ 有人重跑了旧收割器或把落点判据改回半角括号"),
+
     ("R8", "`entry.hanja` 没有被搬到 `dict` 上",
      "SELECT COUNT(*) FROM pragma_table_info('dict') WHERE name='hanja'", 0,
      "1,944 个词形对应 ≥2 个不同汉字（`양` → 壤/兩/良/陽/孃/洋/量/羊），"
@@ -302,7 +322,7 @@ CHECKS = [
 
 
 # 🔴 回归闸应该有多少条。**这个数是声明，不是数出来的** —— 见 `_audit_checks`。
-R_ROSTER = 28
+R_ROSTER = 31
 
 
 def _audit_checks():
@@ -623,6 +643,24 @@ def _redundant_related(con):
     return len(plan(con)[0])
 
 
+def _relation_writer(con):
+    """`writer` 为空或不在登记表里的关系边有几条。判据（登记表）import 自 `pipeline/relation_writers`。"""
+    sys.path.insert(0, str(paths.ROOT / "ko" / "pipeline"))
+    from relation_writers import WRITERS
+    return sum(1 for (w,) in con.execute("SELECT writer FROM sense_relation") if w not in WRITERS)
+
+
+def _paren_text(con):
+    """K27：还要存回原文的行＋还没收的新边＋还没补的落点（新边自己的除外）。判据 import，不重写。"""
+    sys.path.insert(0, str(paths.ROOT / "ko" / "pipeline"))
+    sys.path.insert(0, str(paths.ROOT / "ko" / "fixes"))
+    import fix_k27_relation_paren_text as K
+    upd, _amb, gain = K.plan(con)
+    # 🔴 落点判据锚在常量上：它退回只认半角圆括号时，被清掉的落点也一起「解不出」⇒ `norms()` 照样 0（变异逮到的）
+    anchor = sum(K.R.resolve(t, {w})[0] != w for t, w in (("귀때기 [俗]", "귀때기"), ("아니다（不是）", "아니다")))
+    return len(upd) + len(gain) + len(K.norms(con)) + anchor
+
+
 def _xsampa(con):
     sys.path.insert(0, str(paths.ROOT / "ko" / "pipeline"))
     from fix_xsampa_ipa import is_bad
@@ -630,6 +668,8 @@ def _xsampa(con):
 
 
 _FUNCS = {"@schema_drift": _schema_drift,
+          "@relation_writer": _relation_writer,
+          "@paren_text": _paren_text,
           "@xsampa": _xsampa,
           "@nonexample_rows": _nonexample_rows,
           "@redundant_related": _redundant_related,

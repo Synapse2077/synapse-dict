@@ -33,7 +33,7 @@ import paths                                                    # noqa: E402
 from pipeline import criteria                                   # noqa: E402
 from pipeline import example_layer as XL                        # noqa: E402
 
-ROSTER = ("X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "X9", "X10", "X11", "X12", "X13")
+ROSTER = ("X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "X9", "X10", "X11", "X12", "X13", "X14")
 ACCEPT = HERE / ".example_accept.json"
 SRC_DOMAIN = frozenset({"en-edition", "ru-edition", "zh-edition-simp", "zh-edition-trad",
                         "fr-edition", "vi-edition", "pl-edition"})
@@ -249,6 +249,19 @@ def checks(con):
             bad13[k] = v
     out.append(("X13", not bad13, str(dict(bad13)) if bad13 else "简体出版正文 %s 条" % format(
         q("SELECT COUNT(*) FROM example_gloss WHERE text_pub IS NOT NULL"), ",")))
+
+    # X14 R25（2026-11-05）：例句标签在受控值域里、按 `EXAMPLE_TAG_ORDER` 排好、不重复、不是空串
+    #   （「标签与 dump 逐行一致」归外锚闸 X③ —— 那一半要重读 dump；这里只管形状与值域）
+    order = {k: i for i, k in enumerate(criteria.EXAMPLE_TAG_ORDER)}
+    bad14 = collections.Counter()
+    for (t,) in con.execute("SELECT tags FROM example WHERE tags IS NOT NULL"):
+        ks = t.split("|")
+        if any(k not in order for k in ks):
+            bad14["值域外：" + ",".join(k for k in ks if k not in order)] += 1
+        elif [order[k] for k in ks] != sorted(set(order[k] for k in ks)):
+            bad14["没排序或重复"] += 1
+    out.append(("X14", not bad14, str(dict(bad14)) if bad14 else "带标签 %s 条" % format(
+        q("SELECT COUNT(*) FROM example WHERE tags IS NOT NULL"), ",")))
     return out
 
 
@@ -354,6 +367,10 @@ def _mutations():
         ("X13", "R29：一条繁体译文的简体出版正文被清空", set(),
          ["UPDATE example_gloss SET text_pub=NULL WHERE id=(SELECT MIN(id) FROM example_gloss "
           "WHERE src='zh-edition-trad' AND text_pub IS NOT NULL AND id<>43531)"]),
+        ("X14", "R25：一条例句的标签写进值域外的键", set(),
+         ["UPDATE example SET tags='collocation|«变异»' WHERE id=(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)"]),
+        ("X14", "R25：一条例句的标签顺序反了（类型应排在语体前面）", set(),
+         ["UPDATE example SET tags='colloquial|collocation' WHERE id=(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)"]),
         ("X12", "造一行 src_ref 形状不对的例句", set(),
          ["INSERT INTO example(id,word_id,entry_id,sense_id,text,text_pub,ref,hidden,hidden_why,src,src_ref) "
           # 合成行标成「同一格里重复」藏起来 ⇒ 只有 X12 该红（不藏的话 X8 也红，那是另一件事）

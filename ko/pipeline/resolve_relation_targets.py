@@ -70,7 +70,7 @@ import paths
 
 f = lambda n: format(n, ",")
 
-PAREN = re.compile(r"\([^()]*\)")
+PAREN = re.compile(r"[（(\[【][^（(\[【)\]）】]*[)\]）】]")   # K27：全角括号、方括号也是注（`귀때기 [俗]`、`아니다（不是）`）
 # 汉字族：目标是**注**不是词，不参与死链统计
 ANNOTATION_KINDS = {"hanja_spelling", "alt_hanja"}
 

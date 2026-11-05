@@ -380,11 +380,11 @@ const CHECKS: Check[] = [
 
   // 🔴 词源三版并印必须标来源（7,661 个词形会看到两三段）。
   { word: 'ăn', name: '🔴 词源段标了来源语言版',
-    hit: (t) => (/(中文版|英文版|越南语版)\s*\S/.test(t) ? null
+    hit: (t) => (/(中文维基词典|英文维基词典|越南文维基词典)\s*\S/.test(t) ? null
       : '词源段没标来源 —— 三段同义的话读者会以为是三个词源') },
   { word: 'ăn', name: '🔴 词源的中文那段排在最前',
     hit: (t) => {
-      const zh = t.indexOf('中文版'); const en = t.indexOf('英文版');
+      const zh = t.indexOf('中文维基词典'); const en = t.indexOf('英文维基词典');
       if (zh < 0 || en < 0) return null;
       return zh < en ? null : '英文版排在中文版前面';
     } },

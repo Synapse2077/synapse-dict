@@ -43,7 +43,7 @@ from pipeline.build import SRC                                  # noqa: E402
 
 # 🔴 **花名册独立声明**，不从代码里数（`[[expectation-must-be-declared]]`）。
 ROSTER = ("K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8", "K9", "K10", "K11",
-          "K12", "K13", "K14")
+          "K12", "K13", "K14", "K15")
 
 # 🔴 **已接受基线**：K10 的 `word_norm` 冲突不是 0，而**它的解在展示层不在数据层**。
 #    ⇒ 锁住**数字**不锁名字（`[[fix-regression-and-gate]]`：ACCEPT 锁数字不锁名字，
@@ -212,6 +212,15 @@ def checks(con):
                 "" if not b13 else
                 "这些是真词元（有形容词/名词/副词义项）而被标成屈折形：%s —— "
                 "判据放宽成了「有一个义项带 participle 就算」？" % " ".join(b13)))
+
+    # ── K15 词头的文字系统（R19，2026-11-02）—— 一个西里尔/拉丁/希腊字母都没有的不是俄语词头 ──
+    #    判据 import `criteria.headword_script_ok`（收词那一侧用的就是它，闸不自己再写一版）。
+    #    原形：zh 繁版俄语区里的 `且聽下回分解` 落成了词头，挂着 2 条中文义项。
+    bad15 = [w for (w,) in con.execute("SELECT word FROM dict") if not criteria.headword_script_ok(w)]
+    out.append(("K15", not bad15,
+                "" if not bad15 else
+                "%d 个词头一个西里尔/拉丁/希腊字母都没有：%s —— 收词判据 `entry_accept` ②b 被绕过了？"
+                % (len(bad15), " ".join(bad15[:5]))))
     return out
 
 
@@ -313,6 +322,8 @@ def _mutations():
          ["UPDATE dict SET is_lemma=1 WHERE word='взбулгаченный'"]),
         ("K13", "把一个形容词化的形动词标成屈折形（判据放宽）",
          ["UPDATE dict SET is_lemma=0 WHERE word='навороченный'"]),
+        ("K15", "往 `dict` 塞回一个汉字词头（R19 那条回潮）",
+         ["INSERT INTO dict(word,word_norm,entry_type,is_lemma) VALUES('且聽下回分解','且聽下回分解','phrase',1)"]),
     ]
 
 

@@ -136,6 +136,9 @@ TRACK = [
     #    `hidden_why` 从 NULL 变成有值才看得见，而 R22 保证了
     #    `hidden=1` ⟺ `hidden_why` 非空 ⇒ 盯住它就等于盯住了 `hidden`。
     'sense_relation.hidden_why',
+    # 🔴 关系边的写入方（K14，2026-11-03）。8 个脚本往这张表写，`src` 列分不开它们 ——
+    #    每个写入方都要在 expect 里声明自己写了几行 `writer`，没声明就是有人绕过了登记表。
+    'sense_relation.writer',
     # 🔴 例句被藏起来的原因（2026-09-27，K33）。同一个理由：`example.hidden` 的 0→1
     #    在「非空计数」口径下是 0 变化，只有 `hidden_why` 看得见。
     #    R25 保证了 `example.hidden=1` ⟺ `hidden_why` 非空。

@@ -148,15 +148,6 @@ def collect(wid, s2id, groups):
                     #      会以「有国语字母」的身份穿过去（`같은 말 : yêu thương`）。
                     # 🔴 **标记残渣先清**（55 条）：`#*: ` 行首标记会干扰后面所有
                     #    按行走的判据（出处首行、内嵌英译），所以它必须排在最前。
-                    ct = S6.clean_markup(t)
-                    if ct != t:
-                        stat["清掉标记残渣（%s）" % ed] += 1
-                        t = ct or t
-                    if src in S6.TRANSLATION_INSIDE_TEXT:
-                        cut = S6.strip_foreign_translation(t)
-                        if cut != t:
-                            stat["切掉内嵌的外语译文（%s）" % ed] += 1
-                        t = cut or t      # 全切空时留原文，交给 hidden_why 判掉
                     k = (ed, w, pos, etym, si)
                     sense_id = s2id.get(k)
                     if sense_id is not None:
@@ -172,23 +163,21 @@ def collect(wid, s2id, groups):
                         ref = tr
                     # ── 🔴🔴 2026-10-03 清洗（阶段 6e 开跑前）：顺序是判据的一部分
                     # ⑤b 出处串进了 `text` 首行而 `ref` 是空的 ⇒ 搬过去（202 条）
-                    cite, body = S6.split_citation_prefix(t, syl)
-                    if cite:
-                        if ref:
-                            # ⚠️ 实测 202/202 条 `ref` 都是空的，**但不许假设** ——
-                            #    覆盖一条正当出处比留着串位更坏。
-                            stat["首行像出处但 `ref` 已有内容 ⇒ 不动"] += 1
-                        else:
-                            ref, t = cite, body
-                            stat["出处从 text 首行搬进 ref（%s）" % ed] += 1
+                    # ⚠️ 四种清洗住在 `S6.clean_example_text`（W22：闸要从原文重算出版正文，必须同一份）。
+                    #    出处首行：实测 202/202 条 `ref` 都是空的，**但不许假设** —— 覆盖一条正当出处比留着串位更坏。
+                    t, moved, inline_en, steps = S6.clean_example_text(t, src, syl, bool(ref))
+                    for st_, label in (("markup", "清掉标记残渣（%s）"), ("foreign", "切掉内嵌的外语译文（%s）"),
+                                       ("cite", "出处从 text 首行搬进 ref（%s）")):
+                        if st_ in steps:
+                            stat[label % ed] += 1
+                    if "cite-kept" in steps:
+                        stat["首行像出处但 `ref` 已有内容 ⇒ 不动"] += 1
+                    if moved:
+                        ref = moved
+                    if inline_en:
+                        stat["内嵌英译行搬进译文（%s）" % ed] += len(inline_en)
                     # ⑤d 内嵌英译行 ⇒ 搬进译文侧（282 行）。**不是删**：
                     #    实测 262 条库里没有英译，剥掉就丢了英译。
-                    inline_en = []
-                    if src in S6.INLINE_EN_IN_TEXT:
-                        nb, en_lines = S6.split_inline_english(t)
-                        if en_lines and nb.strip():
-                            t, inline_en = nb, en_lines
-                            stat["内嵌英译行搬进译文（%s）" % ed] += len(en_lines)
                     # ── ⑥ W16：本版自己的释义语言挤在同一格里（52 条）
                     # 🔴 这一族**不改 `text`**，只算出一条**出版正文** `pub`：
                     #    fr 版 44 条的尾巴是**法语**，三语方针不许它进 `example_gloss`，
@@ -208,6 +197,9 @@ def collect(wid, s2id, groups):
                     # 🔴 出处对中文读者完全不可读 ⇒ 不发布（679 条韩语圣经章节号）。
                     #    ⚠️ 判据是「一个拉丁字母都没有」，**不是「含韩文就切」** ——
                     #      后者会截断 56 条以拉丁为主、夹着原文人名的正当引文。
+                    # W18（2026-11-01）：出处里的 wiki 标记残渣（`^(…)` 上标链接等）—— 与正文同一个清洗函数
+                    if ref:
+                        ref = S6.clean_markup(ref) or None
                     if ref and S6.ref_is_unreadable(ref):
                         stat["出处不可读（无拉丁字母）⇒ 不发布（%s）" % ed] += 1
                         ref = None
@@ -262,9 +254,13 @@ def collect(wid, s2id, groups):
                     # 🔴 W22：最终的 `text` 与 dump 原文逐字比一次（见上面 `raw_text`）。
                     #    这个数 **> 0 就是 W22 还开着**；外锚闸 `X源⑥` 锁住它，
                     #    把那四种清洗迁到 `text_pub` 之后它会归 0 ⇒ 闸红 ⇒ 逼人划账。
-                    if t != raw_text:
+                    # ✅ 2026-11-01 W22 结清：`text` 存 **dump 原文**，四种清洗只进出版正文 `pub`（下面 r[8]）。
+                    #    `t`（清洗后的）仍是 hidden_why／出版正文／6e 付费译文的输入，只是不再写进 `text`。
+                    #    这个计数留着守**收割器代码**：谁再把清洗结果写回 `text`，它就 > 0 ⇒ 外锚闸 X源⑥ 红。
+                    stored = raw_text
+                    if stored != raw_text:
                         stat[S6.TEXT_MUTATED_IN_PLACE] += 1
-                    rows.append((wid[w], sense_id, t, ref, why, src,
+                    rows.append((wid[w], sense_id, stored, ref, why, src,
                                  "ex:%s:%s:%s:%s:%d:%d" % (ed, w, pos, etym, si, xi),
                                  gloss, pub))
     # 同一条证据在同一版里出现两次就是重复（`src_ref` 唯一）
@@ -361,7 +357,7 @@ def _sync(rows, gl):
                 "SELECT src_ref, id, sense_id, text, ref, hidden, hidden_why, %s FROM example"
                 % ("text_pub" if has_pub else "NULL"))}
     con.close()
-    upd, now_hidden, text_changed, pub_changed = [], [], [], []
+    upd, now_hidden, text_changed, pub_changed, src_text_changed = [], [], [], [], []
     for r in rows:
         ref = r[6]
         if ref not in have:
@@ -375,8 +371,13 @@ def _sync(rows, gl):
         upd.append(want + (eid,))
         if h == 0 and want[3] == 1:
             now_hidden.append(eid)
-        elif want[3] == 0 and t != want[1]:
+        # 🔴 W22（2026-11-01）：译文失效看**出版正文**，不看 `text`。6e 那 7.6 万条译的是清洗后的正文，
+        #    而它现在只住在出版正文里；`text` 改回 dump 原文时（2,040 行）出版正文一字不变、译文全部仍然有效 ——
+        #    看 `text` 的话这 1,902 条付费译文会被列进「要重买」。
+        elif want[3] == 0 and has_pub and pub != want[5]:
             text_changed.append(eid)
+        if t != want[1]:
+            src_text_changed.append(eid)
         # 🔴 `text_pub` 变了要**单独数**，不许并进 `text_changed` ——
         #    后者的含义是「译文失效、要重新买」，而出版正文摘掉外语尾巴之后
         #    中文译文**不用重买**（它只要跟着切掉对应那半，确定性、0 元）。
@@ -386,9 +387,9 @@ def _sync(rows, gl):
     if not has_pub:
         print("\n■ `text_pub` 列还不存在 ⇒ 本次是**首次填充**，"
               "所以每一行都算「改了」（%s 行），这不是漂移。" % F(len(upd)))
-    print("\n■ `--sync`：要改 %s 行（变成隐藏 %s ／ 正文改了 %s ／ 出版正文改了 %s）"
-          % (F(len(upd)), F(len(now_hidden)), F(len(text_changed)),
-             "首次填充" if not has_pub else F(len(pub_changed))))
+    print("\n■ `--sync`：要改 %s 行（变成隐藏 %s ／ 证据层 text 改了 %s ／ 出版正文改了 %s ⇒ 译文失效 %s）"
+          % (F(len(upd)), F(len(now_hidden)), F(len(src_text_changed)),
+             "首次填充" if not has_pub else F(len(pub_changed)), F(len(text_changed))))
     # ── 缺失的源头译文（W16 白捡的那 6 条英译走这条路）
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     gid = {ref: i for i, ref in con.execute("SELECT id, src_ref FROM example")}
@@ -399,7 +400,18 @@ def _sync(rows, gl):
     print("   要补插的源头译文 %s 条%s" % (
         F(len(ins)), ("（%s）" % collections.Counter(x[1] for x in ins).most_common())
         if ins else ""))
-    if not upd and not ins:
+    # 🔴 W21（2026-11-02）：**源头侧**译文内容变了也要同步（只限 `src` 不是 model 的行）。
+    #    「只插不覆盖」护的是付费译文；源头侧是纯派生的，判据收窄后它会变 ——
+    #    `thối` 的英译，源头把前半段夹在 `text` 里、后半段放进 `english`，新判据把前半段切出来
+    #    ⇒ 应拼成完整的一条，而只插不改让库里停在半条。逮到它的是外锚闸第③向（键对上而内容不一样）。
+    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    srcg = {(e, l): (i, t) for i, e, l, t in con.execute(
+        "SELECT id, example_id, lang, text FROM example_gloss WHERE src NOT LIKE 'model%'")}
+    con.close()
+    upd_g = [(r[7][1], srcg[k][0]) for r in gl
+             for k in [(gid.get(r[6]), r[7][0])] if k in srcg and srcg[k][1] != r[7][1]]
+    print("   内容变了的源头译文 %s 条（原地改，不碰付费译文）" % F(len(upd_g)))
+    if not upd and not ins and not upd_g:
         print("   库已经与 `collect()` 一致，什么都不做。")
         return
     # 🔴 失效译文的 id 清单**先落盘**，再写库 —— 写库之后就查不出哪些是失效的了
@@ -444,6 +456,8 @@ def _sync(rows, gl):
         if ins:
             s.executemany("INSERT INTO example_gloss (example_id, lang, text, src) "
                           "VALUES (?,?,?,?)", ins)
+        if upd_g:
+            s.executemany("UPDATE example_gloss SET text=? WHERE id=? AND src NOT LIKE 'model%'", upd_g)
 
 
 def main():

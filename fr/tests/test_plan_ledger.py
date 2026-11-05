@@ -85,6 +85,18 @@ DELIVERABLE = {
 ROW = re.compile(r"^\|\s*\**\s*(-?[0-9.]+)\s*\**\s*\|(.+?)\|(.+?)\|", re.M)
 
 
+# 状态栏只认**最先出现的那个标记** —— 与 de 的 `_status()` 同一条（2026-11-02 补，EN_PLAN §16.7③）。
+# 🔴 原来是 `if "✅" in state`（子串命中）：状态栏写成「🔄 **1.5a ✅ 已落库**／1.5b 未跑」这种诚实的进行中状态，
+#    就会被判成「已完成」—— de 2026-09-03 的真事故。本门当时阶段表里一格只有一个标记，所以一直没发作。
+MARKS = ("✅", "🔄", "📋", "⬜", "⚪", "❌", "🟡")
+
+
+def _status(state):
+    """状态栏 → 标记里**最先出现的那一个**（没有则 None）。"""
+    pos = [(state.index(m), m) for m in MARKS if m in state]
+    return min(pos)[1] if pos else None
+
+
 def declared_done():
     """→ {阶段号: 标题}，只含**工期栏声明 ✅** 的。"""
     s = PLAN.read_text(encoding="utf-8")
@@ -93,7 +105,7 @@ def declared_done():
     out = {}
     for m in ROW.finditer(tbl):
         num, title, dur = m.group(1), m.group(2), m.group(3)
-        if "✅" in dur:
+        if _status(dur) == "✅":
             out[num] = title.strip().strip("*").strip()
     return out
 
@@ -347,7 +359,24 @@ def mutate():
         ok += bool(p2())
     finally:
         PLAN.write_text(src, encoding="utf-8")
-    print("\n   变异 %d/3" % ok)
+
+    def with_plan(text, fn):
+        try:
+            PLAN.write_text(text, encoding="utf-8")
+            return fn()
+        finally:
+            PLAN.write_text(src, encoding="utf-8")
+
+    # M4：状态栏写成「🔄 进行中、子步 ✅ 已落库」—— **不许**被算成已完成（EN_PLAN §16.7③，2026-11-02）。
+    #     子串判据 `"✅" in state` 在这里会把它判成 ✅ ⇒ 后面依赖「这阶段做完了」的检查全部失效。
+    _st = next(iter(declared_done()))
+    _mut = re.sub(r"(^\|\s*\**\s*%s\s*\**\s*\|[^|]*\|)[^|]*\|" % re.escape(_st),
+                  r"\1 🔄 **进行中**（子步 ✅ 已落库） |", src, count=1, flags=re.M)
+    got = _mut != src and _st not in with_plan(_mut, declared_done)
+    print("   M4 %s（阶段 %s 的状态栏首标记是 🔄、后面夹着 ✅）"
+          % ("✅ 逮到" if got else "🔴 **漏了**：进行中被判成已完成", _st))
+    ok += bool(got)
+    print("\n   变异 %d/%d" % (ok, N_MUT))
     return ok
 
 
@@ -358,7 +387,10 @@ def _safe(con, q):
         return -1
 
 
+# 入口与打印共用一个常量、独立声明（pt 2026-10-27 栽过：写死 `== 6` 而变异加到 8 条 ⇒ 永远退 1）
+N_MUT = 4
+
 if __name__ == "__main__":
     if "--mutate" in sys.argv:
-        sys.exit(0 if mutate() == 3 else 1)
+        sys.exit(0 if mutate() == N_MUT else 1)
     sys.exit(1 if report() else 0)

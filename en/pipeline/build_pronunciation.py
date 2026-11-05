@@ -59,6 +59,12 @@ REGION = {"UK": "uk", "RP": "uk", "British": "uk", "Received-Pronunciation": "uk
           "Canada": "ca", "New-Zealand": "nz", "Ireland": "ie", "Scotland": "gb-sct",
           "Wales": "gb-wls", "India": "in", "South-Africa": "za"}
 REGIONS = set(REGION.values())
+
+# §16.7①：主读音＝每个（词形, 地区）源头列在第一位的那条（行号顺序＝源头 `sounds[]` 顺序），源头没给这个地区才轮到自产。
+#   **判据只有这一份**：重建时在同一次写库里按它填（不留一段 is_primary 全 0 的中间态），
+#   `en/fixes/fill_is_primary.py` 与回归闸 A16 都 import 它。
+PRIMARY_SQL = ("SELECT COALESCE(MIN(CASE WHEN src = 'en-edition' THEN id END), MIN(id)) "
+               "FROM pronunciation GROUP BY word_id, region")
 PLACEHOLDER = re.compile(r"^[\[\(]?\s*[…\.\s\-–—]*\s*[\]\)]?$")
 
 
@@ -136,13 +142,19 @@ def collect(con):
             drop.update(why)
             stat["dropped"] += sum(why.values())
             tags = s.get("tags") or []
-            reg = next((REGION[t] for t in tags if t in REGION), None)
-            for ipa, nota in got:
-                rows.append((i, e, ipa, nota, reg,
-                             json.dumps(tags, ensure_ascii=False) or None,
-                             praw, 0, SRC_KK,
-                             "kk-en:%s:%s:%s:%d" % (w, praw, etym, seq)))
-                stat["kk"] += 1
+            # 🔴 §16.7⑤（2026-11-02）：**一条读音带几个地区，就按地区各存一行**。原来是 `next(...)` 取第一个认得的 ⇒
+            #    `tomato /təˈmɑː.təʊ/` 源头标 `Australia`＋`Received-Pronunciation`（澳式与英式标准音同读）只成了 `au`，
+            #    带 RP 标签而落到别处的 7,342 行／2,652 词英式一栏一条源头读音都没有。`UNIQUE` 本来就含 region。
+            regs = list(dict.fromkeys(REGION[t] for t in tags if t in REGION)) or [None]
+            if len(regs) > 1:
+                stat["multi_region"] += 1
+            for reg in regs:
+                for ipa, nota in got:
+                    rows.append((i, e, ipa, nota, reg,
+                                 json.dumps(tags, ensure_ascii=False) or None,
+                                 praw, 0, SRC_KK,
+                                 "kk-en:%s:%s:%s:%d" % (w, praw, etym, seq)))
+                    stat["kk"] += 1
             stat["split"] += max(0, len(got) - 1)
 
     # ── ② 项目自产（老库 uk/us）—— 词级，无 entry/pos
@@ -279,6 +291,7 @@ def main(run=False):
     for k, v in drop.most_common():
         print("        %-24s %s" % (k, format(v, ",")))
     print("   kaikki 入库           %9s" % format(stat["kk"], ","))
+    print("   └ 其中一条读音带多个地区、按地区拆行的 %9s 条（§16.7⑤）" % format(stat["multi_region"], ","))
     print("   ⭐ 自产入库            %9s（落不上 %s）"
           % (format(stat["self"], ","), format(stat["self_orphan"], ",")))
     print("   同键去重（新约束含 region）%9s（其中 tags 合并 %s）" % (format(stat["dup"], ","), format(stat["tag_merged"], ",")))
@@ -309,6 +322,7 @@ def main(run=False):
         s.executemany(
             "INSERT INTO pronunciation (word_id,entry_id,ipa,notation,region,tags,pos,"
             "is_primary,src,src_ref) VALUES (?,?,?,?,?,?,?,?,?,?)", uniq)
+        s.execute("UPDATE pronunciation SET is_primary = 1 WHERE id IN (%s)" % PRIMARY_SQL)
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     print("\n═══ 闸② ═══")
     bad = gates(con, stat, len(uniq))

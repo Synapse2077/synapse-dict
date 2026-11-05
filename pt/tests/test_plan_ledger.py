@@ -153,6 +153,18 @@ CODE = {
 ROW = re.compile(r"^\|\s*\**\s*(-?[0-9.]+[a-z]?)\s*\**\s*\|(.+?)\|(.+?)\|", re.M)
 
 
+# 状态栏只认**最先出现的那个标记** —— 与 de 的 `_status()` 同一条（2026-11-02 补，EN_PLAN §16.7③）。
+# 🔴 原来是 `if "✅" in state`（子串命中）：状态栏写成「🔄 **1.5a ✅ 已落库**／1.5b 未跑」这种诚实的进行中状态，
+#    就会被判成「已完成」—— de 2026-09-03 的真事故。本门当时阶段表里一格只有一个标记，所以一直没发作。
+MARKS = ("✅", "🔄", "📋", "⬜", "⚪", "❌", "🟡")
+
+
+def _status(state):
+    """状态栏 → 标记里**最先出现的那一个**（没有则 None）。"""
+    pos = [(state.index(m), m) for m in MARKS if m in state]
+    return min(pos)[1] if pos else None
+
+
 def declared_done():
     """→ {阶段号: 标题}，只含**状态栏声明 ✅** 的。"""
     s = PLAN.read_text(encoding="utf-8")
@@ -161,7 +173,7 @@ def declared_done():
     out = {}
     for m in ROW.finditer(tbl):
         num, title, state = m.group(1), m.group(2), m.group(3)
-        if "✅" in state:
+        if _status(state) == "✅":
             out[num] = title.strip().strip("*").strip()
     return out
 
@@ -637,6 +649,17 @@ def mutate():
     print("   M5 %s" % ("✅ 逮到收尾单消失" if got else "🔴 **漏了**：收尾单没了却不红"))
     ok += bool(got)
 
+
+    # M9：状态栏写成「🔄 进行中、子步 ✅ 已落库」—— **不许**被算成已完成（EN_PLAN §16.7③，2026-11-02）。
+    #     子串判据 `"✅" in state` 在这里会把它判成 ✅ ⇒ 后面依赖「这阶段做完了」的检查全部失效。
+    _st = next(iter(declared_done()))
+    _mut = re.sub(r"(^\|\s*\**\s*%s\s*\**\s*\|[^|]*\|)[^|]*\|" % re.escape(_st),
+                  r"\1 🔄 **进行中**（子步 ✅ 已落库） |", src, count=1, flags=re.M)
+    got = _mut != src and _st not in with_plan(_mut, declared_done)
+    print("   M9 %s（阶段 %s 的状态栏首标记是 🔄、后面夹着 ✅）"
+          % ("✅ 逮到" if got else "🔴 **漏了**：进行中被判成已完成", _st))
+    ok += bool(got)
+
     print("\n   变异 %d/%d" % (ok, N_MUT))
     return ok
 
@@ -644,7 +667,7 @@ def mutate():
 # 🔴 2026-10-27：入口原来写死 `== 6`，而变异后来加到 8 条、只改了打印那一处
 #    ⇒ **8/8 全过也永远退 1**（一条永远红的变异档＝没有变异档）。两处共用这一个常量；
 #    **独立声明**，不从 `ok +=` 的行数推 —— 那样删掉一条变异它也看不出来。
-N_MUT = 8
+N_MUT = 9
 
 if __name__ == "__main__":
     if "--mutate" in sys.argv:

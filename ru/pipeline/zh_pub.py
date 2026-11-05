@@ -16,7 +16,6 @@
 """
 import argparse
 import collections
-import json
 import random
 import sqlite3
 import sys
@@ -43,17 +42,8 @@ def _old_normalize(t, src_lines):
 
 
 def answers():
-    got = {}
-    for tag in ANSWER_TAGS:
-        p = TX.OUT / ("%s.jsonl" % tag)
-        for line in p.open(encoding="utf-8"):
-            try:
-                d = json.loads(line)
-            except Exception:                    # noqa: BLE001
-                continue
-            if isinstance(d.get("id"), int) and d["id"] not in got and d.get("zh"):
-                got[d["id"]] = d["zh"]
-    return got
+    # 2026-11-05：改问 `translate_examples.answer_texts`（含 R28 人工改译），不再自己读答案文件
+    return TX.answer_texts(ANSWER_TAGS, skip_empty=True)
 
 
 def plan_model_text(con):

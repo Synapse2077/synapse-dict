@@ -20,7 +20,7 @@ A4 查的就是「同一 (词, Commons 键) 只有一行」—— 这是 B12 的
 它掉到 0 意味着跨版收割那一步被删掉了而总行数只掉两成（不容易看出来）。
 
 ═══ ⚠️ A6：张冠李戴那批必须**还在库里且 hidden=1** ═══
-判据精确度只有 ~57%（7 组里真错 4、假阳 3，欠账 W8）⇒ 不许删。
+判据精确度只有 ~57%（7 组里真错 4、假阳 3）⇒ 不许删。✅ W8 2026-11-05 结清：3 组假阳人工裁决放出，剩 4 行人工确认是别的词。
 A6 两头都查：隐藏的量级在、而且没有一条隐藏的没写理由。
 """
 import sqlite3
@@ -38,7 +38,7 @@ import stage6_sources as S6                                       # noqa: E402
 # 🔴 下限按 2026-10-01 实测写死。⚠️ 距现状 ≤3 个点（账的闸 V10 查这件事）
 COVER_FLOOR = 3.5           # 实测 4.27%（2,839 / 66,502 个词形有录音）
 CROSS_EDITION_FLOOR = 400   # 实测非 en 版贡献 654 行；跨版收割被删掉就掉到 0
-MISMATCH_FLOOR = 5          # 实测隐藏 7 行
+MISMATCH_FLOOR = 4          # W8 人工裁决后隐藏 4 行（2026-11-05：7 行里 3 行是同一个词、已放出）
 MISMATCH_CEIL = 60          # 🔴 上限：判据被放宽（比如拿 IPA 交集当第二信号）会涨到 27+
 _DOM = ",".join("'%s'" % d for d in sorted(set(PS.DIALECTS.values()) | {"unknown"}))
 
@@ -64,7 +64,7 @@ CHECKS = [
     ("A5", "每条都挂得上 dict", lambda c: c.execute(
         "SELECT COUNT(*) FROM audio a LEFT JOIN dict d ON d.id=a.word_id "
         "WHERE d.id IS NULL").fetchone()[0], 0),
-    ("A6", "⚠️ 张冠李戴那批还在库里且 hidden=1（判据只有 57% 准，不许删）",
+    ("A6", "⚠️ 张冠李戴那批还在库里且 hidden=1（人工确认 4/4，证据仍不许删）",
      lambda c: MISMATCH_FLOOR <= c.execute(
          "SELECT COUNT(*) FROM audio WHERE hidden_why=?",
          (S6.HIDDEN_WRONG_WORD,)).fetchone()[0] <= MISMATCH_CEIL, True),
@@ -126,7 +126,7 @@ MUTATIONS = [
      "FROM audio WHERE id=(SELECT MIN(id) FROM audio)", {}),
     ("A5", "让一条录音指向不存在的 dict",
      "UPDATE audio SET word_id=99999999 WHERE id=(SELECT MIN(id) FROM audio)", {}),
-    ("A6", "⚠️ 把张冠李戴那批**删掉**（判据只有 57% 准，删＝丢掉 3 条对的）",
+    ("A6", "⚠️ 把张冠李戴那批**删掉**（隐藏不删＝证据留着，可逆）",
      "DELETE FROM audio WHERE hidden_why='filename-word-mismatch'", {}),
     ("A7", "隐藏一条而不写为什么",
      "UPDATE audio SET hidden=1, hidden_why=NULL WHERE id=(SELECT MIN(id) FROM audio)", {}),
@@ -138,7 +138,7 @@ MUTATIONS = [
      "UPDATE audio SET dialect='Da-Nang' WHERE id=(SELECT MIN(id) FROM audio)", {}),
     ("A10", "⭐ 删掉九成录音（覆盖率掉下去）",
      "DELETE FROM audio WHERE id % 10 <> 0",
-     {"A6": "隐藏的那 7 行多半也被删了", "A8": "非 en 版的也被删到量级以下"}),
+     {"A6": "隐藏的那 4 行多半也被删了", "A8": "非 en 版的也被删到量级以下"}),
     ("A11", "写一个不是 http 地址的 url",
      "UPDATE audio SET url='Vi-xin.ogg' WHERE id=(SELECT MIN(id) FROM audio)", {}),
     ("A12", "⚠️ 把转码后缀塞回 commons_key（`original_name()` 失效的样子）",

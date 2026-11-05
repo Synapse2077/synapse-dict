@@ -136,6 +136,9 @@ export const RU_INFL_TAG_LABELS: Record<string, string> = {
   invariable: '不变',
   phonetic: '按读音',
   familiar: '亲昵',
+  // ── 2026-11-05 R32 收尾：指针说明人工裁决标签（`criteria.POINTER_TAGS_ADJUDICATED`）用到、变格表里没有的 ──
+  reflexive: '自反',
+  aorist: '不定过去时',
 };
 
 /** 义项语法标签（sense_tag bucket=grammar）。 */
@@ -180,6 +183,14 @@ export const RU_GRAMMAR_LABELS: Record<string, string> = {
 };
 
 /** 义项语体/领域标签（sense_tag bucket=label）—— 只放全局 REGISTER_LABELS 没有或意思不同的。 */
+/** 例句标签（R25／B31，2026-11-05）：`example.tags` 的受控值域（`ru/pipeline/criteria.EXAMPLE_TAG_ORDER`）。
+ *  ⚠️ 不借 `RU_INFL_TAG_LABELS`：那张里 `pejorative`＝「指小表蔑」（构词后缀义），印在例句上是错的。 */
+export const RU_EXAMPLE_TAG_LABELS: Record<string, string> = {
+  collocation: '搭配', proverb: '谚语', saying: '俗语', idiom: '习语',
+  colloquial: '口语', informal: '非正式', formal: '正式', literary: '书面', poetic: '诗',
+  dated: '旧', obsolete: '废', vulgar: '粗俗', derogatory: '贬', euphemistic: '委婉', ironic: '讽刺', figurative: '转义',
+};
+
 export const RU_USAGE_LABELS: Record<string, string> = {
   colloquial: '口', figuratively: '转', slang: '俚', dated: '旧', historical: '史', derogatory: '贬',
   vulgar: '粗', literary: '书', archaic: '古', obsolete: '废', dialectal: '方', poetic: '诗', rare: '罕',
@@ -242,8 +253,10 @@ export const RU_USAGE_LABELS: Record<string, string> = {
 
 /** 版名（来源标注；同一个词三版各说一遍时读者要分得出）。 */
 export const RU_EDITION_LABELS: Record<string, string> = {
-  'en-edition': '英文维基', 'ru-edition': '俄文维基', 'zh-edition-simp': '中文维基（简）',
-  'zh-edition-trad': '中文维基（繁）', 'fr-edition': '法文维基', 'vi-edition': '越南文维基', 'pl-edition': '波兰文维基',
+  // 🔴 2026-11-03：写全「维基词典」—— 原来只写「英文维基」，读者问「中文维基、英文维基是什么」（会读成维基百科）。
+  //    与 ko/vi 的同名映射表同一种叫法（三门原来三种叫法）；契约闸 ru C24／ko／vi 各锁一条。
+  'en-edition': '英文维基词典', 'ru-edition': '俄文维基词典', 'zh-edition-simp': '中文维基词典（简）',
+  'zh-edition-trad': '中文维基词典（繁）', 'fr-edition': '法文维基词典', 'vi-edition': '越南文维基词典', 'pl-edition': '波兰文维基词典',
 };
 
 /** 读音的地域（pronunciation.dialect）。`unknown` ＝ 源头没标，**不印**。 */

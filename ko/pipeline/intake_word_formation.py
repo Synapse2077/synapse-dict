@@ -54,6 +54,8 @@ import sqlite3
 
 import dbtool
 import paths
+import relation_writers
+WRITER = relation_writers.name(__file__)    # K14：`sense_relation.writer`
 
 f = lambda n: format(n, ",")
 KIND = "derived"
@@ -260,12 +262,14 @@ def main():
             "ko-k11-intake-word-formation",
             expect={"#sense_relation": len(ins),
                     "sense_relation.target": len(ins),
+                    "sense_relation.writer": len(ins),
                     "sense_relation.target_norm": len(ins) - dead,
                     "__rows__": 0},
             invalidates=[]) as s:
         s.executemany(
             "INSERT INTO sense_relation (word_id, sense_id, kind, target, target_norm,"
-            " tags, hidden, src, src_ref) VALUES (?, NULL, ?, ?, ?, NULL, 0, ?, ?)", ins)
+            " tags, hidden, src, src_ref, writer) VALUES (?, NULL, ?, ?, ?, NULL, 0, ?, ?, '%s')"
+            % WRITER, ins)
 
     print("\n═══ 写后回核（从库里重算）═══")
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)

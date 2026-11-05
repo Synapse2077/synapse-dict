@@ -137,10 +137,22 @@ def _selftest():
     return ok == len(cases)
 
 
-MODELS = {
-    "flash": "deepseek-v4-flash",
-    "pro": "deepseek-v4-pro",
-}
+# 🔴 模型名在 `.env`（2026-11-02，与豆包 `DOUBAO_MODEL_*` 同一规矩）：DeepSeek 会升级、改名
+#    （`deepseek-v4-flash` 已下线，请求由 V4.1-Flash 应答，官方新名 `deepseek-flash`），写死在代码里 ⇒ 每升级一次改六份跑批器。
+#    缺了就停，**不许悄悄回退到写死的旧名**。⚠️ 落库数据的来源标签（`SRC_MODEL = "model:deepseek-v4-flash"`）是另一件事：
+#    它是已落库行的身份（闸靠它认付费数据），不跟着这里变。
+MODEL_ENV = {"flash": "DEEPSEEK_MODEL_FLASH", "pro": "DEEPSEEK_MODEL_PRO"}
+
+
+def model_for(mode, env):
+    """`flash`／`pro` → `.env` 里配的模型名；别的值当作直接给的模型名原样用。"""
+    key = MODEL_ENV.get(mode)
+    if key is None:
+        return mode
+    name = (env.get(key) or "").strip()
+    if not name:
+        raise SystemExit("🔴 .env 里没有 %s —— DeepSeek 的模型名配在 .env（与豆包同一规矩），不在代码里" % key)
+    return name
 URL = "https://api.deepseek.com/chat/completions"
 
 
@@ -223,7 +235,8 @@ async def run(sys_prompt, batches, meta, out_path, mode="flash", conc=12,
     import httpx
     announce_window()          # 🔴 无条件，花钱前必须看见价格档位
     env = load_env()
-    model = MODELS.get(mode, mode)
+    model = model_for(mode, env)
+    print("■ 模型 %s（%s，来自 .env）" % (model, MODEL_ENV.get(mode, "直接指定")), flush=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     done = set()
     if out_path.exists():
@@ -245,6 +258,12 @@ async def run(sys_prompt, batches, meta, out_path, mode="flash", conc=12,
     batch_audit.preflight([batches[i] for i in todo], [meta[i] for i in todo], out_path)
     _audit_off = out_path.stat().st_size if out_path.exists() else 0
     print("■ 模型 %s  并发 %d  思考 %s" % (model, conc, thinking), flush=True)
+    # 跑批记录（2026-11-02）：落库行的来源标签（`SRC_MODEL`）是固定身份、不随模型升级改；**实际用的哪个模型**记在答案文件旁边，
+    #   每轮一行 —— 付费行 → 答案文件（回归闸守着这条链）→ 这里，就追得到当时的模型名与时间。接口不返回具体版本号（实测只回显请求名）。
+    import datetime as _dt
+    with open(str(out_path) + ".runs.jsonl", "a", encoding="utf-8") as _f:
+        _f.write(json.dumps({"at": _dt.datetime.now().isoformat(timespec="seconds"), "model": model, "mode": mode,
+                             "thinking": thinking, "conc": conc, "batches": len(todo)}, ensure_ascii=False) + "\n")
 
     q = asyncio.Queue()
     for i in todo:

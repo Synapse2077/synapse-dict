@@ -95,15 +95,11 @@ def layer_example(show=0):
     # 「有意不收」那一桶：带 LABEL_DROP 前缀的，留给关系层
     dropped = collections.Counter(s for s, _w, _lab, _b in labeled)
     # 这一桶里**已经被关系层吃掉的**有多少 —— 剩下的是真·未消费欠账
-    # 🔴 判据是 `src_ref` 的**形状**，不是 `src`：`sense_relation.src` 存的是
-    #    「哪一版 dump」，两个写入方（`build_relation_layer` 与
-    #    `harvest_relations_from_examples`）填的是同一批版名，分不开。
-    #    能分开的是 src_ref：关系层走 `kk-ko:…#s0:rel:…`（带义项下标 `#`），
-    #    例句标签那一支走 `<版>:<词>:rel:<kind>:<目标>`（没有 `#`）。
-    #    ⚠️ 这条只是**能分**，不是**设计上分得清** —— 落账见 K14。
+    # 判据是 `writer` 列（K14，2026-11-03）。此前 `src` 只存「哪一版 dump」、分不开写入方，
+    #   只能靠 `src_ref` 的形状碰巧不同去猜（例句那支没有 `#`）—— 回填时两种口径逐行一致（10,394）。
     reledges = con.execute(
         "SELECT COUNT(*) FROM sense_relation "
-        "WHERE src_ref LIKE '%:rel:%' AND src_ref NOT LIKE '%#%'").fetchone()[0]
+        "WHERE writer = 'harvest_relations_from_examples'").fetchone()[0]
     con.close()
 
     gap, extra = want - have, have - want

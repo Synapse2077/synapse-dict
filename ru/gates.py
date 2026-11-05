@@ -211,6 +211,9 @@ GATES = [
         deps=frozenset({"dict", "entry", "stress", "inflection", "pronunciation", "sense", "sense_src",
                         "sense_gloss", "sense_tag", "example", "example_gloss", "sense_relation", "audio",
                         "etymology"}),
+        # 🆕 2026-11-02：**它不读的派生列**（只写这几列不脏它）。这两列是从屈折层/fr 说明里推出来的，
+        #    不在任何一份 dump 里 —— 外锚闸比的是证据原文。`self_check` 守着：列名出现在本闸源码里就红。
+        ignore=frozenset({"sense_src.inferred_target", "sense_src.ptr_tags", "sense_src.ptr_zh", "sense_src.ptr_hidden_why"}),
         why="阶段 8。**九层 vs dump，三向恒等**（源头有库里没有／库里有追不回源头／**键对上而内容不一样**）。"
             "⭐ `[[external-anchor-gates]]`：前面的闸锚的都是库自己，对「收割器整批漏抽」「后来某一步静默 UPDATE」结构性失明；"
             "这一道锚外部 dump ⇒ 永不过期。🔴 **一个判据都不重写**：每层 import 收割器的 `collect()` 本身"
@@ -297,10 +300,24 @@ def dirty(d, extra_tables=()):
        `[[primary-key-is-not-enough]]`：**计数型判据对内容改动结构性失明。**
        留着 `d` 是因为它能认出**加列**这种 SQL 里看不出表名的变化。
     """
-    touched = {table_of(k) for k in d} | {str(t).lower() for t in extra_tables}
-    out = [g["name"] for g in GATES
-           if g["deps"] is not None and (g["deps"] & touched)]
+    # 🆕 2026-11-02：粒度到**列**。`d` 的键 `tbl.col` 与 SQL 里抠出的 `tbl.col`（UPDATE 的 SET 列）记成列，
+    #    `#tbl`／整张表的写（INSERT/DELETE/认不出列）记成表。闸声明的 `ignore`（它不读的列）只挡**列级**的变化。
+    touched = {_entry(k) for k in d} | {str(t).lower() for t in extra_tables}
+    out = [g["name"] for g in GATES if g["deps"] is not None and any(_hits(g, e) for e in touched)]
     return sorted(out), touched
+
+
+def _entry(key):
+    """快照键 → `表` 或 `表.列`。"""
+    k = str(key)
+    if k.startswith("#") or k.startswith("__"):
+        return table_of(k)
+    return k.lower() if "." in k else "dict.%s" % k.lower()
+
+
+def _hits(g, e):
+    tbl = e.split(".", 1)[0]
+    return tbl in g["deps"] and not ("." in e and e in g.get("ignore", ()))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -452,6 +469,36 @@ def self_check():
                 bad.append("%s 的 deps 是**空集合** —— 想过了要写 `deps=None` 并说明，"
                            "空集合分不清「没依赖」和「忘了填」" % g["name"])
             claimed |= g["deps"]
+
+    # ⓪ `ignore`（闸声明「我不读的列」）—— 声明错了就是漏跑，所以**两条都机械地查**：
+    #    · 必须是 `表.列`，且表在这道闸的 deps 里；
+    #    · 列名**不许出现在这道闸自己的源码里**（出现了就说明它读）。⚠️ 这只挡得住「闸文件里直接写了列名」那一种；
+    #      闸 import 的收割器里读不读，靠声明者逐个确认 —— 只给「推出来的、不在 dump 里」的派生列用。
+    for g in GATES:
+        ign = g.get("ignore", frozenset())
+        if not ign:
+            continue
+        src = (ROOT / g["file"]).read_text(encoding="utf-8") if (ROOT / g["file"]).exists() else ""
+        for e in sorted(ign):
+            if "." not in e or e.split(".", 1)[0] not in (g["deps"] or ()):
+                bad.append("%s 的 ignore `%s` 不是「deps 里某张表.列」" % (g["name"], e))
+            elif e.split(".", 1)[1] in src:
+                bad.append("🔴 %s 声明不读 `%s`，而这一列的名字出现在它的源码 %s 里 —— 它读，声明错了（会漏跑）"
+                           % (g["name"], e, g["file"]))
+    # ⓪' 调度的固定样例（＝这套粒度机制自己的变异：ignore 被删 / 写宽 / 列级被当成表级，都会在这里红）
+    cases = [
+        ((), ["sense_src.ptr_tags"], "外锚闸", False),          # 只写不读的派生列 ⇒ 不脏
+        ((), ["sense_src.ptr_tags"], "义项闸", True),           # 义项闸 E17 读它 ⇒ 脏
+        ((), ["sense_src"], "外锚闸", True),                    # 整张表（INSERT/DELETE）⇒ 照脏
+        ((), ["sense_src.text"], "外锚闸", True),               # 证据原文那一列 ⇒ 照脏
+        ({"sense_src.inferred_target": 3}, [], "外锚闸", False),  # 计数差也按列
+        ({"#sense_src": 1}, [], "外锚闸", True),                # 行数变 ⇒ 表级
+    ]
+    for dd, ex, name, want in cases:
+        got = name in dirty(dict.fromkeys(dd, 1) if isinstance(dd, tuple) else dd, ex)[0]
+        if got != want:
+            bad.append("🔴🔴 调度样例错：写 %s %s ⇒ %s 应%s脏，实际%s"
+                       % (dd or "", ex or "", name, "" if want else "不", "脏" if got else "不脏"))
 
     # ① 每张追踪中的表，至少要有一道闸盯着
     import dbtool

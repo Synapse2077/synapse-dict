@@ -310,10 +310,14 @@ export class EnglishDictService {
       //    ⚠️ `src` **不能进 DISTINCT** —— 同一读音在 `en-edition` 和 `en-selfgen`
       //       各有一行，带上 src 又变成两行（`cat` 的 `/ˈkæt/·uk` 出现两次）。
       //       读者不需要看来源；来源在库里，回归闸查得到。
+      // 🔴 2026-11-02（EN_PLAN §16.7①）：地区内的顺序＝**主读音在前、其余按源头列出的顺序**（源头给的在我们生成的前面）。
+      //    原来是 `ORDER BY …, notation, ipa`（IPA 字母序）⇒ 每个地区印在第一、做成可点按钮的那条是任意的
+      //    （`curious` 英式第一条是边缘转写 `/ˈkjɵːɹɪjəs/`）。`is_primary` 由 `en/fixes/fill_is_primary.py` 填，回归闸 A16 守。
       readings: this.db.prepare(
         `SELECT ipa, notation, region, MIN(src) AS src FROM pronunciation
           WHERE word_id = ? GROUP BY ipa, notation, region
-          ORDER BY (region IS NULL), region, notation, ipa`),
+          ORDER BY (region IS NULL), region, MAX(is_primary) DESC,
+                   MIN(CASE WHEN src = 'en-edition' THEN id END) IS NULL, MIN(id)`),
       audio: this.db.prepare(
         `SELECT file, COALESCE(url_ogg, url_mp3, url_wav, url_other) AS url,
                 region, region_src, speaker

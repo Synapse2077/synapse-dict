@@ -31,6 +31,7 @@ vi 186 ／ ko 33 ／ de 12 ／ ru 1。
 见 `stage6_sources` 文件头第三条。**第一版拿 IPA 交集当第二信号，错得很整齐**
 （把 `chìa khoá/khóa` 这类正字法异写判成张冠李戴，根因是三版转写约定不同）。
 换成「源头有没有说这两个词形是一回事」后：7 行命中，真错 4、假阳 3。
+✅ W8 2026-11-05：假阳 3 组人工裁决（`S6.AUDIO_SAME_WORD_ADJUDICATED`）放行 ⇒ 现在命中 4 行、人工确认 4/4。
 
 用法：
     python3 vi/pipeline/build_audio_layer.py [--apply]
@@ -192,7 +193,7 @@ def main():
           % (len(bad), len(set(bad))))
     for w, fw, src in sorted(set(bad)):
         print("     %-24s ← 文件名里是 %-16s （%s）" % (w, fw, src))
-    print("   ⚠️ 逐条读过：真错 4 组；已知假阳 3 组（欠账 **W8**）⇒ 精确度 ~57%，"
+    print("   ⚠️ 逐条读过：4 组都是真错（另 3 组假阳已由 W8 裁决名单放行），"
           "**只隐藏不删**；展示层永不播一条读错的音")
 
     cov = len({r[0] for r in pub})

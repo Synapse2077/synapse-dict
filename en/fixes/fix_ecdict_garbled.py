@@ -56,6 +56,9 @@ MAP = {
     "𪤇": "鮨",   # 美洲石鮨 Morone americana（white perch，鮨科）
     "𤟥": "缇",   # 灵缇 greyhound／狐缇
     "𧍃": "蜚",   # 马得拉蜚蠊 Leucophaea maderae
+    # 2026-11-02：私用区 U+E193（源头写成实体 `&#xe193;`，`build_legacy_sense` 解码后落成这个字）——
+    #   `Hida-gawa` 飞騨川／`Hida-sanmyaku` 飞騨山脉（日本岐阜「飛騨」）⇒ 规范简体写「驒」（U+9A52，BMP，字体都有）
+    "\ue193": "驒",
 }
 
 

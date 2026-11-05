@@ -319,6 +319,14 @@ def _mutations():
         ("Q2", "把一行出版值改成还带方括号的串", set(),
          ["UPDATE pronunciation SET ipa='['||ipa||']' WHERE id=(SELECT MIN(id) FROM pronunciation "
           "WHERE entry_id IS NULL)"]),
+        # R6（2026-11-02 结清时补）：源头拿 ASCII 撇号当重音符 —— 入库该归一成 `ˈ`，回潮了 Q2 必须红
+        ("Q2", "把一行出版值的 `ˈ` 换回 ASCII 撇号（R6 回潮）", set(),
+         ["UPDATE pronunciation SET ipa=REPLACE(ipa,'ˈ','''') WHERE id=(SELECT MIN(id) FROM pronunciation "
+          "WHERE entry_id IS NULL AND instr(ipa,'ˈ')>0)"]),
+        # R2（同日）：fr 版把说明散文填进 ipa —— 收割器按 `IPA_PROSE` 拒收，回潮了 Q2 必须红
+        ("Q2", "把一行出版值改成 fr 版的说明散文 `se prononce`（R2 回潮）", set(),
+         ["UPDATE pronunciation SET ipa='se prononce' WHERE id=(SELECT MIN(id) FROM pronunciation "
+          "WHERE entry_id IS NULL)"]),
         ("Q3", "把一批读音的 entry_id 挪到别的词形的 entry 上",
          # Q11：挂到别人的意思上，重音位置自然对不上；Q9：挪过去撞上那个 entry 原有的同串
          {"Q9", "Q11"},["UPDATE pronunciation SET entry_id=entry_id+1 WHERE entry_id IS NOT NULL AND id%50=0"]),

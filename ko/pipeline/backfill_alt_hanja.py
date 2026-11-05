@@ -55,6 +55,8 @@ import sqlite3
 import dbtool
 import paths
 import resolve_relation_targets as R   # 落点解析判据：import，不重写
+import relation_writers
+WRITER = relation_writers.name(__file__)    # K14：`sense_relation.writer`
 
 f = lambda n: format(n, ",")
 
@@ -193,12 +195,13 @@ def main():
             "ko-backfill-alt-hanja",
             expect={"#sense_relation": len(take),
                     "sense_relation.target": len(take),
+                    "sense_relation.writer": len(take),
                     "sense_relation.target_norm": n_norm_new},
             invalidates=[]) as s:
         s.executemany(
             "INSERT INTO sense_relation"
-            " (word_id, sense_id, kind, target, tags, hidden, src, src_ref, target_norm)"
-            " VALUES (?, NULL, 'alt_hanja', ?, NULL, 0, ?, ?, ?)",
+            " (word_id, sense_id, kind, target, tags, hidden, src, src_ref, target_norm, writer)"
+            " VALUES (?, NULL, 'alt_hanja', ?, NULL, 0, ?, ?, ?, '%s')" % WRITER,
             [(wid, alt, SRC, ref, tn) for wid, alt, tn, ref in take])
 
     print("\n═══ 写后回核（从库里重算）═══")

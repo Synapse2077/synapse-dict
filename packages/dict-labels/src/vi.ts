@@ -209,10 +209,11 @@ export function viGlossIsSameAsSpelling(gloss: string, spellings: readonly strin
  *   （`[[dont-say-source-lacks-what-we-skipped]]`）。⇒ 标注来源，中文排在最前。
  */
 export const VI_EDITION_LABELS: Record<string, string> = {
-  'zh-edition-trad': '中文版',
-  'zh-edition-simp': '中文版',
-  'en-edition': '英文版',
-  'vi-edition': '越南语版',
+  // 2026-11-03：写全「维基词典」（与 ru/ko 同一种叫法；原来的「中文版」没说是哪部书的版）
+  'zh-edition-trad': '中文维基词典',
+  'zh-edition-simp': '中文维基词典',
+  'en-edition': '英文维基词典',
+  'vi-edition': '越南文维基词典',
 };
 
 /** 词源段的排序权重：中文读者优先看中文，其次英文，越南语垫后。 */

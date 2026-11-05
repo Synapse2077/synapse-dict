@@ -43,6 +43,8 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '../../..');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+// 正常一批 1–2 分钟（--virtual-time-budget 20s ＋ 起浏览器）；给到 5 分钟仍不返回就是挂了
+const CHROME_TIMEOUT_MS = 300_000;
 const WIDTH = 375;
 type Lang = 'en' | 'es' | 'it' | 'fr' | 'pt' | 'de' | 'ja' | 'ko' | 'vi' | 'ru';
 const VIEW: Record<Lang, unknown> = {
@@ -122,11 +124,24 @@ addEventListener('DOMContentLoaded', () => { const o = document.getElementById('
   const file = join(dir, 'index.html');
   writeFileSync(file, top);
   // 2026-10-31：用完即删 —— 原来每跑一次在系统临时目录留一个 ~9 MB 的目录，从不清
-  let dom: string;
+  // 🔴 2026-11-05：原来**没有超时** —— 无头 Chrome 偶发挂住（53 分钟 1.4 秒 CPU），汇总闸就永远等下去、一个字不报，
+  //    与「还在跑」长得一模一样。⇒ 超时杀掉重试一次；两次都超时就抛出（汇总闸判红），不许静默当绿。
+  let dom = '';
   try {
-    dom = execFileSync(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run',
-      '--virtual-time-budget=20000', '--dump-dom', `file://${file}`],
-      { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+    for (let attempt = 1; ; attempt++) {
+      try {
+        dom = execFileSync(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run',
+          '--virtual-time-budget=20000', '--dump-dom', `file://${file}`],
+          { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+            timeout: CHROME_TIMEOUT_MS, killSignal: 'SIGKILL' });
+        break;
+      } catch (e: any) {
+        const timedOut = e?.code === 'ETIMEDOUT' || e?.signal === 'SIGKILL';
+        if (!timedOut) throw e;
+        if (attempt >= 2) throw new Error(`无头 Chrome 连续 ${attempt} 次超过 ${CHROME_TIMEOUT_MS / 1000}s 没返回（挂住了）—— 不当绿`);
+        console.error(`   ⚠️ 无头 Chrome 超过 ${CHROME_TIMEOUT_MS / 1000}s 没返回，杀掉重试（第 ${attempt + 1} 次）`);
+      }
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -502,6 +502,22 @@ ADD_COLUMNS = [
     # 🆕 2026-10-25（R30）：ё 召回键 `dbtool.fold_ru(word)`（`norm_ru` 再折 ё→е）。**不是身份键**：
     #    `все`/`всё` 在它上面相同。只给搜索「省写 ё 也找得到」用，认词仍按 `word`/`word_norm`。
     ("dict", "word_fold", "TEXT"),
+    # 🆕 2026-11-02（R22 ＋ 空白词形页）：**推出来的**指针目标 —— 屈折层反查唯一 ＋ 释义点名一致才填
+    #    （`criteria.inferred_target`，由 `infer_pointer_targets.py` 写）。**不并进 `pointer_target`**：
+    #    那一列是源头给的结构字段（证据），混进推出来的值就分不清「源头给的」与「我们推的」。
+    ("sense_src", "inferred_target", "TEXT"),
+    # 🆕 2026-11-02（R32）：**从 fr 版指针说明里读出来的**语法标签（`accusative|masculine|singular`，与 `inflection.tags`
+    #    同一值域、同一 `|` 分隔），`criteria.fr_pointer_tags` 解析，认不全的留 NULL。展示层据它印中文、不再印法语原文。
+    ("sense_src", "ptr_tags", "TEXT"),
+    # 🆕 2026-11-03（R32 收尾）：解析不成标签的 vi/pl/fr 指针说明的**机翻中文**（`fixes/translate_r32_pointers.py`，
+    #    deepseek flash，按说法去重译一次）。派生列，原文 `text` 一字不动；展示层 `ptr_tags` 优先、其次它（标「机翻」）。
+    ("sense_src", "ptr_zh", "TEXT"),
+    # 🆕 2026-11-05（R32 结清）：**不印**的指针的理由（`criteria.pointer_hidden_why`，人工裁决 2 行）。派生列，
+    #    `pointer_target`／`text` 一字不动；展示层指针查询 `AND x.ptr_hidden_why IS NULL`。
+    ("sense_src", "ptr_hidden_why", "TEXT"),
+    # 🆕 2026-11-05（R25／B31）：源头给的例句标签 → 受控值域（`criteria.example_tags`；`collocation|proverb|colloquial` 竖线分隔）。
+    #    由 `example_layer.py` 收割时读、`--sync` 原地同步；中文名在 `dict-labels` 的 `RU_EXAMPLE_TAG_LABELS`。
+    ("example", "tags", "TEXT"),
 ]
 
 

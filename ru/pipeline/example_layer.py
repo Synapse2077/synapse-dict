@@ -63,7 +63,8 @@ def dup_key(text):
 
 def collect(conn, limit=None, verbose=True):
     """→ (rows, glosses, stat)。rows 是元组：
-    (id, word_id, entry_id, sense_id, text, text_pub, ref, why, src, src_ref)；
+    (id, word_id, entry_id, sense_id, text, text_pub, ref, why, src, src_ref, tags)；
+    `tags`（R25，2026-11-05）＝ `criteria.example_tags(x)`，加在**末尾**，前十个位置不变（闸按位置读）；
     glosses：(example_id, lang, text, src)。**只读**。"""
     wid = dict(conn.execute("SELECT word, id FROM dict"))
     eid = dict(conn.execute("SELECT src_ref, id FROM entry"))
@@ -74,11 +75,13 @@ def collect(conn, limit=None, verbose=True):
     st = collections.Counter()
     nid = 0
 
-    def add(word_id, entry_id, sense_id, text, tp, rf, why, src, sref, g):
+    def add(word_id, entry_id, sense_id, text, tp, rf, why, src, sref, g, tags=None):
         nonlocal nid
         nid += 1
         rows.append([nid, word_id, entry_id, sense_id, text, tp if tp != text else None,
-                     rf, why, src, sref])
+                     rf, why, src, sref, tags])
+        if tags:
+            st["带标签（%s）" % src] += 1
         if g:
             gl[nid] = (g[0], g[1], src)
 
@@ -133,7 +136,7 @@ def collect(conn, limit=None, verbose=True):
                             st["正文空（只有出处）⇒ 不入库"] += 1
                             continue
                         add(word_id, entry_id, sense_id, t, t, (x.get("ref") or "").strip() or None,
-                            ZH_SPLIT_FAIL, src, "%s#x%d" % (key, xi), None)
+                            ZH_SPLIT_FAIL, src, "%s#x%d" % (key, xi), None, criteria.example_tags(x))
                         st["落点 " + land] += 1
                     continue
                 for xi, x in enumerate(exs):
@@ -156,7 +159,7 @@ def collect(conn, limit=None, verbose=True):
                         st["译文不收（%s：%s）" % (src, "第四语言/非译文" if not criteria.EX_TR_LANG.get(src)
                                               else "形状不像译文")] += 1
                     add(word_id, entry_id, sense_id, t, tp, rf,
-                        why, src, "%s#x%d" % (key, xi), g if not why else None)
+                        why, src, "%s#x%d" % (key, xi), g if not why else None, criteria.example_tags(x))
                     st["落点 " + land] += 1
         if verbose:
             print("   …%s 扫完（%.0fs）" % (src, time.time() - t0), flush=True)
@@ -233,6 +236,7 @@ def write(rows, glosses, conn, rebuild=False):
         - q("SELECT COUNT(*) FROM example WHERE entry_id IS NOT NULL"),
         "example.hidden_why": sum(1 for r in rows if r[7])
         - q("SELECT COUNT(*) FROM example WHERE hidden_why IS NOT NULL AND TRIM(hidden_why)<>''"),
+        "example.tags": sum(1 for r in rows if r[10]) - q("SELECT COUNT(*) FROM example WHERE tags IS NOT NULL"),
     }
     conn.close()
     with dbtool.session("example-layer" + ("-rebuild" if rebuild else ""), expect=exp,
@@ -241,8 +245,8 @@ def write(rows, glosses, conn, rebuild=False):
             s.execute("DELETE FROM example_gloss")
             s.execute("DELETE FROM example")
         s.executemany("INSERT INTO example(id,word_id,entry_id,sense_id,text,text_pub,ref,hidden,"
-                      "hidden_why,src,src_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                      [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], 1 if r[7] else 0, r[7], r[8], r[9])
+                      "hidden_why,src,src_ref,tags) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                      [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], 1 if r[7] else 0, r[7], r[8], r[9], r[10])
                        for r in rows])
         s.executemany("INSERT INTO example_gloss(example_id,lang,text,src) VALUES (?,?,?,?)", glosses)
 
@@ -254,8 +258,10 @@ def sync(rows, glosses, conn, dry=False):
     🔴 只许动上面四列：重算出的 id 与库里按 `src_ref` 对不上、源头译文变了、或要把**挂着模型译文**的例句藏起来，
        一律报错退出（那不是同步能处理的事，要单独设计）。
     """
+    # R25（2026-11-05）：`tags` 也归同步管（源头标签，不碰译文）；列还没有 ⇒ 当作全空，写库时先建
+    has_tags = "tags" in {c[1] for c in conn.execute("PRAGMA table_info(example)")}
     db = {r[0]: r[1:] for r in conn.execute(
-        "SELECT src_ref, id, text_pub, ref, hidden_why FROM example")}
+        "SELECT src_ref, id, text_pub, ref, hidden_why, %s FROM example" % ("tags" if has_tags else "NULL"))}
     if set(db) != {r[9] for r in rows}:
         raise SystemExit("🔴 重算的 src_ref 集合与库里不同（多 %d／少 %d）—— 不是同步能处理的"
                          % (len({r[9] for r in rows} - set(db)), len(set(db) - {r[9] for r in rows})))
@@ -274,15 +280,15 @@ def sync(rows, glosses, conn, dry=False):
         print("   ⭐ 新的同句借中文 %7d %s%s" % (g[0], g[2][:30], "（替换模型中文）" if g[0] in model else ""))
     up = []
     for r in rows:
-        did, tp, rf, why = db[r[9]]
+        did, tp, rf, why, tg = db[r[9]]
         if did != r[0]:
             raise SystemExit("🔴 %s 的 id 变了（库 %d／重算 %d）—— 模型译文按 id 挂着，不许同步" % (r[9], did, r[0]))
-        if (tp, rf, why) != (r[5], r[6], r[7]):
+        if (tp, rf, why, tg) != (r[5], r[6], r[7], r[10]):
             if r[7] and not why and r[0] in model:
                 raise SystemExit("🔴 要藏的 %s 挂着模型译文 —— 单独设计" % r[9])
-            up.append((r[5], r[6], 1 if r[7] else 0, r[7], r[0]))
+            up.append((r[5], r[6], 1 if r[7] else 0, r[7], r[10], r[0]))
     print("\n■ 同步：%s 行出版列要改" % F(len(up)))
-    for tp, rf, _h, why, i in up[:20]:
+    for tp, rf, _h, why, _tg, i in up[:20]:
         print("   %7d  正文 %-40s ｜ ref %s%s" % (i, (tp or "")[:40].replace("\n", "⏎"), (rf or "")[:40],
                                               "  ｜ 藏：" + why if why else ""))
     if dry or not (up or new_g):
@@ -295,10 +301,14 @@ def sync(rows, glosses, conn, dry=False):
         "example.hidden_why": sum(1 for r in rows if r[7])
         - cnt("SELECT COUNT(*) FROM example WHERE hidden_why IS NOT NULL AND TRIM(hidden_why)<>''"),
         "#example_gloss": len(new_g) - len(drop_model),
+        "example.tags": sum(1 for r in rows if r[10])
+        - (cnt("SELECT COUNT(*) FROM example WHERE tags IS NOT NULL") if has_tags else 0),
     }
     conn.close()
     with dbtool.session("example-sync-%s" % criteria.RULE_VER, expect=exp, invalidates=[]) as s:
-        s.executemany("UPDATE example SET text_pub=?, ref=?, hidden=?, hidden_why=? WHERE id=?", up)
+        if not has_tags:
+            s.execute("ALTER TABLE example ADD COLUMN tags TEXT")
+        s.executemany("UPDATE example SET text_pub=?, ref=?, hidden=?, hidden_why=?, tags=? WHERE id=?", up)
         s.executemany("DELETE FROM example_gloss WHERE id=?", [(i,) for i in drop_model])
         s.executemany("INSERT INTO example_gloss(example_id,lang,text,src) VALUES (?,?,?,?)", sorted(new_g))
 

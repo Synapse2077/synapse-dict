@@ -110,8 +110,10 @@ def gap_rows(con):
     ⚠️ 判据写在 SQL 里而不是先全取再过滤：76,031 条的 `text` 有 230 万字符，
        全取一遍只为了丢掉其中一部分是白搬。
     """
+    # 🔴 W22（2026-11-01）：送去译的是**出版正文** `text_pub`（读者看到的那句）。`text` 已改回 dump 原文，
+    #    里面重新带着韩语译文／串进首行的出处／内嵌英译 —— 送那个去译就是花钱译垃圾。
     return list(con.execute("""
-        SELECT e.id, d.word, e.text
+        SELECT e.id, d.word, e.text_pub
         FROM example e JOIN dict d ON d.id = e.word_id
         WHERE e.hidden = 0
           AND NOT EXISTS (SELECT 1 FROM example_gloss g
@@ -150,7 +152,8 @@ def build(rows, per=None):
     batches, meta = [], []
     for i in range(0, len(rows), per):
         chunk = rows[i:i + per]
-        pay = {str(eid): {"w": w, "t": t} for eid, w, t in chunk}
+        # W21：只送**要一行对一行**的那些行（喃字行、`[…]` 不送）—— 口径见 `S6.translation_lines`
+        pay = {str(eid): {"w": w, "t": "\n".join(S6.translation_lines(t))} for eid, w, t in chunk}
         m = [(str(eid), eid) for eid, *_ in chunk]
         # 每批注入一条定题（轮着来），键**混在中间不放开头**
         ck = list(PROBE)[i // per % len(PROBE)]
@@ -185,6 +188,15 @@ def normalize_zh(t, src_lines=None):
     out = "\n".join(l.rstrip() for l in (t or "").strip().split("\n"))
     if src_lines == 1 and "\n" in out:
         out = "".join(l.strip() for l in out.split("\n"))
+    # 🔴 W21（2026-11-02）：**每一行都恰好被拆成两行** ⇒ 两两并回。
+    #    `Làng Phước-hãi, lưới bạc muôn, Ở theo mé biển tuy buồn mà vui.` 是一行里的一副对句，
+    #    模型在逗号处拆开 ⇒ 2 行原文得 4 行译文；**重译一轮不收敛**（4 条里 4 条照拆）。
+    #    与上面「原文一行」同一条原则：对应关系没丢，确定性并回，不靠 prompt。
+    #    ⚠️ 只认「恰好 2 倍」：不是整倍数时并不出确定的对应，留给闸 P16 报。
+    elif src_lines and src_lines > 1:
+        ls = out.split("\n")
+        if len(ls) == 2 * src_lines:
+            out = "\n".join(ls[k].strip() + ls[k + 1].strip() for k in range(0, len(ls), 2))
     return out
 
 
@@ -242,13 +254,14 @@ def audit(path, rows, ntok, peak):
             why = "空"
         elif not _HAN.search(zh):
             why = "没有一个汉字（多半没翻译）"
-        elif len(t.split("\n")) != len(normalize_zh(zh, len(t.split("\n"))).split("\n")):
+        elif (len(S6.translation_lines(t))
+              != len(normalize_zh(zh, len(S6.translation_lines(t))).split("\n"))):
             # 🔴 **例句特有的那条，5b 里不存在。** 诗文多行，行数不对读者就不知道
             #    哪行对哪行。⚠️ 判的是 `normalize_zh` **归一之后**的行数 ——
             #    「原文 1 行而译文多行」那一类已在代码里确定性并掉，不该再报红
             #    （1% 切片的 3 条坏全是那一类）。这里剩下的是真的对不上。
             why = ("🔴 行数不对：原文 %d 行，译文 %d 行"
-                   % (len(t.split("\n")), len(zh.split("\n"))))
+                   % (len(S6.translation_lines(t)), len(zh.split("\n"))))
         else:
             # 判据**词一级**：译文里出现的越南语串，原文里（或词头里）也得有。
             # ⚠️ 这条在 5b 被收窄过一次（第一版「译文里有越南语特征拼写」太宽，
@@ -316,8 +329,8 @@ def load(tags, dry=True, replace=None):
     # 🔴 `normalize_zh` 要知道**原文有几行** ⇒ 入库前必须把原文取回来。
     #    不取的话归一那一半静默失效，而库里会存着多行译文、页面上与原文对不上。
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
-    src_lines = {i: len(t.split("\n")) for i, t in
-                 con.execute("SELECT id, text FROM example WHERE hidden=0")}
+    src_lines = {i: len(S6.translation_lines(t)) for i, t in    # W21：口径见 `S6.translation_lines`
+                 con.execute("SELECT id, text_pub FROM example WHERE hidden=0")}   # W22：行数按读者看到的那句
     con.close()
 
     rows, stat, seen = [], collections.Counter(), set()
@@ -439,7 +452,7 @@ def main():
         want = set(json.loads((OUT / ("%s.json" % a.redo)).read_text()))
         con2 = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
         rows = list(con2.execute(
-            "SELECT e.id, d.word, e.text FROM example e JOIN dict d ON d.id = e.word_id "
+            "SELECT e.id, d.word, e.text_pub FROM example e JOIN dict d ON d.id = e.word_id "   # W22：译出版正文
             "WHERE e.hidden = 0 AND e.id IN (%s) ORDER BY e.id"
             % ",".join("?" * len(want)), tuple(sorted(want))))
         con2.close()

@@ -104,7 +104,7 @@ def plan(con):
             ref_move.append((eid, cite, body))
         else:
             body = text
-        new_body, en = S6.split_inline_english(body)
+        new_body, en = S6.split_inline_english(body, syl)
         if en:
             en_move.append((eid, new_body, en, tail.get(eid)))
     return hide, ref_move, en_move
@@ -133,7 +133,7 @@ def report(con, hide, ref_move, en_move):
     ids = {e for e, _ in hide}
     print("\n   修完后 `text` 里仍带非越南语行的可出版例句：%d 条（应为 0）"
           % sum(1 for eid, body, en, t in en_move
-                if eid not in ids and S6.split_inline_english(body)[1]))
+                if eid not in ids and S6.split_inline_english(body, S6.vi_syllables(con))[1]))
 
 
 def apply_(con, hide, ref_move, en_move):
@@ -158,8 +158,9 @@ def apply_(con, hide, ref_move, en_move):
     ) as cur:
         for eid, why in hide:
             cur.execute("UPDATE example SET hidden=1, hidden_why=? WHERE id=?", (why, eid))
+        syl = S6.vi_syllables(con)
         for eid, cite, body in ref_move:
-            new_body = S6.split_inline_english(body)[0]
+            new_body = S6.split_inline_english(body, syl)[0]
             cur.execute("UPDATE example SET ref=?, text=? WHERE id=?", (cite, new_body, eid))
         moved_ref = {e for e, _, _ in ref_move}
         for eid, body, en, t in en_move:

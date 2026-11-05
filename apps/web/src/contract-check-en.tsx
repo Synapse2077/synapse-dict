@@ -217,6 +217,21 @@ const CHECKS: Check[] = [
       ? `主读音 /${e.readings[0].ipa}/ 不在页面上` : null,
   },
   {
+    // §16.7①（2026-11-02）：每个地区**做成可点按钮的那一条**必须是主读音（源头列在第一位的那条，`is_primary`）。
+    //    原来按 IPA 字母序排，`curious` 英式可点的是边缘转写 `/ˈkjɵːɹɪjəs/`，源头首选的 `/ˈkjʊə.ɹi.əs/` 排在后面。
+    //    主读音从库里独立取（不读服务给的顺序），在 HTML 里找可点按钮（`button.phonetic-btn`，不是 `.phonetic-alt`）。
+    name: '🔴 D4 主读音不是可点的那一条（地区内顺序回到 IPA 字母序）',
+    hit: (e, h) => {
+      const prim = (db.prepare(
+        'SELECT DISTINCT p.ipa FROM pronunciation p JOIN dict d ON d.id = p.word_id WHERE d.word = ? AND p.is_primary = 1',
+      ).all(e.word) as { ipa: string }[]).map((r) => r.ipa);
+      const btn = new Set([...h.matchAll(/<button class="phonetic-btn"[\s\S]*?class="phonetic-value">\/([^<]*)\/</g)]
+        .map((m) => m[1]));
+      const miss = prim.filter((ipa) => !btn.has(ipa));
+      return miss.length ? `主读音 ${miss.slice(0, 3).map((x) => `/${x}/`).join(' ')} 没有印成可点按钮` : null;
+    },
+  },
+  {
     // fr 那次 39 万条录音一个用户看不见（`french.ts` 里 `FROM audio` 出现 0 次）。
     // 🔴 2026-09-10 判据跟着组件换：en 从页尾裸 `<audio controls>` 换成共用的
     //    `HumanAudioRow`（内联按钮 `.audio-chip`，播放走 JS `new Audio()`，
@@ -473,6 +488,10 @@ const MUTS: Mut[] = [
     (h) => h.replace(/<span class="rel-more">\+\d+<\/span>/g, '')
       .replace(/(<button class="phonetic-btn"[\s\S]*?<\/button>)[\s\S]*?(<\/div>)/,
                (_m, first, tail) => first + tail)],
+  // 主读音降成「另一种记法」—— 模拟地区内顺序回到 IPA 字母序、首选读音不再是可点的那条
+  ['D4 主读音被排到后面（不是可点按钮）',
+    (h) => h.replace(/<button class="phonetic-btn"([^>]*)>([\s\S]*?)<\/button>/g,
+                     '<span class="phonetic-btn phonetic-alt"$1>$2</span>')],
   ['E1 例句没渲染', (h) => h.replace(/class="ex-en"/g, 'class="x"')],
   ['E2 例句中文没渲染', (h) => h.replace(/<div class="ex-zh">[^<]*<\/div>/g, '')],
   ['E3 出处排在引文后面（改前的顺序）',

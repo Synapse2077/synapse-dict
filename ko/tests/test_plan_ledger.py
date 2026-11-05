@@ -141,10 +141,9 @@ DELIVERABLE = {
           ("例句译文（中文版白送的那批）",
            "SELECT COUNT(*) FROM example_gloss WHERE lang='zh'"),
           # 🔴 6b 是**从例句标签里再收一轮关系**，它与阶段 2d 的关系层是两个写入方。
-          #    判据只能按 `src_ref` 的形状挑（K14：`src` 列分不开两支）
+          #    按 `writer` 挑（K14 结清前只能按 `src_ref` 的形状猜）
           ("从例句标签收来的关系边（6b）",
-           "SELECT COUNT(*) FROM sense_relation WHERE src_ref LIKE '%:rel:%' "
-           "AND src_ref NOT LIKE '%#%'"),
+           "SELECT COUNT(*) FROM sense_relation WHERE writer = 'harvest_relations_from_examples'"),
           ("audio 录音层（6c）", "SELECT COUNT(*) FROM audio"),
           # 🔴 Commons 那一路是 6c 的**主力**（dump 内嵌只有 636 条）。
           #    不单查它，"只抽了 dump、Commons 整块没跑"也能宣布做完

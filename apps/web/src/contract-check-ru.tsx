@@ -18,7 +18,7 @@ import { getService } from '@synapse-dict/dict-core';
 import { RussianEntryView, EXAMPLES } from './App';
 import { POS_LABELS, REL_LABELS, RU_POS_LABELS, RU_RELATION_LABELS, RU_INFL_TAG_LABELS, RU_GRAMMAR_LABELS,
   RU_USAGE_LABELS, RU_USAGE_UNPRINTED, RU_FAMILY_POS_LABELS, RU_FAMILY_FORM_LABELS, RU_ASPECT_SUBKIND_LABELS,
-  RU_ETYM_TYPE_LABELS, RU_EDITION_LABELS } from '@synapse-dict/dict-labels';
+  RU_ETYM_TYPE_LABELS, RU_EDITION_LABELS, RU_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 
 const svc = getService('ru') as unknown as { getEntry(w: string): any;
   search(p: string, l: number): Array<{ word: string }>;
@@ -50,6 +50,9 @@ function domainGaps(): string[] {
     (v) => !!RU_USAGE_LABELS[v] || RU_USAGE_UNPRINTED.has(v));
   need('词源类型', q('SELECT DISTINCT etym_type AS v FROM etymology WHERE etym_type IS NOT NULL'), (v) => !!RU_ETYM_TYPE_LABELS[v]);
   need('版名', q('SELECT DISTINCT src AS v FROM entry'), (v) => !!RU_EDITION_LABELS[v]);
+  // R25（2026-11-05）：例句标签 —— 展示层对没映射的键**不印**（不拿英文键兜底），所以漏映射只能在这里逮
+  need('例句标签', [...new Set(q('SELECT DISTINCT tags AS v FROM example WHERE tags IS NOT NULL')
+    .flatMap((v) => v.split('|')))], (v) => !!RU_EXAMPLE_TAG_LABELS[v]);
   return gaps;
 }
 const MUTATE = process.argv.includes('--mutate');
@@ -138,6 +141,58 @@ const CHECKS: Check[] = [
     hit: (t, e) => (e.word === 'чёс' && t.includes('按 ё 的写法找到') ? null : `打开的是「${e.word}」或没有说明`) },
   { id: 'C15', word: 'все', name: '「все」页印出只差 ё 的 всё（另一个词，不合并）',
     hit: (t, e) => (e.word === 'все' && t.includes('ё/е 写法不同的词') && t.includes('всё') ? null : '看不到 всё') },
+  // ⑩ R22（2026-11-02）：源头没给目标的词形页 —— 目标靠屈折层反查（`inferred_target`）。
+  //    这两页在那之前**什么释义/指针都印不出来**（ru 版形动词、fr 版姓氏变格各一个样本）
+  { id: 'C20', word: 'взбулгаченный', name: '形动词页印出可点的 → взбулгачить（反查目标）',
+    hit: (t, _e, h) => (t.includes('这个词形是') && /ru-pointer-go[^>]*>→ взбулгачить/.test(h) ? null : '没有可点的 → взбулгачить') },
+  { id: 'C21', word: 'Янкова', name: '姓氏变格页印出可点的 → Янков（反查目标）',
+    hit: (t, _e, h) => (t.includes('这个词形是') && /ru-pointer-go[^>]*>→ Янков</.test(h) ? null : '没有可点的 → Янков') },
+  // ⑪ R32：fr 版指针说明印中文（解析出的标签），法语原文不上页面
+  { id: 'C22', word: 'Янкова', name: '姓氏变格页的指针说明印中文、不印法语原文',
+    hit: (t) => (t.includes('宾格') && !/Accusatif|Génitif|singulier/.test(t) ? null : '指针说明不是中文（或法语原文漏出来）') },
+  // ⑫ R21（2026-11-02 补闸；展示层阶段 9 已按此实现、而一直没有闸守着）：词形页上读音与带重音拼写**不许并排配对**
+  //    —— `лисы` 是 ли́сы（单数属格）／лисы́（复数主格）两个义项各一种重音，读音配错对就是错的。读音单独一行。
+  { id: 'C23', word: 'лисы', name: '词形页读音单独成行、不与带重音拼写配对（R21）',
+    hit: (_t, _e, h) => (!/class="ru-prons"/.test(h) && /ru-prons-form/.test(h) ? null : '读音被并进了带重音拼写那一行') },
+  // ⑬ R31（2026-11-03）：同组里中文一字不差的义项只印一行（`ель` 的「云杉」中文版一遍、英文版机翻又一遍）。
+  //    两个方向：云杉、冷杉**各**只印一次（并了）且**都还在**（没把不同的中文并成一条）；并起来那行带着英文版的 spruce、
+  //    不再标「机翻」（中文版是源头给的）、标出两个来源。
+  { id: 'C24', word: 'ель', name: '中文相同的义项只印一行、不同的不并（R31）',
+    hit: (_t, _e, h) => {
+      const n = (z: string) => (h.match(new RegExp(`class="ru-zh">${z}`, 'g')) ?? []).length;
+      if (n('云杉') !== 1 || n('冷杉') !== 1) return `云杉 印了 ${n('云杉')} 次、冷杉 ${n('冷杉')} 次（应各 1 次）`;
+      const li = h.split('<li').find((x) => x.includes('class="ru-zh">云杉')) ?? '';
+      if (!li.includes('spruce')) return '并起来那行丢了英文版的 spruce';
+      if (li.includes('机翻')) return '中文版给过同一句中文，仍标了「机翻」';
+      if (!/ru-sense-srcs/.test(li)) return '并起来那行没标来源';
+      // 来源说得出是哪个网站（2026-11-03：原来只写「英文维基」，读者读成维基百科）
+      if (!li.includes('中文维基词典') || !li.includes('英文维基词典')) return '来源标签没写全「维基词典」';
+      return null;
+    } },
+  // ⑭ R14（2026-11-03 结清）：一个 entry 有几个**重音位置不同**的候选时，页面**并列都印**，不只印 is_primary 那一个
+  //    （挑主行的信号弱：源头行序不是规范性判断）。阶段 9 已这样实现，而一直没有闸守着。
+  { id: 'C25', word: 'алфавит', name: '重音位置不同的候选并列都印（R14）',
+    //    🔴 第一版查整页文本 ⇒ 变异（候选收成一个）**没逮到**：变格表／读音区本来就印着两种重音写法。只读词头的 `ru-stressed` 那一格
+    hit: (_t: string, _e: any, h: string) => {
+      const s = [...h.matchAll(/class="ru-stressed"[^>]*>([^<]*)</g)].map((m) => m[1]).join(' ');
+      return s.includes('алфави́т') && s.includes('алфа́вит') ? null : `词头重音只印了「${s}」（另一个候选被挑掉了）`;
+    } },
+  // ⑮ R32 收尾（2026-11-03）：解析不成标签的 vi/pl/fr 指针说明印**过了术语核对的机翻中文**、标「机翻」，越南语原文不上页面
+  { id: 'C26', word: 'фоторепотёре', name: '越南文指针说明印中文（机翻）、不印越南语原文（R32）',
+    hit: (t) => (t.includes('前置格单数') && t.includes('机翻') && !/Dạng|cách|số ít/.test(t) ? null : '越南语原文漏到页面上（或没标机翻）') },
+  // ⑯ R32 结清（2026-11-05）：人工裁决不印的指针 —— `они` 页上不许出现源头指向法语词 `elles` 的那条
+  { id: 'C27', word: 'они', name: '不印的指针没漏出来（R32：目标是法语词 elles）',
+    hit: (t) => (!/\belles\b/.test(t) ? null : '页面上出现了指向法语词 elles 的指针') },
+  // ⑰ R25（2026-11-05）：源头标成搭配的例句，**那一条例句自己**前面印「搭配」（只读那一个例句块，不读整页 —— C25 的教训）
+  { id: 'C28', word: 'обиняк', name: '源头标的搭配在例句上印出「搭配」（R25）',
+    hit: (_t: string, _e: any, h: string) => {
+      // 🔴 第一版按「包含 без обиняков」找 ⇒ 先撞上 ru 版整句「Я буду говорить прямо, без обиняков.」（那条本就没标签）。
+      //    ⇒ 认**正文就是**这个搭配的那一块（去掉标签芯片与重音后以它开头）
+      const plain = (b: string) => b.replace(/<span class="ru-chip">[^<]*<\/span>/g, '').replace(/<[^>]*>/g, '').replace(/\u0301/g, '').trim();
+      const blk = (h.match(/<div class="ru-example">[\s\S]*?<\/div>/g) ?? []).find((b) => plain(b).startsWith('без обиняков'));
+      if (!blk) return '页面上找不到正文为「без обиняков」的例句';
+      return blk.includes('class="ru-chip">搭配<') ? null : '「без обиняков」前面没有印「搭配」';
+    } },
   // ⑨ 读者口径的标签覆盖：标签区一个英文键都不许漏出来（ko：映射表与展示层读不同列 ⇒ 徽标全空/漏键）
   ...['вода', 'замок', 'показать', 'полвека', 'все', 'Москва', 'идти', 'красный', 'быть', 'дом'].map((w, i) => ({
     id: `L${i + 1}`, word: w, name: `「${w}」标签区没有漏出英文键`,
@@ -147,6 +202,16 @@ const CHECKS: Check[] = [
     },
   })),
 ];
+
+// 🔴 编号必须唯一（2026-11-02）：R22 新加两条时我用了 C18/C19，而 C18 已被下面那条「欢迎页推荐词」占用 ——
+//    变异判「逮没逮到」按编号找，撞号时另一条的红会被算成这一条的（假通过）。没有任何东西报出来，是读输出时碰巧看见的
+//    ⇒ 做成启动即判：列表里的编号 ∪ 列表外单独跑的那几条（C16 搜索／C18 欢迎页）不许重复。
+const OUTSIDE_IDS = ['C16', 'C18'];
+{
+  const ids = [...CHECKS.map((c) => c.id), ...OUTSIDE_IDS];
+  const dup = ids.filter((x, i) => ids.indexOf(x) !== i);
+  if (dup.length) { console.log(`🔴🔴 契约闸检查编号重复：${[...new Set(dup)].join('、')}`); process.exit(1); }
+}
 
 /** C16（R30）：搜索下拉 —— 省写 ё 的前缀也要找得到带 ё 的词，逐字对上的排第一。 */
 type SearchFn = (p: string, l: number) => Array<{ word: string }>;
@@ -220,6 +285,15 @@ if (!MUTATE) {
     ['C13', '指针说明回到繁体原文', (w, e) => { if (w === 'книгу') e.pointers.forEach((p: any) => { p.text = p.text.replace('宾格单数', '賓格單數'); }); return e; }],
     ['C14', 'ё 兜底丢了（说明不印）', (w, e) => { if (w === 'чес') e.foldedFrom = null; return e; }],
     ['C15', 'ё/е 异写丢了', (w, e) => { if (w === 'все') e.yoVariants = []; return e; }],
+    ['C20', '反查目标没取到（展示层只读 pointer_target）', (w, e) => { if (w === 'взбулгаченный') e.pointers = []; return e; }],
+    ['C21', '姓氏变格页的指针丢了', (w, e) => { if (w === 'Янкова') e.pointers.forEach((p: any) => { p.targetId = null; }); return e; }],
+    ['C23', '词形页被当成词元页排（读音与重音配对）', (w, e) => { if (w === 'лисы') e.isLemma = true; return e; }],
+    ['C24', '英文版那条「云杉」多了个句号（并不起来 ⇒ 印两次）', (w, e) => { if (w === 'ель') e.senses.forEach((s: any) => s.glosses.forEach((g: any) => { if (g.model && g.text === '云杉') g.text = '云杉。'; })); return e; }],
+    ['C28', '例句标签丢了（搭配又与整句例句混着印）', (w, e) => { if (w === 'обиняк') e.examples.forEach((x: any) => { x.tags = null; }); return e; }],
+    ['C27', '不印的指针又被印出来（查询漏了 ptr_hidden_why）', (w, e) => { if (w === 'они') e.pointers.push({ entryId: null, lang: 'fr', text: 'Ils, elles, pronom personne sujet de la troisième personne du pluriel.', src: 'fr-edition', target: 'elles', targetId: null, ptrTags: [], ptrZh: null }); return e; }],
+    ['C26', '机翻中文丢了（回到印越南语原文）', (w, e) => { if (w === 'фоторепотёре') e.pointers.forEach((p: any) => { p.ptrZh = null; }); return e; }],
+    ['C25', '只印主行（重音候选被收成一个）', (w, e) => { if (w === 'алфавит') e.entries.forEach((x: any) => { x.stressVariants = x.stressed ? [x.stressed] : []; }); return e; }],
+    ['C22', '指针标签丢了（回到印法语原文）', (w, e) => { if (w === 'Янкова') e.pointers.forEach((p: any) => { p.ptrTags = []; }); return e; }],
     ['L1', '一个词性键没有映射（漏到徽标上）', (w, e) => { if (w === 'вода') e.entries[0].pos = 'nonexistent_pos'; return e; }],
   ];
   let fails = 0;

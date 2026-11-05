@@ -33,6 +33,7 @@ _sys.path.insert(0, str(_ROOT))
 _sys.path.insert(0, str(_ROOT / "pipeline"))
 _sys.path.insert(0, str(_ROOT / "fixes"))
 
+import json
 import re
 import sqlite3
 
@@ -48,6 +49,8 @@ _sys.path.insert(0, str(_ROOT.parent / "scripts"))
 from zh_t2s import t2s as zh_t2s                                # noqa: E402
 from fix_chem_e import CHEM as ZH_CHEM_E                         # noqa: E402
 from fix_ecdict_garbled import MAP as ECDICT_GARBLED              # noqa: E402
+from fill_is_primary import plan as IS_PRIMARY_PLAN             # noqa: E402
+from build_pronunciation import REGION as PRON_REGION            # noqa: E402
 
 TS = _ROOT.parent / "packages" / "dict-core" / "src" / "english.ts"
 V3 = ("dict", "entry", "sense", "sense_src", "sense_gloss", "sense_tag",
@@ -245,6 +248,28 @@ def build(con, only=None):
     add("A", "A12 出版层还有 ECDICT 的乱码字（已裁决的 25 个）",
         sum(1 for (t,) in con.execute("SELECT text FROM sense_gloss WHERE lang='zh'")
             if t and any(c in ECDICT_GARBLED for c in t)))
+    # 2026-11-02（EN_PLAN §16.7①）：主读音＝每个（词形, 地区）源头列在第一位的那条；判据 import 填充脚本的 `plan()`。
+    #    两个方向都算（该是主读音而没标／标了而不该是），`curious` 英式第一条曾是边缘转写。
+    if _has(con, "pronunciation"):
+        _have16 = {i for (i,) in con.execute("SELECT id FROM pronunciation WHERE is_primary = 1")}
+        add("A", "A16 主读音（is_primary）与「源头列在第一位」判据不一致",
+            len(IS_PRIMARY_PLAN(con) ^ _have16))
+    # 2026-11-03（EN_PLAN §16.7⑤）：一条源头读音带几个地区标签，**每个地区都要各有一行**。原来只记第一个 ⇒
+    #    `tomato` 的英式标准音只落成澳式，2,652 词英式一栏一条源头读音都没有。地区映射 import 收割器的 `REGION`。
+    if _has(con, "pronunciation"):
+        _rows = con.execute("SELECT word_id, COALESCE(entry_id, -1), ipa, region, tags FROM pronunciation "
+                            "WHERE src = 'en-edition' AND tags IS NOT NULL").fetchall()
+        _have17 = {(w, e, i, r) for w, e, i, r, _t in _rows}
+        _miss17 = 0
+        for w, e, i, _r, tg in _rows:
+            for reg in {PRON_REGION[x] for x in json.loads(tg) if x in PRON_REGION}:
+                _miss17 += (w, e, i, reg) not in _have17
+        add("A", "A17 源头读音带的某个地区标签没有对应的一行（多地区读音只记了一个）", _miss17)
+    # 2026-11-02（EN_PLAN §16.7②）：数字字符实体的 `;` 被 `split_top` 当分隔符 ⇒ `"飞&#xe193;川"` 拆成两条半截义项。
+    #    生成器已改成先解码再切（`build_legacy_sense.decode_num_entities`）；这条锁两层都不许再出现 `&#`。
+    add("A", "A15 老词典层／出版层里还有数字字符实体（`&#…;` 被分号拆开的形状）",
+        q("SELECT COUNT(*) FROM sense_src WHERE instr(text, '&#') > 0")
+        + q("SELECT COUNT(*) FROM sense_gloss WHERE instr(text, '&#') > 0"))
     # 2026-10-30：B29 第一版把规范字「噁」转成「恶」（`异噁唑→异恶唑` 511 处），已改回；判据 import 修复脚本。
     add("A", "A13 化学名里的「噁」被写成「恶」（`异恶唑` `二恶烷`）",
         sum(1 for tb in ("sense_gloss", "example_gloss", "collocation_gloss")
@@ -519,6 +544,15 @@ def mutate():
     case("出版层塞回一个乱码字", "A12 出版层还有 ECDICT 的乱码字（已裁决的 25 个）",
          lambda c: (c.execute("INSERT INTO sense(id,word_id,rank) VALUES(1,1,0)"),
                     c.execute("INSERT INTO sense_gloss(sense_id,lang,text) VALUES(1,'zh','仅能𪤛口的生活')")))
+    case("多地区读音只记了第一个地区（tomato 的 RP 只落成澳式）", "A17 源头读音带的某个地区标签没有对应的一行（多地区读音只记了一个）",
+         lambda c: c.execute("INSERT INTO pronunciation(id,word_id,entry_id,ipa,region,src,tags) "
+                             "VALUES(1,1,1,'təˈmɑː.təʊ','au','en-edition','[\"Australia\", \"Received-Pronunciation\"]')"))
+    case("主读音标在了源头第二条上", "A16 主读音（is_primary）与「源头列在第一位」判据不一致",
+         lambda c: c.executemany("INSERT INTO pronunciation(id,word_id,region,src,is_primary) VALUES(?,1,'uk','en-edition',?)",
+                                 [(1, 0), (2, 1)]))
+    case("实体被分号拆开的半截义项回潮", "A15 老词典层／出版层里还有数字字符实体（`&#…;` 被分号拆开的形状）",
+         lambda c: (c.execute("INSERT INTO sense(id,word_id,rank) VALUES(1,1,0)"),
+                    c.execute("INSERT INTO sense_gloss(sense_id,lang,text) VALUES(1,'zh','\"飞&#xe193')")))
     case("化学名又被转成「恶」", "A13 化学名里的「噁」被写成「恶」（`异恶唑` `二恶烷`）",
          lambda c: (c.execute("INSERT INTO sense(id,word_id,rank) VALUES(1,1,0)"),
                     c.execute("INSERT INTO sense_gloss(sense_id,lang,text) VALUES(1,'zh','[化] 二恶烷')")))
@@ -646,7 +680,7 @@ CREATE TABLE dict(id INTEGER PRIMARY KEY, word TEXT, word_norm TEXT, is_lemma IN
   pos TEXT, collins INT, oxford INT, exam_tag TEXT, bnc INT, freq_rank INT, freq_zipf REAL);
 CREATE TABLE entry(id INTEGER PRIMARY KEY, word_id INT);
 CREATE TABLE sense(id INTEGER PRIMARY KEY, word_id INT, rank INT);
-CREATE TABLE sense_src(id INTEGER PRIMARY KEY, sense_id INT, word_id INT, src TEXT, raw_tags TEXT);
+CREATE TABLE sense_src(id INTEGER PRIMARY KEY, sense_id INT, word_id INT, src TEXT, raw_tags TEXT, text TEXT);
 CREATE TABLE sense_gloss(sense_id INT, lang TEXT, text TEXT, src TEXT);
 CREATE TABLE sense_tag(sense_id INT, kind TEXT, value TEXT);
 CREATE TABLE sense_relation(id INTEGER PRIMARY KEY, word_id INT, sense_id INT,
@@ -655,7 +689,7 @@ CREATE TABLE inflection(id INTEGER PRIMARY KEY, word_id INT, entry_id INT,
   kind TEXT, base TEXT, base_id INT, label_zh TEXT, desc_en TEXT, tags TEXT,
   src TEXT, src_ref TEXT);
 CREATE TABLE pronunciation(id INTEGER PRIMARY KEY, word_id INT, entry_id INT,
-  ipa TEXT, notation TEXT, region TEXT, src TEXT);
+  ipa TEXT, notation TEXT, region TEXT, src TEXT, is_primary INT DEFAULT 0, tags TEXT);
 CREATE TABLE example(id INTEGER PRIMARY KEY, word TEXT, sense_id INT, text TEXT,
   bold TEXT, ref TEXT, src_gloss TEXT, src_translation TEXT, src_lang TEXT,
   hidden INT DEFAULT 0, src TEXT);

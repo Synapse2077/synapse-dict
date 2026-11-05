@@ -37,6 +37,8 @@ import sqlite3
 import dbtool
 import paths
 from build_relation_layer import scan
+import relation_writers
+WRITER = relation_writers.name(__file__)    # K14：`sense_relation.writer`
 
 f = lambda n: format(n, ",")
 
@@ -83,7 +85,8 @@ def main():
     with dbtool.session(
             "ko-topup-relations-new-words",
             expect={"#sense_relation": len(fresh),
-                    "sense_relation.target": len(fresh)},
+                    "sense_relation.target": len(fresh),
+                    "sense_relation.writer": len(fresh)},
             invalidates=[
                 "空白页判据：这批新词此前靠「有读音」一条撑着，现在有 %s 条带关系了 —— "
                 "空白页数**不会变**（读音那一条已经让它们不空白），但**原因变了**，"
@@ -92,8 +95,8 @@ def main():
         for i in range(0, len(fresh), 20000):
             s.executemany(
                 "INSERT OR IGNORE INTO sense_relation "
-                "(word_id, sense_id, kind, target, tags, src, src_ref)"
-                " VALUES (?,?,?,?,?,?,?)", fresh[i:i + 20000])
+                "(word_id, sense_id, kind, target, tags, src, src_ref, writer)"
+                " VALUES (?,?,?,?,?,?,?,'%s')" % WRITER, fresh[i:i + 20000])
 
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     q = lambda x: con.execute(x).fetchone()[0]

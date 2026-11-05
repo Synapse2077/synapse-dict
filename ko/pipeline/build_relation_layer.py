@@ -41,6 +41,7 @@ import sqlite3
 
 import dbtool
 import paths
+import relation_writers
 from infl_tags import classify
 from coverage import blank_pages, blank_sample
 
@@ -55,6 +56,7 @@ SOURCES = [
     ("zh-edition-trad", paths.ZH_TRAD),
 ]
 SRC = "en-edition"
+WRITER = relation_writers.name(__file__)    # K14：`sense_relation.writer`
 
 
 def _op(p):
@@ -200,9 +202,12 @@ def scan(indict, inentry, sense_of):
             fo = se.get("form_of") or se.get("alt_of")
             if fo:
                 kind = "hanja_form_of" if se.get("form_of") else "alt_of"
-                for it in fo:
+                # K29：一个指针义项对多个目标时（`스드메` → 스튜디오/드레스/메이크업），
+                #   第 2 个起带目标序号，否则几条边共用一个 `src_ref`、追不回是源头的第几个。
+                #   第 1 个不带序号 ＝ 与单目标的形状一致，既有的 4 万多行不用改。
+                for k, it in enumerate(fo):
                     add(wid, sid, kind, (it or {}).get("word"), None,
-                        "%s#ptr:%d" % (eref, i))
+                        "%s#ptr:%d" % (eref, i) + (":%d" % k if k else ""))
             elif "form-of" in (se.get("tags") or []):
                 # 韩文版的指针：结构化字段是空的，目标在散文＋空 tag form 里（见上）
                 tgt = ko_pointer_target(se, o)
@@ -288,14 +293,15 @@ def main():
 
     with dbtool.session("build-ko-relation",
                         expect={"#sense_relation": len(rows) - have,
-                                "sense_relation.target": len(rows) - have},
+                                "sense_relation.target": len(rows) - have,
+                                "sense_relation.writer": len(rows) - have},
                         invalidates=[]) as s:
         if have:
             s.execute("DELETE FROM sense_relation")
             s.written += have
         s.executemany(
             "INSERT INTO sense_relation (word_id, sense_id, kind, target, tags, "
-            "src, src_ref) VALUES (?,?,?,?,?,?,?)", rows)
+            "src, src_ref, writer) VALUES (?,?,?,?,?,?,?,'%s')" % WRITER, rows)
 
     print("\n═══ 写后回核 ═══")
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)

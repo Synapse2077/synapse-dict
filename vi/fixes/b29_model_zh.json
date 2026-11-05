@@ -176,14 +176,14 @@
    "orig": "无产阶级专政（以争取实现共产主义社会为斗争特征的社會政治权力）",
    "new": "无产阶级专政（以争取实现共产主义社会为斗争特征的社会政治权力）",
    "why": "释义里的繁体"
-  },
+  }
+ ],
+ "retired": [
   {
    "table": "example_gloss",
    "rowid": 16347,
-   "action": "edit",
-   "orig": "南國方言俗語備錄（Records of the Southern nation's local proverbs and common sayings），第13b页\n𧐖𥐇麻吱䖳𨱽\n船班𠶦𠰘吱𧕚嚦㕨\n黄鳝短却嫌泥鳅长，\n比目鱼嘴歪却嫌蚬嘴斜。",
-   "new": "南国方言俗语备录（Records of the Southern nation's local proverbs and common sayings），第13b页\n𧐖𥐇麻吱䖳𨱽\n船班𠶦𠰘吱𧕚嚦㕨\n黄鳝短却嫌泥鳅长，\n比目鱼嘴歪却嫌蚬嘴斜。",
-   "why": "只转书名；喃字原文一字不动"
+   "date": "2026-11-02",
+   "why": "W21：那条译文（lươn）把串在正文首行的出处一起译了，裁决只是把书名转简体；出处已搬进 ref、整条译文已重译替换，这一行不在了 ⇒ 裁决作废"
   }
  ]
 }

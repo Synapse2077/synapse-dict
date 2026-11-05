@@ -180,6 +180,22 @@ def _has_quoc_ngu(t):
     return bool(_VI_LETTER.search(ud.normalize("NFD", t or "")))
 
 
+def translation_lines(text_pub):
+    """出版正文里**译文要一行对一行**的那些行。→ [行…]
+
+    W21（2026-11-02）：去掉**只有喃字/汉字、没有国语字**的行 ——
+    `𡥵𪅆奴𣵰𡥵𪂮奴𱝩` ⏎ `Con le nó lặn; con cò nó bay.` 是同一句话的两种文字，
+    模型把两行译成一行中文**是对的**（`Bàn Cổ`/`của cải` 那一类，W21 的「行数少是对的」）；
+    而它把喃字行**原样抄进中文列**（`谷咍事世與令特收`）是错的 —— 读者会当成中文。
+    ⚠️ `[…]` 行**要算**：译文提示规矩 5 要求原样保留它。第一版把「没有国语字」的行都去掉，
+       当场多报 17 条「对不上」而它们全是 `[…]` 对 `[…]`、一行不差 —— 判据比目的宽。
+    🔴 **只能有这一份**：送去译的载荷、`normalize_zh` 的行数、跑批审计、回归闸 P16 都调它。
+       口径一处一个样 ⇒ 闸报的「对不上」里一半是口径差（W21 那 17 条就混着这一类）。
+    """
+    lines = [l.strip() for l in (text_pub or "").split("\n") if l.strip()]
+    return [l for l in lines if _has_quoc_ngu(l) or not _HAN.search(l)] or lines
+
+
 def ref_is_unreadable(ref):
     """这条出处对中文读者**完全不可读** ⇒ 不发布。→ True/False
 
@@ -303,12 +319,25 @@ _CITATION_KW = re.compile(
     r"(English|Vietnamese|vietnamienne?)\s+translation"   # `; English translation by …`
     r"|\btransl(ation|ated)?\b\s+(by|from|of)\b"          # `free 2003 translation by …`
     r"|,\s*transl\."                                      # `in Nguyễn Thành Long, transl.,`
-    r"|;\s*quoted (and translated )?in ")                 # `; quoted and translated in …`
+    r"|;\s*quoted (and translated )?in "                  # `; quoted and translated in …`
+    r"|\btranslated into (English|Vietnamese)\b")         # W21：`…; translated into English as “…”`
 _CITATION_YEAR = re.compile(
     r"^\s*(c?\.?\s*\d{3,4}\s*(\[\d{3,4}\])?\s*[,:]"       # `1932: …` / `2012 [1943], …`
     r"|\d{1,2}(st|nd|rd|th)\s+century\b"                  # `19th century, Nguyễn Đình Chiểu…`
     r"|c\.\s*\d+.{0,24}\bBCE\b)")                         # `c. 11th - 7th century BCE, …`
 _SENTENCE_END = re.compile(r"[.!?…。！？]\s*$")
+# 🔴 **W21（2026-11-02）第四次收：第三支「文献定位支」**。W21 那 17 条「译文行数对不上」里
+#    6 条的首行是出处而两支都没认出来 —— 汉喃文献的出处**不以年份开头**，而以书名开头、以**叶码**收尾：
+#        `Đại Việt sử ký tiệp lục tổng tự (大越史記捷錄總序), page 6b`
+#        `Nam Giao cổ kim lý hạng ca dao chú giải 南交古金里巷歌謠註解 ("…"), 151a`
+#    叶码带 `a/b`（线装书的正反面）是这一族独有的结构；再要求**行内有汉字**（书名的原文）。
+#    另一族是出版信息：`Tú Xương, "Ông Cò …", Thơ Trần Tế Xương; published in 1998 by NXB …`、
+#    `2017 (published), Reverend …` —— 安全网与年份支同一条（≥2 逗号／引号书名）。
+#    实测全量可见多行例句新增命中逐条读过，见 `docs/VI_PLAN.md` W21。
+#    🔴 什么会推翻：一句越南语正文以「, 12a」收尾且含汉字（查法：重读 `_CITATION_LOC` 的命中集）。
+_CITATION_LOC = re.compile(r"(?:[,;]\s*|\b(?:folio|page|pg|p)\.?\s+)\d{1,3}[ab]\s*$")   # `page. 15a`／`pg. 2a` 也有
+_CITATION_PUB = re.compile(r"\bpublished (?:in|by)\b|^\s*\d{4}\s*\(published\)\s*,")
+_HAN = re.compile(r"[㐀-鿿\U00020000-\U0003ffff]")
 
 
 def is_citation_line(line, syllables):
@@ -327,10 +356,11 @@ def is_citation_line(line, syllables):
     t = (line or "").strip()
     if _CITATION_KW.search(t) and vi_syllable_rate(t, syllables) < 0.60:
         return True
-    if _CITATION_YEAR.match(t):
+    if _CITATION_YEAR.match(t) or _CITATION_PUB.search(t):
         return (not _SENTENCE_END.search(t)
                 or t.count(",") >= 2 or '"' in t or "“" in t)
-    return False
+    # ③ 文献定位支（W21）：叶码 `6b`/`folio 13b` 收尾 ＋ 行内有汉字书名
+    return bool(_CITATION_LOC.search(t) and _HAN.search(t))
 
 
 def split_citation_prefix(text, syllables):
@@ -389,7 +419,7 @@ def vi_syllable_rate(text, syllables):
 
 
 _VI_MARK_D = "đĐ"
-_SEP_GLOSS = re.compile(r"\s+[:：—―]\s+|\s*[:：]\s+")
+_SEP_GLOSS = re.compile(r"\s+[:：—–―]\s+|\s*[:：]\s+")   # W21：补 en dash（nl 版 `… bao giờ? – Wanneer …`）
 
 
 def vi_mark_count(text):
@@ -496,24 +526,56 @@ _EN_WORD = re.compile(r"[A-Za-z]{2,}")
 INLINE_EN_IN_TEXT = {"en-edition"}
 
 
-def split_inline_english(text):
+def _is_english_line(l, syllables):
+    """一行英译。两支：
+    ① 一个越南语标记都没有且 ≥4 个英文词（原判据）；
+    ② 🔴 W21（2026-11-02）：**带越南语专名的英译**。`Hà Nam's most honoured person, …`、
+       `I (focusing) also have a son,His name is Bùi Kiệm; …` —— 专名带声调符，①放过了它们，
+       模型拿它们当正文去对齐，译文行数就对不上。⇒ 允许有越南语标记，但要
+       ≥6 个词 ＋ ≥3 个英语虚词 ＋ 越南语音节率 < 0.5（**三条同时**：单看虚词，
+       越南语正文里引一句英文就会被切走）。实测新增命中逐条读过，见 `docs/VI_PLAN.md` W21。
+    """
+    if not vi_mark_count(l):
+        return len(_EN_WORD.findall(l)) >= 4
+    ws = [t.lower() for t in _TOKEN.findall(l)]
+    return (sum(1 for w in ws if len(w) > 1) >= 6
+            and sum(1 for w in ws if w in _EN_STOP_LINE) >= 2
+            and vi_syllable_rate(l, syllables) < 0.55)
+
+
+# 只给 `_is_english_line` ② 用的虚词表：`_EN_STOP` ＋ 几个代词/介词。
+# ⚠️ **不并进 `_EN_STOP`**：那张表还管 `is_not_vietnamese`（无声调符 ＋ ≥2 虚词 ⇒ 隐藏），
+#    而 `do`/`an`/`me`/`so` 在越南语里是常用词 —— 这里也有意不收它们。
+# 实测（2026-11-02，全量 en 版可见多行例句里带越南语标记、≥6 词的行按音节率排序读过）：
+#    英译行音节率全部 ≤ 0.50；`Hà Nam's most honoured person, …` 原表 0 个虚词（靠 `him`/`upon` 才认得出）；
+#    巴利语 `Aggo ham asmi lokassa…`（音节率 0.17）0 个虚词 ⇒ 虚词门挡住它，它不会被当英译搬走。
+_EN_STOP_LINE = _EN_STOP | frozenset("him them upon who when what my our into would will".split())
+
+
+def split_inline_english(text, syllables):
     """切出夹在多行例句里的英译行。→ (越南语正文, [英译行…])
 
     判据：**整块里至少有一行带越南语标记**（否则这是 `is_not_vietnamese` 的事，
-    不是本函数的事），而**这一行一个越南语标记都没有且有 ≥4 个英文词**。
+    不是本函数的事），而这一行是 `_is_english_line`。
     ⚠️ `≥4 个词` 这道门槛挡的是 `Sao?` `[...]` 这种短行 —— 它们不是英译，
       切掉会把正文弄残。实测 384 行命中，逐条读过零误伤
       （`The little guerrilla damsel holds her rifle high.`）。
+    ⚠️ 切完必须还剩一行带越南语标记的，否则一行不切（整块都像英译 ⇒ 判据在这块上不可信）。
     """
     lines = [l.strip() for l in (text or "").split("\n") if l.strip()]
     if not any(vi_mark_count(l) for l in lines):
         return "\n".join(lines), []        # 整块无越南语 ⇒ 不是本函数的事
     body, en = [], []
     for l in lines:
-        if not vi_mark_count(l) and len(_EN_WORD.findall(l)) >= 4:
-            en.append(l)
-        else:
-            body.append(l)
+        # 🔴 W21：②支（带越南语专名的英译）只认**跟在越南语正文后面**的行。不加这条时
+        #    `Late 19th century, Nguyễn Khuyến, “Bạn Đến Chơi Nhà (My Friend's …)”` 这种
+        #    **首行出处**（源头另有 `ref`、所以没被当出处搬走）会被当成英译搬进 `example_gloss`。
+        #    译文总在原文之后，出处总在之前 —— 位置是结构信号，不靠再加词。
+        after_vi = any(vi_mark_count(b) and vi_syllable_rate(b, syllables) >= 0.55 for b in body)
+        is_en = (not vi_mark_count(l) or after_vi) and _is_english_line(l, syllables)
+        (en if is_en else body).append(l)
+    if not any(vi_mark_count(l) for l in body):
+        return "\n".join(lines), []
     return "\n".join(body), en
 
 
@@ -548,6 +610,50 @@ _SUPERSCRIPT_NOTE = re.compile(r"\^\((\[[^\]]*\])\)")
 # 2026-11-01（B21 顺带逮到的那一族）：
 #   `[[目标|显示文字]]` ⇒ 只留显示文字 —— 要在拆落单括号**之前**做，否则剩下 `w:I_Ching…|||||||`（`càn khôn`）
 #   `'''粗体'''`／`''斜体''` ⇒ 去掉引号（例句 `Cao đình'''`）。⚠️ 越语／中文里不用撇号，实测全库只有这 1 处两个以上连写
+# ── W18（2026-11-01 结清）：kaikki 把维基上标渲染成 `^(…)`，**里面可以嵌括号**（链接里的 `_7(1).pdf`、`^((xem từ nguyên 1))`）
+#    ⇒ 不用正则，按括号深度找配对。三种读法，**一个字都不丢**：
+#      `^((xem từ nguyên 1))` 内容自带括号 ⇒ 去壳 `(xem từ nguyên 1)`（释义 46 行全是这种：「见词源 1」）
+#      `ʂəː^(C2)`           短字母数字且每个字都有上标字形 ⇒ 真的印成上标 `ʂəːᶜ²`（古越南语声调类）
+#      `Xteen^(http://…)`   其余（含链接）⇒ ` (http://…)`
+#    `^([sic])` 仍走上面 `_SUPERSCRIPT_NOTE`（方括号那一族，`[sic]` 的字一个不许丢）。
+_SUPER = dict(zip("0123456789ABDEGHIJKLMNOPRTUWabcdefghijklmnoprstuvwxyz",
+                  "⁰¹²³⁴⁵⁶⁷⁸⁹ᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁᵂᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ"))
+_SUPER["C"] = "ᶜ"
+
+
+def expand_superscripts(line):
+    """`^(…)` → 可读形式（见上）。配不上的 `^(`（没有收口）原样留着 —— 交给 `sup_residue` 报出来，不猜。"""
+    out, i = [], 0
+    while True:
+        j = line.find("^(", i)
+        if j < 0:
+            out.append(line[i:])
+            return "".join(out)
+        depth, k = 0, j + 1
+        while k < len(line):
+            depth += {"(": 1, ")": -1}.get(line[k], 0)
+            if depth == 0:
+                break
+            k += 1
+        if depth != 0:                      # 没收口
+            out.append(line[i:])
+            return "".join(out)
+        inner = line[j + 2:k]
+        out.append(line[i:j])
+        before = line[:j]
+        if inner.startswith("[") and inner.endswith("]"):
+            rep = inner                                           # `[sic]` 那一族
+        elif inner.startswith("(") and inner.endswith(")"):
+            rep = inner if (not before or before[-1].isspace()) else " " + inner
+        elif inner and len(inner) <= 4 and all(c in _SUPER for c in inner):
+            rep = "".join(_SUPER[c] for c in inner)
+        else:
+            rep = (inner and "(" + inner + ")")
+            rep = rep if (not before or before[-1].isspace()) else " " + rep
+        out.append(rep)
+        i = k + 1
+
+
 _PIPED_LINK = re.compile(r"\[\[[^\]|]*\|([^\]]*)\]\]")
 _BOLD_ITALIC = re.compile(r"'{2,}")
 
@@ -568,7 +674,7 @@ def clean_markup(text):
     out = []
     for line in (text or "").split("\n"):
         new = _BOLD_ITALIC.sub("", _STRAY_LINK.sub("", _PIPED_LINK.sub(r"\1", _WIKI_PREFIX.sub(
-            "", _SUPERSCRIPT_NOTE.sub(r"\1", line)))))
+            "", expand_superscripts(_SUPERSCRIPT_NOTE.sub(r"\1", line))))))
         if new != line:                      # 只有被我改过的行才整理空白
             new = " ".join(new.split())
         out.append(new)
@@ -725,6 +831,53 @@ def brackets_balanced(s):
     return s.count('"') % 2 == 0 and s.count("'") % 2 == 0
 
 
+def clean_example_text(raw, src, syllables, has_ref):
+    """例句正文的四种清洗（**顺序是判据的一部分**）。→ (清洗后的正文, 搬走的出处或 None, 搬走的内嵌英译行, 步骤)
+
+    W22（2026-11-01）：`example.text` 改存 dump 原文之后，这四步只决定**出版正文**与搬去别列的东西 ——
+    收割器与闸**调同一个函数**（闸要从原文重算出版正文；抄一份就是 ko 外锚闸栽过的「闸自己重写判据」）。
+      ① 标记残渣（必须最先：`#*: ` 行首标记会干扰后面按行走的判据）
+      ② 夹在同一格里的外语译文（ko 版 1,655 条内嵌韩语）
+      ③ 出处串进首行 ⇒ 搬去 `ref` —— **源头自带出处（has_ref）时不搬**（覆盖正当出处比留着串位更坏）
+      ④ 内嵌英译行 ⇒ 搬进译文侧
+    """
+    steps, t = [], raw
+    ct = clean_markup(t)
+    if ct != t:
+        steps.append("markup")
+        t = ct or t
+    if src in TRANSLATION_INSIDE_TEXT:
+        cut = strip_foreign_translation(t)
+        if cut != t:
+            steps.append("foreign")
+        t = cut or t      # 全切空时留原文，交给 hidden_why 判掉
+    moved = None
+    cite, body = split_citation_prefix(t, syllables)
+    if cite:
+        if has_ref:
+            steps.append("cite-kept")
+        else:
+            moved, t = cite, body
+            steps.append("cite")
+    inline_en = []
+    if src in INLINE_EN_IN_TEXT:
+        nb, en_lines = split_inline_english(t, syllables)
+        if en_lines and nb.strip():
+            t, inline_en = nb, en_lines
+            steps.append("inline-en")
+    return t, moved, inline_en, steps
+
+
+def example_cleaned_variants(raw, src, syllables):
+    """闸用：库里看不出「源头自带出处」（搬过去的与自带的都在 `ref` 里）⇒ 两种都算。→ {清洗后的正文}"""
+    return {clean_example_text(raw, src, syllables, h)[0] for h in (False, True)}
+
+
+def example_pub_variants(raw, word, src, syllables):
+    """闸用：→ {这一行合法的出版正文}。出版正文不在里面 ⇒ 与判据不一致。"""
+    return {split_edition_gloss(t, word, src, syllables)[0] for t in example_cleaned_variants(raw, src, syllables)}
+
+
 def split_edition_gloss(text, word, src, syllables):
     """切开「越南语词条 ＋ 本版分隔符 ＋ 本版释义」。→ (出版正文, 释义, 释义语种)
 
@@ -733,8 +886,10 @@ def split_edition_gloss(text, word, src, syllables):
     """
     t = (text or "").strip()
     reg = EDITION_GLOSS_SEP.get(src)
-    if not reg or not t or "\n" in t:
-        return t, None, None            # 多行例句不是这一族（这一族都是单行词条）
+    if not reg or not t:
+        return t, None, None
+    if "\n" in t:
+        return _split_edition_gloss_lines(t, word, src, syllables)
     sep, lang = reg
     if not sep.search(t):
         return t, None, None
@@ -747,6 +902,32 @@ def split_edition_gloss(text, word, src, syllables):
     if not brackets_balanced(head):
         return t, None, None            # ⓑ 切点在括号里 ⇒ 切了就残
     return head.strip(), tail.strip(), lang
+
+
+def _split_edition_gloss_lines(t, word, src, syllables):
+    """多行版（W21，2026-11-02）。nl 版有 2 条是「荷兰语用法说明 ⏎ 越南语句 – 荷兰语译文 ⏎ …」：
+        `naar een tijdstip in het verleden als aan het eind van de zin`
+        `Chuyện ấy xảy ra từ bao giờ? – Wanneer is dat gebeurd?`
+    单行版原先一律放过多行 ⇒ 荷兰语印在页面上，模型把整块译成「越南语原句 —— 中文」两种语言混在中文列里。
+    判据：**每一行**要么按单行版切得开，要么整行是本版释义语言（一个越南语标记都没有且音节率 < 0.3）；
+    有一行两样都不是 ⇒ 整块不切（宁可不切也不切残）。至少要有一行真的切开。
+    """
+    heads, tails, lang = [], [], None
+    for l in (x.strip() for x in t.split("\n")):
+        if not l:
+            continue
+        h, tl, lg = split_edition_gloss(l, word, src, syllables)
+        if tl is not None:
+            heads.append(h)
+            tails.append(tl)
+            lang = lg
+        elif not vi_mark_count(l) and vi_syllable_rate(l, syllables) < 0.5:   # nl 的 `in`/`de`/`van` 也是越南语音节
+            tails.append(l)
+        else:
+            return t, None, None
+    if not heads:
+        return t, None, None
+    return "\n".join(heads), "\n".join(tails), lang
 
 
 # ── ⑦ 同一格里跨版重复的例句（W24）──────────────────────────────────────
@@ -879,7 +1060,7 @@ def example_hidden_why(text, word, tags=(), syllables=None):
         #    这是 `[[criteria-narrower-than-you-think]]` 的第 N 次：判据对的是「正文」，
         #    那就必须先有「正文」—— 把出处和英译切掉之后剩下的才是它。
         body = split_citation_prefix(t, syllables)[1]
-        body = split_inline_english(body)[0]
+        body = split_inline_english(body, syllables)[0]
         if not body.strip() or is_not_vietnamese(body, word, syllables):
             return HIDDEN_NO_VIETNAMESE
     return None
@@ -993,6 +1174,15 @@ def relation_target(item):
 # ⑥ 录音：Lingua Libre 文件名里嵌着被录的词 —— 一把源头自带的尺子
 _LL = re.compile(r"^lL-Q\d+ \([a-z]{3}\)-.*?-(.+)\.(wav|ogg|oga|mp3|flac|opus)$", re.I)
 HIDDEN_WRONG_WORD = "filename-word-mismatch"
+# W8（2026-11-05 人工逐条裁决，结清）：判据命中 7 行，逐条听名/读过 ——
+#   这 3 对**是同一个词**（源头没说，所以第二信号认不出），放行：
+#     `Toà Bạch Ốc`←`Tòa Bạch Ốc`：新旧两种声调符位置（正字法异写）
+#     `X`←`ích xì`：字母 X 的越南语读法就是 ích xì
+#     `ô-kê`←`OK`：录的就是越南语读「OK」
+#   其余 4 对**确实是别的词**，照旧隐藏：`sáo`(箫)←`sáu`(六)／`số liệu`(数据)←`số hiệu`(编号)／
+#     `thuyền quyên`←`mĩ nhân`（同义不同词）／`đinh ba`←`dăm ba`。
+#   ⇒ 隐藏的那批从「判据 ~57% 准」变成「人工确认 4/4」。⚠️ 名单只放行**逐条裁决过**的对，新命中照旧隐藏。
+AUDIO_SAME_WORD_ADJUDICATED = (("Toà Bạch Ốc", "Tòa Bạch Ốc"), ("X", "ích xì"), ("ô-kê", "OK"))
 
 
 def _fold(s):
@@ -1025,6 +1215,8 @@ def audio_hidden_why(word, key, variant_pairs):
         return None
     if frozenset((norm_vi(fw), norm_vi(word))) in variant_pairs:
         return None                        # 源头说它们是一回事 ⇒ 同一条录音挂两个异写，对的
+    if (word, fw) in AUDIO_SAME_WORD_ADJUDICATED:
+        return None                        # W8：人工裁决过是同一个词
     return HIDDEN_WRONG_WORD
 
 

@@ -763,6 +763,35 @@ _WRITE_SQL = re.compile(
     r"\s+[\"'`\[]?([a-z_][a-z0-9_]*)", re.I)
 
 
+def _update_cols(sql, m):
+    """`UPDATE t SET a=?, b=COALESCE(x,',') WHERE …` → ['a','b']；认不出 → None（调用方按整张表记）。"""
+    rest = sql[m.end():]
+    s = re.match(r"\s+SET\s+(.*?)(?:\s+WHERE\b|\s*$)", rest, re.I | re.S)
+    if not s:
+        return None
+    parts, depth, buf, q = [], 0, "", None
+    for ch in s.group(1):
+        if q:
+            q = None if ch == q else q
+        elif ch in "'\"":
+            q = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(buf); buf = ""; continue
+        buf += ch
+    parts.append(buf)
+    cols = []
+    for part in parts:
+        mm = re.match(r"\s*[\"`\[]?([a-z_][a-z0-9_]*)[\"`\]]?\s*=", part, re.I)
+        if not mm:
+            return None
+        cols.append(mm.group(1).lower())
+    return cols or None
+
+
 class _S:
     """会话句柄。只暴露写库入口，强制所有写操作被计数。"""
 
@@ -773,8 +802,17 @@ class _S:
         self.touched = set()        # 这次写库动过的表名（给欠账机制用，见 `_gate_debt`）
 
     def _note(self, sql):
+        # 🆕 2026-11-02：`UPDATE t SET a=…, b=…` 记到**列**（`t.a`、`t.b`）—— 闸可以声明「我不读的派生列」
+        #    （`gates.py` 的 `ignore`），只写那几列就不脏它。外锚闸重放整份 dump 约 20 分钟，
+        #    R22/R32 只写了 `sense_src` 上两个派生列，它不读，却每次都被标脏。
+        #    ⚠️ 抠不出列（写法认不出）⇒ 照旧记**整张表**：宁可多跑，不许漏跑。INSERT/DELETE 一律整张表。
         for m in _WRITE_SQL.finditer(sql or ""):
-            self.touched.add(m.group(1).lower())
+            tbl = m.group(1).lower()
+            cols = _update_cols(sql, m) if m.group(0).upper().startswith("UPDATE") else None
+            if cols:
+                self.touched |= {"%s.%s" % (tbl, c) for c in cols}
+            else:
+                self.touched.add(tbl)
 
     def executemany(self, sql, seq):
         if self.undo:

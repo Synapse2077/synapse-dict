@@ -47,7 +47,9 @@ MULTI_FLOOR = 40            # 实测 65 组 (词, 词源号, 版) 有多段
 #    真渣只有 3 段（`cá` 的 `Âm thanh (Hà Nội): (tập tin)` 那一族）。
 #    ⇒ 按模式删 ＝ 为了去 3 段删掉 9 段真词源（`[[criteria-narrower-than-you-think]]`）
 #      ⇒ **不删，设一个上界盯住它别长**。欠账 W11。
-PRON_LEAK_CEIL = 20
+#    ✅ 2026-11-02 W11 结清：那 3 段按**逐字名单** `etym_sources.PRON_SECTION_LEAKS` 拒收并移出 ⇒ 剩 9 段真词源。
+#    上界从 20 **收紧**到 9（只许收紧不许抬）：再冒出一段就红 ⇒ 逐条读，真渣进名单、真词源才许抬并写理由。
+PRON_LEAK_CEIL = 9
 _TYPE_DOM = ",".join("'%s'" % v for v in ES.ETYM_TYPE_DOMAIN)
 
 

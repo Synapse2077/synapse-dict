@@ -557,6 +557,8 @@ def main():
     sys_path_hack()
     import dbtool
     import paths
+    import relation_writers
+    WRITER = relation_writers.name(__file__)    # K14：`sense_relation.writer`
 
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     rows, edges, stat, outcome = build(con)
@@ -629,20 +631,27 @@ def main():
     per_kind = dict(con.execute("SELECT kind, COUNT(*) FROM sense_relation GROUP BY 1"))
     con.close()
 
-    ins = [(e[0], e[1], e[2], e[3], e[4], "ko-example:%d#k33" % e[5]) for e in edges]
+    # K29：一行「例句」常拆出好几条边（`珠算/주산, 珠板/주판, …`），`src_ref` 带序号才各自唯一
+    #   （原来 250 行例句的几条边共用一个 `ko-example:<id>#k33`）
+    nth = collections.Counter()
+    ins = []
+    for e in edges:
+        ins.append((e[0], e[1], e[2], e[3], e[4], "ko-example:%d#k33:%d" % (e[5], nth[e[5]])))
+        nth[e[5]] += 1
     upd = [(WL_WHY.get(r[0], WHY[r[3]]), r[0]) for r in rows]
     with dbtool.session(
             "ko-k33-reclass-nonexamples",
             expect={"#sense_relation": len(ins),
                     "sense_relation.target": len(ins),
+                    "sense_relation.writer": len(ins),
                     "sense_relation.target_norm": sum(1 for e in edges if e[3] is not None),
                     "example.hidden_why": len(upd),
                     "__rows__": 0},
             invalidates=[]) as s:
         s.executemany(
             "INSERT INTO sense_relation (word_id, sense_id, kind, target, target_norm,"
-            " tags, hidden, src, src_ref) "
-            "VALUES (?, NULL, ?, ?, ?, ?, 0, 'ko-edition', ?)", ins)
+            " tags, hidden, src, src_ref, writer) "
+            "VALUES (?, NULL, ?, ?, ?, ?, 0, 'ko-edition', ?, '%s')" % WRITER, ins)
         s.executemany("UPDATE example SET hidden=1, hidden_why=? WHERE id=?", upd)
 
     print("\n═══ 写后回核（从库里重算，期望取自写前）═══")
@@ -654,7 +663,7 @@ def main():
          n_norm + sum(1 for e in edges if e[3] is not None)),
         ("tags 非空", q("SELECT COUNT(*) FROM sense_relation WHERE tags IS NOT NULL"),
          n_tags + sum(1 for e in edges if e[4] is not None)),
-        ("新边一条不多不少", q("SELECT COUNT(*) FROM sense_relation WHERE src_ref LIKE '%#k33'"),
+        ("新边一条不多不少", q("SELECT COUNT(*) FROM sense_relation WHERE src_ref LIKE '%#k33:%'"),
          len(ins)),
         ("example.hidden_why 非空",
          q("SELECT COUNT(*) FROM example WHERE hidden_why IS NOT NULL AND TRIM(hidden_why)<>''"),
@@ -667,7 +676,7 @@ def main():
            "AND TRIM(hidden_why)<>''")),
         # 🔴 反向：没动到别的 kind 的既有边
         ("别的来源的边一条没变",
-         q("SELECT COUNT(*) FROM sense_relation WHERE src_ref NOT LIKE '%#k33' OR src_ref IS NULL"),
+         q("SELECT COUNT(*) FROM sense_relation WHERE src_ref NOT LIKE '%#k33:%' OR src_ref IS NULL"),
          n_rel),
     ]
     for kind, before in sorted(per_kind.items()):
@@ -680,7 +689,7 @@ def main():
         page = q("SELECT word FROM dict WHERE id=?", word_id)
         checks.append(("样例 `%s --%s--> %s` 在库里" % (page, kind, raw[:12]),
                        q("SELECT COUNT(*) FROM sense_relation WHERE word_id=? AND kind=? "
-                         "AND target=? AND src_ref LIKE '%#k33'", word_id, kind, raw), 1))
+                         "AND target=? AND src_ref LIKE '%#k33:%'", word_id, kind, raw), 1))
         checks.append(("样例那一行例句已藏",
                        q("SELECT COALESCE(hidden,0) FROM example WHERE id=?", eid), 1))
     ok = True

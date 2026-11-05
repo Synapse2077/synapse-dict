@@ -1992,6 +1992,16 @@ button.brand:focus-visible {
   font-family: var(--ko-hanja-font);
 }
 
+/* K28（2026-11-02）：汉字混写表记（`鸚鵡새`）—— 主体同上，后面的「（汉字混写）」说明降一档，不抢汉字的位置。
+   活用类徽标旁的「（同形词可能不同）」（K17）同一档。 */
+.badge.hanja-mixed small,
+.badge.vclass small {
+  margin-left: 2px;
+  font-family: var(--font-sans, inherit);
+  font-size: 0.82em;
+  opacity: 0.75;
+}
+
 /* ---- 读音区 ----
    一个词可能有多个读音（`조선` 的长短音两读）。
    ⚠️ 每行本身是 `.phonetic-row`，它带 `margin-bottom: 26px`（那是给「整块读音」
@@ -2620,6 +2630,8 @@ button.brand:focus-visible {
 .ru-src, .ru-count {
   font-size: 11px; color: var(--text-tertiary); margin-left: 5px; white-space: nowrap;
 }
+/* R31：中文相同而由几版各给一遍、页面并成一行时，标出是哪几版说的 */
+.ru-sense-srcs { margin-left: 8px; }
 .ru-group { border-top: 1px solid var(--border); padding-top: 14px; }
 .ru-group:first-of-type { border-top: 0; padding-top: 0; }
 .ru-group-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }

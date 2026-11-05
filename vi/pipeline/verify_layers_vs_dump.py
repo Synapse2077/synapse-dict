@@ -75,7 +75,9 @@ QUIET = False   # 变异验证期间把层内的报数行闭嘴（否则 10 条�
 #      期望值必须独立声明，从现状推出来的期望逮不到任何东西。
 # 2,041 → 2,042（2026-11-01）：`clean_markup` 补了「去 `'''`」，例句 `Cao đình'''` 在 text 上被清（例句层四种清洗仍原地改 text，W22 的形状），
 #   清完与词头相同 ⇒ 已隐藏。涨的这 1 行就是它。
-TEXT_MUTATED_BASELINE = 2042
+# ✅ 2,042 → **0（2026-11-01，W22 结清）**：`text` 改存 dump 原文，四种清洗只进出版正文（`S6.clean_example_text`）。
+#    从此本闸第③向锚的就是 **dump 原文**（`[[external-anchor-gates]]` 要的那种锚）；这个数再 > 0 ＝ 有人把清洗写回了 `text`。
+TEXT_MUTATED_BASELINE = 0
 
 
 def ro():
@@ -193,8 +195,8 @@ def layer_example(show=0):
                             "（**那就是 W22 结清了，回去划账并把这条基线改成 0**）"
                     % (F(n_mut), F(TEXT_MUTATED_BASELINE))))
     elif not QUIET:
-        print("   ⚠️ W22：`text` 原地改过 %s 行（本闸第③向锚的是**清洗后**的 text，"
-              "不是 dump 原文）" % F(n_mut))
+        # W22 结清（2026-11-01）后 n_mut 恒为 0：第③向锚的就是 dump 原文。> 0 时上面那条红先响
+        print("   ✅ W22：`text` 原地改过 %s 行 ⇒ 本闸第③向锚的是 **dump 原文**" % F(n_mut))
     # 🔴 排除一类就必须钉住「没有第三类」
     if other:
         bad.append(("X译④", "🔴 `example_gloss.src` 出现既不是版本名也不是 `model*` 的值："

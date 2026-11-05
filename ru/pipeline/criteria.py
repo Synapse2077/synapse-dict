@@ -21,7 +21,10 @@ vi 那门的结论是「**判据一律 import 不重写**」，而它是栽了�
 import re
 import unicodedata as ud
 
-RULE_VER = "ru-crit-19"           # 判据版本。改判据必须同时改它（ko 的 W1 教训）
+RULE_VER = "ru-crit-22"           # 判据版本。改判据必须同时改它（ko 的 W1 教训）
+#   v21 → v22（2026-11-05）：R33 `SENSE_REF`／`strip_sense_ref_zh`（11-03 加的，当时漏升版本）；
+#     R32 `pointer_tags` ＝ 人工裁决表 `POINTER_TAGS_ADJUDICATED`（38 行）＋ fr 模板解析器，范围扩到 fr/vi/pl；
+#     R28 `example_hidden_why` 加末支「源头残渣（人工裁决）」3 条（vi 版 `матерскаяие`／`выходит‚в,`／`посадки`）。
 #   v1 → v2（2026-10-07 同日）：`zh_gloss_kind` 从「按整条」改成**按行**判。
 #   v2 → v3（同日）：再从「按行」改成**按行内分段**判。
 #   🔴 同一条判据一天内三版，而**每一版都是抽样人读推翻的，不是想出来的**：
@@ -54,6 +57,11 @@ RULE_VER = "ru-crit-19"           # 判据版本。改判据必须同时改它�
 #   v14 → v15（同日，5b 切片照出来）：`is_inflected_form` 第六条路 —— 副动词页（词级 gerund ＋ 分类）。
 #   v17 → v18（2026-10-25，R29）：加 ⑮ 中文出版正文 `zh_simp`（安全的繁→简）。
 #   v18 → v19（2026-10-26，5c 回收逮到）：`zh_simp` 否决 `慰藉/狼藉/枕藉`（前一个字决定）；R24 `example_split_citation`。
+#   v19 → v20（2026-11-02，R19）：`entry_accept` 加 ②b `headword_script_ok`（词头一个西里尔/拉丁/希腊字母都没有 ⇒ 不收）。
+#   v20 → v21（2026-11-03，R18）：`inflection_rows` 放行被拒的合法屈折形 —— 软连字符删、不换行连字符→`-`、
+#        拉丁 `ë`→`ё`（`_fix_latin_accent`），以及词头自己就有的**希腊字母／破折号**（`α-частица`、`конденсат Бозе — Эйнштейна`）。
+#        R15①：`_repairs` 末尾加「拉丁同形字换回西里尔」（先 `_fix_latin_accent` 保住重音，再 `_deglyph`）。
+#        R15②：`rejoin_fragments` —— 源头把一条带重音拼写拆成多行（谚语按逗号切），按原序拼回，仍过 `stressed_spelling` 那个等式。
 
 STRESS = "́"                # COMBINING ACUTE ACCENT
 
@@ -704,12 +712,30 @@ SRC_SHORT = {
 }
 
 
+# 俄语词典词头可能用到的文字：西里尔（本体）／拉丁（`BMX` `HTML` `c-moll`）／希腊（`α-частица`）
+_HEAD_SCRIPTS = ("CYRILLIC", "LATIN", "GREEK")
+
+
+def headword_script_ok(word):
+    """词头**至少有一个**西里尔/拉丁/希腊字母，或者根本没有字母（`24/7`、`@`）。→ True/False
+
+    R19（2026-11-02）：zh 繁版俄语区里混进一条 `且聽下回分解`（汉语章回小说的结束语），落成了 `dict` 词头。
+    🔴 账上原写「西里尔或拉丁缩写/符号白名单」—— 那是把现在那 29 个登记成规格（`[[gate-registers-status-quo-as-spec]]`）。
+    判据问的是文字系统，不是名单。
+    ⚠️ 是「**一个**都没有」不是「有**任何**一个外文字母」：后者当场误伤 `Роᛋᛋия`（fr 版收的俄语贬义拼写，
+       用如尼字母 ᛋ 写「法西斯的俄罗斯」）—— 全库量过，宽的那版命中 2、窄的这版只命中 `且聽下回分解` 1 个。
+    """
+    letters = [ch for ch in word or "" if ch.isalpha()]
+    return not letters or any(ud.name(ch, "").startswith(_HEAD_SCRIPTS) for ch in letters)
+
+
 def entry_accept(e):
     """这一行源头数据**会不会落成一个 `entry`**。→ `(ok, (种类, 明细), pos)`。
 
-    三条，顺序就是建库时的顺序（顺序有意义：pos 认不出的行里也有非俄语的）：
+    四条，顺序就是建库时的顺序（顺序有意义：pos 认不出的行里也有非俄语的）：
       ① 切片应当只含俄语 —— 不是就如实记下，**不许静默收进去**；
       ② 空词头；
+      ②b 词头一个西里尔/拉丁/希腊字母都没有（R19，`headword_script_ok`）；
       ③ `pos_norm` 认不出 ⇒ **当场记名并跳过**，不兜底（`PLAYBOOK` 7.2 闸自证）。
     """
     if e.get("lang_code") != "ru":
@@ -717,6 +743,8 @@ def entry_accept(e):
     w = e.get("word") or ""
     if not w.strip():
         return False, ("empty", "«空词头»"), None
+    if not headword_script_ok(w):
+        return False, ("script", w[:30]), None
     try:
         pos = pos_norm(e.get("pos"))
     except ValueError as ex:
@@ -881,6 +909,12 @@ def _repairs(f):
     g = "".join(_INVISIBLE.get(ch, ch) for ch in e)
     if g != e:
         yield g, "ok-修过不可见字符"
+    # R15①（2026-11-03）：拉丁同形字冒充西里尔（fr 版 842 行：`Лéнин`、`бельë`）。先把「拉丁元音＋重音」换回
+    #   「西里尔元音＋U+0301」（`_fix_latin_accent`，重音信息不丢），再把剩下的同形字母换回去。最宽的一步放最后；
+    #   等式照旧是闸 —— 换完剥掉重音必须正好是词头，`со [ with instrumental` 这类散文换不出词头。
+    h = _deglyph(_fix_latin_accent(g))
+    if h != g:
+        yield h, "ok-拉丁同形字换回西里尔"
 
 
 def stressed_spelling(word, form):
@@ -977,8 +1011,26 @@ def stressed_spelling(word, form):
     if w and any(b and (b in w or w in b) for b in deg):
         # 源头把一条内容**拆成了多行**（谚语按逗号切、`со [...]` 按空格切）。
         # 单独一个标签：它不是脏数据，是**我们这边要重新拼起来**的东西。
-        return False, "源头把一条拆成多行（片段）", f
+        return False, FRAGMENT, f
     return False, "其他（残渣，必须看样本）", f
+
+
+FRAGMENT = "源头把一条拆成多行（片段）"
+
+
+def rejoin_fragments(word, frags):
+    """R15②（2026-11-03）：源头把**一条**带重音拼写拆成了多行 ⇒ 按源头行序拼回。→ `(ok, kind, val)`
+
+        око за око, зуб за зуб  →  `о́ко за о́ко` ＋ `зуб за зуб`（两行，都被判成「片段」）
+    `frags` 是同一个 entry 里**连续的**、被 `stressed_spelling` 判成 `FRAGMENT` 的那几行（原样）。
+    拼法只试源头切掉的两种分隔（`, ` 与空格）；**判定仍是那一个等式** —— 拼回来的串剥掉重音
+    必须等于词头，拼错了（拼成别的词、少了一截）它自己会拒。修复写得宽，闸是等式。
+    """
+    for sep in (", ", " "):
+        ok, kind, val = stressed_spelling(word, sep.join(f.strip() for f in frags))
+        if ok:
+            return True, "ok-拼回源头拆开的片段", val
+    return False, FRAGMENT, ""
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1048,6 +1100,10 @@ def _fix_latin_accent(s):
     out = []
     for c in s or "":
         d = ud.normalize("NFD", c)
+        # R18：拉丁 `ë`（U+00EB）冒充 `ё` —— 与阶段 2 的 `бельë` 同一类，映射一对一
+        if len(d) == 2 and d[1] == "\u0308" and d[0] in "eE":
+            out.append("Ё" if d[0] == "E" else "ё")
+            continue
         if len(d) == 2 and d[1] in MARKS and d[0].lower() in _LAT2CYR_VOWEL:
             cyr = _LAT2CYR_VOWEL[d[0].lower()]
             out.append((cyr.upper() if d[0].isupper() else cyr) + d[1])
@@ -1112,6 +1168,11 @@ def _strip_usage_label(piece):
                 break
         else:
             return t, got
+
+
+def _r18_allowed(c):
+    """R18：词头里出现时可以照样出现在屈折形里的非西里尔字符 —— 希腊字母、破折号类标点（Unicode `Pd`）。"""
+    return ud.category(c) == "Pd" or ud.name(c, "").startswith("GREEK ")
 
 
 def _split_cell(form):
@@ -1190,6 +1251,9 @@ def inflection_rows(word, form, tags, pos=None, table_tag=None):
         piece, labels = _strip_usage_label(piece)
         cleaned = _MARKS_RE.sub("", piece).strip()
         cleaned = re.sub(r"\s+", " ", cleaned)
+        # R18：两种排版字符归一 —— 软连字符 U+00AD 是不可见的断行提示（删），
+        #   不换行连字符 U+2011 就是连字符（`ВИЧ‑диссидент` → `ВИЧ-диссидент`）
+        cleaned = cleaned.replace("\u00ad", "").replace("\u2011", "-")
         if not cleaned:
             # 🔴 整格就是一个 `*`（ru 版 6,242 行 `украинский → *`，短尾形那一格）
             #    —— 与 `-` **是同一个意思**：源头说这一格没有这个词形。
@@ -1216,10 +1280,14 @@ def inflection_rows(word, form, tags, pos=None, table_tag=None):
         #   撇号两种     `Кòт-д’Ивуа́ра`（阶段 2 的 `_APOS` 同一批）
         #   U+0308       改革前正字法的组合符（`я → ея̈`，en 版 201 行、标着 dated）
         #   数字         序数词（`2-ой → 2-о́го`）
+        # R18：词头自己就有的**希腊字母**（`α-частица`）与**破折号类标点**（`конденсат Бозе — Эйнштейна`）放行。
+        #   🔴 第一版写的是「词头里有的字符都放行」，干跑逮到它宽了：`Микро$офт`／`Роᛋᛋия`（卢恩字母冒充 с）
+        #     这类戏谑拼写的 20 行变格也一起进来了 ⇒ 收窄到这两类，交给 Unicode 答（名称/类别），不手抄范围。
         odd = [c for c in cleaned
                if c not in (" ", "-", "/", ".", "'", "’", STRESS,
                             "̀", "̈")
-               and not _dbtool.is_cyrillic(c) and not c.isdigit()]
+               and not _dbtool.is_cyrillic(c) and not c.isdigit()
+               and not (c in (word or "") and _r18_allowed(c))]
         if odd:
             bad = bad or ("其他残渣（%s）" % "".join(sorted(set(odd)))[:8])
             continue
@@ -1727,7 +1795,19 @@ def example_hidden_why(src, word, text_pub):
         return "关系元数据（不是例句）"
     if strip_stress(t).strip(" .!?…").lower() == strip_stress(word).strip().lower():
         return "整条就是词头本身"
+    if (src, t) in EXAMPLE_JUNK_ADJUDICATED:
+        return EXAMPLE_JUNK_WHY
     return None
+
+
+# R28（2026-11-05）：6d 回收时形状不过、人读逐条看过 —— 这 3 条**不是例句**，是源头残渣（两个词尾粘连／半截／单个词形）。
+#   形式判据写不出来不误伤的（`посадки` 与正常的单词例句同形），所以按 (版, 正文) 逐条登记。
+EXAMPLE_JUNK_WHY = "源头残渣（不成句，人工裁决）"
+EXAMPLE_JUNK_ADJUDICATED = frozenset({
+    ("vi-edition", "матерскаяие"),
+    ("vi-edition", "выходит‚в,"),
+    ("vi-edition", "посадки"),
+})
 
 
 # ── zh-s 版：**纸质俄汉词典整段抄进来、例句边界切错了**（R3 在例句层的那一半）──
@@ -2378,3 +2458,230 @@ def _zh_simp_once(text, src):
             continue
         res.append(b)
     return "".join(res)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ⑯ **反查出来的指针目标**（R22 ＋ 空白词形页，2026-11-02）
+# ══════════════════════════════════════════════════════════════════════════
+# 🔴🔴 23 万个词形页点进去是空的（`Янкова` 什么都没有、`взбулгаченный` 只有一行音标）：
+#    源头只在释义散文里写了原形（ru 版形动词 `страд. прич. прош. вр. от взбулгачить`、
+#    fr 版姓氏变格 `Accusatif masculin singulier de Янков.`），没给 `form_of` ⇒ `pointer_target` 空 ⇒
+#    指针区不印。而义项闸 E13 的空白页只数**词元**，这批从来没被数到。
+# ⇒ 目标从**我们自己的屈折层**反查（这个词形出现在谁的变位表里），**两个独立信号一致才收**：
+#    ① 屈折层反查到**唯一**的原形；② 释义散文里点名的原形（只当第二信号对答案，不当数据源）。
+#    2026-11-02 实测：两边都有答案的词形里一致 **99.83%**（226,147 / 226,541）。不一致的 394 条读过样本：
+#    散文打错字（`крейаировать`）／只差 ё、同形号（`начёркать`/`начеркать`、`провинтитьᴵ`）／
+#    一个词形属于两个动词（`зароненный`）／屈折层那边错（`прищеплённый` → 形容词 `прищепленный`）
+#    ⇒ 只收一致的，其余留空计数 —— 屈折层错的那几条正好被第二信号挡在外面。
+# ⚠️ 推出来的目标存**单独一列** `sense_src.inferred_target`，不写进 `pointer_target`：
+#    后者是源头给的结构字段（证据），混进推出来的值，「源头给的」与「我们推的」就分不开了
+#    （`[[ipa-provenance-columns]]`／`[[dont-say-source-lacks-what-we-skipped]]`）。
+_NAMED_PARENT = re.compile(r"(?:\bот|\bde|\bd[’'])\s+([^\s.,;:()]+)", re.I)
+_HOMONYM_MARK = re.compile(r"[ᴵᴵᴵᴵⅠ-ⅿ¹²³⁴⁵⁶⁷⁸⁹⁰]+$")
+
+
+def parent_key(w):
+    """比对两个信号用的键：剥重音、折 ё、去同形号。**只用于比较，从不落库。**"""
+    return fold_ru(_HOMONYM_MARK.sub("", strip_stress(w or "")))
+
+
+def named_parents(text):
+    """释义散文里点名的原形（第二信号）。→ {比对键}"""
+    return {parent_key(m.group(1)) for m in _NAMED_PARENT.finditer(strip_stress(text or ""))}
+
+
+def inferred_target(parents, text):
+    """→ 落库的目标（屈折层里那个原形的写法）或 None。
+
+    `parents`：屈折层反查到的原形词头集合（不含这个词形自己）。**唯一**且与散文点名的一致才返回。
+    """
+    if len(parents) != 1:
+        return None
+    (p,) = parents
+    return p if parent_key(p) in named_parents(text) else None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ⑰ **fr 版指针说明 → 标准语法标签**（R32，2026-11-02）
+# ══════════════════════════════════════════════════════════════════════════
+# 词形页的指针区印的是证据层原话：fr 版 30.7 万条 `Accusatif masculin singulier de Янков.` —— 法语上了页面（三语方针）。
+# 而这句话是**闭合词汇表拼出来的模板**：去掉末尾「de X」只有 264 种说法、148 个词，核心 40 个覆盖几乎全部。
+# ⇒ 解析成项目统一的标签键（与变位表 `inflection.tags` 同一套值域），中文名由展示层 `dict-labels` 的
+#   `RU_INFL_TAG_LABELS` 给 —— **中文对照只有那一个家**，这里只做「法语语法词 → 标签键」。
+# 🔴 **认不全就整句不解析**（返回 None），不猜：`et`/`ou`（并列两组语法信息，拆成一个集合就丢了结构）、
+#    `inusité`（「不用的」，与 rare 不是一回事）、散文句子（`indique`／`traduit`）—— 留原文、计数。
+# ⚠️ 解析出来的标签是**我们从说明里读出来的**，存 `sense_src.ptr_tags`，证据层原文一字不动。
+_FR_PTR_TAG = {
+    "nominatif": "nominative", "génitif": "genitive", "datif": "dative", "accusatif": "accusative",
+    "instrumental": "instrumental", "locatif": "locative", "prépositionnel": "prepositional",
+    "vocatif": "vocative", "partitif": "partitive",
+    "singulier": "singular", "pluriel": "plural",
+    "masculin": "masculine", "féminin": "feminine", "neutre": "neuter",
+    "animé": "animate", "inanimé": "inanimate",
+    "présent": "present", "passé": "past", "futur": "future", "impératif": "imperative",
+    "gérondif": "adverbial", "participe": "participle", "actif": "active", "passif": "passive",
+    "passive": "passive", "imperfectif": "imperfective", "perfectif": "perfective",
+    "comparatif": "comparative", "courte": "short-form",
+    "variante": "alternative", "archaïque": "archaic", "rare": "rare",
+}
+_FR_PTR_PERSON = {"première": "first-person", "deuxième": "second-person", "seconde": "second-person",
+                  "troisième": "third-person"}
+# 只起连接作用、不带信息的词（`forme courte`、`du présent`、`variante orthographique`）
+_FR_PTR_FILLER = {"du", "forme", "orthographique"}
+_FR_PTR_TAIL = re.compile(r"\s+(?:de|d[’'])\s*\S.*$|\s+d[’']\S.*$", re.I)
+
+
+def fr_pointer_tags(text):
+    """fr 版指针说明 → 标签键列表（按原文顺序、去重）或 None（有认不出的词就整句不解析）。"""
+    head = _FR_PTR_TAIL.sub("", (text or "").strip())
+    toks = re.findall(r"[^\s,;.()]+", head.lower())
+    out, i = [], 0
+    while i < len(toks):
+        w = toks[i]
+        if w in _FR_PTR_PERSON and i + 1 < len(toks) and toks[i + 1] == "personne":
+            k, i = _FR_PTR_PERSON[w], i + 2
+        elif w in _FR_PTR_TAG:
+            k, i = _FR_PTR_TAG[w], i + 1
+        elif w in _FR_PTR_FILLER:
+            i += 1
+            continue
+        else:
+            return None
+        if k not in out:
+            out.append(k)
+    return out or None
+
+
+# ═══ R33（2026-11-03）：释义里的「义项编号」引用 `[1]`／`[I.1]`／`[1, 2]`／`［1］` ═══
+# ru.wiktionary 的写法：**紧挨在前面那个词的第 n 个义项**（`похожая на червя [1.]`＝червь 的第 1 义）。
+# 对中文读者是用不上的记号，机翻照抄进中文（模型还常改成全角 `［1］`）。
+# 🔴 第一版只认 `[1]`／`[I]`、只认半角 ⇒ 漏了 `[1.]`／`[I.1]`／`[1, 2]`／`[III 2]`／`[II, 4 或 5]` 和全角 42 条。
+# ⚠️ **只许方括号里全是编号**：数字／罗马数字／点／逗号／顿号／连字符／и、или、或、和。
+#    这样化学命名 `[4,5-d]`、`[Si₄O₁₀]`，音素 `[а]`，出处 `[Даль]`／`[ГОСТ 16032 70]`，年代 `[20世纪起]` 一律不命中
+#    （回归闸 P32 基线 0 而库里留着这几类 ⇒ 基线本身就是反向控制）。
+_SR_UNIT = r"(?:[IVX]+(?:[.\s]*\d+)?|\d+)\.?"
+_SR_SEP = r"\s*(?:[,，、\-–]|\s(?:или|и|或|和)\s|\s)\s*"
+_SR_TOK = r"[\[［]\s*" + _SR_UNIT + r"(?:" + _SR_SEP + _SR_UNIT + r")*\s*[\]］]"
+SENSE_REF = re.compile(_SR_TOK)
+_SR_STRIP = re.compile(r"\s*" + _SR_TOK + r"(?:\s*[、，,或和]\s*" + _SR_TOK + r")*")   # `[2]、[3]` 整串一起剥
+_SR_CJK_GAP = re.compile(r"(?<=[㐀-鿿〉）])\s+(?=[㐀-鿿（〈])")      # `起腿 [I.1] 作用` 剥完的空格
+
+
+def strip_sense_ref_zh(text):
+    """中文出版文本里剥掉义项编号引用；剥完两个汉字之间留下的空白一起收掉（俄语词两边的空格不动）。"""
+    if not text or not SENSE_REF.search(text):
+        return text
+    return _SR_CJK_GAP.sub("", _SR_STRIP.sub("", text)).strip()
+
+
+# ═══ R32 收尾（2026-11-05）：解析器认不全的指针说明 —— **人工逐条裁决的标签** ═══
+# 键＝(语言, 证据层原文 `sense_src.text` 一字不差)；值＝与变格表同一值域的标签（`RU_INFL_TAG_LABELS`）。
+# 能对上屈折层的（15 行）逐条对过：标签＝源词变格表里那一格的 tags（写法也照它：副动词 `adverbial|participle|…`、
+#   将来时不另标体）。🔴 vi 版 4 行**源头自相矛盾**（「số nhiều … số ít」复数…单数），屈折层裁定是**单数**。
+# 不进表的 2 行（`они`→法语 `elles`、`нет` 的散文释义）不是语法形式，见 `RU_PLAN` R32。
+_PTR_ADJ = {
+    # fr：解析器认不全（自反／不定过去时／旧形式／拼写错／散文尾巴）
+    ("fr", "Ancienne forme de la troisième personne du pluriel du présent de бежа́ть, utilisée jusqu’à la fin du XIXᵉ siècle."):
+        "obsolete|third-person|plural|present",
+    ("fr", "Deuxième et troisième personne du singulier de l’aoriste de быть (« être »)."):
+        "second-person|third-person|singular|aorist",
+    ("fr", "Forme courte du féminin singulie de полый."): "short-form|feminine|singular",          # 源头 `singulie` 拼错
+    ("fr", "Forme désuète de дую, première personne de l’indicatif singulier de дуть."):
+        "obsolete|first-person|singular|present",
+    ("fr", "Forme féminine de -ист."): "feminine",
+    ("fr", "Forme pronominale de бить : se battre."): "reflexive",
+    ("fr", "Forme pronominale de возвращать : se retourner, revenir sur ses pas."): "reflexive",
+    ("fr", "Forme pronominale de занимать : s’occuper."): "reflexive",
+    ("fr", "Forme pronominale de занять : s’occuper à."): "reflexive",
+    ("fr", "Forme pronominale de поднять : s’élever, monter."): "reflexive",
+    ("fr", "Forme pronominale de сражать : se battre."): "reflexive",
+    ("fr", "Forme pronominale de сразить : se battre."): "reflexive",
+    ("fr", "Gérondif présent (servant de gérondif passé) de выбранить."): "adverbial|participle|present",
+    ("fr", "Nominatif et accusatif pluriel de бронх : bronches."): "nominative|accusative|plural",
+    ("fr", "Nominatif et accusatif pluriels de деньга."): "nominative|accusative|plural",
+    ("fr", "Participe passé passif actuel de найти́."): "participle|passive|past",
+    ("fr", "Perfectif passé indicatif masculin singulier de загуби́ть."): "past|masculine|singular",
+    ("fr", "Prépostionnel singulier de ду́мер."): "prepositional|singular",                        # 源头 `Prépostionnel` 拼错
+    # pl
+    ("pl", "M. (i B. nżw) lm od: бус"): "nominative|accusative|plural",
+    **{("pl", "krótka forma n lp od: %s" % w): "short-form|neuter|singular" for w in (
+        "бескоры́стный", "беспоко́йный", "бесполе́зный", "бессмы́сленный", "бога́тый", "больно́й",
+        "всесторо́нний", "единогла́сный", "еженеде́льный", "конечный")},
+    ("pl", "krótka forma n od: шу́мный"): "short-form|neuter|singular",
+    ("pl", "uprzedni od: зали́ть"): "adverbial|participle|past",
+    # vi（前 4 行源头写「复数…单数」，屈折层裁定单数）
+    ("vi", "(animate) Giống cái tương đương của чех (čex): Người phụ nữ Tiệp, người đàn bà Séc."): "feminine",
+    ("vi", "Dạng trần thuật tương lai hoàn thành số nhiều ở ngôi thứ ba số ít của насы́пать (nasýpatʹ)"):
+        "third-person|singular|future",
+    ("vi", "Dạng trần thuật tương lai hoàn thành số nhiều ở ngôi thứ nhất số ít của обмолоти́ть (obmolotítʹ)"):
+        "first-person|singular|future",
+    ("vi", "Dạng trần thuật tương lai hoàn thành số nhiều ở ngôi thứ nhất số ít của съесть (sʺjestʹ)"):
+        "first-person|singular|future",
+    ("vi", "Dạng tương lai trần thuật hoàn thành số nhiều ở ngôi thứ nhất số ít của задохну́ться (zadoxnútʹsja)"):
+        "first-person|singular|future",
+    ("vi", "Dạng viết tắt của «Ле́нинец» («Léninec», “K-137 Leninets (Yankee Navaga)”)"): "abbreviation",
+    ("vi", "Dạng viết tắt của ладья́ (ladʹjá, “X (xe)”)"): "abbreviation",
+}
+POINTER_TAGS_ADJUDICATED = {k: v.split("|") for k, v in _PTR_ADJ.items()}
+
+
+def pointer_tags(lang, text):
+    """指针说明 → 标签列表或 None。先查人工裁决表，再走 fr 模板解析器（只认 fr）。"""
+    t = POINTER_TAGS_ADJUDICATED.get((lang, text))
+    if t:
+        return t
+    return fr_pointer_tags(text) if lang == "fr" else None
+
+
+# ═══ R32 结清（2026-11-05，用户确认）：**不印**的指针 —— 人工逐条裁决 ═══
+# 这 2 行不是语法形式，而页面上各已有 8／11 条中文释义，指针不添任何信息：
+#   `они`：源头结构字段把目标指向**法语词 `elles`**（页面会出一个指向法语词的链接）；
+#   `нет`：说明是一句法语散文释义（「быть 的否定形式，常译作 il n’y a pas」）。
+# 证据层原文与 `pointer_target` 一字不动；派生列 `sense_src.ptr_hidden_why` 记理由，展示层 WHERE 跳过它。
+POINTER_HIDDEN_ADJUDICATED = {
+    ("fr", "Ils, elles, pronom personne sujet de la troisième personne du pluriel."):
+        "不是语法形式：源头目标指向法语词（人工裁决）",
+    ("fr", "Forme négative du verbe быть que l’on traduit souvent par il n’y a pas, il n’est pas...."):
+        "不是语法形式：法语散文释义（人工裁决）",
+}
+
+
+def pointer_hidden_why(lang, text):
+    return POINTER_HIDDEN_ADJUDICATED.get((lang, text))
+
+
+# ═══ R25 ／ B31（2026-11-05）：例句标签 —— 源头 `examples[].tags`／`raw_tags` → 受控值域 ═══
+# 实测（ru 全部来源）：en 版 1,180 条带标签（`collocation` 867）、zh-t 141、fr 68、zh-s 6；ru/vi/pl 版 0。
+# 收两类：**例句类型**（搭配／谚语／俗语／习语）与**语体**；语法注（`[with genitive]`／`+ 屬格`）、学科（`Médecine`／`軍事`）、
+#   自由文本（`note the stress`／整句译文／网址）**不收**。
+# 🔴 `raw_tags` 是自由文本 ⇒ **只认逐字白名单**，不做子串／模糊匹配（「判据比要描述的东西宽」是本仓库最高频的自伤）。
+# ⚠️ 例句标签有**自己的**中文映射表（`dict-labels` 的 `RU_EXAMPLE_TAG_LABELS`），不借变格表那张：
+#    那张里 `pejorative`＝「指小表蔑」（构词后缀义），印在例句上是错的。
+EXAMPLE_TAG_ORDER = ("collocation", "proverb", "saying", "idiom",                          # 类型（先印）
+                     "colloquial", "informal", "formal", "literary", "poetic", "dated", "obsolete",
+                     "vulgar", "derogatory", "euphemistic", "ironic", "figurative")         # 语体
+_EX_TAGS = {                     # 源头 `tags`（kaikki 归一过的英文值）→ 键
+    "collocation": "collocation", "idiomatic": "idiom",
+    "colloquial": "colloquial", "informal": "informal", "formal": "formal", "literary": "literary",
+    "poetic": "poetic", "dated": "dated", "obsolete": "obsolete", "vulgar": "vulgar",
+    "pejorative": "derogatory", "derogatory": "derogatory", "euphemistic": "euphemistic",
+    "ironic": "ironic", "sarcastic": "ironic", "figuratively": "figurative",
+}
+_EX_RAW = {                      # 源头 `raw_tags`（自由文本）**逐字**白名单 → 键
+    "proverb": "proverb", "derisive proverb": "proverb", "諺語": "proverb", "Proverbial": "proverb",
+    "saying": "saying", "contemporary Russian saying": "saying", "常言": "saying", "當代俄語俗話": "saying",
+    "諷刺俗語": "saying",
+    "idiom": "idiom", "慣用語": "idiom", "Idiomatique": "idiom",
+    "figurative": "figurative", "亦用於比喻": "figurative",
+    "jocular": "ironic", "戲謔": "ironic", "嘲諷": "ironic",
+    "low colloquial": "colloquial",
+    "saying, figuratively": "saying", "idiomatic, nautical": "idiom",    # 组合写法也逐字登记
+}
+assert set(_EX_TAGS.values()) | set(_EX_RAW.values()) <= set(EXAMPLE_TAG_ORDER)
+
+
+def example_tags(x):
+    """源头一条例句 → `'collocation|colloquial'` 或 None（按 `EXAMPLE_TAG_ORDER` 排序、去重）。"""
+    got = {_EX_TAGS[t] for t in (x.get("tags") or []) if t in _EX_TAGS}
+    got |= {_EX_RAW[t.strip()] for t in (x.get("raw_tags") or []) if t.strip() in _EX_RAW}
+    return "|".join(k for k in EXAMPLE_TAG_ORDER if k in got) or None
