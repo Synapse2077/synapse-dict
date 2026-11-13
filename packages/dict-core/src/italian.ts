@@ -120,6 +120,7 @@ export type ItalianExample = {
   zh: string | null;
   en: string | null;        // 源自带的英文译文（英文版有，其余版没有）
   ref: string | null;       // 文献出处
+  tags: string | null;      // B31：源头例句标签（`|` 分隔，受控值域见 it/pipeline/example_tags.py）
 };
 
 // 语义关系。一个词最多 763 条（`piante`），**不截断**：`targets` 就是全部。
@@ -672,7 +673,7 @@ export class ItalianDictService {
 
     // 例句 + 中文。同上，`idx_ex_word` 也是 BINARY 索引，不加 COLLATE。
     this.exampleQuery = this.db.prepare(`
-      SELECT e.sense_id, e.text, e.ref,
+      SELECT e.sense_id, e.text, e.ref, e.tags,
              (SELECT text FROM example_gloss WHERE example_id = e.id AND lang = 'zh') AS zh,
              (SELECT text FROM example_gloss WHERE example_id = e.id AND lang = 'en') AS en
       FROM example e WHERE e.word = ? AND COALESCE(e.hidden, 0) = 0 ORDER BY e.id
@@ -849,11 +850,11 @@ export class ItalianDictService {
   private examplesOf(word: string): Map<number | null, ItalianExample[]> {
     const rows = this.exampleQuery.all(word) as unknown as
       { sense_id: number | null; text: string; ref: string | null;
-        zh: string | null; en: string | null }[];
+        zh: string | null; en: string | null; tags: string | null }[];
     const out = new Map<number | null, ItalianExample[]>();
     for (const r of rows) {
       const list = out.get(r.sense_id) ?? [];
-      list.push({ text: r.text, zh: r.zh ?? null, en: r.en ?? null, ref: r.ref ?? null });
+      list.push({ text: r.text, zh: r.zh ?? null, en: r.en ?? null, ref: r.ref ?? null, tags: r.tags ?? null });
       out.set(r.sense_id, list);
     }
     return out;

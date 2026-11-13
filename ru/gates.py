@@ -110,7 +110,7 @@ GATES = [
         # 🔴 `dict` 不是陪衬：I10 的分母是 `dict.is_lemma=1`。2026-10-23 ru-crit-9
         #    把 62,576 个形动词页 1→0，**I10 的覆盖率当场变了而一行屈折都没动** ——
         #    不依赖 `dict` 的话这道闸不会被标脏。
-        deps=frozenset({"dict", "entry", "inflection"}),
+        deps=frozenset({"dict", "entry", "inflection", "entry_class"}),     # entry_class：I13（R16，2026-11-11）
         why="阶段 3 的 13 条（I1–I13）。⭐ **I2 用收它的那个函数复核每一行**"
             "（`criteria.inflection_rows`，638 万行不抽样，约 8 分钟）。"
             "⭐ **I11 是第二个信号的落点**：`forms` 里 45.8 万行拉丁转写，而 en/fr 版会发出"
@@ -210,7 +210,7 @@ GATES = [
         # 九层全读 ⇒ 动哪张内容表都脏它（约 20 分钟，七份 dump 各扫九遍）
         deps=frozenset({"dict", "entry", "stress", "inflection", "pronunciation", "sense", "sense_src",
                         "sense_gloss", "sense_tag", "example", "example_gloss", "sense_relation", "audio",
-                        "etymology"}),
+                        "etymology", "entry_class"}),
         # 🆕 2026-11-02：**它不读的派生列**（只写这几列不脏它）。这两列是从屈折层/fr 说明里推出来的，
         #    不在任何一份 dump 里 —— 外锚闸比的是证据原文。`self_check` 守着：列名出现在本闸源码里就红。
         ignore=frozenset({"sense_src.inferred_target", "sense_src.ptr_tags", "sense_src.ptr_zh", "sense_src.ptr_hidden_why"}),
@@ -227,7 +227,7 @@ GATES = [
         mutate="python3 -u ru/tests/test_no_regression.py --mutate",
         file="ru/tests/test_no_regression.py",
         deps=frozenset({"dict", "pronunciation", "sense", "sense_src", "sense_gloss", "example", "example_gloss",
-                        "audio", "etymology", "sense_relation", "inflection"}),
+                        "audio", "etymology", "sense_relation", "inflection", "entry_class"}),
         why="阶段 8。**每次写库由 `dbtool._regression_check()` 自动跑**（层闸要手动跑）；锁**非零的已接受基线**、"
             "锁数字不锁名字。⭐ **P5/P8 锁两笔付费数据**（5b 331,639／6d 292,566 条模型中文）——"
             "一次误操作的 `--rebuild` 能静默清掉它们，而层闸只看比例、比例会跟着分母一起掉。"

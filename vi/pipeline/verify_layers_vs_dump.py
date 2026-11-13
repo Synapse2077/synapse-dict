@@ -151,10 +151,13 @@ def layer_example(show=0):
     #    才最容易被某一步悄悄改掉而无人察觉 —— 而第③向（键对上而内容不一样）
     #    就是为这种事存在的。回归闸 P18 查同一件事，两道闸从不同方向各查一次
     #    （`[[correct-steps-can-compose-a-hole]]`）。
-    want = {r[6]: (r[1], r[2], r[3], r[4], r[5], r[8]) for r in rows}
-    have = {ref: (sid, t, rf, why, src, pub)
-            for ref, sid, t, rf, why, src, pub in con.execute(
-                "SELECT src_ref, sense_id, text, ref, hidden_why, src, text_pub FROM example")}
+    # B31（2026-11-07）：源头例句标签 r[9] 也进恒等式 —— 它直接来自 dump，重建漏了它只有这里看得见第③向
+    want = {r[6]: (r[1], r[2], r[3], r[4], r[5], r[8], r[9]) for r in rows}
+    has_tags = any(c[1] == "tags" for c in con.execute("PRAGMA table_info(example)"))
+    have = {ref: (sid, t, rf, why, src, pub, tg)
+            for ref, sid, t, rf, why, src, pub, tg in con.execute(
+                "SELECT src_ref, sense_id, text, ref, hidden_why, src, text_pub, %s FROM example"
+                % ("tags" if has_tags else "NULL"))}
     bad = _diff(want, have, "X源", show)
     # ── 译文侧：**只管源头给的那批**，模型译文按 src 排除（6e 的那一刀）
     # 🔴 `want` 必须用收割器自己的 `gloss_rows()`，不许在这里重写条件 ——

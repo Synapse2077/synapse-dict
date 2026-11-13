@@ -88,3 +88,11 @@ export function itAudioRegion(raw: string | null | undefined): string | null {
   if (/itali/i.test(s)) return '意大利';
   return s;
 }
+
+/** 例句标签（B31，2026-11-07）：`example.tags` 的受控值域（`it/pipeline/example_tags.EXAMPLE_TAG_ORDER`）。
+ *  用字随 B32（两字），与 ru／fr／en 同键同名。⚠️ 键没映射就不印 —— 契约闸按库里全值域查漏。 */
+export const IT_EXAMPLE_TAG_LABELS: Record<string, string> = {
+  collocation: '搭配', proverb: '谚语',
+  informal: '非正式', slang: '俚语', dated: '过时', archaic: '古旧', vulgar: '粗俗',
+  figurative: '转义',
+};

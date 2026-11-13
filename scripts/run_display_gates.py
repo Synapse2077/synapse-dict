@@ -10,7 +10,7 @@
 **五道绿、en 红的就是账上的 B13**，没有藏着的新红。
 
 ═══ 判据 ═══
-  · 名册 G0：`apps/web/src/contract-check-*.tsx` 每个文件都必须在 GATES 里（新闸有文件没入口＝没有闸，B15 的病）；
+  · 名册 G0：`apps/web/src/contract-check*.tsx`（含不带「-」的 it 那道，B34）每个文件都必须在 GATES 里（新闸有文件没入口＝没有闸，B15 的病）；
     GATES 里每个 npm 入口都必须在 package.json 里。
   · 每道闸退出码 0 ⇒ 绿。
   · 退出码非 0 ⇒ 只有当红的**恰好是** DEBT 登记的那几条、且条数逐字相等，才算「欠账照旧」；
@@ -50,6 +50,7 @@ GATES = {
     "gate:es-display": "apps/web/src/contract-check-es.tsx",
     "gate:fr-display": "apps/web/src/contract-check-fr.tsx",
     "gate:pt-display": "apps/web/src/contract-check-pt.tsx",
+    "gate:it-display": "apps/web/src/contract-check.tsx",   # B34（11-12）：it 那道文件名不带「-」，名册 glob 认不到 ⇒ 从来没进汇总
     "gate:colloc-display": "apps/web/src/contract-check-colloc.tsx",
     "gate:audio-labels": "apps/web/src/contract-check-audio.tsx",
     "gate:etym-display": "apps/web/src/contract-check-etym.tsx",
@@ -108,13 +109,13 @@ RED_LINE = re.compile(r"^\s*🔴\s+(?:🔴\s+)?([A-Z]+\d+[a-z]?)\b.*?([\d,]+)\s*
 
 def roster():
     bad = []
-    have = {str(p.relative_to(ROOT)) for p in (ROOT / "apps/web/src").glob("contract-check-*.tsx")}
+    have = {str(p.relative_to(ROOT)) for p in (ROOT / "apps/web/src").glob("contract-check*.tsx")}
     scripts = json.loads((ROOT / "package.json").read_text())["scripts"]
     # 🔴 B23 那一类（2026-10-30）：下面三条比较，任何一边为空都恒真 —— 目录挪了 glob 一个都扫不到、
     #    入口前缀改了一个 `gate:` 都没有 ⇒ 「有文件不在名单里」「有入口不在名单里」永远报不出来，汇总闸照样全绿。
     #    另：名单里登记的文件自己存不存在，原来没人查（改名之后 `npm run` 才报错，而那只在真跑到它时）。
     if not have:
-        bad.append("G0 判据坏了：apps/web/src 下一个 contract-check-*.tsx 都没扫到")
+        bad.append("G0 判据坏了：apps/web/src 下一个 contract-check*.tsx 都没扫到")
     if not any(k.startswith("gate:") for k in scripts):
         bad.append("G0 判据坏了：package.json 里一个 gate: 入口都没有")
     for g, f in GATES.items():

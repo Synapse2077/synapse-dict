@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""**外锚闸** —— 九层 vs dump，三向恒等。ru，2026-10-24（阶段 8）。
+"""**外锚闸** —— 十层 vs dump（R16 加 class 层，2026-11-11），三向恒等。ru，2026-10-24（阶段 8）。
 
-    python3 -u ru/tests/test_dump_anchor.py                    # 全九层（约 20 分钟，七份 dump 各扫九遍）
+    python3 -u ru/tests/test_dump_anchor.py                    # 全十层（约 20 分钟，七份 dump 各扫九遍）
     python3 -u ru/tests/test_dump_anchor.py --layer example    # 只跑一层
     python3 -u ru/tests/test_dump_anchor.py --mutate           # 变异（源头侧只算一次、缓存）
 
@@ -62,7 +62,7 @@ def _diff(name, want, have, eg=None):
     return out
 
 
-# ════════════════════════════════════ 九层 ════════════════════════════════════
+# ════════════════════════════════════ 十层 ════════════════════════════════════
 def want_skeleton():
     from pipeline import build
     forms, entries, _st = build.collect(verbose=False)
@@ -290,11 +290,27 @@ def check_etymology(con, W):
     return _diff("Y", W, have)
 
 
+def want_class():
+    """R16（2026-11-11）：变格／变位类层。import `class_layer.collect`，不重写判据。"""
+    from pipeline import class_layer as CL
+    con = _open()
+    rows, _st = CL.collect(con, verbose=False)
+    con.close()
+    return {(r[0], r[4]): (r[1], r[2], r[3], r[5], r[6], r[7]) for r in rows}
+
+
+def check_class(con, W):
+    have = {(r[0], r[1]): tuple(r[2:]) for r in con.execute(
+        "SELECT entry_id, raw, system, kind, code, hidden, hidden_why, src FROM entry_class")}
+    return _diff("C", W, have)
+
+
 LAYERS = [("skeleton", want_skeleton, check_skeleton), ("stress", want_stress, check_stress),
           ("inflection", want_inflection, check_inflection),
           ("pronunciation", want_pronunciation, check_pronunciation), ("sense", want_sense, check_sense),
           ("example", want_example, check_example), ("relation", want_relation, check_relation),
-          ("audio", want_audio, check_audio), ("etymology", want_etymology, check_etymology)]
+          ("audio", want_audio, check_audio), ("etymology", want_etymology, check_etymology),
+          ("class", want_class, check_class)]
 
 
 def run(only=None, verbose=True):
@@ -356,6 +372,10 @@ MUTATIONS = [
     ("example", "X·gloss④", "模型中文盖到一条有源头中文的例句上",
      ["UPDATE example_gloss SET src='%s' WHERE id=(SELECT MIN(id) FROM example_gloss WHERE lang='zh' AND src LIKE 'zh-%%')"
       % MODEL]),
+    ("class", "C③", "R16：改一行变格/变位类的类别码", ["UPDATE entry_class SET code=code||'«变异»' "
+                                                       "WHERE id=(SELECT MIN(id) FROM entry_class)"]),
+    ("class", "C①", "R16：删一行变格/变位类（源头有、库里没有）",
+     ["DELETE FROM entry_class WHERE id=(SELECT MAX(id) FROM entry_class)"]),
     ("relation", "R①", "删一行关系", ["DELETE FROM sense_relation WHERE id=(SELECT MIN(id) FROM sense_relation)"]),
     ("audio", "A③", "把一条录音的 url 换掉", ["UPDATE audio SET url=url||'«变异»' WHERE id=(SELECT MIN(id) FROM audio)"]),
     ("etymology", "Y③", "改一段词源的出版正文",
@@ -384,8 +404,14 @@ def mutate():
                 con = sqlite3.connect(cp)
                 for s in sqls:
                     con.execute(s)
+                changed = con.total_changes
                 con.commit()
                 con.close()
+                # 🔴 2026-11-05（例句闸 X7 栽过）：注入 0 行 ＝ 空操作 —— 单独判死，不报成「没逮到」
+                if not changed:
+                    print("   🔴🔴 %-12s **注入是空操作**（0 行被改，前提已不成立）—— %s" % (cid, why))
+                    fails.append(cid)
+                    continue
                 bad = run([layer], verbose=False)[layer][0]
                 got = {c for c, _w in bad}
                 also = ALSO.get(cid, set())

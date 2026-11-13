@@ -49,6 +49,8 @@ import sqlite3
 
 import dbtool
 import paths
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent))
+import criteria as CR   # B31：例句标签判据唯一的家
 
 f = lambda n: format(n, ",")
 BATCH = 20000
@@ -134,7 +136,7 @@ def split_text(src, raw):
 
 
 def harvest():
-    rows, seen = [], set()
+    rows, seen = [], {}      # seen：(词,正文) → rows 下标（B31：重复处并入标签）
     labeled, resid = [], collections.Counter()
     stat = collections.Counter()
     for src, p in SRC:
@@ -155,6 +157,7 @@ def harvest():
                         stat["跳过·text 是空的·" + src] += 1
                         continue
                     m = PRE.match(t)
+                    prefix = m.group(1) if m else None
                     if m and m.group(1) in LABEL_DROP:
                         labeled.append((src, w, m.group(1), m.group(2).replace("\t", " ")))
                         stat["带标签·留给关系层·" + src] += 1
@@ -178,10 +181,13 @@ def harvest():
                     if not HANGUL.search(body):
                         stat["跳过·正文里没有谚文·" + src] += 1
                         continue
+                    tg = CR.example_tag_set(e, prefix)
                     if (w, body) in seen:
                         stat["跳过·与已收的重复·" + src] += 1
+                        # 🔴 B31：入库只留先到的那一行，但**标签取并集**（fr／en／de／es 同款）
+                        rows[seen[(w, body)]]["_tags"] |= tg
                         continue
-                    seen.add((w, body))
+                    seen[(w, body)] = len(rows)
                     # 译文：字段优先，其次是挤在一格里切出来的
                     en = e.get("translation") or e.get("english")
                     en = en.strip() if en and not HANGUL.search(en) else None
@@ -198,10 +204,14 @@ def harvest():
                         "src_translation": dropped or e.get("translation"),
                         "src_lang": "ja" if src == "ja-edition" else None,
                         "zh": zh, "en": en, "hidden": 1 if crammed else 0,
+                        "_tags": set(tg),
                     })
                     if crammed:
                         stat["⚠️ 多行挤成一格·标 hidden 留着·" + src] += 1
                     stat["✅ 收·" + src] += 1
+    for r in rows:
+        r["tags"] = CR.join_example_tags(r.pop("_tags"))
+    stat["带例句标签（B31）"] = sum(1 for r in rows if r["tags"])
     return rows, labeled, resid, stat
 
 
@@ -275,13 +285,14 @@ def main():
 
     n_hid = sum(r["hidden"] for r in rows)
     ex = [(r["word"], r["sense_id"], r["text"], r["ref"], r["src_gloss"],
-           r["src_translation"], r["src_lang"], r["roman"], r["hidden"], r["src"])
+           r["src_translation"], r["src_lang"], r["roman"], r["hidden"], r["src"], r["tags"])
           for r in rows]
     with dbtool.session(
             "ko-harvest-examples",
             expect={"#example": len(ex), "#example_gloss": n_zh + n_en,
                     "example.src_translation": sum(
-                        1 for r in rows if r["src_translation"])},
+                        1 for r in rows if r["src_translation"]),
+                    "example.tags": sum(1 for r in rows if r["tags"])},
             invalidates=[
                 "阶段 6 的例句译文：**主力源韩文版几乎没有译文**（29,241 条里 50 条）⇒ "
                 "要给读者中文例句只能送模型翻译，那是一笔**要单独报价**的钱",
@@ -293,8 +304,8 @@ def main():
         for i in range(0, len(ex), BATCH):
             s.executemany(
                 "INSERT OR IGNORE INTO example (word, sense_id, text, ref, src_gloss,"
-                " src_translation, src_lang, roman, hidden, src)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " src_translation, src_lang, roman, hidden, src, tags)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 ex[i:i + BATCH])
         ids = {(w, t): i for i, w, t in s.execute(
             "SELECT id, word, text FROM example").fetchall()}

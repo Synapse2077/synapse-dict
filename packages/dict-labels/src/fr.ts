@@ -290,3 +290,14 @@ export const FR_TAG_SKIP: ReadonlySet<string> = new Set([
 export const FR_PRON_CONTEXT_LABELS: Record<string, string> = {
   liaison: '连诵',
 };
+
+/** 例句标签（B31，2026-11-06）：`example.tags` 的受控值域（`fr/pipeline/example_tags.EXAMPLE_TAG_ORDER`）。
+ *  用字随 B32（两字）：与共用 REGISTER_LABELS 同一个键印同一个中文。
+ *  ⚠️ 键没映射就不印（不拿英文键兜底）—— 契约闸按库里全值域查漏。 */
+export const FR_EXAMPLE_TAG_LABELS: Record<string, string> = {
+  collocation: '搭配', proverb: '谚语', idiom: '习语',
+  familiar: '通俗', colloquial: '口语', slang: '俚语', formal: '正式', literary: '书面', poetic: '诗歌',
+  dated: '过时', archaic: '古旧', obsolete: '已废', rare: '罕用',
+  vulgar: '粗俗', derogatory: '贬义', euphemistic: '委婉', ironic: '讽刺',
+  figurative: '转义', broadly: '广义', 'by-analogy': '类比', metonymically: '转喻', hyperbole: '夸张',
+};

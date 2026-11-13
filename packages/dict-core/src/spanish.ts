@@ -60,6 +60,7 @@ export type SpanishExample = {
   text: string;                // 西语原句
   zh: string | null;
   ref: string | null;          // 出处（书名/作者/年份）
+  tags: string | null;         // B31：源头例句标签（`|` 分隔，受控值域见 es/pipeline/example_tags.py）
 };
 
 // 词汇关系。源头一直有，2026-08-07 才收进库（`sense_relation` 121,647 条）。
@@ -714,12 +715,16 @@ export class SpanishDictService {
     // 例句：`bold`（关键词位置）与 `src_gloss`（源头义项）不推给前端 ——
     // 前者前端还没用上，后者是溯源信息不是展示内容。
     this.exampleQuery = this.db.prepare(`
-      SELECT e.id, e.sense_id, e.text, g.text AS zh, e.ref
+      SELECT e.id, e.sense_id, e.text, g.text AS zh, e.ref, e.tags
       FROM example e
       LEFT JOIN example_gloss g ON g.example_id = e.id AND g.lang = 'zh'
       WHERE e.word = ?
-      ORDER BY (e.sense_id IS NULL), e.sense_id, e.id
+      ORDER BY (e.sense_id IS NULL), e.sense_id,
+               CASE WHEN e.tags LIKE '%collocation%' THEN 0 WHEN e.tags IS NOT NULL THEN 1 ELSE 2 END,
+               e.id
     `);
+    // ⬆ B31（2026-11-07，照 fr 用户 11-06 定的口径）：同一义项内搭配最前、其余带标签的其次。
+    //    每条义项只印 3 条（未挂义项的 6 条）⇒ 带标签的可见 578／632 → 598。
 
     // 词汇关系。`linkable` 在 SQL 里判，省得前端为每个 target 再发一次查询。
     this.relationQuery = this.db.prepare(`
@@ -1044,7 +1049,8 @@ export class SpanishDictService {
 
     entry.examples = (this.exampleQuery.all(entry.word) as Array<{
       id: number; sense_id: number | null; text: string; zh: string | null; ref: string | null;
-    }>).map((r) => ({ id: r.id, senseId: r.sense_id, text: r.text, zh: r.zh, ref: r.ref }));
+      tags: string | null;
+    }>).map((r) => ({ id: r.id, senseId: r.sense_id, text: r.text, zh: r.zh, ref: r.ref, tags: r.tags }));
     entry.relations = (this.relationQuery.all(row.id) as Array<{
       sense_id: number | null; kind: string; target: string;
       tags: string | null; linkable: number;

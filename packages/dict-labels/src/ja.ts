@@ -190,7 +190,7 @@ export const JA_GRAMMAR_LABELS: Record<string, string> = {
  *    单独立桶才印得出来；混进 register 会被「口语」「俚语」淹掉。
  */
 export const JA_USAGE_LABELS: Record<string, string> = {
-  idiomatic: '惯用', figuratively: '比喻', literally: '字面',
+  idiomatic: '惯用', figuratively: '转义', literally: '字面',
   broadly: '广义', narrowly: '狭义',
   onomatopoeic: '拟声词', ideophonic: '拟态词',
   metonymically: '转喻', emphatic: '强调',
@@ -244,4 +244,12 @@ export const JA_RELATION_LABELS: Record<string, string> = {
   //    它**不断言这些词是异体**，只说"都念这个音" —— 措辞必须跟着判据走，
   //    印成「异体写法」就是在页面上做一个数据层拒绝做的断言（`JA_PLAN` §二.5）。
   see_also: '同音词',
+};
+
+/** 例句标签（B31，2026-11-07）：`example.tags` 的受控值域（`ja/pipeline/example_tags.EXAMPLE_TAG_ORDER`）。
+ *  `polite` 与义项层 `JA_REGISTER_LABELS` 同名（丁宁语，です・ます）；其余用字随 B32（两字）。
+ *  ⚠️ 键没映射就不印 —— 契约闸按库里全值域查漏。 */
+export const JA_EXAMPLE_TAG_LABELS: Record<string, string> = {
+  collocation: '搭配', proverb: '谚语',
+  polite: '丁宁语', internet: '网络用语', humorous: '诙谐', proscribed: '不规范',
 };

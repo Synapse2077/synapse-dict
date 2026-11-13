@@ -88,6 +88,8 @@ export type EnglishExample = {
   ref: string | null;
   /** 源头给的现代英语转写（古英语/方言引文才有） */
   modern: string | null;
+  /** B31：源头例句标签（`|` 分隔，绝大多数是 `collocation`；受控值域见 en/pipeline/example_tags.py） */
+  tags: string | null;
 };
 
 export type EnglishSense = {
@@ -295,7 +297,7 @@ export class EnglishDictService {
           WHERE s.word_id = ? AND r.kind = 'alt_of' AND r.hidden = 0`),
       // ⑤ LEFT JOIN —— 中文还没买，例句照样要出来
       examples: this.db.prepare(
-        `SELECT e.sense_id, e.text, e.ref, e.src_translation AS modern,
+        `SELECT e.sense_id, e.text, e.ref, e.src_translation AS modern, e.tags,
                 (SELECT text FROM example_gloss WHERE example_id = e.id AND lang='zh') AS zh
            FROM example e JOIN sense s ON s.id = e.sense_id
           WHERE s.word_id = ? AND e.hidden = 0
@@ -431,9 +433,9 @@ export class EnglishDictService {
     const exBy = new Map<number, EnglishExample[]>();
     for (const e of this.q.examples.all(wordId) as Array<{
       sense_id: number; text: string; ref: string | null;
-      modern: string | null; zh: string | null }>) {
+      modern: string | null; zh: string | null; tags: string | null }>) {
       const arr = exBy.get(e.sense_id) ?? [];
-      arr.push({ text: e.text, zh: e.zh, ref: e.ref, modern: e.modern });
+      arr.push({ text: e.text, zh: e.zh, ref: e.ref, modern: e.modern, tags: e.tags });
       exBy.set(e.sense_id, arr);
     }
     return rows.map((r) => ({

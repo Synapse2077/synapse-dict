@@ -115,6 +115,8 @@ export type VietnameseExample = {
   ref: string | null;
   zh: string | null;
   en: string | null;
+  /** B31：源头例句标签（`|` 分隔，受控值域见 vi/pipeline/stage6_sources.py ⑪） */
+  tags: string | null;
 };
 
 /** 🔴 W15：证据层的指针义项（源头给了而出版层没有）。 */
@@ -325,7 +327,7 @@ export class VietnameseDictService {
       //    重建时忘填这一列，兜底会让页面看起来完全正常，而我们永远发现不了。
       //    回归闸 **P17** 查「可出版行的 `text_pub` 全部非空」，忘填就判红。
       examples: this.db.prepare(`
-        SELECT x.sense_id AS senseId, x.text_pub AS text, x.ref,
+        SELECT x.sense_id AS senseId, x.text_pub AS text, x.ref, x.tags,
                (SELECT text_pub FROM example_gloss WHERE example_id = x.id AND lang='zh') AS zh,
                (SELECT text FROM example_gloss WHERE example_id = x.id AND lang='en') AS en
         FROM example x

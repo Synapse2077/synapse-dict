@@ -48,6 +48,7 @@ from build_entry_layer import GRADE_LABEL             # noqa: E402
 from harvest_relations import KIND, clean_target, JA  # noqa: E402
 from harvest_relations import clean_targets            # noqa: E402
 from harvest_examples import simplified_only          # noqa: E402
+import example_tags as _xt                            # noqa: E402  B31
 from fill_freq import _same                           # noqa: E402
 from backfill_kana import PURE_KANA                   # noqa: E402
 from build import norm_ja                             # noqa: E402
@@ -582,6 +583,15 @@ def build(con):
             "SELECT text FROM example WHERE src='zh-edition'"
             " AND src_translation IS NULL")
         if any(c in simp for c in t))))
+    # B31（2026-11-07）：例句标签。判据 import 生成侧那一份（`example_tags`），不另抄。
+    #   E4 值域外／乱序 —— 页面按 JA_EXAMPLE_TAG_LABELS 印中文，值域外的键会被静默不印。
+    #   E5 带标签的行比声明的少 —— 重建 `example` 时漏了标签；期望值**独立声明**在
+    #      `_xt.EXPECT_TAGGED`（不写在断言里 —— 字面量闸管的就是这个）。
+    _has = any(r[1] == "tags" for r in con.execute("PRAGMA table_info(example)"))
+    _tg = [v for (v,) in con.execute("SELECT tags FROM example WHERE tags IS NOT NULL")] if _has else []
+    a(("E", "E4 例句标签值域外或乱序（B31）", sum(1 for v in _tg if _xt.bad_tag_value(v))))
+    a(("E", "E5 例句标签少了（B31，少于 example_tags.EXPECT_TAGGED）",
+       max(0, _xt.EXPECT_TAGGED - len(_tg))))
 
     # ── F 关系 ──
     a(("F", "F1 关系 kind 在值域外", q(
@@ -964,6 +974,14 @@ MUT = [
      ["UPDATE inflection SET src_ref=(SELECT src_ref FROM inflection ORDER BY id LIMIT 1)"
       " WHERE id=(SELECT id FROM inflection ORDER BY id LIMIT 1 OFFSET 1)"],
      "I7 src_ref 不唯一（认领凭据撞车）"),
+    # B31：值域外的键、整条标签被清掉 —— 各造一条
+    ("M39", "B31 例句标签塞一个值域外的键（地区）",
+     ["UPDATE example SET tags='collocation|Kansai' WHERE id="
+      "(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)"],
+     "E4 例句标签值域外或乱序（B31）"),
+    ("M40", "B31 清掉一条例句的标签（重建漏了标签列的样子）",
+     ["UPDATE example SET tags=NULL WHERE id=(SELECT MAX(id) FROM example WHERE tags IS NOT NULL)"],
+     "E5 例句标签少了（B31，少于 example_tags.EXPECT_TAGGED）"),
 ]
 
 

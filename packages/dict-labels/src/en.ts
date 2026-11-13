@@ -109,7 +109,7 @@ export const EN_GRAMMAR_LABELS: Record<string, string> = {
  */
 export const EN_REGISTER_LABELS: Record<string, string> = {
   // ── 时代层 ──
-  obsolete: '废弃', archaic: '古体', dated: '旧式', historical: '历史',
+  obsolete: '已废', archaic: '古旧', dated: '过时', historical: '历史',
   // 🔴 `Early` / `Modern` 是源头把「Early Modern English」拆成的**两个 tag**
   //    （`aback` 的 tags 是 `['Early','Modern','obsolete']`），不是两个独立语域。
   //    ⇒ 拆开的两个徽标连读仍是「早期 现代英语」，照源头的拆法印，不硬拼。
@@ -121,7 +121,7 @@ export const EN_REGISTER_LABELS: Record<string, string> = {
   rare: '罕用', uncommon: '少见', neologism: '新词', 'nonce-word': '临时造词',
   // ── 正式度 ──
   slang: '俚语', informal: '非正式', colloquial: '口语', formal: '正式',
-  literary: '文学', poetic: '诗歌', jargon: '行话', technical: '专业',
+  literary: '书面', poetic: '诗歌', jargon: '行话', technical: '专业',
   standard: '标准语', nonstandard: '非标准', proscribed: '不规范',
   dialectal: '方言',
   // ── 冒犯度 ──
@@ -131,14 +131,14 @@ export const EN_REGISTER_LABELS: Record<string, string> = {
   slur: '蔑称', ethnic: '族群', mildly: '轻度',
   // ── 语气 / 人群 ──
   humorous: '诙谐', euphemistic: '委婉', sarcastic: '讥讽', ironic: '反讽',
-  emphatic: '强调', excessive: '夸张', endearing: '昵爱', familiar: '亲昵',
+  emphatic: '强调', excessive: '夸张', endearing: '昵爱', familiar: '通俗',
   childish: '童语',
   // ── 社群变体 ──
   Internet: '网络', Leet: '黑客体', Polari: '波拉里黑话',
   // ── ECDICT 方括号短码 → 与上面同一套中文 ──
-  俚: '俚语', 口语: '口语', 网络: '网络', 古: '古体', 废: '废弃',
+  俚: '俚语', 口语: '口语', 网络: '网络', 古: '古旧', 废: '已废',
   方: '方言', 谑: '诙谐', 贬: '贬义', 褒: '褒义', 讳: '委婉',
-  书: '书面语', 俗: '俗语', 粗: '粗俗', 婉: '委婉',
+  书: '书面', 俗: '俗语', 粗: '粗俗', 婉: '委婉',
 };
 
 /**
@@ -146,7 +146,7 @@ export const EN_REGISTER_LABELS: Record<string, string> = {
  * 对着 `build_sense_tags.py` 的 `USAGE` 集合（18 个值）写全。
  */
 export const EN_USAGE_LABELS: Record<string, string> = {
-  figuratively: '比喻', literally: '字面', idiomatic: '习语',
+  figuratively: '转义', literally: '字面', idiomatic: '习语',
   usually: '通常', often: '常', sometimes: '有时', especially: '尤指',
   broadly: '广义', narrowly: '狭义', also: '亦作', chiefly: '主要',
   physical: '具体', 'by-extension': '引申', generally: '泛指',
@@ -278,3 +278,13 @@ export function enExamLabels(tag: string | null): string[] {
   if (!tag) return [];
   return tag.split(/\s+/).filter(Boolean).map((t) => EN_EXAM_LABELS[t] ?? t);
 }
+
+/** 例句标签（B31，2026-11-07）：`example.tags` 的受控值域（`en/pipeline/example_tags.EXAMPLE_TAG_ORDER`）。
+ *  用字随 B32（两字）与 `EN_REGISTER_LABELS` 同键同名（`proscribed`＝不规范）；`ironic` 含源头 `sarcastic`。
+ *  ⚠️ 键没映射就不印（不拿英文键兜底）—— 契约闸按库里全值域查漏。 */
+export const EN_EXAMPLE_TAG_LABELS: Record<string, string> = {
+  collocation: '搭配',
+  informal: '非正式', nonstandard: '非标准', proscribed: '不规范',
+  dated: '过时', archaic: '古旧',
+  humorous: '诙谐', ironic: '讽刺',
+};

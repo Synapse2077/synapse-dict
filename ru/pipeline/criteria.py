@@ -21,7 +21,13 @@ vi 那门的结论是「**判据一律 import 不重写**」，而它是栽了�
 import re
 import unicodedata as ud
 
-RULE_VER = "ru-crit-22"           # 判据版本。改判据必须同时改它（ko 的 W1 教训）
+RULE_VER = "ru-crit-25"           # 判据版本。改判据必须同时改它（ko 的 W1 教训）
+#   v24 → v25（2026-11-11）：R16 `entry_class_rows`（⑪c）—— en 版 `class` 落 `entry_class` 表。
+#   v23 → v24（2026-11-11）：R3 例句那一半 —— `zh_simp_pairs` 括号整组定类、中性字符按方向归属、
+#     `1)` 分项编号、义项号截断、`@` 模板残渣整义项不收；`zh_simp_pub`／`zh_simp_zh_pub` 清私用区字形
+#     （`\ue4d5`＝破折号、`\ue0c3`＝成语记号）与悬空破折号；`example_text_pub` 的 zh-s 分支走它。
+#   v22 → v23（2026-11-07）：R3 `zh_paper_clean`／`zh_publish_text`／`zh_clean_why`（⑩b）——
+#     zh-s 释义里的纸质俄汉词典洗成释义；`sense_hidden_why` 的 zh 分支改走它，并且**必须给 src**。
 #   v21 → v22（2026-11-05）：R33 `SENSE_REF`／`strip_sense_ref_zh`（11-03 加的，当时漏升版本）；
 #     R32 `pointer_tags` ＝ 人工裁决表 `POINTER_TAGS_ADJUDICATED`（38 行）＋ fr 模板解析器，范围扩到 fr/vi/pl；
 #     R28 `example_hidden_why` 加末支「源头残渣（人工裁决）」3 条（vi 版 `матерскаяие`／`выходит‚в,`／`посадки`）。
@@ -1605,11 +1611,14 @@ def sense_tags(s):
 _RU_LABELS_ONLY = re.compile(r"(?:[а-яё\-]{2,10}\.)(?:[,\s]+[а-яё\-]{2,10}\.)*")
 
 
-def sense_hidden_why(lang, text):
+def sense_hidden_why(lang, text, src=None):
     """出版层的义项要不要藏。→ None（印）或原因。
 
-    zh 版三桶（`zh_gloss_kind`）：`real` 印；`mixed` 先藏（R3：要先切才能用）；`meta` 藏
-    （「брело́к 的形容词」这种元描述，读者得不到词义）。
+    zh 版（R3 之后，ru-crit-23）：
+      · **zh-s**（`zh-edition-simp`）一律过 `zh_paper_clean`：洗得出释义就印，洗不出按成因藏；
+      · **zh-t** 仍按 `zh_gloss_kind` 三桶：`real` 印、`meta` 藏；`mixed` 再过一遍 `zh_paper_clean`
+        （它那 250 条大半是「俄语词嵌在中文释义里」的正常释义，少数是指针／纸质条目）。
+    ⚠️ zh 必须给 `src` —— 两个版的判法不同，不给就是调用方没跟上，直接报错而不是猜。
     ⚠️ 藏 ≠ 删：`sense` 行在、`sense_gloss` 在，判据翻案一条 UPDATE 就放出来。
     """
     # 🔴 **先判「没有字母」再判 zh 三桶**：第一版顺序反了，zh-s 约 90 条整串是 `,` 的释义
@@ -1626,12 +1635,27 @@ def sense_hidden_why(lang, text):
     if lang == "ru" and _RU_LABELS_ONLY.fullmatch(text.strip()):
         return "只有语体/领域标签、没有释义（源头漏写）"
     if lang == "zh":
-        k = zh_gloss_kind(text)
-        if k == "meta":
-            return "zh-元描述（zh_gloss_kind=meta）"
-        if k == "mixed":
-            return "zh-中俄混排待切（R3）"
+        if src not in ("zh-edition-simp", "zh-edition-trad"):
+            raise ValueError("sense_hidden_why(zh) 必须给 src（zh-edition-simp／zh-edition-trad），收到 %r" % (src,))
+        if src == "zh-edition-trad":
+            k = zh_gloss_kind(text)
+            if k == "meta":
+                return ZH_HIDE["meta"]
+            if k == "real":
+                return None
+        out, kinds = zh_paper_clean(text, src)
+        return None if out else zh_clean_why(kinds)
     return None
+
+
+def zh_publish_text(text, src):
+    """zh 出版文本（`sense_gloss.text`）。洗得出释义 ⇒ 洗后的；否则（藏着的、或 zh-t 的 real 桶）⇒ 最小清洗。
+    ⚠️ 与 `sense_hidden_why` 同一套分流 —— 两个函数对「这条走不走 R3 清洗」必须一致。"""
+    if src == "zh-edition-simp" or (src == "zh-edition-trad" and zh_gloss_kind(text) == "mixed"):
+        out, _k = zh_paper_clean(text, src)
+        if out:
+            return out
+    return zh_gloss_tidy(text)
 
 
 _WIKI_LIST = re.compile(r"^[#*]+[:*]*\s*")
@@ -1655,6 +1679,300 @@ def zh_gloss_tidy(text):
         seen.add(t)
         out.append(t)
     return "\n".join(out)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ⑩b R3：**zh-s 释义里抄进来的整条俄汉纸质词典 → 释义**（ru-crit-23，2026-11-07）
+# ══════════════════════════════════════════════════════════════════════════
+# 中文版（简体）一条 gloss 里常常是**维基短释义 ＋ 一整条纸质俄汉词典**，后者的格式非常规整：
+#
+#     [变位词尾] 〔词类/体〕 [对应体的俄语词＋词尾 〔体〕] [支配 что/кого] 〈语体〉释义. ～例句 译文. ‖派生词〔阴〕.
+#     -ню́, -ни́шь; … 〔完〕упрочня́ть, … 〔未〕что〈专〉使更坚固，使更结实. ～ изде́лия из ко́жи使皮革制品更结实.
+#                                                    └──────── 读者要的只有这一截 ────────┘
+# 量（2026-11-07，zh-s 83,227 条）：在印的 7.7 万条里 2.1 万条带〔〕、9 千条夹例句；
+# 另有 5,720 条因为「中俄混排」整条被藏（`zh_gloss_kind=mixed`）—— 里面绝大多数**洗得出释义**。
+#
+# ═══ 判法（每一步都是全量干跑里栽过的，见 RU_PLAN R3）═══
+# ① 行级：`== 俄语 ==` 标题行、`@` 之后（相邻词条的残片，源头串行）、`‖` 之后（派生词）丢；
+#    `～` 开头 ＝ 例句；上一行是例句、这一行带「。」＝ 例句的译文（这一源释义用 `.`，译文用 `。`）；
+#    **非首行**以俄语词开头（又不是支配 что/кого）＝ 例句或派生词。首行以俄语词开头是词头的变体/词形
+#    （`плэ́йер或пле́ер〔阳〕`、`лохм〔复〕`），按条目头处理。
+#    🔴 曾试过「与词头相同就留」：29 条差异里留下来的全是成语例句，删掉了。
+# ② 没有俄语、没有〔〕、没有 `～` 的行 ＝ 维基短释义 ⇒ **R3 不碰**（只去句末 `.`）。
+#    🔴 第一版对所有行都切，`2-氯丁间二烯{1,3}` 被切成 `{1`。
+# ③ 纸质条目行：按 ⑴⑵ 切义项（丢了圈码的 `?` 也是义项分隔：`〔副〕?жу́ткий的副词. ?(无…)`），每个义项：
+#    a. 元描述判在**剥前缀之前**、**按段**判（`〔形〕кулуа́ры的形容词；非正式的` 只丢前一段）；
+#       「X 的某形式」必须带外文字母 —— 🔴 `〔形〕简化的；缩写的`、`(…最高级)最不` 曾被误判；
+#       `的被形过/主形现/副词/指小…` 是这部纸质词典的写法，`_META_TAIL` 没有，补在 `_ZH_META_EXTRA`。
+#    b. 剥前缀：词尾、〔〕、俄语词、不含汉字的括号、支配；**前缀里的纯中文括号（`(用作名)`）与〈〉留下**，
+#       但 〔〕 之前的那些说的是词形（`(主要用于书面语中)或грамм〔阳〕克`）⇒ 遇到 〔〕 清空。
+#       中文小词（复二/或/和…）只在**紧跟俄语或连字符**时才算前缀 —— 🔴 `〔阳〕无线电报务员` 的「无」被吃过。
+#       前缀以冒号收尾（`〔形〕: гомери́ческий смех 狂笑`）⇒ 这个词只在这个短语里用，**短语连译文就是释义**。
+#    c. 第一句是释义（`.`/`。`，不切 `...`），之后是例句；释义里圆括号外第一个 `～` 起是例句。
+#    d. 指针（`见X`／`＝X`／`參見X`／`等同X`）丢。
+#    e. 乱码：`作威作涪?`＝作威作福。—— 末字＋句号坏成「一个错字＋?」，错字认不回来，**丢掉坏的那一项**
+#       （回退到上一个 `，；`）；整条只剩坏的 ⇒ 藏。
+# ④ 洗后去重；什么都不剩 ⇒ 按成因藏（`zh_clean_why`）。证据层（`sense_src.text`）永远是原文。
+#
+# 🔴 **什么会推翻它**：抽读（RU_PLAN R3 验收）里「洗后释义」错/残的 > 5%，或「洗后藏」里出现该印的真释义
+#    ⇒ 判据作废重写。⚠️ 只看文本形式，不回源（俄语没有汉字表记可对，同 `zh_gloss_kind` 的已知不足）。
+_ZC_CYR = "А-Яа-яЁёІіѢѣ"
+_ZC_ACC = "\u0300\u0301\u0306\u0308`ʹʺ'"   # \u0308：源头有分解写法的 ё（`е`＋分音符）
+_ZC_W = r"[%s][%s%s]*(?:-[%s%s]+)*" % (_ZC_CYR, _ZC_CYR, _ZC_ACC, _ZC_CYR, _ZC_ACC)   # 一个俄语词
+_ZC_HAS_CYR = re.compile(r"[%s]" % _ZC_CYR)
+_ZC_HAS_LETTER = re.compile(r"[%sA-Za-z]" % _ZC_CYR)
+_ZC_PRON = (r"(?:кого|чего|кому|чему|кем|чем|ком|чём|что|кто)"
+            r"(?:-(?:кого|чего|кому|чему|кем|чем|ком|чём|что))?")
+_ZC_PREP = r"(?:за|против|на|в|во|о|об|с|со|к|ко|от|до|по|для|из|у|над|под|подо|перед|без|при|про|через|между)"
+_ZC_GOV = r"(?:%s\s+)?%s" % (_ZC_PREP, _ZC_PRON)
+_ZC_GOV_LEAD = re.compile(r"^(?:%s)(?:\s*(?:或|和|,|，)?\s*(?:%s))*(?=[\s一-鿿〈(（])" % (_ZC_GOV, _ZC_GOV))
+_ZC_GZ = (r"(?:复二|复数|复|单|或|和|及|二格|三格|四格|五格|六格|命令式|过去时|现在时|将来时|副动词|短尾|比较级)"
+          r"(?=\s*[-%s])" % _ZC_CYR)
+_ZC_DROP = re.compile(
+    r"\s+|[,，;；.]"
+    r"|〔[^〕\n]{0,20}〕"
+    r"|[(（](?![^)）\n]*[一-鿿])[^)）\n]{0,60}[)）]"
+    r"|[)）](?=\s*[,，;；〔])"                       # 源头括号不配平：`-оённый-ён, -ена́) 〔完〕`
+    r"|-[%s%s]+(?:-[%s%s]+)*" % (_ZC_CYR, _ZC_ACC, _ZC_CYR, _ZC_ACC)
+    # 🔴 **单个字母**直接贴着中文是正文（`Г字形`／`р或л音发不清楚的`／`м牌小汽车`），不是前缀 ——
+    #    R3 验收第二轮逮到 `глаголь` 只剩「字形」。⚠️ 试过「俄语词贴着中文一律不算前缀」：126 行变坏
+    #    （`或межосный轴间的`、`(用作副)ле́сенкой一个比一个高` 的俄语词全漏进释义），已撤。
+    + r"|(?![%s](?:或|和)?[\u4e00-\u9fff])" % _ZC_CYR + _ZC_W
+    + r"|［(?![^］\n]*[\u4e00-\u9fff])[^］\n]{0,20}］"          # 全角方括号里的读音提示 `［тэ́］`
+    + r"|" + _ZC_GZ)
+_ZC_KEEP = re.compile(r"[(（][^)）\n]{0,30}[)）]|〈[^〉\n]{0,12}〉")
+_ZC_POINTER = re.compile(r"^(?:〈[^〉]{0,12}〉|[(（][^)）]{0,14}[)）]|\s)*"
+                         r"(?:见|參見|参见|参看|参阅|等同|同|即|＝|=)\s*[%s]" % _ZC_CYR)
+_ZC_META_HEAD = re.compile(r"^[①-⑳⑴-⒇\d\s,，-]*(?:解)?的")
+_ZC_SENSE_NO = "⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂"
+# 一行里「维基短释义，纸质条目」粘在一起：`统治，〔中〕〈雅〉统治…`／`罐，复二-е́ек〔阴〕…`
+_ZC_GLUE = re.compile(r"(?<=[一-鿿])[，,]\s*(?=[,，]?\s*(?:复二|复|或)?\s*-[%s]|〔|(?:或)?〈[^〉]{1,8}〉\s*[%s]"
+                      r"|(?:或)?[%s][%s%s]*〔)" % (_ZC_CYR, _ZC_CYR, _ZC_CYR, _ZC_CYR, _ZC_ACC))
+_ZC_GRAM_ONLY = re.compile(r"陽性|陰性|阳性|阴性|中性|有生|無生|无生|複數|复数|單數|单数|不變|不变|复二"
+                           r"|[陽陰阳阴中复或和及]|[\s,，、;；.。]+")
+_ZH_META_EXTRA = re.compile(r"的(?:被形过|被形现|主形过|主形现|副词|动名词|形容词|指小|指大|表卑|表爱|指小表爱|多次体|一次体|定向|不定向|比较级|最高级"
+                            r"|另一種拼寫法|另一种拼写法|現在狀語未完成分詞)[\s.。]*$"
+                            r"|在1918年.{0,12}寫法[。.]?$|年以前(?:的寫法|正字)[。.]?$|為同義詞[。.]?$")
+
+# 藏的原因（`sense.hidden_why`）。**标错原因比不标更坏**（ru-crit-14 的教训）⇒ 按成因分开。
+ZH_HIDE = {
+    "meta": "zh-元描述（只说是某词的某形式）",
+    "pointer": "zh-指向别的词（见X／＝X）",
+    "garbled": "zh-源头乱码（末字＋句号坏成「错字＋?」）",
+    "other": "zh-纸质词典条目洗不出释义（只有例句／派生词）",
+}
+
+
+def zh_clean_why(kinds):
+    """`zh_paper_clean` 洗不出释义时，按各行的成因给一个藏的原因（元描述 > 指针 > 乱码 > 其余）。"""
+    for k in ("meta", "pointer", "garbled"):
+        if k in kinds:
+            return ZH_HIDE[k]
+    return ZH_HIDE["other"]
+
+
+def _zc_meta(s):
+    """「某俄语词的某形式」—— 读者得不到词义。必须带外文字母。"""
+    bare = _MARKUP.sub("", s).strip(" 　,，.。、；;:：-－—")
+    if not _ZC_HAS_LETTER.search(bare):
+        return False
+    if _META_TAIL.search(bare) or _ZH_META_EXTRA.search(bare):
+        return True
+    # 截断的：`〔形〕ана́пест的`／`〔形〕акце́нт①解的`（「解」是「第几解」的记号，不算实义）
+    return bool(re.search(r"的\s*$", bare) and len(_CJK.findall(bare.replace("解", ""))) <= 1)
+
+
+def _zc_split(s):
+    """按 `，、；` 切段（括号内不切），**保留分隔符**。→ [(段, 其后分隔符)]"""
+    out, buf, depth = [], [], 0
+    for ch in s:
+        if ch in _OPEN:
+            depth += 1
+        elif ch in _CLOSE:
+            depth = max(depth - 1, 0)
+        if ch in _SEP and depth == 0:
+            out.append(("".join(buf), ch))
+            buf = []
+            continue
+        buf.append(ch)
+    out.append(("".join(buf), ""))
+    return out
+
+
+def _zc_strip_prefix(s):
+    """→ (留下的括号与〈〉, 剩下的, 前缀是否以冒号收尾)"""
+    i, kept, colon = 0, [], False
+    while i < len(s):
+        if s[i] in ":：":
+            colon = True
+            i += 1
+            break
+        m = _ZC_DROP.match(s, i)
+        if m and m.end() > i:
+            if m.group(0).startswith("〔"):
+                kept = []
+            i = m.end()
+            continue
+        m = _ZC_KEEP.match(s, i)
+        if m:
+            kept.append(m.group(0))
+            i = m.end()
+            continue
+        break
+    return "".join(kept), s[i:].lstrip(" ,，;；"), colon
+
+
+def _zc_degarble(s):
+    """→ (剩下的, 是否整条都坏了)"""
+    gm = re.search(r"[一-鿿]\?", s)
+    if not gm:
+        return s, False
+    s = re.sub(r"[^，,；;]*$", "", s[:gm.start()]).rstrip("，,；;")
+    if s.count("(") + s.count("（") > s.count(")") + s.count("）"):
+        return "", True                            # 回退点落在括号里（`(无，用作谓)生活富寓?`）⇒ 剩下的是半个括号，整条算坏
+    return s, not _CJK.search(s)
+
+
+def _zc_part(t, paper):
+    """纸质条目的一个义项（⑴⑵ 已切开）→ (kind, text)"""
+    head = re.split(r"\.\s*(?=[～~%s])|\.\s*$" % _ZC_CYR, t)[0]
+    segs = [x for x, _ in _zc_split(head) if x.strip()]
+    if segs and any(_zc_meta(x) for x in segs) and all(
+            _zc_meta(x) or not _CJK.search(_ZC_GRAM_ONLY.sub("", _MARKUP.sub("", x))) for x in segs):
+        return "meta", None
+    kept, rest, colon = _zc_strip_prefix(t)
+    if not colon and "〔" in re.split(r"(?<=[^.])\.(?!\.)", rest)[0]:
+        # 逐词剥没剥干净（`或〈口〉-а́〔阳〕…`／`单六о -е, в (на) -у́〔阳〕…`／源头断词 `тся, -оку́тся〔完〕`）
+        # ⇒ 退一步：切到**最后一个**「前面只有语法成分」的 〔〕 之后。
+        #   「只有语法成分」＝ 去掉俄语、括号、〈〉、标点、语法小词之后一个汉字都不剩。
+        #   扫完后仍有 〔 的约 0.4%（R3 收尾时量：342／81,904），这一步收掉大半。
+        head0 = re.split(r"(?<=[^.])\.(?!\.)", t)[0]
+        for m in reversed(list(re.finditer(r"〔[^〕\n]{0,20}〕", head0))):
+            pfx = head0[:m.start()]
+            if pfx.count("(") + pfx.count("（") > pfx.count(")") + pfx.count("）"):
+                continue                           # 括号里的 〔〕（`(单гре́нка〔阴〕)`）不是切点 —— 🔴 切过，剩下「)炸面包块」
+            pre = re.sub(r"[%s%s\-]+|[(（［\[][^)）］\]]*[)）］\]]|〈[^〉]*〉|〔[^〕]*〕|[\s\d,，;；:：.]" % (_ZC_CYR, _ZC_ACC),
+                         "", head0[:m.start()])
+            pre = re.sub(r"复二|复六|单六|单二|复数|单数|或|和|及|复|单|无|不变|集", "", pre)
+            if not _CJK.search(pre):
+                kept, rest = "", t[m.end():].lstrip(" ,，;；")
+                break
+    g = _ZC_GOV_LEAD.match(rest)
+    if g:
+        rest = rest[g.end():].lstrip()
+    mh = _ZC_META_HEAD.match(rest)
+    if mh and not _CJK.search(rest[mh.end():]):
+        return "meta", None
+    body = kept + rest
+    if not body:
+        return "meta", None
+    if mh:
+        body = t                                   # `автока́р (avtokár)的駕駛員` —— 剥了反而成半句，原样留
+    if _ZC_POINTER.match(body):
+        # 指针后面跟着一句中文说明的不是指针（前缀词条 `〔前缀〕＝обез...，用在清辅音之前，如：…`）——
+        #   🔴 R3 验收第一轮 60 条里错的 3 条全是这一类（`обес-`／`нис-`／`роз-` 被藏）
+        #   判法：指针那一截（`＝X`、`见X和Y`、`②解`）之外，第一句里还有 ≥4 个说明性汉字 ⇒ 是释义
+        first = re.split(r"(?<=[^.])\.(?!\.)\s*", body)[0]
+        rest_cjk = _CJK.findall(re.sub(r"〈[^〉]*〉|[(（][^)）]*[)）]|[见參参看阅等同即和或及解]", "",
+                                       re.sub(r"[：:，,]?\s*如[：:].*$", "", first)))
+        if len(rest_cjk) >= 4:
+            return "def", first.rstrip(" .。")
+        return "pointer", None
+    if colon:
+        s = re.split(r"(?<=[^.])\.(?!\.)\s*", body)[0].rstrip(" .。")
+        core = re.sub(r"〈[^〉]*〉|[(（][^)）]*见[^)）]*[)）]|＝.*$", "", s)
+        return ("def", s) if _CJK.search(core) else ("pointer", None)
+    s = re.split(r"(?<=[^.])[.。](?![.])\s*", body)[0]
+    depth, cut = 0, len(s)
+    for j, ch in enumerate(s):
+        if ch in "(（〈[":
+            depth += 1
+        elif ch in ")）〉]":
+            depth = max(depth - 1, 0)
+        elif depth == 0 and ch in "～~":
+            cut = j
+            break
+    if cut < len(s):
+        s = re.sub(r"[\s.]*(?:%s[\s,()（）]*)+$" % _ZC_W, "", s[:cut])
+    s, bad = _zc_degarble(s)
+    if bad:
+        return "garbled", None
+    s = "".join(x + sep for x, sep in _zc_split(s)
+                if x.strip() and not _zc_meta(x) and not _ZC_POINTER.match(x.strip())).strip(" ,，;；、:：.。")
+    if not s:
+        return "meta", None
+    core = re.sub(r"〈[^〉]*〉|\([^)]*\)|（[^）]*）|\[[^\]]*\]", "", s)
+    if paper:
+        core = _ZC_GRAM_ONLY.sub("", core)
+    if _CJK.search(core):
+        return "def", s
+    # ⚠️ 下限 8 个汉字：`(无，用作谓)`／`(不用一、二人称)` 这类语法说明（4–6 字）单独剩下时不是释义
+    if not core.strip() and len(_CJK.findall(s)) >= 8 and not _ZC_HAS_CYR.search(s):
+        return "def", s                            # `(连接补语、主语、谓语、定语从属句)` —— 用法说明就是释义
+    return "residue", None
+
+
+def _zc_line(ln, first, prev, trad=False):
+    """→ [(kind, text)]；kind ∈ def/example/derived/pointer/meta/garbled/residue/heading/empty
+
+    `trad`：zh-t 的维基式释义里**俄语词是正文的一部分**（`Ашхаба́д (Ašxabád)在土庫曼斯坦的標準寫法：阿什哈巴德`）
+    ⇒ 只有真带纸质标记（〔〕／`～`）的行才剥前缀。🔴 第一版不分，主语被当前缀剥掉、只剩「在土庫曼斯坦的標準寫法」。"""
+    t = _WIKI_LIST.sub("", ln or "").strip()
+    if not t:
+        return [("empty", None)]
+    if re.fullmatch(r"=+[^=]*=+|%s\.\.\.?" % _ZC_W, t):
+        return [("heading", None)]
+    t = t.split("@")[0].split("‖")[0].strip()
+    if not t:
+        return [("derived", None)]
+    if t[0] in "～~":
+        return [("example", None)]
+    if prev == "example" and "。" in t:
+        return [("example", None)]
+    if not first and re.match(_ZC_W, t) and not _ZC_GOV_LEAD.match(t):
+        if _zc_meta(t):
+            return [("meta", None)]
+        return [("derived" if "〔" in t[:60] else "example", None)]
+    paper = bool("〔" in t or "～" in t or (not trad and _ZC_HAS_CYR.search(t)))
+    if not paper:
+        first_seg = _zc_split(t)[0][0]
+        if _zc_meta(first_seg):
+            return [("meta", None)]                # zh-t：`вперёд (vperjód)的另一種拼寫法`／`весь的舊中性複數，在…`
+        if _ZC_POINTER.match(t):
+            return [("pointer", None)]             # zh-t：`參見брюква`／`等同но́-о-о`
+        t, bad = _zc_degarble(t)
+        if bad:
+            return [("garbled", None)]
+        t = t.rstrip(" .")
+        if not _CJK.search(t) or re.fullmatch(r"(?:\[[^\]]{0,8}\]|〈[^〉]{0,8}〉|<[^>]{0,8}>|\s)+", t):
+            return [("residue", None)]             # 只有一个领域标签（`[动]`），释义源头没给
+        return [("def", t)]
+    t = re.sub(r"(?:^|(?<=[.。〕]))\s*\?(?=\s*[^\s?])", "⑴", t)
+    out = []
+    for p in re.split(r"\s*(?=[%s])" % _ZC_SENSE_NO, t):
+        p = p.lstrip(_ZC_SENSE_NO).strip()
+        if p and (_CJK.search(p) or _ZC_HAS_CYR.search(p)):
+            out.append(_zc_part(p, paper))
+    return out or [("residue", None)]
+
+
+def zh_paper_clean(text, src="zh-edition-simp"):
+    """R3：zh 释义 → (洗后的出版文本 或 None, 各行成因 tuple)。证据层不动。"""
+    trad = src == "zh-edition-trad"
+    raw = []
+    for ln in (text or "").split("\n"):
+        raw.extend(_ZC_GLUE.split(ln))
+    lines, kinds, prev = [], [], None
+    for n, ln in enumerate(raw):
+        res = _zc_line(ln, n == 0, prev, trad)
+        prev = res[-1][0]
+        kinds.extend(k for k, _ in res)
+        defs = [v for k, v in res if k == "def"]
+        if defs:
+            v = "；".join(defs)
+            if v not in lines:
+                lines.append(v)
+    return ("\n".join(lines) or None), tuple(kinds)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1736,6 +2054,8 @@ def example_text_pub(src, text):
             keep.append(ln)
         t = "\n".join(keep).strip() or t
     t = _LEAD_MARK.sub("", t).strip() or t
+    if src == "zh-edition-simp":
+        t = zh_simp_pub(t) or t
     if src == "fr-edition":
         m = _FR_TAIL.search(t)
         if m and _has_cyrillic(t[:m.start()]) and not _has_cyrillic(t[m.end():]):
@@ -1841,35 +2161,230 @@ def _balanced(s):
     return True
 
 
+# ── v24（2026-11-11，R3 例句那一半）：旧切分器在 615 句上切不开，量下来**几乎都是切分器自己的边界错**：
+#   ① 括号被劈开（215）：`яи́ц(鸡、昆虫等)产卵` —— `(` 是中性字符跟着前一段走，`鸡、昆虫等)` 落进中文段
+#      ⇒ 两边括号都不配。⇒ **括号整组是一个原子，按内容定类**：有西里尔 ⇒ 俄；只有汉字 ⇒ 中。
+#   ② 俄文括号里的「或／和」被切成中文段（260）：`блестя́щая(或блиста́тельная)` ⇒ 同上，组内汉字只有
+#      或/和 且有西里尔 ⇒ 俄。组内**俄中混着别的汉字**（`(见 крути́ть)`）⇒ 认不出，整义项不收。
+#   ③ 中文段的分项编号 `1）…；2)…`（55 的大头）：编号不计入括号配平。
+#   ④ 中性字符（空格、数字、ASCII 标点、拉丁字母）旧版一律跟前一段 ⇒ `100 ～ов` 的 100 落进上一句中文。
+#      ⇒ 开头的**收尾标点**（`.,;:!?)]»…-–—`）、**拉丁字母**（转写行）、普通数字归前一段；隔着空格的分项编号 `1)`
+#      与开括号归后一段；
+#      俄文句末的全角 `？！` 归俄文。（第一版拉丁字母也跟后一段 ⇒ 转写 `Oná starájetsja…` 当成了中文译文，干跑逮到）
+#   ⑤ 拉丁字母紧贴西里尔（`Kома́ндная`，源头把 К 打成了拉丁 K）⇒ 算西里尔。
+#   ⑥ 义项号 `⑴…⒇／①…⑳` 之后是别的义项的东西 ⇒ 截掉（同 `‖`）。
+#   ⑦ ~~有假名 ⇒ 整义项不收~~（第一版有，**撤了**：唯一那条 `目谠龀ぁ＂啤醋` B30 早已改译成「迅速接近目标」，
+#      藏掉整个义项反而丢了改译和同义项另外 2 对好句子）。俄文段有 `@`（`Из-за пус@развестись@ 动词 离婚`，
+#      别的词典的模板残渣）⇒ 整义项不收。
+#   ⑧ `` `ё `` ＝ 坏掉的大写 `Л`（`` `ёо́дку ～сло́ `` ＝ Ло́дку）：源头 83 处反引号**后面全是 ё**、全是词首 Л 的位置
+#      ⇒ 整体算西里尔，出版正文还原成 Л。旧版把反引号挂在上一句中文末尾，读者看到 `ёо́дку`。
+# 🔴 收的条件没有放宽：**每一对都要过**、任何一对不过整义项不收 —— 放宽的只是「怎么切」。
+#    v23 → v24 在源头全部 zh-s 义项上比过：原来切得开的 6,234 个义项**一个没变成切不开**；
+#    配对变了的 192 个全是边界字符换边（逐类看过：全角 `！？` 回到俄文句末、成语记号换边、破折号）。
+# 🔴 跨义项错位（义项开头就是中文、俄文在上一个义项末尾）**不修**：哪个义项是对的源头没给，配了就是猜。
+_ZS_OPEN = {"(": ")", "（": "）", "《": "》", "[": "]", "«": "»", "〈": "〉", "〔": "〕"}
+_ZS_CLOSE = frozenset(_ZS_OPEN.values())
+_ZS_NUM_MARK = re.compile(r"\d+\s*[)）]")
+_ZS_SENSE_NO = re.compile(r"[⑴-⒇①-⑳]")
+_ZS_ALT = frozenset("或和")
+_ZS_TRAIL = frozenset(".,;:!?)]»…-–—")      # 🔴 不含空格：空格是「数字隔开了」的信号（`конце́рт 1）猫叫春` 第一版吃掉了它）
+
+
+def _zs_cyr(ch):
+    return "CYRILLIC" in ud.name(ch, "")
+
+
+def _zs_atoms(blob):
+    """→ [(类, 文本)]。类：C 俄／H 中／N 中性／M 分项编号（跟后面走）／X 认不出。"""
+    out, i, n = [], 0, len(blob)
+    while i < n:
+        ch = blob[i]
+        if ch in _ZS_OPEN:
+            depth, j = 0, i
+            while j < n:                              # `(` 与 `（`、`)` 与 `）` 互认（源头混着用）
+                if blob[j] in _ZS_OPEN:
+                    depth += 1
+                elif blob[j] in _ZS_CLOSE:
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            if j < n:
+                g = blob[i:j + 1]
+                has_c = any(_zs_cyr(c) for c in g)
+                cjk = _CJK.findall(g)
+                if has_c and cjk and not set(cjk) <= _ZS_ALT:
+                    out.append(("X", g))
+                elif has_c:
+                    out.append(("C", g))
+                elif cjk or ch in "〈〔":
+                    out.append(("H", g))
+                else:
+                    out.append(("N", g))
+                i = j + 1
+                continue
+        m = _ZS_NUM_MARK.match(blob, i)
+        if m and (i == 0 or not blob[i - 1].isdigit()):
+            out.append(("M", m.group()))
+            i = m.end()
+            continue
+        k = _zh_cls(ch)
+        if k == "L" and i + 1 < n and _zs_cyr(blob[i + 1]):
+            k = "C"
+        if ch == "`" and i + 1 < n and blob[i + 1] == "ё":   # ⑧ 坏掉的 Л（见 `zh_simp_pub`）
+            k = "C"
+        out.append((k, ch))
+        i += 1
+    return out
+
+
+def _zs_segs(blob):
+    """→ [(类, 段)] 或 None（有认不出的括号组）。"""
+    segs, pend = [], ""
+    for k, t in _zs_atoms(blob):
+        if k in ("N", "L", "M"):
+            pend += t
+            continue
+        if k == "X":
+            return None
+        if segs:                                      # 中性串开头的收尾标点归前一段
+            m = 0
+            while m < len(pend) and pend[m] in _ZS_TRAIL:
+                m += 1
+            # 拉丁字母（转写行 `Oná starájetsja…`）留在前一段：截到最后一个拉丁字母再吃掉其后的收尾标点
+            last = max((j for j, c in enumerate(pend) if c.isalpha()), default=-1)
+            if last >= m:
+                m = last + 1
+                while m < len(pend) and pend[m] in _ZS_TRAIL:
+                    m += 1
+            # 隔着空格的**分项编号 `1)`／开括号**跟后一段（`Чу́вство ло́ктя 1)站队时…；2)…`）；
+            # 普通数字一律跟前一段（`～ 92` 作品号／`на 10%`／`号码7`）—— 第一版让隔着空格的数字也跟后一段，弄坏 3 处
+            while m < len(pend):
+                tm = re.match(r"\s*\S+", pend[m:])
+                if not tm:                            # 只剩空白
+                    m = len(pend)
+                    break
+                tok = tm.group()
+                if tok[0].isspace() and (_ZS_NUM_MARK.match(tok.lstrip()) or tok.lstrip()[0] in _ZS_OPEN):
+                    break
+                m += len(tok)
+            segs[-1][1] += pend[:m]
+            pend = pend[m:]
+        if segs and segs[-1][0] == k:
+            segs[-1][1] += pend + t
+        elif k == "H" and segs and t in "？！" and not pend.strip():
+            segs[-1][1] += pend + t                   # 俄文句末的全角问号/叹号
+        else:
+            segs.append([k, pend + t])
+        pend = ""
+    if segs:
+        segs[-1][1] += pend
+    return [(k, s.strip()) for k, s in segs if s.strip()]
+
+
+def _zs_balanced(s):
+    s = _ZS_NUM_MARK.sub("", s)
+    return _balanced(s) and s.count("(") + s.count("（") == s.count(")") + s.count("）")
+
+
 def zh_simp_pairs(texts):
-    """一个义项的 zh-s 例句正文（源头顺序）→ `[(俄, 中), …]` 或 None（切不开 ⇒ 整义项不收）。"""
+    """一个义项的 zh-s 例句正文（源头顺序）→ `[(俄, 中), …]` 或 None（切不开 ⇒ 整义项不收）。
+    返回的是**源头原文的切片**（私用区字形原样留着）；出版文本另由 `zh_simp_pub`／`zh_simp_zh_pub` 出。"""
     blob = " ".join(t for t in texts if t)
     blob = blob.split("‖", 1)[0]
-    runs = []
-    for ch in blob:
-        k = _zh_cls(ch)
-        if k in "NL":
-            if runs:
-                runs[-1][1].append(ch)
-            else:
-                runs.append(["N", [ch]])
-            continue
-        if runs and runs[-1][0] == k:
-            runs[-1][1].append(ch)
-        elif runs and runs[-1][0] == "N":
-            runs[-1] = [k, runs[-1][1] + [ch]]
-        else:
-            runs.append([k, [ch]])
-    segs = [(k, "".join(c).strip()) for k, c in runs if "".join(c).strip()]
+    m = _ZS_SENSE_NO.search(blob)
+    if m:
+        blob = blob[:m.start()]
+    segs = _zs_segs(blob)
     if not segs or len(segs) % 2 or any(k != "CH"[i % 2] for i, (k, _s) in enumerate(segs)):
         return None
     out = []
     for i in range(0, len(segs), 2):
         ru, zh = segs[i][1], segs[i + 1][1]
-        if (sum(1 for ch in ru if "CYRILLIC" in ud.name(ch, "")) < 2
-                or len(_CJK.findall(zh)) < 2 or not _balanced(ru) or not _balanced(zh)):
+        if (sum(1 for ch in ru if _zs_cyr(ch)) < 2 or len(_CJK.findall(zh)) < 2
+                or not _zs_balanced(ru) or not _zs_balanced(zh) or "@" in ru):
             return None
         out.append((ru, zh))
+    return out
+
+
+# 纸质词典的私用区字形：`` 在俄文里是破折号（`Муж и жена́ — одна́ сатана́`，上下文逐条看过），
+# `` 是成语记号（◇，后面跟成语）⇒ 删。**别的私用区字形不动**：中文里那几个是生僻字造字（`拉重的马`），
+# 还原不了、也不该猜。
+_ZS_PUA_DASH = re.compile(r"\s*\s*")
+_ZS_EDGE_DASH = re.compile(r"(?<=\S)\s+[\-–—]$")       # 只剥句尾悬空的；句首 `— Вы…` 是对话体，留着
+
+
+def zh_simp_pub(ru):
+    """zh-s 俄文段 → 出版正文。"""
+    t = ru.replace("`ё", "Л").replace("", " ")
+    t = _ZS_PUA_DASH.sub(" — ", t)
+    t = _ZS_EDGE_DASH.sub("", re.sub(r"\s{2,}", " ", t).strip())
+    return t
+
+
+def zh_simp_zh_pub(zh):
+    """zh-s 中文段 → 出版译文（成语记号、开头的悬空破折号）。"""
+    t = zh.replace("", " ").strip()
+    return re.sub(r"^[\-–—]\s*", "", t).strip()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ⑪c R16：**en 版的 `class`（词干类型／重音型／变位类）→ `entry_class` 表**（ru-crit-25，2026-11-11）
+# ══════════════════════════════════════════════════════════════════════════
+# 实测（只读扫七源）：**只有 en 版给**，56,985 个 entry。值属于哪套体系**看源头的变位表模板**，不看值的形状：
+#   `ru-noun-table`／`ru-ndecl` ⇒ 名词：词干类型（`velar-stem`）＋ 重音型（`accent-c`），一般成对
+#   `ru-decl-adj`              ⇒ 形容词变格的重音码（`a*②`／`cʹ`）；7,357 个 pos=verb 的是**形动词**（`используемый`）
+#   `ru-conj`／`ru-conj-old`   ⇒ 动词变位类（`1a imperfective transitive`）
+# 🔴 与 `entry.declension`（ru 版的传统第一/二/三变格）是**两套分类系统**，不许混进一列（ko K8/K10）。
+# 🔴 **一个 entry 同一族可以多值**（实测 480 个：两体动词 `2a imperfective`＋`2a perfective` 401／
+#    形容词短尾两种重音 `великий aʹ, b` 57／名词异读重音 `дед accent-a, accent-c` 14…）⇒ 一值一行，不落列。
+# 类别码（`code`）从原文剥：
+#   名词词干 `decl/soft-stem`／`/velar-stem` ⇒ 取最后一个 `/` 之后、去 `-stem`；重音型去 `accent-`
+#   形容词 `a*② / dated short class c*②` ⇒ 取 ` / dated short class ` 之前（原文留着那条旧读法）
+#   动词 `1a imperfective transitive` ⇒ 去掉体与及物性（`entry.aspect` 与 `sense_tag` 已有）；
+#        `4b(-жд-` ⇒ 去掉被截断的辅音交替注（源头括号没闭合）
+# ⚠️ 原文（`raw`）整串留着，类别码只是方便查；判不出的 `hidden_why` 写原因，**不丢**。
+ENTRY_CLASS_SYSTEM = {"ru-noun-table": "noun", "ru-ndecl": "noun", "ru-decl-adj": "adj",
+                      "ru-conj": "verb", "ru-conj-old": "verb"}
+ENTRY_CLASS_KINDS = {"noun": frozenset({"stem", "accent"}), "adj": frozenset({"stem", "accent"}),
+                     "verb": frozenset({"conj"})}
+CLASS_UNKNOWN_TEMPLATE = "变位表模板不认识（R16）"
+CLASS_UNPARSED = "类别码剥不出来（R16）"
+_CL_VERB_TAIL = re.compile(r"\s+(?:imperfective|perfective)(?:\s+[a-z]+)*$")
+_CL_TRUNC_ALT = re.compile(r"\(-[^)]*$")
+
+
+def entry_class_rows(table_tag, values):
+    """一个 entry 的 `class` 值（源头顺序）＋ 它的变位表模板 → `[(system, kind, code, raw, hidden_why)]`。
+    按原文去重（源头同一个值常出现两次：`знать` 的 `1a imperfective transitive` ×2）。"""
+    out, seen = [], set()
+    system = ENTRY_CLASS_SYSTEM.get(table_tag)
+    for raw in values:
+        raw = (raw or "").strip()
+        if not raw or raw in seen:
+            continue
+        seen.add(raw)
+        if system is None:
+            out.append((None, None, None, raw, CLASS_UNKNOWN_TEMPLATE))
+            continue
+        kind = code = None
+        # 词干类型／重音型这两种**形状**在哪个模板下都是同一个意思：姓氏 `Павлов`／`Пушкин` 走形容词模板
+        #   （`ru-decl-adj`）而给的是名词那套 `hard-stem`＋`accent-a` —— 第一版按模板硬套，存成了重音码 `hard-stem`
+        if raw.endswith("-stem"):
+            kind, code = "stem", raw.rsplit("/", 1)[-1][:-len("-stem")]
+        elif raw.startswith("accent-"):
+            kind, code = "accent", raw[len("accent-"):]
+        elif system == "noun":
+            pass
+        elif system == "adj":
+            kind, code = "accent", raw.split(" / dated short class ")[0].strip()
+        else:
+            kind, code = "conj", _CL_TRUNC_ALT.sub("", _CL_VERB_TAIL.sub("", raw)).strip()
+        if not code:
+            out.append((system, None, None, raw, CLASS_UNPARSED))
+        else:
+            out.append((system, kind, code, raw, None))
     return out
 
 

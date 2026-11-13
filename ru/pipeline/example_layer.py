@@ -123,9 +123,11 @@ def collect(conn, limit=None, verbose=True):
                     pairs = criteria.zh_simp_pairs(texts)
                     if pairs is not None:
                         for k, (ru, zh) in enumerate(pairs):
-                            why = criteria.example_hidden_why(src, w, ru)
-                            add(word_id, entry_id, sense_id, ru, ru, None, why, src,
-                                "%s#p%d" % (key, k), None if why else ("zh", zh))
+                            # v24：`text` 是源头切片；出版正文／译文清私用区字形（criteria §⑪）
+                            tp = criteria.example_text_pub(src, ru)
+                            why = criteria.example_hidden_why(src, w, tp)
+                            add(word_id, entry_id, sense_id, ru, tp, None, why, src,
+                                "%s#p%d" % (key, k), None if why else ("zh", criteria.zh_simp_zh_pub(zh)))
                             st["落点 " + land] += 1
                             st["zh-s 重切成对"] += 1
                         st["zh-s 重切的源例句"] += len(exs)
@@ -199,6 +201,25 @@ def collect(conn, limit=None, verbose=True):
     st["⭐ 同句借中文"] = len(borrowed)
     for r in rows:
         st[("隐藏：" + r[7]) if r[7] else "✅ 可出版"] += 0 if r[7] == DUP else 1
+    # ── id 按 `src_ref` 稳定（2026-11-11，R3 例句那一半）：库里已有的行沿用库里的 id，新行从最大 id 往后排。
+    #    🔴 以前 id ＝ 重算顺序号 ⇒ 判据一让某个义项多切出/少切出一行，**它后面 33 万行的 id 全部错位**，
+    #    而模型译文按 id 挂着 —— 同步只能拒绝。空库（首次建）时与顺序号完全相同。
+    old = {}
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='example'").fetchone():
+        old = dict(conn.execute("SELECT src_ref, id FROM example"))
+    if old:
+        nxt = max(old.values())
+        remap = {}
+        for r in rows:
+            if r[9] in old:
+                remap[r[0]] = old[r[9]]
+            else:
+                nxt += 1
+                remap[r[0]] = nxt
+                st["新 id（库里没有的 src_ref）"] += 1
+        for r in rows:
+            r[0] = remap[r[0]]
+        glosses = [(remap[g[0]],) + tuple(g[1:]) for g in glosses]
     return [tuple(r) for r in rows], glosses, st
 
 
@@ -260,38 +281,75 @@ def sync(rows, glosses, conn, dry=False):
     """
     # R25（2026-11-05）：`tags` 也归同步管（源头标签，不碰译文）；列还没有 ⇒ 当作全空，写库时先建
     has_tags = "tags" in {c[1] for c in conn.execute("PRAGMA table_info(example)")}
+    # R3（2026-11-07）：`sense_id` 也归同步管 —— 它跟着「义项藏不藏」走（文件头 ①②），而义项层判据一改，
+    #   藏不藏就变了：R3 放出 4,881 条 zh-s 义项后 612 句例句该挂上去、撤下的破例义项上 3 句该解开。
+    #   🔴 以前同步不管这一列 ⇒ 外锚闸 X③ 612 条、例句闸 X5 3 条，是义项层改判据之后**第一次**暴露。
     db = {r[0]: r[1:] for r in conn.execute(
-        "SELECT src_ref, id, text_pub, ref, hidden_why, %s FROM example" % ("tags" if has_tags else "NULL"))}
-    if set(db) != {r[9] for r in rows}:
-        raise SystemExit("🔴 重算的 src_ref 集合与库里不同（多 %d／少 %d）—— 不是同步能处理的"
-                         % (len({r[9] for r in rows} - set(db)), len(set(db) - {r[9] for r in rows})))
+        "SELECT src_ref, id, text_pub, ref, hidden_why, %s, sense_id, text FROM example"
+        % ("tags" if has_tags else "NULL"))}
+    db_src = dict(conn.execute("SELECT src_ref, src FROM example"))
+    row_src = {r[9]: r[8] for r in rows}
+    # 2026-11-11（R3 例句那一半）：src_ref 集合**可以变，但只许在 zh-s 重切上变** —— 判据让一个义项从「切不开」
+    #   变成「切得开」（`#x` 行换成 `#p` 行）、或多切/少切一对。别的版本行集合变了 ⇒ 不是同步能处理的。
+    #   id 由 `collect` 按 src_ref 稳定分配（旧行沿用、新行往后排），所以这里还是逐行核 id。
+    want_refs = {r[9] for r in rows}
+    add_refs, del_refs = want_refs - set(db), set(db) - want_refs
+    bad_ref = [x for x in add_refs if row_src[x] != "zh-edition-simp"] + \
+        [x for x in del_refs if db_src[x] != "zh-edition-simp"]
+    if bad_ref:
+        raise SystemExit("🔴 重算的 src_ref 集合与库里不同（多 %d／少 %d），且有非 zh-s 的（%s）—— 不是同步能处理的"
+                         % (len(add_refs), len(del_refs), bad_ref[:3]))
     model = dict(conn.execute("SELECT example_id, id FROM example_gloss WHERE src LIKE 'model:%' AND lang='zh'"))
+    model_any = {r[0] for r in conn.execute("SELECT DISTINCT example_id FROM example_gloss WHERE src LIKE 'model:%'")}
+    del_ids = [db[x][0] for x in del_refs]
+    if model_any & set(del_ids):
+        raise SystemExit("🔴 要删的例句挂着模型译文 %d 条 —— 单独设计" % len(model_any & set(del_ids)))
     have_g = {tuple(g) for g in conn.execute(
         "SELECT example_id, lang, text, src FROM example_gloss WHERE src NOT LIKE 'model:%'")}
-    # 唯一放行的译文变化：**新的同句借用**（正文改了之后与同词形下一句带源头中文的一字不差）。
-    #   落在挂着模型中文的例句上 ⇒ **源头中文替换模型中文**（源头优先；当初若这样建，6d 根本不会译它）。
-    #   模型原话仍在答案文件里（`[[answer-file-is-the-ledger]]`）。R24 实测 1 条（3806）。
-    new_g = set(glosses) - have_g
-    if have_g - set(glosses) or any(not g[3].endswith(":同句") or g[1] != "zh" for g in new_g):
-        raise SystemExit("🔴 源头译文会变（库里多 %d／少 %d，且不全是新的同句借用）—— 同步只动出版列"
-                         % (len(have_g - set(glosses)), len(new_g)))
+    # 放行的译文变化只有两种：
+    #   ① **新的同句借用**（正文改了之后与同词形下一句带源头中文的一字不差）。落在挂着模型中文的例句上
+    #      ⇒ **源头中文替换模型中文**（源头优先）；模型原话仍在答案文件里（`[[answer-file-is-the-ledger]]`）。
+    #   ② **zh-s 源头中文本身变了**（v24 重切/清私用区字形；含借过去的 `zh-edition-simp:同句`）。
+    #   其余源头译文一变就停。
+    zs = lambda g: g[3].startswith("zh-edition-simp")                    # noqa: E731
+    new_g, gone_g = set(glosses) - have_g, have_g - set(glosses)
+    if any(not zs(g) for g in gone_g) or any(not (zs(g) or g[3].endswith(":同句")) or g[1] != "zh" for g in new_g):
+        raise SystemExit("🔴 源头译文会变（库里多 %d／少 %d，且不全是 zh-s 或新的同句借用）—— 同步只动出版列"
+                         % (len(gone_g), len(new_g)))
+    # 🔴 同一 (例句, 语种) 的源头译文只是**文字变了** ⇒ 原地改 `text`、**id 不动**：B30 的改译按
+    #    `example_gloss.id` 挂着（`judge_zh_edition_examples.fixes`），删了再插就把改译冲掉（第一次 apply 实测丢 6 条，回滚）。
+    gid = {(r[0], r[1]): r[2] for r in conn.execute(
+        "SELECT example_id, lang, id FROM example_gloss WHERE src NOT LIKE 'model:%'")}
+    gone_by = {(g[0], g[1]): g for g in gone_g}
+    re_g = [(g[2], g[3], gid[(g[0], g[1])]) for g in sorted(new_g) if (g[0], g[1]) in gone_by]
+    new_g = {g for g in new_g if (g[0], g[1]) not in gone_by}
+    want_keys = {(x[0], x[1]) for x in glosses}
+    gone_g = {g for k, g in gone_by.items() if k not in want_keys}
     drop_model = [model[g[0]] for g in new_g if g[0] in model]
-    for g in sorted(new_g):
-        print("   ⭐ 新的同句借中文 %7d %s%s" % (g[0], g[2][:30], "（替换模型中文）" if g[0] in model else ""))
-    up = []
+    print("   源头译文：新 %s／去 %s／原地改 %s（其中替换模型中文 %d）"
+          % (F(len(new_g)), F(len(gone_g)), F(len(re_g)), len(drop_model)))
+    up, ins, txt = [], [], []
     for r in rows:
-        did, tp, rf, why, tg = db[r[9]]
+        if r[9] in add_refs:
+            ins.append((r[0], r[1], r[2], r[3], r[4], r[5], r[6], 1 if r[7] else 0, r[7], r[8], r[9], r[10]))
+            continue
+        did, tp, rf, why, tg, sid, text = db[r[9]]
         if did != r[0]:
             raise SystemExit("🔴 %s 的 id 变了（库 %d／重算 %d）—— 模型译文按 id 挂着，不许同步" % (r[9], did, r[0]))
-        if (tp, rf, why, tg) != (r[5], r[6], r[7], r[10]):
-            if r[7] and not why and r[0] in model:
+        if text != r[4]:
+            if "#p" not in r[9]:
+                raise SystemExit("🔴 %s 的原文变了 —— 只有 zh-s 重切的行允许（原文是切片）" % r[9])
+            txt.append((r[4], r[0]))
+        if (tp, rf, why, tg, sid) != (r[5], r[6], r[7], r[10], r[3]):
+            if r[7] and not why and r[0] in model_any:
                 raise SystemExit("🔴 要藏的 %s 挂着模型译文 —— 单独设计" % r[9])
-            up.append((r[5], r[6], 1 if r[7] else 0, r[7], r[10], r[0]))
+            up.append((r[5], r[6], 1 if r[7] else 0, r[7], r[10], r[3], r[0]))
+    print("   行：新增 %s／删除 %s／原文切片改 %s" % (F(len(ins)), F(len(del_ids)), F(len(txt))))
     print("\n■ 同步：%s 行出版列要改" % F(len(up)))
-    for tp, rf, _h, why, _tg, i in up[:20]:
+    for tp, rf, _h, why, _tg, _sid, i in up[:20]:
         print("   %7d  正文 %-40s ｜ ref %s%s" % (i, (tp or "")[:40].replace("\n", "⏎"), (rf or "")[:40],
                                               "  ｜ 藏：" + why if why else ""))
-    if dry or not (up or new_g):
+    if dry or not (up or new_g or gone_g or re_g or ins or del_ids or txt):
         print("(干跑)" if dry else "(没有差异)")
         return
     cnt = lambda sql: conn.execute(sql).fetchone()[0]                   # noqa: E731
@@ -300,15 +358,33 @@ def sync(rows, glosses, conn, dry=False):
         - cnt("SELECT COUNT(*) FROM example WHERE text_pub IS NOT NULL AND TRIM(text_pub)<>''"),
         "example.hidden_why": sum(1 for r in rows if r[7])
         - cnt("SELECT COUNT(*) FROM example WHERE hidden_why IS NOT NULL AND TRIM(hidden_why)<>''"),
-        "#example_gloss": len(new_g) - len(drop_model),
+        "#example": len(ins) - len(del_ids),
+        "example.entry_id": len(ins) - len(del_ids),            # 每行都有 entry_id ⇒ 跟行数走
+        # 去掉的源头译文若带简体出版文本，跟着没了；新插的等 `zh_pub.py --apply` 补
+        "example_gloss.text_pub": -sum(cnt("SELECT COUNT(*) FROM example_gloss WHERE example_id=%d AND lang='%s' "
+                                           "AND src='%s' AND text_pub IS NOT NULL" % (g[0], g[1], g[3]))
+                                       for g in gone_g)
+        - sum(cnt("SELECT COUNT(*) FROM example_gloss WHERE example_id=%d AND text_pub IS NOT NULL" % i)
+              for i in set(del_ids) - {g[0] for g in gone_g}),      # 删掉的 #p 行的译文已在 gone_g 里算过
+        "#example_gloss": len(new_g) - len(gone_g) - len(drop_model),
+        "example_gloss.text": None,               # 原地改（`re_g`）
+        "example.text": None,                     # zh-s 重切切片（`txt`）
         "example.tags": sum(1 for r in rows if r[10])
         - (cnt("SELECT COUNT(*) FROM example WHERE tags IS NOT NULL") if has_tags else 0),
+        "example.sense_id": None,                 # 允许变（R3 之后挂上/解开），数目由外锚闸逐行核
     }
     conn.close()
     with dbtool.session("example-sync-%s" % criteria.RULE_VER, expect=exp, invalidates=[]) as s:
         if not has_tags:
             s.execute("ALTER TABLE example ADD COLUMN tags TEXT")
-        s.executemany("UPDATE example SET text_pub=?, ref=?, hidden=?, hidden_why=?, tags=? WHERE id=?", up)
+        s.executemany("DELETE FROM example_gloss WHERE example_id=? AND lang=? AND text=? AND src=?", sorted(gone_g))
+        s.executemany("UPDATE example_gloss SET text=?, src=? WHERE id=?", re_g)
+        s.executemany("DELETE FROM example_gloss WHERE example_id=?", [(i,) for i in del_ids])
+        s.executemany("DELETE FROM example WHERE id=?", [(i,) for i in del_ids])
+        s.executemany("INSERT INTO example(id, word_id, entry_id, sense_id, text, text_pub, ref, hidden, hidden_why,"
+                      " src, src_ref, tags) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", ins)
+        s.executemany("UPDATE example SET text=? WHERE id=?", txt)
+        s.executemany("UPDATE example SET text_pub=?, ref=?, hidden=?, hidden_why=?, tags=?, sense_id=? WHERE id=?", up)
         s.executemany("DELETE FROM example_gloss WHERE id=?", [(i,) for i in drop_model])
         s.executemany("INSERT INTO example_gloss(example_id,lang,text,src) VALUES (?,?,?,?)", sorted(new_g))
 

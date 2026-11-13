@@ -28,7 +28,7 @@ sys.path.insert(0, str(HERE.parent))
 import paths                                                    # noqa: E402
 from pipeline import criteria                                   # noqa: E402
 
-ROSTER = tuple("E%d" % i for i in range(1, 18))
+ROSTER = tuple("E%d" % i for i in range(1, 19))
 ACCEPT = HERE / ".sense_accept.json"
 SRC_DOMAIN = frozenset(criteria.SENSE_LANG)
 BUCKETS = frozenset({"grammar", "label", "raw", "topic"})
@@ -53,12 +53,40 @@ ZH_SIMP_KNOWN = (
 KNOWN = (
     ("голубь", "zh", "鴿子", None),
     ("голубь", "en", "dove, pigeon", None),
-    ("бочечка", "zh", "复二-чек", "zh-元描述（zh_gloss_kind=meta）"),
+    ("бочечка", "zh", "复二-чек", "zh-元描述（只说是某词的某形式）"),     # R3 之后：藏着的行出版文本＝最小清洗
     ("дегтярный", "zh", ",", "没有字母（整串是标点/符号）"),
     ("за", "en", "[with accusative] to", None),          # 父释义拼进来了（sense_text）
     # ru-crit-14：只有领域缩写、源头漏写了释义 ⇒ 藏（不花钱译、不印成「〈体〉」）
     ("прыжок с шестом", "ru", "спорт.", "只有语体/领域标签、没有释义（源头漏写）"),
 )
+# E18 R3 已知答案（2026-11-07，全部取自两轮验收抽读里**逐条读过**的样例）：(证据原文, src) → (出版文本, 藏因)
+#   每条是一次实测栽过、或验收时专门核过的形状；判据写坏 ⇒ 这里红，而库与判据一起坏时不动点那一半是瞎的。
+R3_KNOWN = (
+    (("-ню́, -ни́шь; -нённый (-ён, -ена́) 〔完〕упрочня́ть, -я́ю, -я́ешь〔未〕что〈专〉使更坚固，使更结实. "
+      "～ изде́лия из ко́жи使皮革制品更结实.", "zh-edition-simp"), ("〈专〉使更坚固，使更结实", None)),
+    (("Г字形. Зда́ние постро́ено ～ем. 房子建成Г字形。", "zh-edition-simp"), ("Г字形", None)),          # 单字母不是前缀
+    (("-ою́, -ои́шь; -оённый-ён, -ена́) 〔完〕перегна́ивать, -аю, -аешь〔未〕кого-что使(全部、许多)完全腐烂\n"
+      "#::～ се́но使干草完全腐烂.", "zh-edition-simp"), ("使(全部、许多)完全腐烂", None)),           # 源头括号不配平
+    (("〔前缀〕＝обез...，用在清辅音之前，如：обеспоко́ить打搅.", "zh-edition-simp"),
+     ("＝обез...，用在清辅音之前，如：обеспоко́ить打搅", None)),                                  # 指针＋说明 ≠ 指针
+    (("(无，用作谓)生活富寓?Тепло́ и ～ вам", "zh-edition-simp"), (None, criteria.ZH_HIDE["garbled"])),
+    (("〔形〕моли́тва的形容词\n#::～ дом祈祷室；教堂.", "zh-edition-simp"), (None, criteria.ZH_HIDE["meta"])),
+    (("，复二-вок〔阴〕〈俗〉＝о́бувь", "zh-edition-simp"), (None, criteria.ZH_HIDE["pointer"])),
+    (("〔形〕简化的；缩写的", "zh-edition-simp"), ("简化的；缩写的", None)),                        # 不带外文字母 ≠ 元描述
+    (("统治，〔中〕〈雅〉统治，主宰.", "zh-edition-simp"), ("统治\n〈雅〉统治，主宰", None)),          # 维基短释义粘着纸质条目
+    (("〔形〕: гомери́ческий смех(或хо́хот）狂笑；哈哈大笑.", "zh-edition-simp"),
+     ("гомери́ческий смех(或хо́хот）狂笑；哈哈大笑", None)),                                      # 冒号后的短语就是释义
+    (("-о́л〔形〕无角的\n～ая коро́ва无角母泞?", "zh-edition-simp"), ("无角的", None)),              # 例句里的乱码不连坐
+    (("〔复〕(单грено́к, -нка́〔阳〕)或〈口〉гре́нки, -нок, -нкам〔复〕(单гре́нка〔阴〕)炸面包块.", "zh-edition-simp"),
+     ("(单гре́нка〔阴〕)炸面包块", None)),                                                       # 括号里的〔〕不是切点
+    (("Ашхаба́д (Ašxabád)在土庫曼斯坦的標準寫法：阿什哈巴德（土庫曼斯坦的首都）", "zh-edition-trad"),
+     ("Ашхаба́д (Ašxabád)在土庫曼斯坦的標準寫法：阿什哈巴德（土庫曼斯坦的首都）", None)),          # zh-t 的俄语是正文
+    (("вперёд (vperjód)的另一種拼寫法", "zh-edition-trad"), (None, criteria.ZH_HIDE["meta"])),
+    (("鴿子", "zh-edition-trad"), ("鴿子", None)),
+)
+# 洗后仍带纸质标记（〔〕／行首 `～`）的可印 zh 版释义 —— **独立声明**的上限，只许降。2026-11-07 R3 收尾时 183
+#   （多是 `(单хо́дуля〔阴〕)高跷` 这种单数形说明，读者看得懂）。涨了 ⇒ 判据退化或新数据没过判据。
+R3_RESIDUE_MAX = 183
 # 指针只进证据层，且目标是结构字段
 POINTER = ("лук", "en-edition", "лука́")
 
@@ -127,10 +155,10 @@ def checks(con):
 
     # ── E4 hidden_why 从证据原文重算一致 ───────────────────────────────
     bad, eg = 0, []
-    for sid, h, w, lang, text in con.execute(
-            "SELECT s.id, s.hidden, s.hidden_why, x.lang, x.text FROM sense s "
+    for sid, h, w, lang, text, xsrc in con.execute(
+            "SELECT s.id, s.hidden, s.hidden_why, x.lang, x.text, x.src FROM sense s "
             "JOIN sense_src x ON x.sense_id=s.id"):
-        want = criteria.sense_hidden_why(lang, text)
+        want = criteria.sense_hidden_why(lang, text, xsrc)
         if (want != w) or (h != (1 if want else 0)):
             bad += 1
             if len(eg) < 4:
@@ -284,6 +312,30 @@ def checks(con):
     out.append(("E17", not bad17, "" if not bad17 else
                 "%d 行指针标签与判据重算不一致（例 sense_src.id %s）—— 跑 `ru/pipeline/infer_pointer_targets.py --apply`"
                 % (len(bad17), sorted(bad17)[:5])))
+
+    # ── E18 R3：zh 版出版文本 ＝ `zh_publish_text(证据原文)`（不动点）＋ 已知答案 ＋ 残渣上限 ───────────
+    bad18, eg18 = collections.Counter(), []
+    for gid, gtext, raw, xsrc in con.execute(
+            "SELECT g.id, g.text, x.text, x.src FROM sense_gloss g JOIN sense_src x ON x.sense_id=g.sense_id "
+            "WHERE g.lang='zh' AND g.src IN ('zh-edition-simp','zh-edition-trad')"):
+        if gtext != criteria.zh_publish_text(raw, xsrc):
+            bad18["出版文本≠判据重算"] += 1
+            if len(eg18) < 2:
+                eg18.append("#%d %s" % (gid, gtext[:20].replace("\n", "⏎")))
+    for (raw, src), (want_t, want_w) in R3_KNOWN:
+        w = criteria.sense_hidden_why("zh", raw, src)
+        t = None if w else criteria.zh_publish_text(raw, src)
+        if (t, w) != (want_t, want_w):
+            bad18["已知答案错"] += 1
+            eg18.append("「%s」→ %r／%r" % (raw[:14].replace("\n", "⏎"), t, w))
+    import re as _re
+    resid = sum(1 for (t,) in con.execute(
+        "SELECT g.text FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
+        "WHERE g.src IN ('zh-edition-simp','zh-edition-trad') AND s.hidden=0")
+        if "〔" in t or _re.search(r"(?m)^～", t))
+    if resid > R3_RESIDUE_MAX:
+        bad18["残渣 %d > 上限 %d" % (resid, R3_RESIDUE_MAX)] += 1
+    out.append(("E18", not bad18, "" if not bad18 else "%s %s" % (dict(bad18), " ｜ ".join(eg18[:3]))))
     return out
 
 
@@ -345,7 +397,8 @@ def _mutations():
         ("E4", "把所有 hidden 清零",
          # E11：`бочечка` 的元描述露出来；E6（5b 之后才有）：藏着的义项放出来 ⇒ 破例义项所在的词元
          #   「有了别的可印义项」⇒ 不再满足破例条件 —— 正是 E6 盯的事
-         {"E6", "E11"},
+         # E18（11-12 补声明）：藏着的纸质词典残渣全放出来 ⇒ 残渣 6,115 > 上限 183
+         {"E6", "E11", "E18"},
          ["UPDATE sense SET hidden=0, hidden_why=NULL"]),
         ("E5", "把一条指针证据出版出来",
          {"E3"},                                  # 那条证据属于另一个词
@@ -363,18 +416,20 @@ def _mutations():
          ["UPDATE sense_tag SET bucket='«变异»' WHERE id=(SELECT MIN(id) FROM sense_tag)"]),
         ("E9", "删掉一批 R11 落下的 entry 级标签", set(),
          ["DELETE FROM sense_tag WHERE (src LIKE 'entry:%' OR src LIKE '%+entry') AND value='reflexive'"]),
-        ("E10", "往一条 zh 出版文本里塞回 wiki 标记", set(),
+        # E18（11-12 补声明）：被塞的那条（#504593）是 zh-s 洗过的 ⇒ 出版文本≠判据重算
+        ("E10", "往一条 zh 出版文本里塞回 wiki 标记", {"E18"},
          ["UPDATE sense_gloss SET text='#::'||text WHERE id=(SELECT MIN(id) FROM sense_gloss WHERE lang='zh')"]),
         # 🔴 第一版只改了数据、没改判据 ⇒ E4 拿原文一重算就看见了，**这条变异测的不是它自称的东西**。
         #    E11 存在的理由是「判据函数**本身**写坏时 E4 跟着坏而报绿」——用一条 SQL 模拟不出来。
         #    ⇒ 第 5 个元素：检查期间把 `criteria.sense_hidden_why` 换成同样坏掉的版本
         #       （「鴿子」也判成元描述），E4 与坏数据一致而绿，**E11 必须单独红**。
-        ("E11", "判据本身坏了（把「鴿子」也判成元描述）—— E4 跟着坏而报绿，只有已知答案拦得住", set(),
-         ["UPDATE sense SET hidden=1, hidden_why='zh-元描述（zh_gloss_kind=meta）' WHERE id IN "
+        # E18（11-12 补声明）：R3_KNOWN 里也有「鴿子」（zh-t）⇒ 判据写坏，两套已知答案各红一次 —— 是第二道独立的防线
+        ("E11", "判据本身坏了（把「鴿子」也判成元描述）—— E4 跟着坏而报绿，只有已知答案拦得住", {"E18"},
+         ["UPDATE sense SET hidden=1, hidden_why='zh-元描述（只说是某词的某形式）' WHERE id IN "
           "(SELECT g.sense_id FROM sense_gloss g JOIN sense s ON s.id=g.sense_id JOIN dict d ON "
           "d.id=s.word_id WHERE d.word='голубь' AND g.text='鴿子')"],
-         lambda orig: (lambda lang, text: "zh-元描述（zh_gloss_kind=meta）" if text == "鴿子"
-                       else orig(lang, text))),
+         lambda orig: (lambda lang, text, src=None: "zh-元描述（只说是某词的某形式）" if text == "鴿子"
+                       else orig(lang, text, src))),
         ("E12", "删掉一半词元的中文义项",
          {"E9", "E11", "E13"},                    # 删掉的义项挂着 R11 标签／样例／空白页涨
          ["DELETE FROM sense WHERE id IN (SELECT g.sense_id FROM sense_gloss g WHERE g.lang='zh') "
@@ -388,6 +443,16 @@ def _mutations():
          ["UPDATE sense_src SET inferred_target='«变异»' WHERE id=(SELECT MIN(id) FROM sense_src WHERE inferred_target IS NOT NULL)"]),
         ("E15", "R29：一条简体出版正文被清空（页面回到繁体）", set(),
          ["UPDATE sense_src SET text_pub=NULL WHERE id=(SELECT MIN(id) FROM sense_src WHERE text_pub IS NOT NULL)"]),
+        ("E18", "把一条洗过的 zh-s 释义换回证据原文（纸质词典残渣回到页面）",
+         {"E15"},                                 # 换了 text 没换 text_pub ⇒ 简体出版列不再是 text 的不动点（2026-11-07 实跑看到）
+         ["UPDATE sense_gloss SET text=(SELECT x.text FROM sense_src x WHERE x.sense_id=sense_gloss.sense_id) "
+          "WHERE id=(SELECT MIN(g.id) FROM sense_gloss g JOIN sense_src x ON x.sense_id=g.sense_id "
+          "JOIN sense s ON s.id=g.sense_id WHERE g.src='zh-edition-simp' AND s.hidden=0 AND g.text<>x.text "
+          "AND x.text NOT LIKE '%#%' AND instr(x.text, char(10))=0)"]),
+        # 判据本身坏了：「统治，〔中〕…」这条已知答案（库里没有这串）被洗成原样 —— 不动点那一半看不见，只有已知答案拦得住
+        ("E18", "判据本身坏了（只对一条库里没有的已知答案失效）—— 只有已知答案拦得住", set(), [],
+         ("zh_publish_text", lambda orig: (lambda text, src: text if text.startswith("统治，〔中〕")
+                                           else orig(text, src)))),
         ("E13", "把一批词元的出版义项全部删掉（空白页涨）",
          {"E9", "E11", "E12"},                    # 同上，覆盖率跌
          ["DELETE FROM sense WHERE word_id IN (SELECT id FROM dict WHERE is_lemma=1 AND id%7=0)"]),
@@ -416,15 +481,17 @@ def mutate():
                     con.execute(s)
                 con.commit()
                 con.close()
-                orig = criteria.sense_hidden_why
-                if patch:
-                    criteria.sense_hidden_why = patch(orig)
+                # 第 5 个元素：可调用 ⇒ 换 `sense_hidden_why`；`(属性名, 工厂)` ⇒ 换那个判据函数
+                attr, fac = (patch if isinstance(patch, tuple) else ("sense_hidden_why", patch))
+                orig = getattr(criteria, attr)
+                if fac:
+                    setattr(criteria, attr, fac(orig))
                 con = _open()
                 try:
                     got = {c for c, ok, _ in checks(con) if not ok}
                 finally:
                     con.close()
-                    criteria.sense_hidden_why = orig
+                    setattr(criteria, attr, orig)
                 undecl = sorted(got - {cid} - set(also))
                 if cid in got and not undecl:
                     print("   ✅ %-4s %s%s" % (cid, why, "（连带红 %s，已逐条声明）" % sorted(got - {cid})

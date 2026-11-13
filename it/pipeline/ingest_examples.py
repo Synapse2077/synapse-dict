@@ -46,6 +46,8 @@ import paths                                        # noqa: E402
 from build_pronunciation_layer import word_index    # noqa: E402
 from ipa_variants import iter_source                # noqa: E402
 
+import example_tags as XT   # noqa: E402  B31：例句标签判据唯一的家
+
 SOURCES = [("en-edition", paths.KK, None), ("it-edition", paths.EDITION, "it"),
            ("fr-edition", paths.KK_FR, None)]
 PRIO = {"en-edition": 0, "it-edition": 1, "fr-edition": 2}
@@ -166,6 +168,7 @@ def collect(con, verbose=True):
     sense_word = {sid: w for sid, w in con.execute(
         "SELECT s.id, d.word FROM sense s JOIN dict d ON d.id=s.word_id")}
     rows, c = {}, Counter()
+    tags = defaultdict(set)     # B31：(词,句) → 所有出现处的标签并集（不论哪版胜出）
     for src, path, lc in SOURCES:
         for w, d in iter_source(path, src, lc):
             wid = ids.get(w)
@@ -190,6 +193,7 @@ def collect(con, verbose=True):
                         c["🔴 跳过：根本不是例句（构词公式/元指引/书目）"] += 1
                         continue
                     key = (word, text)
+                    tags[key] |= XT.example_tags(e)
                     if key in rows and PRIO[rows[key]["src"]] <= PRIO[src]:
                         c["同一句多版都有，留优先级高的那版"] += 1
                         continue
@@ -217,6 +221,9 @@ def collect(con, verbose=True):
                         "src": src,
                         "pub": (PUBLISH_LANG[src], tr) if (tr and src in PUBLISH_LANG) else None,
                     }
+    for key, r in rows.items():
+        r["tags"] = XT.join_tags(tags[key])
+    c["带例句标签（B31）"] = sum(1 for r in rows.values() if r["tags"])
     c["落表行数"] = len(rows)
     c["带出版层译文的"] = sum(1 for r in rows.values() if r["pub"])
     c["挂上义项的"] = sum(1 for r in rows.values() if r["sense_id"])
@@ -406,9 +413,9 @@ def main():
         for r in rows:
             s.execute(
                 "INSERT INTO example (word,sense_id,text,bold,ref,src_gloss,"
-                "src_translation,src_lang,src) VALUES (?,?,?,?,?,?,?,?,?)",
+                "src_translation,src_lang,src,tags) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (r["word"], r["sense_id"], r["text"], r["bold"], r["ref"], r["src_gloss"],
-                 r["src_translation"], r["src_lang"], r["src"]))
+                 r["src_translation"], r["src_lang"], r["src"], r["tags"]))
             if r["pub"]:
                 lang, text = r["pub"]
                 s.execute("INSERT INTO example_gloss (example_id,lang,text,src) "

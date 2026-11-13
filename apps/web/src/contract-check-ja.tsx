@@ -21,7 +21,7 @@ import { JapaneseEntryView } from './App';
 import { JA_RELATION_LABELS, JA_POS_LABELS, POS_LABELS, relTagLabel, REGISTER_LABELS,
          JA_REGISTER_LABELS, JA_REGION_LABELS, JA_GRAMMAR_LABELS, JA_USAGE_LABELS,
          JA_KANJI_READING_KIND, JA_KANJI_READING_SUBKIND,
-         JA_KANJI_READING_ORDER } from '@synapse-dict/dict-labels';
+         JA_KANJI_READING_ORDER, JA_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 
 const svc = getService('ja') as unknown as {
   getEntry(w: string): any;
@@ -43,8 +43,29 @@ function visibleText(html: string): string {
 
 type Check = { word: string; name: string; hit: (t: string, e: any, html: string) => string | null };
 
+/** B31：找正文（去振假名）恰好等于 `sentence` 的 `example-text` 块 → 它的胶囊（`|` 连接）；找不到 → null。 */
+function exChips(html: string, sentence: string): string | null {
+  for (const m of html.matchAll(/<div class="example-text">([\s\S]*?)<\/div>/g)) {
+    const chips = [...m[1].matchAll(/<span class="ex-chip">([^<]*)<\/span>/g)].map((c) => c[1]);
+    const body = m[1].replace(/<span class="ex-chip">[^<]*<\/span>/g, '')
+      .replace(/<rt>[\s\S]*?<\/rt>|<rp>[\s\S]*?<\/rp>/g, '').replace(/<[^>]*>/g, '').trim();
+    if (body === sentence) return chips.join('|');
+  }
+  return null;
+}
+
 const CHECKS: Check[] = [
   // ── 日语特有字段，必须真的印出来 ──
+  // B31（2026-11-07）：源头例句标签。读者口径 —— 已知搭配那一句前面印「搭配」、已知谚语那一句前面印「谚语」
+  //    （数据侧：回归闸 E4／E5 只证明「库里有」）。
+  // 🔴 判据按**块**找：在 `example-text` 块里找正文（去掉振假名 <rt>/<rp>）恰好等于这一句的那块，
+  //    再看块里的胶囊 —— 整页找字会被别的例句的胶囊顶替（ru C28 第一版就这么配错了块）。
+  { word: '生活', name: '🔴 B31：已知搭配那一句前面印着「搭配」',
+    hit: (_t, _e, html) => exChips(html, '生活を送る') === '搭配' ? null
+      : `「生活を送る」那块的胶囊是 [${exChips(html, '生活を送る') ?? '找不到这一句'}]，应为 [搭配]` },
+  { word: '馬子', name: '🔴 B31：已知谚语那一句前面印着「谚语」',
+    hit: (_t, _e, html) => exChips(html, '馬子にも衣装') === '谚语' ? null
+      : `「馬子にも衣装」那块的胶囊是 [${exChips(html, '馬子にも衣装') ?? '找不到这一句'}]，应为 [谚语]` },
   { word: '痛い', name: '假名读音印出来了', hit: (t) => (t.includes('いたい') ? null : '看不到假名') },
   { word: '痛い', name: '罗马字印出来了', hit: (t) => (t.includes('itai') ? null : '看不到罗马字') },
   { word: '痛い', name: '声调标记印出来了', hit: (t) => (/[ꜜ]/.test(t) ? null : '看不到声调标记') },
@@ -711,6 +732,14 @@ for (const c of CHECKS) {
   const why = c.hit(visibleText(html), e, html);
   if (why) red += 1;
   console.log(`   ${why ? '🔴' : '✅'} ${c.word.padEnd(5)} ${c.name}${why ? `  —— ${why}` : ''}`);
+}
+// B31：例句标签**全值域**查漏（不靠抽到哪页）—— 库里出现的每个键都要有中文名
+{
+  const keys = new Set(((svc as any).db.prepare('SELECT DISTINCT tags FROM example WHERE tags IS NOT NULL').all() as Array<{ tags: string }>)
+    .flatMap((r) => r.tags.split('|')));
+  const nolab = [...keys].filter((k) => !JA_EXAMPLE_TAG_LABELS[k]);
+  if (nolab.length) { red += 1; console.log(`   🔴 例句标签值域里有键没有中文名（全库）：${nolab.join('、')}`); }
+  else console.log(`   ✅ 例句标签全值域 ${keys.size} 个键都有中文名（B31）`);
 }
 console.log(red ? `\n🔴 ${red} 条不合格` : '\n✅ 日语展示层契约全部通过');
 process.exit(red ? 1 : 0);

@@ -39,6 +39,19 @@ from pipeline import criteria                                   # noqa: E402
 from pipeline.build import SRC                                  # noqa: E402
 
 # 🔴 **花名册独立声明**，不从代码里数（ko 的 K31：改测试时删掉一条而闸报全绿）
+# I13 已知答案（R16，2026-11-11）：**逐条读 dump 原文声明**，不从库里推（`[[expectation-must-be-declared]]`）。
+#   (system, kind, code, raw)。覆盖：名词异读重音（дед 两个）、两体动词（использовать 两个体同一个码）、
+#   形容词模板下的名词式值（Павлов）、截断的辅音交替注（освободить `4b(-жд-`）。
+CLASS_KNOWN = {
+    "дед": {("noun", "stem", "hard", "hard-stem"), ("noun", "accent", "a", "accent-a"),
+            ("noun", "accent", "c", "accent-c")},
+    "собака": {("noun", "stem", "velar", "velar-stem"), ("noun", "accent", "a", "accent-a")},
+    "большой": {("adj", "accent", "b", "b")},
+    "Павлов": {("adj", "stem", "hard", "hard-stem"), ("adj", "accent", "a", "accent-a")},
+    "использовать": {("verb", "conj", "2a", "2a imperfective transitive"),
+                     ("verb", "conj", "2a", "2a perfective transitive")},
+    "освободить": {("verb", "conj", "4b", "4b(-жд-")},
+}
 ROSTER = ("I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "I10",
           "I11", "I12", "I13")
 
@@ -244,24 +257,35 @@ def checks(con, base=None):
                 "读者会在 `я` 的页上看见 `ты` 被印成它的屈折形"
                 % (format(g, ","), format(sib, ","))))
 
-    # ── I13 R16 的锁：`class` 那一族还没有家 ───────────────────────
-    # 🔴 **带锁的豁免**：`class`（词干型/重音型，512 种值、56,985 个 entry）
-    #    与 `entry.declension` 现在装的 ru 版值域是**两套分类系统**，
-    #    塞一列就是 ko 的 K8/K10 同签名 ⇒ 现在只存档。
-    #    锁：存档文件必须在，且**一旦库里出现装它的列/表，这条当场红**，
-    #    逼人回来写明「它的家在哪、值域怎么分」。
-    arch = paths.WORK / "stage3_inflection_stats.json"
+    # ── I13 R16：变格／变位类层 `entry_class`（2026-11-11 结清 R16 之后由「锁」翻成「值域 ＋ 已知答案」）──
+    # 原来是带锁的豁免（库里一出现装它的列就红）。R16 定了家：**独立的 `entry_class` 表、一值一行**
+    #   （`criteria` ⑪c）。保留的那半锁：`class` **仍然不许落成 entry/inflection 上的列**（多值 480 个 entry、
+    #   与 `entry.declension` 是两套分类 —— 落列就是 ko 的 K8/K10）。
     live = {r[1] for r in con.execute("PRAGMA table_info(inflection)")}
     cols = {r[1] for r in con.execute("PRAGMA table_info(entry)")}
-    appeared = sorted({"infl_class", "stem_class", "accent_class"}
-                      & (live | cols))
-    ok13 = arch.exists() and not appeared
+    appeared = sorted({"infl_class", "stem_class", "accent_class", "conj_class"} & (live | cols))
+    bad_dom = con.execute(
+        "SELECT COUNT(*) FROM entry_class WHERE src <> 'en-edition' OR (hidden=1) <> (hidden_why IS NOT NULL) "
+        "OR (hidden=0 AND (code IS NULL OR code='' OR system IS NULL OR kind IS NULL)) "
+        "OR entry_id NOT IN (SELECT id FROM entry)").fetchone()[0]
+    for system, kind in con.execute("SELECT DISTINCT system, kind FROM entry_class WHERE hidden=0"):
+        if kind not in criteria.ENTRY_CLASS_KINDS.get(system, ()):
+            bad_dom += con.execute("SELECT COUNT(*) FROM entry_class WHERE system IS ? AND kind IS ?",
+                                   (system, kind)).fetchone()[0]
+    miss = []
+    for w, want in CLASS_KNOWN.items():
+        got = {tuple(r) for r in con.execute(
+            "SELECT c.system, c.kind, c.code, c.raw FROM entry_class c JOIN entry e ON e.id=c.entry_id "
+            "JOIN dict d ON d.id=e.word_id WHERE d.word=? AND c.hidden=0", (w,))}
+        if got != want:
+            miss.append("%s：库 %s ≠ 期望 %s" % (w, sorted(got), sorted(want)))
+    n13 = con.execute("SELECT COUNT(*) FROM entry_class").fetchone()[0]
+    ok13 = not appeared and not bad_dom and not miss and n13 > 0
     out.append(("I13", ok13,
                 "" if ok13 else
-                ("存档 %s 不在 —— `class` 那 512 种值就真的丢了" % arch.name
-                 if not arch.exists() else
-                 "库里出现了 %s —— R16 的锁到期了：`class` 有家了，"
-                 "那就要写明值域怎么与 `entry.declension` 分开" % appeared)))
+                ("库里出现了列 %s —— `class` 只许住 `entry_class`（多值、两套分类）" % appeared if appeared else
+                 "entry_class 是空的 —— R16 的层没了" if not n13 else
+                 "值域外 %d 行" % bad_dom if bad_dom else " ｜ ".join(miss[:3]))))
     return out
 
 
@@ -383,8 +407,13 @@ def _mutations():
         #    往库里加一列装 `class` ⇒ 锁到期判红。
         #    ⚠️ 这一条照 vi 的 V10 教训写：带锁的豁免每多一个状态，
         #      验它的变异就要多一支 —— 现在是「还没有家」那一支。
-        ("I13", "给 `entry` 加一列 `stem_class`（R16 的锁到期）", set(),
+        ("I13", "给 `entry` 加一列 `stem_class`（`class` 落成列 ⇒ K8/K10）", set(),
          ["ALTER TABLE entry ADD COLUMN stem_class TEXT"]),
+        ("I13", "R16：一行名词类的 kind 改成动词才有的 conj（值域外）", set(),
+         ["UPDATE entry_class SET kind='conj' WHERE id=(SELECT MIN(id) FROM entry_class WHERE system='noun')"]),
+        ("I13", "R16：`дед` 的第二个重音型 accent-c 丢了（多值被压成一个）", set(),
+         ["DELETE FROM entry_class WHERE raw='accent-c' AND entry_id IN (SELECT e.id FROM entry e "
+          "JOIN dict d ON d.id=e.word_id WHERE d.word='дед')"]),
     ]
 
 

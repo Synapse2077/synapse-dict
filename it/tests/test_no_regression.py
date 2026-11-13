@@ -58,6 +58,7 @@ sys.path.insert(0, str(HERE.parent.parent / "scripts"))
 from zh_t2s import t2s as zh_t2s                           # noqa: E402
 from fix_ipa_xsampa import BAD as XSAMPA_BAD, ENTITY as IPA_ENTITY   # noqa: E402
 from fix_cross_edition_sense import REWRITE as XED_REWRITE  # noqa: E402
+import example_tags as _xt                                  # noqa: E402  B31
 
 f = lambda n: format(n, ",")
 
@@ -476,6 +477,16 @@ def special(con, trace=False):
             if not row or row[0] != new_zh:
                 n += 1
         return n
+    # E1／E2（2026-11-07，B31）：例句标签。判据 import 生成侧那一份（`example_tags`），不另抄。
+    #   E1 值域外／乱序 —— 页面按 IT_EXAMPLE_TAG_LABELS 印中文，值域外的键会被静默不印。
+    #   E2 带标签的行比声明的少 —— 重建 `example` 时漏了标签，别的闸一条都看不见。
+    #      期望值**独立声明**在 `_xt.EXPECT_TAGGED`。（App 直接读 example ⇒ 写=读，两侧同数）
+    _has = any(r[1] == "tags" for r in con.execute("PRAGMA table_info(example)"))
+    _tg = [v for (v,) in con.execute("SELECT tags FROM example WHERE tags IS NOT NULL")] if _has else []
+    _n = sum(1 for v in _tg if _xt.bad_tag_value(v))
+    out.append(("E1", "example_tags.py", "11-07", "例句标签值域外或乱序（B31）", _n, _n))
+    _n = max(0, _xt.EXPECT_TAGGED - len(_tg))
+    out.append(("E2", "example_tags.py", "11-07", "例句标签少了（B31，少于 EXPECT_TAGGED）", _n, _n))
     out.append(("D9", "fix_cross_edition_sense.py", "08-21", "人工裁决过的中文被盖回去了",
                 xed(""), xed("AND COALESCE(s.hidden,0)=0 AND g.kind='equivalent'")))
     return out
@@ -678,6 +689,12 @@ def mutate(only=()):
         ("D9", "D9 把人工裁决过的中文盖回旧值",
          "UPDATE sense_gloss SET text='（人或物的）系列，行列' "
          "WHERE sense_id=12064 AND lang='zh' AND seq=0"),
+        # B31：值域外的键、整条标签被清掉 —— 各造一条
+        ("E1", "E1 例句标签塞一个值域外的键（地区）",
+         "UPDATE example SET tags='collocation|Tuscany' WHERE id="
+         "(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)"),
+        ("E2", "E2 清掉一条例句的标签",
+         "UPDATE example SET tags=NULL WHERE id=(SELECT MAX(id) FROM example WHERE tags IS NOT NULL)"),
         ("D6", "D6 给一行变形打上 reflexive 标签",
          "UPDATE inflection SET tags='[\"form-of\", \"reflexive\"]' WHERE id="
          "(SELECT id FROM inflection WHERE tags NOT LIKE '%reflexive%' LIMIT 1)"),

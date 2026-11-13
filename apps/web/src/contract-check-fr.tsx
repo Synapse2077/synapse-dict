@@ -26,6 +26,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { getService, type FrenchEntry } from '@synapse-dict/dict-core';
 import {
   POS_LABELS, FR_REGION_LABELS, FR_REGION_CODE_LABELS, REGISTER_LABELS, TOPIC_LABELS,
+  FR_EXAMPLE_TAG_LABELS,
 } from '@synapse-dict/dict-labels';
 import { FrenchEntryView, groupFrSenses, frReadingSlot, frHeadGender} from './App';
 
@@ -69,6 +70,13 @@ function renderedIn(t: string, raw: string): boolean {
     .replace(/\[\[w:[^|\]]*\|([^\]]*)\]\]/g, '$1')
     .replace(/\s+/g, '');
   return strip(t).includes(strip(raw));
+}
+
+// B31：例句标签。一个 `ex-fr` 块 = 可选的若干 `ex-chip` + 法语原句。
+const EX_BLOCK = /<div class="ex-fr" lang="fr">([\s\S]*?)<\/div>/g;
+const EX_CHIP = /<span class="ex-chip">([^<]*)<\/span>/g;
+function exLabels(tags: string | null): string[] {
+  return (tags ?? '').split('|').filter(Boolean).map((k) => FR_EXAMPLE_TAG_LABELS[k] ?? `?${k}`);
 }
 
 function visibleText(html: string): string {
@@ -397,6 +405,42 @@ const CHECKS: Check[] = [
     },
   },
   {
+    // B31（2026-11-06）：源头例句标签（搭配／谚语／转义…）。
+    // 🔴 判据按**块**对，不按整页文字：搭配往往很短（`prendre froid`），整页找会被另一条
+    //    长例句「包含」而误判为已渲染（ru C28 第一版就这么配错了块）。
+    //    ⇒ 每个 `ex-fr` 块：剥掉 chip 后的原句 ↔ 接口里同一句的 tags，chip 必须**逐个一致**。
+    name: '🔴 例句块的标签胶囊必须与该句的源头标签逐个一致（B31）',
+    hit: (e, html) => {
+      const nolab = e.examples.flatMap((x) => (x.tags ?? '').split('|').filter((k) => k && !FR_EXAMPLE_TAG_LABELS[k]));
+      if (nolab.length) return `例句标签键没有中文名：${[...new Set(nolab)].join('、')}`;
+      for (const m of html.matchAll(EX_BLOCK)) {
+        const chips = [...m[1].matchAll(EX_CHIP)].map((c) => c[1]);
+        const body = visibleText(m[1].replace(EX_CHIP, ''));
+        const x = e.examples.find((y) => renderedIn(body, y.text) && renderedIn(y.text, body));
+        const want = x ? exLabels(x.tags) : [];
+        if (chips.join('|') !== want.join('|')) {
+          return `「${body.trim().slice(0, 30)}」印了 [${chips.join('、')}]，应为 [${want.join('、')}]`;
+        }
+      }
+      return null;
+    },
+  },
+  {
+    // B31（2026-11-06，用户定）：同一义项内搭配排最前、其余带标签的其次 —— 每条义项只印 3 条，
+    //    按 id 排时搭配只露出 39%。判据看接口给的顺序（组件按它切前 3 条）。
+    name: '🔴 同一义项内例句顺序必须是 搭配 → 其余带标签 → 无标签（B31）',
+    hit: (e) => {
+      const rank = (t: string | null) => (t?.includes('collocation') ? 0 : t ? 1 : 2);
+      const last = new Map<number | null, number>();
+      for (const x of e.examples) {
+        const r = rank(x.tags);
+        if ((last.get(x.senseId) ?? 0) > r) return `义项 ${x.senseId} 里「${x.text.slice(0, 24)}」排在了更低档之后`;
+        last.set(x.senseId, r);
+      }
+      return null;
+    },
+  },
+  {
     // 变形/异体的目标点不点得动，判据必须与 getEntry 的解析路径一致
     name: '🔴 标成可点的目标必须真的查得到',
     hit: (e) => {
@@ -420,9 +464,12 @@ function targets(limit: number): string[] {
   const famC = q(`SELECT d.word FROM dict d JOIN pronunciation p ON p.word_id=d.id
      WHERE p.region IS NOT NULL GROUP BY d.id LIMIT 800`);              // 读音带地区
   const famD = q(`SELECT DISTINCT word FROM example WHERE sense_id IS NOT NULL LIMIT 800`); // 有例句
+  // B31：带标签的例句。按标签键轮转取，保证 22 种键每种都有词进来（小键只有 1–6 条）
+  const famE = q(`SELECT word FROM (SELECT word, tags, ROW_NUMBER() OVER (PARTITION BY tags ORDER BY id) rn
+     FROM example WHERE tags IS NOT NULL AND hidden=0) WHERE rn <= 40 ORDER BY rn, tags LIMIT 800`);
   // 🔴 四族**轮转交错**，不是首尾相接 —— 任何一个 --limit 都要同时覆盖四族。
   const must: string[] = [];
-  const fams = [famA, famB, famC, famD];
+  const fams = [famA, famB, famC, famD, famE];
   for (let i = 0; i < Math.max(...fams.map((f) => f.length)); i += 1) {
     for (const f of fams) if (i < f.length) must.push(f[i]);
   }
@@ -439,6 +486,11 @@ function run(words: string[], quiet = false): number {
   const fails = new Map<string, string[]>();
   let n = 0;
   if (!quiet) console.log(`■ 待渲染 ${words.length.toLocaleString()} 个词条`);
+  // B31：例句标签**全值域**查漏（不靠抽到哪页）—— 库里出现的每个键都必须有中文名
+  const keys = new Set((db.prepare('SELECT DISTINCT tags FROM example WHERE tags IS NOT NULL').all() as Array<{ tags: string }>)
+    .flatMap((r) => r.tags.split('|')));
+  const nolab = [...keys].filter((k) => !FR_EXAMPLE_TAG_LABELS[k]);
+  if (nolab.length) fails.set('🔴 例句标签值域里有键没有中文名（全库）', nolab);
   for (const w of words) {
     const entry = svc.getEntry(w) as FrenchEntry | null;
     if (!entry) continue;
@@ -500,6 +552,12 @@ function mutate(words: string[]): void {
     ['把 alt_of 塞进 relations 分组',
       (e) => { e.relations = [{ kind: 'alt_of',
                                 targets: [{ word: 'zzz', clickable: false }] }]; }, () => true],
+    ['B31：给例句塞一个没有中文名的标签键',
+      (e) => { e.examples.find((x) => x.tags)!.tags = 'collocation|zzz-nokey'; },
+      (e) => e.examples.some((x) => !!x.tags)],
+    ['B31：把例句顺序倒过来（模拟查询丢了「搭配优先」那一段排序）',
+      (e) => { e.examples.reverse(); },
+      (e) => e.examples.some((x) => !!x.tags) && e.examples.some((x) => !x.tags && x.senseId !== null)],
     ['把 alt_of 标成可点但指向不存在的词',
       (e) => { e.altOf = [{ target: 'zzzz-nope', zh: null, clickable: true }]; }, () => true],
     ['把第一条变位形式复制一份（模拟展示层漏了判重）',
@@ -543,6 +601,13 @@ function mutate(words: string[]): void {
         '<div class="entry-meta-row entry-badges"><span class="badge g g-mf">阴阳性</span>'),
       (e) => { const g = new Set(e.senses.map((s) => s.gender).filter(Boolean));
                return g.has('m') && g.has('f'); }],
+    // B31：模拟组件漏写 `<FrExTags>` 那一行
+    ['B31：把例句前的标签胶囊抹掉', (h) => h.replace(EX_CHIP, ''),
+      (e) => e.examples.some((x) => !!x.tags)],
+    // B31：模拟组件印错了键（标签张冠李戴到另一条例句上）
+    ['B31：把例句标签胶囊挪到没有标签的例句前',
+      (h) => h.replace(EX_CHIP, '').replace(/<div class="ex-fr" lang="fr">/, '<div class="ex-fr" lang="fr"><span class="ex-chip">搭配</span>'),
+      (e) => e.examples.some((x) => !x.tags)],
     ['页面里塞进模板残渣', (h) => `${h}<span>{{ modele }}</span>`, () => true],
     // 🔴 族 C 第二段的变异**必须在 HTML 层做**。第一版写成数据变异
     //    （给义项塞 `derogatory` + `pejorative`，中文都是「贬义」）——

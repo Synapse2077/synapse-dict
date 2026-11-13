@@ -163,7 +163,10 @@ export const VI_SPELLING_RULE: Record<string, { label: string; trusted: boolean 
   'src-label-v1': { label: '源头自标', trusted: true },
   // 4,835 行。en 版词源正文里的汉字。
   'src-en-etym-v1': { label: '据英文版词源', trusted: true },
-  // 🔴 9,792（han）＋ 4,535（nom）行 ＝ **按 Unicode 码位区间猜的**，实测 70.8% 对。
+  // 449 行（W1，2026-11-07）。原是 codepoint-v1，汉越音逐字对上 **且** 汉字与中文释义共字 ⇒ 升档；
+  //    源头自标的 10,178 对真值上精确率 98.73%（两家咨询都要求「音之外还要验义」，这一档两样都验了）。
+  'reading-meaning-v1': { label: '据汉越音与字义核对', trusted: true },
+  // 🔴 9,343（han）＋ 4,535（nom）行 ＝ **按 Unicode 码位区间猜的**，实测 70.8% 对（W1 升走 449 行后）。
   //    W6：它**不许印成「汉越字」**。
   'codepoint-v1': { label: '按字形推定（未经核实）', trusted: false },
 };
@@ -222,3 +225,12 @@ export function viEditionRank(src: string): number {
   if (src === 'en-edition') return 1;
   return 2;
 }
+
+/** 例句标签（B31，2026-11-07）：`example.tags` 的受控值域（`vi/pipeline/stage6_sources.EXAMPLE_TAG_ORDER`）。
+ *  用字随 B32（两字），与 ru／fr／en／es 同键同名；`folk-verse`＝越南语 `ca dao`（民间歌谣，与谚语并列的体裁）。
+ *  ⚠️ 键没映射就不印（不拿英文键兜底）—— 契约闸按库里全值域查漏。 */
+export const VI_EXAMPLE_TAG_LABELS: Record<string, string> = {
+  collocation: '搭配', proverb: '谚语', saying: '俗语', idiom: '习语', 'folk-verse': '歌谣',
+  colloquial: '口语', slang: '俚语', literary: '书面', proscribed: '不规范',
+  humorous: '诙谐', derogatory: '贬义', figurative: '转义',
+};

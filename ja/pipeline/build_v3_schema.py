@@ -254,6 +254,7 @@ ADD_COLUMNS = [
     ('entry', 'vclass', 'TEXT'),   # ja/pipeline/fill_vclass.py
     ('example', 'roman', 'TEXT'),  # ja/pipeline/harvest_examples.py
     ('example', 'ruby', 'TEXT'),   # ja/pipeline/harvest_examples.py
+    ('example', 'tags', 'TEXT'),   # ja/pipeline/example_tags.py（B31，2026-11-07）
 ]
 
 

@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dbtool                                    # noqa: E402
 import paths                                     # noqa: E402
 from intake_edition_words import EDITIONS         # noqa: E402
+import example_tags as XT                        # noqa: E402  B31：例句标签判据唯一的家
 
 f = lambda n: format(n, ",")
 SRC = "de-edition"
@@ -59,7 +60,8 @@ def opener(p):
 def harvest(words, bridge):
     """→ (rows, stat)。bridge = {(词形, 德语释义原文): sense_id}"""
     path, _ = EDITIONS["de"]
-    rows, stat, seen = [], Counter(), set()
+    rows, stat, seen = [], Counter(), {}   # seen：(词,句) → rows 下标（B31：重复处并入标签）
+    tags = []                              # 与 rows 平行的标签集合
     with opener(path) as fh:
         for line in fh:
             if '"examples"' not in line:
@@ -88,10 +90,14 @@ def harvest(words, bridge):
                         stat["🔴 丢：句子里没有这个词（挂错了词）"] += 1
                         continue
                     k = (w, t)
+                    tg = XT.example_tags(x)
                     if k in seen:
                         stat["重复（同词同句）"] += 1
+                        # 🔴 B31：入库只留先到的那一行，但**标签取并集**（fr／en 同款）
+                        tags[seen[k]] |= tg
                         continue
-                    seen.add(k)
+                    seen[k] = len(rows)
+                    tags.append(set(tg))
                     rows.append((w, sid, t,
                                  json.dumps(off) if off else None,
                                  (x.get("ref") or "").strip() or None,
@@ -102,6 +108,8 @@ def harvest(words, bridge):
                     stat["收下"] += 1
                     if sid:
                         stat["  其中挂上了义项"] += 1
+    rows = [r + (XT.join_tags(g),) for r, g in zip(rows, tags)]
+    stat["带例句标签（B31）"] = sum(1 for r in rows if r[10])
     return rows, stat
 
 
@@ -204,8 +212,8 @@ def main():
     with dbtool.session("keep-v3-5a-examples", expect={"#example": len(rows)}) as s:
         s.executemany(
             "INSERT OR IGNORE INTO example "
-            "(word,sense_id,text,bold,ref,src_gloss,src_translation,src_lang,hidden,src) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
+            "(word,sense_id,text,bold,ref,src_gloss,src_translation,src_lang,hidden,src,tags) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     n = con.execute("SELECT count(*) FROM example").fetchone()[0]
     ok = gate2(con, {"rows": n})

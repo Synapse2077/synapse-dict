@@ -74,7 +74,7 @@ export const RU_INFL_TAG_LABELS: Record<string, string> = {
   diminutive: '指小', augmentative: '指大', pejorative: '指小表蔑', adjective: '形容词', adverb: '副词',
   'abstract-noun': '抽象名词', possessive: '物主', relational: '关系形容词', 'noun-from-verb': '动名词',
   collective: '集合', singulative: '单个', demonym: '居民名', alternative: '异体',
-  dated: '旧', obsolete: '废', archaic: '古', rare: '罕用', colloquial: '口语', dialectal: '方言',
+  dated: '过时', obsolete: '已废', archaic: '古旧', rare: '罕用', colloquial: '口语', dialectal: '方言',
   poetic: '诗', proscribed: '不规范', nonstandard: '不规范', irregular: '不规则',
   // ── 2026-10-25 补：契约闸「全值域覆盖」逼出来的（抽样页只逮到 emphatic 一个） ──
   emphatic: '强调',
@@ -135,7 +135,7 @@ export const RU_INFL_TAG_LABELS: Record<string, string> = {
   capitalized: '首字母大写',
   invariable: '不变',
   phonetic: '按读音',
-  familiar: '亲昵',
+  familiar: '通俗',
   // ── 2026-11-05 R32 收尾：指针说明人工裁决标签（`criteria.POINTER_TAGS_ADJUDICATED`）用到、变格表里没有的 ──
   reflexive: '自反',
   aorist: '不定过去时',
@@ -187,8 +187,8 @@ export const RU_GRAMMAR_LABELS: Record<string, string> = {
  *  ⚠️ 不借 `RU_INFL_TAG_LABELS`：那张里 `pejorative`＝「指小表蔑」（构词后缀义），印在例句上是错的。 */
 export const RU_EXAMPLE_TAG_LABELS: Record<string, string> = {
   collocation: '搭配', proverb: '谚语', saying: '俗语', idiom: '习语',
-  colloquial: '口语', informal: '非正式', formal: '正式', literary: '书面', poetic: '诗',
-  dated: '旧', obsolete: '废', vulgar: '粗俗', derogatory: '贬', euphemistic: '委婉', ironic: '讽刺', figurative: '转义',
+  colloquial: '口语', informal: '非正式', formal: '正式', literary: '书面', poetic: '诗歌',
+  dated: '过时', obsolete: '已废', vulgar: '粗俗', derogatory: '贬义', euphemistic: '委婉', ironic: '讽刺', figurative: '转义',
 };
 
 export const RU_USAGE_LABELS: Record<string, string> = {
@@ -240,7 +240,7 @@ export const RU_USAGE_LABELS: Record<string, string> = {
   Russia: '俄罗斯',
   lowercase: '小写',
   uppercase: '大写',
-  familiar: '亲昵',
+  familiar: '通俗',
   sometimes: '有时',
   Southern: '南部',
   endearing: '爱称',

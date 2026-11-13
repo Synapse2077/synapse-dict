@@ -161,7 +161,9 @@ READ_PATH = [
 READ_SCALE = [
     ("P5", "W6：按码位推定的表记（展示层必须标「未经核实」）",
      "SELECT (SELECT COUNT(*) FROM han_spelling WHERE rule_ver='codepoint-v1')"
-     " + (SELECT COUNT(*) FROM nom_spelling WHERE rule_ver='codepoint-v1')", 14327,
+     " + (SELECT COUNT(*) FROM nom_spelling WHERE rule_ver='codepoint-v1')", 13878,
+     "2026-11-07 W1：14,327 → 13,878（−449 升到 `reading-meaning-v1`：汉越音逐字对上 ∧ 与中文释义共字，"
+     "真值上精确率 98.73%；汉字层闸 H11／H12 锁）。"
      "实测这条判据只有 **70.8%** 对，且污染单向全在 han 侧。"
      "展示层据 `VI_SPELLING_RULE[ruleVer].trusted` 决定印不印「汉越字」三个字"),
 

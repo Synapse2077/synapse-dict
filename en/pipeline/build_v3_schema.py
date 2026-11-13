@@ -166,6 +166,7 @@ DDL_EXAMPLE = """CREATE TABLE example (
     src_lang        TEXT,
     hidden          INTEGER NOT NULL DEFAULT 0,
     src             TEXT NOT NULL,
+    tags            TEXT,             -- B31：源头例句标签（`|` 分隔，受控值域见 pipeline/example_tags.py）
     UNIQUE(word, text)
 )"""
 

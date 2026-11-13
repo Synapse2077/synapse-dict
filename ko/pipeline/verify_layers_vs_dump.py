@@ -91,6 +91,13 @@ def layer_example(show=0):
     want = {(r["word"], r["text"]) for r in rows}
     con = ro()
     have = {(w, t) for w, t in con.execute("SELECT word, text FROM example")}
+    # B31（2026-11-07）：源头例句标签。键对上之后**标签也必须相等**（第③向：键对上而内容不一样）——
+    #    重建时漏了标签列、或某一步改了它，键集合的两向比较一条都看不见。
+    wt = {(r["word"], r["text"]): r["tags"] for r in rows}
+    has_tags = any(c[1] == "tags" for c in con.execute("PRAGMA table_info(example)"))
+    ht = ({(w, t): g for w, t, g in con.execute("SELECT word, text, tags FROM example")}
+          if has_tags else {k: None for k in have})
+    tagdiff = sum(1 for k in wt.keys() & ht.keys() if wt[k] != ht[k])
     indict = {r[0] for r in con.execute("SELECT word FROM dict")}
     # 「有意不收」那一桶：带 LABEL_DROP 前缀的，留给关系层
     dropped = collections.Counter(s for s, _w, _lab, _b in labeled)
@@ -115,6 +122,7 @@ def layer_example(show=0):
     print("   %s 源头有·库里没有 %s   其中词形不在 `dict` %s ⇒ 真缺 %s"
           % ("✅" if not miss else "🔴", f(len(gap)), f(len(nodict)), f(len(miss))))
     print("   %s 库里有·追不回源头 %s" % ("✅" if not extra else "🔴", f(len(extra))))
+    print("   %s 键对上而例句标签不同 %s（B31）" % ("✅" if not tagdiff else "🔴", f(tagdiff)))
     if show or miss:
         for w, t in list(miss)[:max(show, 10)]:
             print("      🔴缺  %-12s %s" % (w, t[:70]))
@@ -135,6 +143,7 @@ def layer_example(show=0):
     return {"miss": len(miss), "extra": len(extra), "drop": tot,
             "gap": len(gap), "nodict": len(nodict),
             "drop_by_src": dict(dropped), "resid": len(resid),
+            "tagdiff": tagdiff, "_wt": wt, "_ht": ht,
             "_want": want, "_have": have}
 
 
@@ -366,6 +375,8 @@ def layer_etymology(show=0):
 # 🔴 变异验证（`PLAYBOOK` 7.3）——**一条永远通过的检查等于没检查**。
 #    每条都对着「这道闸声称能逮到什么」，不是「它跑不跑得起来」。
 MUTATIONS = {
+    "N10": ("例句：库侧把一条例句的标签清掉（B31）",
+            "行数、文本一点不变 ⇒ 键集合两向都看不见；**「键对上而标签不同」必须红**"),
     "N1": ("例句：库侧删掉 200 行",
            "恒等式的「源头有·库里没有」那一半**必须红** —— 验它真在查写丢的行"),
     "N2": ("例句：把 `近义词` 从 LABEL_DROP 里拿掉",
@@ -395,6 +406,11 @@ MUTATIONS = {
 
 
 def mutate(which, ex, infl, pron, ety=None):
+    if which == "N10":
+        h = dict(ex["_ht"])
+        k = sorted(x for x, g in h.items() if g)[0]
+        h[k] = None
+        return 0, sum(1 for x in ex["_wt"].keys() & h.keys() if ex["_wt"][x] != h[x])
     if which == "N1":
         h = set(list(ex["_have"])[200:])
         return len(ex["_want"] - h), len(h - ex["_want"])
@@ -463,7 +479,8 @@ def run_mutations(ex, infl, pron, ety):
             "N3": (infl["miss"], infl["extra"]), "N5": (infl["miss"], infl["extra"]),
             "N4": (pron["miss"], pron["extra"]),
             "N6": (ety["miss"], ety["extra"]), "N7": (ety["miss"], ety["extra"]),
-            "N8": (0, 0), "N9": (ety["miss"], ety["extra"])}
+            "N8": (0, 0), "N9": (ety["miss"], ety["extra"]),
+            "N10": (0, ex["tagdiff"])}
     print("\n═══ 变异验证（%d 条）═══" % len(MUTATIONS))
     bad = 0
     for mid, (what, why) in MUTATIONS.items():
@@ -483,6 +500,8 @@ def run_mutations(ex, infl, pron, ety):
             ok = e == 1
         elif mid == "N9":
             ok = m == b[0] + 5
+        elif mid == "N10":
+            ok = e == b[1] + 1
         else:
             ok = e > b[1] + 100_000
         bad += not ok
@@ -514,6 +533,7 @@ def main():
 
     red = sum((d["miss"] > 0) + (d["extra"] > 0)
               for d in (ex, infl, pron, ety) if d)
+    red += bool(ex and ex["tagdiff"])          # B31：键对上而例句标签不同
     if a.mutate and ex and infl and pron and ety:
         red += run_mutations(ex, infl, pron, ety)
     if red:

@@ -260,9 +260,10 @@ def collect(wid, s2id, groups):
                     stored = raw_text
                     if stored != raw_text:
                         stat[S6.TEXT_MUTATED_IN_PLACE] += 1
+                    # B31（2026-11-07）：源头例句标签挂在**末位** r[9]（理由同上：按下标读，插中间会静默错位）
                     rows.append((wid[w], sense_id, stored, ref, why, src,
                                  "ex:%s:%s:%s:%s:%d:%d" % (ed, w, pos, etym, si, xi),
-                                 gloss, pub))
+                                 gloss, pub, S6.example_tags(x)))
     # 同一条证据在同一版里出现两次就是重复（`src_ref` 唯一）
     seen, out = set(), []
     for r in rows:
@@ -352,10 +353,12 @@ def _sync(rows, gl):
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     cols = {r[1] for r in con.execute("PRAGMA table_info(example)")}
     has_pub = "text_pub" in cols
-    have = {ref: (eid, sid, t, rf, h, why, pub)
-            for ref, eid, sid, t, rf, h, why, pub in con.execute(
-                "SELECT src_ref, id, sense_id, text, ref, hidden, hidden_why, %s FROM example"
-                % ("text_pub" if has_pub else "NULL"))}
+    has_tags = "tags" in cols                 # B31：首次同步时列还不存在
+    have = {ref: (eid, sid, t, rf, h, why, pub, tg)
+            for ref, eid, sid, t, rf, h, why, pub, tg in con.execute(
+                "SELECT src_ref, id, sense_id, text, ref, hidden, hidden_why, %s, %s FROM example"
+                % ("text_pub" if has_pub else "NULL", "tags" if has_tags else "NULL"))}
+    n_tags = sum(1 for r in rows if r[9])
     con.close()
     upd, now_hidden, text_changed, pub_changed, src_text_changed = [], [], [], [], []
     for r in rows:
@@ -364,9 +367,9 @@ def _sync(rows, gl):
             raise SystemExit("🔴 `src_ref=%r` 在库里不存在 —— 收词变了？`--sync` 只同步"
                              "**已有行的列**，行数变了要走 `--rebuild`（而它现在被"
                              "付费数据保险拦着）。" % ref)
-        eid, sid, t, rf, h, why, pub = have[ref]
-        want = (r[1], r[2], r[3], 1 if r[4] else 0, r[4], r[8])
-        if (sid, t, rf, h, why, pub) == want:
+        eid, sid, t, rf, h, why, pub, tg = have[ref]
+        want = (r[1], r[2], r[3], 1 if r[4] else 0, r[4], r[8], r[9])
+        if (sid, t, rf, h, why, pub, tg) == want:
             continue
         upd.append(want + (eid,))
         if h == 0 and want[3] == 1:
@@ -436,6 +439,8 @@ def _sync(rows, gl):
                     #    「多写了一列」的唯一机制。首次填充 = 全部可出版行
                     #    （隐藏行的 `text_pub` 也填，它是纯派生值）。
                     "example.text_pub": None,
+                    # B31：例句标签 —— 非空行数的变化必须**恰好**等于收割器给的（首次填充＝全部）
+                    "example.tags": n_tags - sum(1 for v in have.values() if v[7]),
                     "example_gloss.text": len(ins) - drop_g,
                     "example_gloss.lang": len(ins) - drop_g,
                     "example_gloss.src": len(ins) - drop_g,
@@ -449,7 +454,7 @@ def _sync(rows, gl):
             if tbl == "example" and col not in have_c:
                 s.execute("ALTER TABLE example ADD COLUMN %s %s" % (col, typ))
         s.executemany("UPDATE example SET sense_id=?, text=?, ref=?, hidden=?, hidden_why=?, "
-                      "text_pub=? WHERE id=?", upd)
+                      "text_pub=?, tags=? WHERE id=?", upd)
         if now_hidden:
             s.executemany("DELETE FROM example_gloss WHERE example_id=?",
                           [(e,) for e in now_hidden])
@@ -545,8 +550,8 @@ def main():
             s.execute("DELETE FROM example")
         s.executemany(
             "INSERT INTO example (word_id, sense_id, text, ref, hidden, hidden_why, "
-            "src, src_ref, text_pub) VALUES (?,?,?,?,?,?,?,?,?)",
-            [(r[0], r[1], r[2], r[3], 0 if r[4] is None else 1, r[4], r[5], r[6], r[8])
+            "src, src_ref, text_pub, tags) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [(r[0], r[1], r[2], r[3], 0 if r[4] is None else 1, r[4], r[5], r[6], r[8], r[9])
              for r in rows])
         eid = {ref: i for i, ref in s.execute("SELECT id, src_ref FROM example")}
         s.executemany(

@@ -68,7 +68,7 @@ def main():
         return
 
     ex = [(r["word"], r["sense_id"], r["text"], r["ref"], r["src_gloss"],
-           r["src_translation"], r["src_lang"], r["roman"], r["hidden"], r["src"])
+           r["src_translation"], r["src_lang"], r["roman"], r["hidden"], r["src"], r["tags"])
           for r in todo]
     with dbtool.session(
             "ko-topup-examples",
@@ -78,15 +78,16 @@ def main():
             #    ⚠️ 闸的价值正在于**声明发生在写之前**：想不清楚就写不出 expect。
             expect={"#example": len(ex), "#example_gloss": n_zh + n_en,
                     "example.src_translation": sum(
-                        1 for r in todo if r["src_translation"])},
+                        1 for r in todo if r["src_translation"]),
+                    "example.tags": sum(1 for r in todo if r["tags"])},
             invalidates=[
                 "例句总数变了：`test_plan_ledger` 的例句条数、`coverage.py` 的例句覆盖率",
                 "阶段 6d 例句翻译的待译条数（本步补进来的也要译）",
             ]) as s:
         s.executemany(
             "INSERT OR IGNORE INTO example (word, sense_id, text, ref, src_gloss,"
-            " src_translation, src_lang, roman, hidden, src)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)", ex)
+            " src_translation, src_lang, roman, hidden, src, tags)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)", ex)
         ids = {(w, t): i for i, w, t in s.execute(
             "SELECT id, word, text FROM example").fetchall()}
         gl = []

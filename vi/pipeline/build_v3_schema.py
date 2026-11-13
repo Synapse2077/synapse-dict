@@ -371,6 +371,8 @@ NOT_BUILT = {
 ADD_COLUMNS = [
     # 阶段 6 补：例句的文献出处。见 `example` 的建表注释
     ("example", "ref", "TEXT"),
+    # B31（2026-11-07）：源头例句标签（`|` 分隔，受控值域 `stage6_sources.EXAMPLE_TAG_ORDER`）
+    ("example", "tags", "TEXT"),
     # 阶段 6 补：录音也要能「留着但不出版」。
     # 🔴 建表时 `audio` 是唯一没有 `hidden`/`hidden_why` 的内容表 —— 当时还没有录音层，
     #    没想到会有「这条录音读的是别的词」这种事（实测 7 行，判据精确度只有 57%

@@ -268,6 +268,7 @@ DDL = [
 #    ⚠️ 只是登记（声明库里该有什么），本脚本建库时**不**加它们 —— 加列的是右边注释里那个脚本。
 ADD_COLUMNS = [
     ('collocation', 'text_norm', 'TEXT'),  # scripts/build_collocation_search.py
+    ('example', 'tags', 'TEXT'),           # de/pipeline/example_tags.py（B31，2026-11-07）
 ]
 
 

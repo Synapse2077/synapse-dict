@@ -76,6 +76,10 @@ def _dup_in_cell(c):
     return again
 
 
+# B31：带例句标签的行数 —— **独立声明**（`[[expectation-must-be-declared]]`），不从现状推。
+# 2026-11-07 首次同步：收割器给 344 条（搭配 316／谚语 9／歌谣 4…），库里全部落上。改它必须写理由。
+EXAMPLE_TAGGED = 344
+
 CHECKS = [
     ("X1", "example 非空", lambda c: c.execute(
         "SELECT COUNT(*) FROM example").fetchone()[0] > 0, True),
@@ -149,9 +153,17 @@ CHECKS = [
     ("X14", "🔴 出版的例句不是该词本身", lambda c: c.execute(
         "SELECT COUNT(*) FROM example e JOIN dict d ON d.id=e.word_id "
         "WHERE e.hidden=0 AND LOWER(TRIM(e.text, ' .!?'))=LOWER(d.word)").fetchone()[0], 0),
+    # ── B31（2026-11-07）：例句标签。判据 import `S6.bad_example_tags`，不在这里重写。
+    #    X16 值域外／乱序 —— 页面按 VI_EXAMPLE_TAG_LABELS 印中文，值域外的键会被静默不印。
+    #    X17 带标签的行数 == 独立声明的 EXAMPLE_TAGGED —— 重建／同步漏了标签，别的检查一条都看不见。
+    ("X16", "例句标签在值域里且按序（B31）", lambda c: sum(
+        1 for (v,) in c.execute("SELECT tags FROM example WHERE tags IS NOT NULL")
+        if S6.bad_example_tags(v)), 0),
+    ("X17", "带例句标签的行数（B31）", lambda c: c.execute(
+        "SELECT COUNT(*) FROM example WHERE tags IS NOT NULL").fetchone()[0], EXAMPLE_TAGGED),
 ]
 ROSTER = ("X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "X9",
-          "X10", "X11", "X12", "X13", "X14", "X15")
+          "X10", "X11", "X12", "X13", "X14", "X15", "X16", "X17")
 UNMUTABLE = {
     "X1": "要变异就得清空整张表；它拦的是「表空了而所有 0 值检查全绿」。",
     "X6": "DDL 上有 `UNIQUE(src_ref)`，注不进去（与骨架闸 S2 同一情形，恒绿已登记）。",
@@ -220,6 +232,11 @@ MUTATIONS = [
     ("X15", "🔴 把一条同格重复的例句放回出版层（W24 的判据被关掉的样子）",
      "UPDATE example SET hidden=0, hidden_why=NULL WHERE id="
      "(SELECT MIN(id) FROM example WHERE hidden_why='duplicate-in-same-cell')", {}),
+    # B31：值域外的键、整条标签被清掉 —— 各造一条
+    ("X16", "例句标签塞一个值域外的键（地区）",
+     "UPDATE example SET tags='collocation|US' WHERE id=(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)", {}),
+    ("X17", "清掉一条例句的标签（重建漏了标签列的样子）",
+     "UPDATE example SET tags=NULL WHERE id=(SELECT MAX(id) FROM example WHERE tags IS NOT NULL)", {}),
     ("X14", "🔴 往出版层塞一条「例句就是该词本身」",
      # ⚠️ `src` 必须用一个**已有**的值 —— 写 `'t'` 会顺带让 X12（十二份切片）
      #    变成十三份而连带报红，那样这条变异就同时注入了两个缺陷

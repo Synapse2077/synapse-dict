@@ -38,6 +38,8 @@ import dbtool
 import paths
 from criteria import is_han_headword, syllables
 import han_sources as HS
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent.parent / "scripts"))
+from zh_t2s import t2s                                          # noqa: E402  W1：字义比对要简体
 
 
 def rd(p):
@@ -133,6 +135,8 @@ def main():
     #       哪天本层掺进了花钱买的定性结果，这个开关就必须换成原地补列。
     ap.add_argument("--rebuild", action="store_true",
                     help="清空 han_spelling/nom_spelling 再建（纯派生层，可重算）")
+    ap.add_argument("--resync-rule", action="store_true",
+                    help="只原地同步 rule_ver（行集合必须与库逐行一致，否则拒绝）—— W1 升级判据落库用")
     a = ap.parse_args()
 
     got, stat = harvest()
@@ -173,6 +177,26 @@ def main():
         (rows_han if kind == "han" else rows_nom).append(
             (wid, eid, han, rule, src, src_ref))
 
+    # ── W1（2026-11-07）：codepoint-v1 的 han 行里，汉越音逐字对上且与中文释义共字的 ⇒ reading-meaning-v1 ──
+    #    判据住 `han_sources.reading_meaning_ok`；读音表只用本轮 S2/S4 那两档的行（不用 S3，防自证）。
+    id2w = {i: w for w, i in indict.items()}
+    rd = HS.hv_readings([(id2w[r[0]], r[2]) for r in rows_han
+                         if r[3] in ("src-zh-etym-v1", "src-en-etym-v1")])
+    con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+    zh = collections.defaultdict(str)
+    for wid_, t in con.execute("SELECT s.word_id, g.text FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
+                               "WHERE g.lang='zh' AND COALESCE(s.hidden,0)=0"):
+        zh[wid_] += " " + (t or "")
+    con.close()
+    up = 0
+    for i, r in enumerate(rows_han):
+        if r[3] == "codepoint-v1" and HS.reading_meaning_ok(id2w[r[0]], r[2], rd, zh.get(r[0], ""), t2s):
+            rows_han[i] = r[:3] + ("reading-meaning-v1",) + r[4:]
+            rulec[("han", "codepoint-v1")] -= 1
+            rulec[("han", "reading-meaning-v1")] += 1
+            up += 1
+    print("■ W1 升级：codepoint-v1 → reading-meaning-v1 %s 行（读音表 %s 个字）" % (format(up, ","), format(len(rd), ",")))
+
     print("\n■ 落点")
     print("   %-34s %8s" % ("本步能建（词形在 dict 里）", format(len(rows_han) + len(rows_nom), ",")))
     print("   %-34s %8s" % ("  → han_spelling", format(len(rows_han), ",")))
@@ -195,6 +219,27 @@ def main():
                         ("汉字", "判据", "源", "归到"))
     dbtool.sample_check([(r[2], r[3], r[4], "nom") for r in rows_nom], 6,
                         ("喃字", "判据", "源", "归到"))
+
+    if a.resync_rule:
+        # 🔴 只改 rule_ver：行集合（word_id, han, src）必须与库**逐行一致**，否则说明库与 dump 已漂开，
+        #    那要走 --rebuild（会改行），不是本模式能管的。
+        con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
+        have = {(w, h, src): (i, rv) for i, w, h, src, rv in con.execute(
+            "SELECT id, word_id, han, src, rule_ver FROM han_spelling")}
+        con.close()
+        want = {(r[0], r[2], r[4]): r[3] for r in rows_han}
+        if set(have) != set(want):
+            raise SystemExit("🔴 han_spelling 行集合与收割结果不一致（库多 %d／库缺 %d）—— 走 --rebuild"
+                             % (len(set(have) - set(want)), len(set(want) - set(have))))
+        upd = [(want[k], have[k][0]) for k in want if have[k][1] != want[k]]
+        print("\n■ --resync-rule：要改 rule_ver %s 行 %s"
+              % (format(len(upd), ","), dict(collections.Counter((have[k][1], want[k]) for k in want if have[k][1] != want[k]))))
+        if not a.apply or not upd:
+            print("(干跑或无事可做。确认后加 --apply)")
+            return
+        with dbtool.session("resync-vi-han-rule", expect={"__rows__": 0}, invalidates=[]) as s:
+            s.executemany("UPDATE han_spelling SET rule_ver=? WHERE id=?", upd)
+        return
 
     if not a.apply:
         print("\n(干跑。确认后 --apply)")

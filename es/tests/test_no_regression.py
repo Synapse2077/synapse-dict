@@ -50,6 +50,8 @@ from hide_english_relation_notes import is_english_note   # noqa: E402
 from fix_ipa_xsampa import BAD as XSAMPA_BAD, ENTITY as IPA_ENTITY   # noqa: E402
 _sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent.parent / "scripts"))
 from zh_t2s import t2s as zh_t2s   # noqa: E402
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent / "pipeline"))
+import example_tags as _xt   # noqa: E402  B31：判据 import 生成侧那一份
 
 # ══════════════════════════════════════════════════════════════════════════
 #  落点：同一个「缺陷」要在哪两个地方查
@@ -207,6 +209,12 @@ SENSE_CHECKS = [
     ("B8", "build_relation_layer.py", "08-10", "义项级 derived 关系漏收（曾漏 20,193）",
      "SELECT CASE WHEN (SELECT COUNT(*) FROM sense_relation WHERE kind='derived') "
      "< 40000 THEN 1 ELSE 0 END"),
+    # B31（2026-11-07）：例句标签。B10 值域外／乱序（判据 `_xt.bad_tag_value`，经 run_sense 注册成 SQL 函数）；
+    #   B11 带标签的行比声明的少（重建 example 漏了标签）—— 期望值**独立声明**在 `_xt.EXPECT_TAGGED`。
+    ("B10", "example_tags.py", "11-07", "例句标签值域外或乱序（B31）",
+     "SELECT COUNT(*) FROM example WHERE b31_bad(tags)"),
+    ("B11", "example_tags.py", "11-07", "例句标签少了（B31，少于 example_tags.EXPECT_TAGGED）",
+     "SELECT MAX(0, b31_expect() - (SELECT COUNT(*) FROM example WHERE tags IS NOT NULL))"),
     ("B9", "全局", "—", "义项没有任何中文释义",
      "SELECT COUNT(*) FROM sense s WHERE NOT EXISTS("
      "SELECT 1 FROM sense_gloss g WHERE g.sense_id=s.id AND g.lang='zh')"),
@@ -437,6 +445,8 @@ def run_ipa(con, mutate_note=""):
 
 
 def run_sense(con):
+    con.create_function("b31_bad", 1, lambda v: int(_xt.bad_tag_value(v)), deterministic=True)
+    con.create_function("b31_expect", 0, lambda: _xt.EXPECT_TAGGED, deterministic=True)
     out = []
     for cid, script, date, name, sql in SENSE_CHECKS:
         try:
@@ -563,6 +573,11 @@ MUTATIONS = [
      "DELETE FROM example_gloss WHERE rowid % 10 <> 0"),
     ("B8 删掉大部分 derived 关系",
      "DELETE FROM sense_relation WHERE kind='derived' AND rowid % 10 <> 0"),
+    # B31：值域外的键、整条标签被清掉 —— 各造一条
+    ("B10 例句标签塞一个值域外的键",
+     "UPDATE example SET tags='collocation|Mexico' WHERE id=(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)"),
+    ("B11 清掉一条例句的标签",
+     "UPDATE example SET tags=NULL WHERE id=(SELECT MAX(id) FROM example WHERE tags IS NOT NULL)"),
     ("B9 删掉一条义项的全部中文",
      "DELETE FROM sense_gloss WHERE sense_id=(SELECT MIN(sense_id) FROM sense_gloss) AND lang='zh'"),
     # ── C 组：迁出来的这份与旧列对不上 ──────────────────────────────

@@ -41,9 +41,13 @@ DISPLAY = paths.ROOT / "packages" / "dict-core" / "src" / "russian.ts"
 # (编号, 名称, 写入列 SQL, 读取路径 SQL, 期望差额, 差额是什么)
 READ_PATH = [
     ("RP1", "义项：写入 vs 展示", "SELECT COUNT(*) FROM sense", "SELECT COUNT(*) FROM sense WHERE hidden = 0",
-     12779, "藏的义项：zh 元描述／中俄混排待切（R3）／只有语体标签／没有字母"),
+     7939, "藏的义项：zh 指针 4,427／zh 元描述 3,086／只有语体标签 263／没有字母 105／zh 源头乱码 31／"
+     "zh 纸质条目洗不出释义 27。2026-11-07 R3 12,779→7,939：zh-s 纸质词典洗出释义 4,881 条放出来"
+     "（`criteria.zh_paper_clean`，两轮各 60 条抽读验收），在印的 79 条改藏（元描述／指针／乱码）"),
     ("RP2", "例句：写入 vs 展示", "SELECT COUNT(*) FROM example", "SELECT COUNT(*) FROM example WHERE hidden = 0",
-     2486, "构词示意式 1,280／R3 切不开 615／关系元数据 169／同格重复 151／整条是词头 126／其余。"
+     2057, "构词示意式 1,280／R3 切不开 187／关系元数据 169／同格重复 151／整条是词头 126／其余。"
+     "2026-11-11 R3 例句那一半 −429：ru-crit-24 重切判据救回 615 → 187（括号整组定类、中性字符按方向归属，"
+     "`example_layer.py --sync`；行集合 +413 #p／−437 #x）。"
      "2026-11-05 R28 +3：vi 版源头残渣 `матерскаяие`／`выходит‚в,`／`посадки`（`criteria.EXAMPLE_JUNK_ADJUDICATED`）"),
     ("RP3", "关系：写入 vs 展示", "SELECT COUNT(*) FROM sense_relation",
      "SELECT COUNT(*) FROM sense_relation WHERE hidden = 0", 244130, "B17 108,451 ＋ 同条目重复 135,679"),
@@ -98,6 +102,10 @@ CHECKS = [
     # P34（R25／B31，2026-11-05）：源头给的例句标签（搭配／谚语／口语…）—— 掉了 ⇒ 页面上搭配又与整句例句混着印
     ("P34", "R25：带源头标签的例句", "SELECT COUNT(*) FROM example WHERE tags IS NOT NULL", 1095,
      "en 版 986／zh-t 77／fr 32；`collocation` 867。判据 `criteria.example_tags`（raw_tags 只认逐字白名单）"),
+    # P35（R16，2026-11-11）：变格／变位类层 —— 掉了 ⇒ `class` 那 512 种值又没有家（`criteria` ⑪c）
+    ("P35", "R16：变格／变位类（en 版 class）", "SELECT COUNT(*) FROM entry_class", 87803,
+     "56,985 个 entry、一值一行：名词词干 30,346／名词重音型 32,108／形容词重音码 11,964（＋形容词模板下的名词式词干 11）／"
+     "动词变位类 13,374；`class_layer.py --apply` 整表重建（无付费数据）"),
     ("P1", "词元数", "SELECT COUNT(*) FROM dict WHERE is_lemma=1", 368848,
      "2026-11-02 R19 −1：移出不是俄语的词头 `且聽下回分解`（1 个词元）。三次修 is_lemma（ru-crit-9 形动词 62,576／crit-10 姓氏变格 132,938／crit-15 副动词 75,782），"
      "分母虚胖过 42%。**锁数**：判据再动一次它就变，变了必须有人解释"),
@@ -107,26 +115,31 @@ CHECKS = [
     ("P3", "源头标错的读音藏而不删",
      "SELECT COUNT(*) FROM pronunciation WHERE hidden=1 AND hidden_why IN ('源头标为错误读音','源头标为不推荐')", 245,
      "源头 `неправильно`/proscribed 等；删掉就找不回，清零 hidden 就印给读者"),
-    ("P4", "可出版义项", "SELECT COUNT(*) FROM sense WHERE hidden=0", 625798,
-     "2026-11-02 R19 −2：移出不是俄语的词头 `且聽下回分解`（它的 2 条义项）。5a 落库 ＋ 5b 破例 11,496。`--rebuild` 改判据会动它"),
-    ("P5", "🔴 付费：5b+5c 模型中文释义", "SELECT COUNT(*) FROM sense_gloss WHERE src='model:deepseek-v4-flash'", 515689,
-     "5b 331,639（≈106 元）＋ 5c 184,050（2026-10-26，≈59 元，答案 `ru-C1`/`en-C1`）。**少一条都是付费数据丢了**"
+    ("P4", "可出版义项", "SELECT COUNT(*) FROM sense WHERE hidden=0", 630612,
+     "2026-11-07 R3 ＋4,814：zh-s 纸质词典洗出释义放出 4,881 −在印改藏 79（元描述／指针／乱码／洗不出）"
+     "−撤下破例 26（词元有了中文版自己的释义，破例条件不再成立）。2026-11-02 R19 −2：移出不是俄语的词头 `且聽下回分解`（它的 2 条义项）。5a 落库 ＋ 5b 破例 11,496。`--rebuild` 改判据会动它"),
+    ("P5", "🔴 付费：5b+5c 模型中文释义", "SELECT COUNT(*) FROM sense_gloss WHERE src='model:deepseek-v4-flash'", 515663,
+     "2026-11-07 R3 −26：撤下的破例义项挂着的模型中文（`translate_glosses.py --prune-xl`；**钱没丢**，"
+     "译文仍在 `xl-` 答案文件里按 `sense_src.id` 存，页面再变空白时 `--load` 原样收回）。5b 331,639（≈106 元）＋ 5c 184,050（2026-10-26，≈59 元，答案 `ru-C1`/`en-C1`）。**少一条都是付费数据丢了**"
      "（答案文件在 `data/work/ru/gloss_zh/`，可按 id 回收）"),
     ("P6", "破例义项", "SELECT COUNT(*) FROM sense s WHERE EXISTS (SELECT 1 FROM sense_src x WHERE x.sense_id=s.id "
-     "AND x.lang IN ('fr','vi','pl'))", 11496, "用户 2026-10-23 拍板：fr/vi/pl 证据只在空白页词元上出版、只挂模型中文"),
+     "AND x.lang IN ('fr','vi','pl'))", 11470, "2026-11-07 R3 −26：这些词元有了 zh-s 洗出来的释义、不再是空白页 ⇒ 按同一条规则撤下。用户 2026-10-23 拍板：fr/vi/pl 证据只在空白页词元上出版、只挂模型中文"),
     ("P7", "破例义项挂在没有字母的证据上", "SELECT COUNT(*) FROM sense_src x JOIN sense s ON s.id=x.sense_id "
      "WHERE x.lang IN ('fr','vi','pl') AND x.text NOT GLOB '*[A-Za-zА-яЁё0-9]*'", 0,
      "5b 那一跤：破例盘子漏过判据，55 条 `:` 证据被模型照词头盲推，义项闸 E4 拦下、已撤"),
-    ("P8", "🔴 付费：6d 模型中文例句", "SELECT COUNT(*) FROM example_gloss WHERE src='model:deepseek-v4-flash'", 292628,
-     "≈108 元。答案文件 `data/work/ru/example_zh/{all,redo}.jsonl`。2026-11-05 R28 +57：形状不过的 66 条人读裁决"
+    ("P8", "🔴 付费：6d 模型中文例句", "SELECT COUNT(*) FROM example_gloss WHERE src='model:deepseek-v4-flash'", 292595,
+     "≈108 元。2026-11-11 R3 例句那一半 −33：zh-s 重切修好后（`` `ёо́дку``→`Ло́дку`、俄文尾巴上的分项编号 `1)` 归回中文等）与别版同句一字不差 ⇒ "
+     "源头中文替换模型中文（R24 定的源头优先，用户 11-11 同意）；模型原话仍在答案文件。答案文件 `data/work/ru/example_zh/{all,redo}.jsonl`。2026-11-05 R28 +57：形状不过的 66 条人读裁决"
      "（36 条原样放行／21 条人工改译 `translate_examples.R28_FIXED`；6 条不需要译文、3 条残渣隐藏）。2026-10-25 R24：292,566 −1（3806 出处搬走后与 zh-t "
      "一句一字不差 ⇒ 源头中文替换模型中文）＋6（出处搬走后行数对上、从答案文件免费落库，R28 的 6 条）"),
-    ("P9", "同句借中文", "SELECT COUNT(*) FROM example_gloss WHERE src LIKE '%:同句'", 11834,
-     "6a：同词形一字不差的句子借 zh 版的中文（例句闸 X9 逐条找出处）；R24 +1（3806）"),
+    ("P9", "同句借中文", "SELECT COUNT(*) FROM example_gloss WHERE src LIKE '%:同句'", 11867,
+     "6a：同词形一字不差的句子借 zh 版的中文（例句闸 X9 逐条找出处）；R24 +1（3806）；2026-11-11 R3 +33（即 P8 那 33 条）"),
     ("P10", "删节号被剥成句点", "SELECT COUNT(*) FROM example WHERE text LIKE '...%' AND text_pub LIKE '. %'", 0,
      "6a 第一版判据把 НКРЯ 的 `...` 当垃圾剥成 `.`（抽读逮到）"),
-    ("P11", "zh-s 纸质词典重切成对", "SELECT COUNT(*) FROM example WHERE src_ref LIKE '%#p%'", 9063,
-     "R3 的例句那一半：按文字交界重切（抽读 60/60）。数变了 ⇒ 重切判据被动过"),
+    ("P11", "zh-s 纸质词典重切成对", "SELECT COUNT(*) FROM example WHERE src_ref LIKE '%#p%'", 9467,
+     "R3 的例句那一半：按文字交界重切（抽读 60/60）。数变了 ⇒ 重切判据被动过。"
+     "2026-11-11 ru-crit-24 +404：切不开的 176 个义项救回 409 对，`катать` 在义项号 ⑼ 截掉 1 对，"
+     "`@` 模板残渣 3 个义项整义项不收（−4）"),
     ("P12", "构词示意式不当例句印", "SELECT COUNT(*) FROM example WHERE hidden_why='构词示意式（词缀页，不是句子）'", 1280,
      "en 版词缀页 `на- + идти → найти`"),
     ("P13", "张冠李戴录音藏", "SELECT COUNT(*) FROM audio WHERE hidden_why LIKE '录音文件名里的词%'", 165,
@@ -170,8 +183,8 @@ CHECKS = [
      "变小 ⇒ 归一或白名单被撤；负数 ⇒ 戏谑拼写的变格进来了（白名单又宽回「词头里有的字符都放行」）"),
     ("P22", "R29：中文简体出版正文", "SELECT (SELECT COUNT(*) FROM sense_gloss WHERE text_pub IS NOT NULL)"
      "+(SELECT COUNT(*) FROM example_gloss WHERE text_pub IS NOT NULL)"
-     "+(SELECT COUNT(*) FROM sense_src WHERE text_pub IS NOT NULL)", 139077,
-     "2026-11-03 R33 −1：sense_gloss 1081521（格陵兰岛）旧译文带繁体、出版列是「格陵兰岛[1]及…」，重译成纯简体后 `zh_pub` 不再需要出版列"
+     "+(SELECT COUNT(*) FROM sense_src WHERE text_pub IS NOT NULL)", 139072,
+     "2026-11-11 R3 −1：`обернуть` 的 `@обертка@ 名词 包` 是模板残渣、整义项不收，它的 B30 改译出版列跟着没了（P25 退役名册）。2026-11-07 R3 −4：zh-s 洗掉纸质残渣后 4 行本身就是简体、不再需要出版列（`zh_pub.py` 清空 4 条）。2026-11-03 R33 −1：sense_gloss 1081521（格陵兰岛）旧译文带繁体、出版列是「格陵兰岛[1]及…」，重译成纯简体后 `zh_pub` 不再需要出版列"
      "（对照 15:24 备份，三张表只有这一行变了）。2026-11-02 R19 −4：移出不是俄语的词头 `且聽下回分解`（2 条 sense_gloss ＋ 2 条 sense_src 的简体出版列）。2026-10-30 B30 ＋894：中文版错译的改译 2,685 行写进 `text_pub`，其中 894 行原来没有出版正文（原文已是简体）。"
      "2026-10-25 `zh_pub.py`：释义 25,920（5c 新译文里模型漏转的繁体 ＋52）＋ 例句译文 16,883（R24 借来的 3806 ＋1）＋ 指针说明 95,385；掉了 ⇒ 页面回到繁简混排"),
     ("P23", "R29：「覆上」没被改成「复上」", "SELECT (SELECT COUNT(*) FROM sense_gloss WHERE lang='zh' AND "
@@ -195,11 +208,18 @@ ZH_READ = ("COALESCE(g.text_pub, g.text) FROM sense s JOIN sense_gloss g",
 #    逮不到「整条被删了」（vi 栽过的正是后者：P12/P13 被整段替换切走，正常跑报全绿）。
 #    ⇒ 独立写死。加一条检查 ⇒ 这里也要加，不加就红 —— 那正是它存在的理由（`[[expectation-must-be-declared]]`）。
 ROSTER = ["R0",
-          "P26", "P28", "P27", "P33", "P34",   # 2026-11-02 R22／R32：在 CHECKS 最前面（花名册按输出顺序比对）；P33 2026-11-05
+          "P26", "P28", "P27", "P33", "P34", "P35",   # 2026-11-02 R22／R32：在 CHECKS 最前面（花名册按输出顺序比对）；P33 2026-11-05
           "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P12",
           "P13", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P21", "P30", "P31", "P29", "P22", "P23", "P24", "P25", "P32",
           "RP1", "RP2", "RP3", "RP4", "RP5", "RP6", "RP7",
           "R0b", "R0c"]
+
+
+# P25 的退役名册：B30 改译挂着的译文行被判据**合法删掉**的，逐条点名 + 理由。
+B30_RETIRED = {
+    32580: "2026-11-11 R3 ru-crit-24：`обернуть` 的 `` `ёе́бедь ～у́@обертка@ ⇒ 名词 包 `` 是别的词典的模板残渣，"
+           "俄文段有 `@` ⇒ 整义项不收（B30 当时把它「改译」成「名词 包皮」）",
+}
 
 
 def run_all(con):
@@ -217,9 +237,13 @@ def run_all(con):
     pub = {i: (t, sr) for i, t, sr in con.execute(
         "SELECT id, COALESCE(text_pub, text), src FROM example_gloss WHERE lang='zh' AND id IN (%s)"
         % (",".join(map(str, fx)) or "NULL"))}
-    out.append(("P25", "B30：中文版错译的改译没印出来", sum(1 for i, t in fx.items()
-                if i not in pub or pub[i][0] != _crit.zh_simp(t, pub[i][1])), 0,
-                "2,685 行（两层判官都判错 1,465 ＋ 同句借用跟着改 1,220）；红 ⇒ 读者看回「建造房屋」那种错译"))
+    # 退役名册：改译挂着的那行**被判据合法删掉**的，逐条点名（不许写成「行不在就不算」—— 那样误删就看不见了）。
+    #   名册里的 id 必须**真的不在库里**，否则同样算红。
+    retired = B30_RETIRED
+    out.append(("P25", "B30：中文版错译的改译没印出来", sum(1 for i, t in fx.items() if i not in retired and (
+                i not in pub or pub[i][0] != _crit.zh_simp(t, pub[i][1]))) + sum(1 for i in retired if i in pub), 0,
+                "2,685 行（两层判官都判错 1,465 ＋ 同句借用跟着改 1,220）；红 ⇒ 读者看回「建造房屋」那种错译。"
+                "退役 %d 条见 `B30_RETIRED`" % len(retired)))
     # P32（R33，2026-11-03）：读者看到的模型中文里还带义项编号 `[1]`／`［1］`／`[I.1]`／`[1, 2]`
     #   判据 import `criteria.SENSE_REF`（与修复脚本同一个）；库里留着化学命名 `[4,5-d]`／出处 `[ГОСТ …]` 等 ⇒ 基线 0 本身是反向控制
     out.append(("P32", "R33：模型中文释义里印着义项编号", sum(1 for (t,) in con.execute(
@@ -366,6 +390,8 @@ def _mutations():
          "UPDATE sense_src SET ptr_hidden_why=NULL WHERE id=(SELECT MIN(id) FROM sense_src WHERE ptr_hidden_why IS NOT NULL)"),
         ("P34", "清掉一条例句的源头标签（`без обиняков` 不再标「搭配」那一类）",
          "UPDATE example SET tags=NULL WHERE id=(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)"),
+        ("P35", "删一行变格/变位类（`дед` 的 accent-c 那一类多值被压掉）",
+         "DELETE FROM entry_class WHERE id=(SELECT MIN(id) FROM entry_class)"),
         ("R0b", "展示层换了口径（russian.ts 里没有 hidden = 0 了）", "DISPLAY"),
         ("R0c", "展示层的中文回到读 text（不读 text_pub）", "DISPLAY_ZH"),
     ]
@@ -424,8 +450,14 @@ def mutate():
                 else:
                     con = sqlite3.connect(cp)
                     con.execute(sql)
+                    changed = con.total_changes
                     con.commit()
                     con.close()
+                    # 🔴 2026-11-05（例句闸 X7 栽过）：注入 0 行 ＝ 空操作 —— 单独判死，不报成「没逮到」
+                    if not changed:
+                        print("   🔴🔴 %-4s **注入是空操作**（0 行被改，前提已不成立）—— %s" % (cid, why))
+                        fails.append(cid)
+                        continue
                 got = {c for c, _n, _w in check_brief()}
                 if cid in got and not (got - {cid} - ALSO.get(cid, set())):
                     print("   ✅ %-4s %s" % (cid, why))

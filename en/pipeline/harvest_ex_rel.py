@@ -26,6 +26,7 @@ import collections
 import json
 
 import paths
+import example_tags as XT   # B31：例句标签判据唯一的家
 
 OUT = paths.WORK / "ingest" / "ex_rel.jsonl"
 REL_KINDS = ("synonyms", "antonyms", "hypernyms", "hyponyms", "holonyms",
@@ -76,7 +77,9 @@ def main():
                     stat["ex"] += 1
                     rec["ex"].append({"i": idx, "t": t, "ty": ty,
                                       "r": e.get("ref"), "en": e.get("english"),
-                                      "b": e.get("bold_text_offsets")})
+                                      "b": e.get("bold_text_offsets"),
+                                      # B31（2026-11-07）：源头例句标签 → 我们的键（受控值域）
+                                      "tg": sorted(XT.example_tags(e))})
                 for kind in REL_KINDS:
                     for r in s.get(kind) or []:
                         t = (r.get("word") or "").strip()

@@ -210,6 +210,10 @@ DDL = [
          -- 🔴 写这一行的**脚本**（K14，2026-11-03）。`src` 是「哪一版 dump」，8 个写入方填的是同一批版名，
          --    分不开；取值只许是 `relation_writers.WRITERS` 登记过的（回归闸 R29）。
          writer   TEXT,
+         -- 🔴 K20（2026-11-11）：边指向**哪个词条**（`target_norm` 只到词形：`부인` 页上有 婦人／否認／夫人）。
+         --    派生列，**只由 `anchor_relation_targets.py` 写**（判据 `criteria.relation_target_entry`），
+         --    认不准就 NULL；回归闸 R35 是它的不动点。展示层用它定链接落点、高亮词条、取悬停释义。
+         target_entry_id INTEGER,
          UNIQUE(word_id, sense_id, kind, target)
        )""",
     # ── 变形层（阶段 2 填）。🔴 韩语的活用表在**英文版** ────────────────
@@ -292,6 +296,9 @@ DDL = [
          --    **2026-09-27 才补进本声明** —— 在此之前它只由 `fix_nonexample_rows.py`
          --    的 `ALTER TABLE` 建出来，**按 schema 重建库会把 792 行分类静默丢掉**。
          hidden_why      TEXT,
+         -- B31（2026-11-07）：源头例句标签（`|` 分隔，受控值域 `criteria.EXAMPLE_TAG_ORDER`）。
+         --    由 `fill_example_tags.py` 的 `ALTER TABLE` 建出、同时补进本声明（hidden_why 那次的教训）。
+         tags            TEXT,
          src             TEXT NOT NULL,
                                           -- 🔴 中文版的 `examples` 里混着**关系数据**：
                                           --   `近义词：추` / `派生詞：늦가을，올가을…` /

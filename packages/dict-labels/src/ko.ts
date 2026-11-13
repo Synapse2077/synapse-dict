@@ -151,14 +151,14 @@ export const KO_RELATION_TAG_LABELS: Record<string, string> = {
   nonstandard: '非规范', misspelling: '误写', proscribed: '不推荐',
 
   // ── 语体/年代 ──
-  archaic: '古语', obsolete: '废弃', dated: '旧式', literary: '书面语',
+  archaic: '古旧', obsolete: '已废', dated: '过时', literary: '书面',
   colloquial: '口语', slang: '俚语', Internet: '网络语',
   honorific: '敬语', impolite: '非敬语', informal: '非格式体',
   vulgar: '粗俗', derogatory: '贬义', offensive: '冒犯',
   endearing: '爱称', humorous: '戏谐', poetic: '诗语',
 
   // ── 频度 ──
-  common: '常见', uncommon: '少见', rare: '罕见',
+  common: '常见', uncommon: '少见', rare: '罕用',
 
   // 🔴 韩语的**语感对立**（어감）—— 强弱/大小/送气是这门语言里的真区别，
   //    `따듯하다`／`따뜻하다` 的差别就靠这一格说清。别当成"程度副词"删掉。
@@ -296,4 +296,13 @@ export const KO_EDITION_LABELS: Record<string, string> = {
   'ko-edition': '韩文维基词典',
   // 日文版只印中文译文（原文是日语，三语方针不印）⇒ 标签要说清这段是**译过来的**，别和源头白送的中文版混。
   'ja-edition': '日文维基词典·中译',
+};
+
+/** 例句标签（B31，2026-11-07）：`example.tags` 的受控值域（`ko/pipeline/criteria.EXAMPLE_TAG_ORDER`）。
+ *  敬语体系沿用义项层 `KO_REGISTER_LABELS` 的叫法（honorific 敬语／informal 非格式体），补 polite 敬体／formal 格式体。
+ *  其余用字随 B32（两字），与 ru／fr／en 同键同名。⚠️ 键没映射就不印 —— 值域覆盖闸（`test_display_labels`）查漏。 */
+export const KO_EXAMPLE_TAG_LABELS: Record<string, string> = {
+  collocation: '搭配', proverb: '谚语', idiom: '习语',
+  honorific: '敬语', polite: '敬体', formal: '格式体', informal: '非格式体',
+  colloquial: '口语', slang: '俚语', literary: '书面', poetic: '诗歌', vulgar: '粗俗',
 };

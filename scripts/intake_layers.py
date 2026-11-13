@@ -49,6 +49,7 @@ TIED = {
     "罗马字": "词元集合：四套罗马字按词元生成",
     "汉字层": "词元集合中的汉字词：汉字读音／音训／汉字表记",
     "活用类": "用言词元：活用类与活用表",
+    "变格变位类": "带变格/变位模板的词元：`entry_class`（体系/类别码）按源头模板重放（ru R16，新词元要有自己的类）",
     "义项标签": "义项集合：新收义项的语域／地区等标签",
     "量词": "名词词元：量词搭配",
     "义项中文": "义项集合：新收义项的中文（付费跑批）",
@@ -215,6 +216,7 @@ LAYERS = {
     ],
     "ru": [
         L("变形连线", "ru/pipeline/inflection_layer.py", ["inflection-layer"], note="靠销账 ＋ ru 的变形层闸"),
+        L("变格变位类", "ru/pipeline/class_layer.py", ["class-layer"], note="R16；靠销账 ＋ 屈折闸 I13 ＋ 外锚闸 class 层"),
         L("重音", "ru/pipeline/stress_layer.py", ["stress-layer"], "词元·带重音拼写"),
         L("读音", "ru/pipeline/pronunciation_layer.py", ["pronunciation-layer"], note="靠销账 ＋ ru 的读音层闸"),
         L("例句", "ru/pipeline/example_layer.py", ["example-layer", "example-sync-"], note="靠销账 ＋ ru 的例句层闸"),

@@ -170,10 +170,14 @@ DELIVERABLE = {
            "     AND g.lang='zh' WHERE e.edition='ja-edition')=3093"),
           ("中文版挂在词上的词源 ＝ 5,520（K36①）",
            "SELECT COUNT(*)=5520 FROM etymology WHERE entry_id IS NULL AND edition LIKE 'zh-edition-%'"),
-          ("韩文版词源 ＝ 22,910（K36②，判据 `criteria.ko_etymology`）",
-           "SELECT COUNT(*)=22910 FROM etymology WHERE edition='ko-edition'"),
-          ("韩文版挂在词上的词源 ＝ 9,957（K36②）",
-           "SELECT COUNT(*)=9957 FROM etymology WHERE entry_id IS NULL AND edition='ko-edition'")],
+          # ⚠️ 2026-11-07 K35：22,910 → 22,869（−41）、9,957 → 9,926（−31，另 10 条挂 entry）。
+          #    K35 给 75 个词补了 `hanja_spelling`，其中 41 个的韩文版词源正文**只有「한자 X」**而 X 现在印在
+          #    汉字表记里 ⇒ 按 `criteria.ko_etymology` 同一条规则「不收·汉字写法已在页面上」，
+          #    `fixes/k35_sync_ko_etymology.py` 删掉（零信息损失，无译文）。外锚闸先判红逼出来的。
+          ("韩文版词源 ＝ 22,869（K36②，判据 `criteria.ko_etymology`；K35 −41）",
+           "SELECT COUNT(*)=22869 FROM etymology WHERE edition='ko-edition'"),
+          ("韩文版挂在词上的词源 ＝ 9,926（K36②；K35 −31）",
+           "SELECT COUNT(*)=9926 FROM etymology WHERE entry_id IS NULL AND edition='ko-edition'")],
 }
 
 FILES = {

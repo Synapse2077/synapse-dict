@@ -38,6 +38,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
+import { DE_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 import { GermanEntryView, capAudios, deShownExamples } from './App';
 
 const svc = getService('de') as unknown as {
@@ -63,7 +64,28 @@ const norm = (x: string) => x
 const text = (h: string) => norm(h.replace(/<[^>]*>/g, ' '));
 const count = (h: string, re: RegExp) => (h.match(re) ?? []).length;
 
+const EX_CHIP = /<span class="ex-chip">([^<]*)<\/span>/g;
 const CHECKS: Check[] = [
+  {
+    // B31（2026-11-07）：源头例句标签（de 只有「转义」）。按**块**对（fr／en 同款）：
+    //    每个 `example-de` 块剥掉 chip 后的原句 ↔ 接口里同一句的 tags，chip 必须逐个一致。
+    name: '🔴 例句块的标签胶囊与该句源头标签不一致（B31）',
+    hit: (e, h) => {
+      const exs = e.examples as Array<{ text: string; tags: string | null }>;
+      const nolab = exs.flatMap((x) => (x.tags ?? '').split('|').filter((k) => k && !DE_EXAMPLE_TAG_LABELS[k]));
+      if (nolab.length) return `例句标签键没有中文名：${[...new Set(nolab)].join('、')}`;
+      for (const m of h.matchAll(/<div class="example-de">([\s\S]*?)<\/div>/g)) {
+        const chips = [...m[1].matchAll(EX_CHIP)].map((c) => c[1]);
+        const body = text(m[1].replace(EX_CHIP, ''));
+        const x = exs.find((y) => norm(y.text) === body);
+        const want = (x?.tags ?? '').split('|').filter(Boolean).map((k) => DE_EXAMPLE_TAG_LABELS[k]);
+        if (chips.join('|') !== want.join('|')) {
+          return `「${body.slice(0, 30)}」印了 [${chips.join('、')}]，应为 [${want.join('、')}]`;
+        }
+      }
+      return null;
+    },
+  },
   {
     name: '🔴 ① 有义项却整块释义不渲染（`is_lemma` 挡住 124,291 个词形那个形状）',
     hit: (e, h) => (e.senses.length > 0 && !/class="sense-zh"/.test(h))
@@ -289,6 +311,9 @@ const arms: Array<[string, string]> = [
   ['词条级关系 >200', `SELECT d.word FROM dict d JOIN (SELECT word_id FROM sense_relation
      WHERE sense_id IS NULL AND COALESCE(hidden,0)=0 GROUP BY word_id HAVING COUNT(*) > 200 LIMIT 8) x
      ON x.word_id = d.id`],
+  // B31：带标签的例句（只 190 条，全取 —— 词数少于 PER 也照收）
+  ['例句带标签', `SELECT word FROM example WHERE tags IS NOT NULL AND COALESCE(hidden,0)=0
+      GROUP BY word LIMIT ${PER}`],
   ['例句有中文', `SELECT e.word FROM example e
       JOIN example_gloss g ON g.example_id=e.id AND g.lang='zh'
       WHERE COALESCE(e.hidden,0)=0 GROUP BY e.word LIMIT ${PER}`],
@@ -343,6 +368,8 @@ for (const w of words) {
       //    那条断言查的是文字不是类名 ⇒ 单独造一条：把译文整行删掉。
       //    （2026-09-10：不造这条的话它在 --mutate 下恒绿，看起来却像合格。）
       .replace(/<div class="example-zh">[^<]*<\/div>/g, '')
+      // B31：模拟组件漏写 `<DeExTags>` 那一行
+      .replace(EX_CHIP, '')
       .replace(/class="de-infl-list"/g, 'class="x"')
       .replace(/class="sense-altof"/g, 'class="x"')
       .replace(/class="rel-row"/g, 'class="x"')
@@ -382,6 +409,14 @@ for (const c of CHECKS) {
   red++;
   console.log(`   🔴 ${c.name}  ${n} 条${acc ? `  ← 超出已接受上限 ${acc[0]}` : ''}`);
   for (const x of arr) console.log(`        ${x}`);
+}
+// B31：例句标签**全值域**查漏（不靠抽到哪页）
+{
+  const keys = new Set((db.prepare('SELECT DISTINCT tags FROM example WHERE tags IS NOT NULL').all() as Array<{ tags: string }>)
+    .flatMap((r) => r.tags.split('|')));
+  const nolab = [...keys].filter((k) => !DE_EXAMPLE_TAG_LABELS[k]);
+  if (nolab.length) { red++; console.log(`   🔴 例句标签值域里有键没有中文名（全库）：${nolab.join('、')}`); }
+  else console.log(`   ✅ 例句标签全值域 ${keys.size} 个键都有中文名（B31）`);
 }
 console.log(red ? `\n🔴 ${red} 条红` : `\n✅ 全部通过（${CHECKS.length} 条断言）`);
 if (mutate) console.log('\n（--mutate：抹掉八个类名，上面应有 ≥8 条红）');

@@ -139,6 +139,7 @@ DDL = [
          src_translation TEXT,            -- 源自带的译文（各版自己的语言，非中文）
          src_lang        TEXT,
          src             TEXT NOT NULL,
+         tags            TEXT,            -- B31（2026-11-07）：源头例句标签（`|` 分隔，受控值域见 example_tags.py）
          UNIQUE(word, text)
        )""",
     """CREATE TABLE example_gloss (

@@ -42,6 +42,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import dbtool                                                    # noqa: E402
 import paths                                                     # noqa: E402
+sys.path.insert(0, str(HERE))
+import example_tags as XT                                        # noqa: E402  B31：例句标签判据唯一的家
 
 DUMPS = paths.DUMPS
 # 顺序即优先级
@@ -73,6 +75,7 @@ CREATE TABLE IF NOT EXISTS example (
   src_translation TEXT,             -- 源自带的译文（各版自己的语言，非中文）
   src_lang        TEXT,             -- 上一列是什么语言
   src             TEXT NOT NULL,    -- 哪个版本给的
+  tags            TEXT,             -- B31：源头例句标签（`|` 分隔，受控值域见 example_tags.py）
   UNIQUE(word, text)
 )
 """
@@ -87,8 +90,9 @@ def opener(path, kind):
 
 
 def harvest():
-    """→ {(word, text): row}，按 SOURCES 顺序先到先得。"""
+    """→ {(word, text): row}，按 SOURCES 顺序先到先得。row 末位是 tags（B31，重复处取并集）。"""
     out = {}
+    tags = {}                       # (word, text) → 标签集合
     stat = collections.Counter()
     for src, path, kind in SOURCES:
         if not Path(path).exists():
@@ -118,9 +122,13 @@ def harvest():
                         if not txt:
                             continue
                         key = (w, txt)
+                        tg = XT.example_tags(x)
                         if key in out:
                             stat["重复（已有更优先的源）"] += 1
+                            # 🔴 B31：入库只留先到的那一行，但**标签取并集**（fr／en／de 同款）
+                            tags[key] |= tg
                             continue
+                        tags[key] = set(tg)
                         bold = x.get("bold_text_offsets")
                         out[key] = (
                             w, None, None, txt, None, None,
@@ -134,6 +142,8 @@ def harvest():
                         got += 1
         stat["收自 " + src] = got
         print("   %-12s +%-7d 条  (%.0fs)" % (src, got, time.time() - t))
+    out = {k: r + (XT.join_tags(tags[k]),) for k, r in out.items()}
+    stat["带例句标签（B31）"] = sum(1 for r in out.values() if r[12])
     return out, stat
 
 
@@ -178,8 +188,8 @@ def main():
             s.execute(q)
         s.executemany(
             "INSERT OR IGNORE INTO example "
-            "(word,dict_id,sid,text,zh,zh_src,bold,ref,src_gloss,src_translation,src_lang,src) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", plan)
+            "(word,dict_id,sid,text,zh,zh_src,bold,ref,src_gloss,src_translation,src_lang,src,tags) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", plan)
 
     conn = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)
     n = conn.execute("SELECT COUNT(*) FROM example").fetchone()[0]

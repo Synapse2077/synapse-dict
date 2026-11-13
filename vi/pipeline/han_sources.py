@@ -102,6 +102,14 @@ RULES = {
                       "① 码位分布与 S3 的 chữ Hán 对照组几乎重合（99.7% vs 99.9%）"
                       "② 与 S4 在 4,628 个词形上交叉验证 94.40% 一致",
     "src-en-etym-v1": "en 版词源散文明说 `Sino-Vietnamese word from …` —— 源头直接断言",
+    # W1（2026-11-07）：codepoint-v1 里**汉越音逐字对上、且汉字与中文释义共字**的那批升到这一档。
+    #   在源头自标的 10,178 对真值（不参与建读音表）上实测精确率 98.73%（5,189 对里错 66，错的多是
+    #   `chủ nghĩa tư bản 主義資本` 这种越南语语序的汉越语素组合，真值本身模糊）。
+    #   两家咨询（`data/work/vi/consult_w1_reading_20261107.*`）一致：只验音不够（`một 没`、`chia 支`
+    #   是本土词借同音字＝喃字）⇒ 必须加字义；只验音判「喃」也不可靠（地名音译 `老街`、特殊读法 `Châu 周`）
+    #   ⇒ **只做升级、不做降级**：对不上的一律留在 codepoint-v1。
+    "reading-meaning-v1": "汉越音逐字对上（读音表只取 S2/S4 源头断言的汉越词）**且**汉字与该词中文释义共字"
+                          " —— 真值上精确率 98.73%（W1，2026-11-07）",
     "codepoint-v1":   "🔴 **只有码位可依据**（S1 en forms 是混装的）。"
                       "扩展区⇒喃字实测 99.4% 可信；**通用区⇒汉越字只有 70.8%**，"
                       "余下 29.2% 是借用通用汉字表喃音（欠账 W1 的残留）。"
@@ -208,3 +216,44 @@ def classify(han, label=None, src_kind=None):
     if src_kind == "en-etym":
         return "han", "src-en-etym-v1"
     return ("han" if in_basic_block(han) else "nom"), "codepoint-v1"
+
+
+# ── W1（2026-11-07）：codepoint-v1 的升级判据 —— 汉越音 ＋ 字义 ─────────────
+# 读音表**只从源头断言是汉越词的两源**（S2 中文版词源、S4 英文版词源散文）建：
+# 逐字配音节（字数＝音节数才配）。🔴 **不用 S3（源头自标）建表** —— S3 是验它的真值，混进来就是自证。
+_TONES = {"\u0300", "\u0301", "\u0303", "\u0309", "\u0323"}
+_VOW = set("aăâeêioôơuưy")
+
+
+def syllable_key(s):
+    """音节 → 归一键：去掉声调符号**位置**差异（hoá／hóa）、尾 y→i（kỳ／kì、lý／lí），声调本身保留。
+    🔴 不归一的话 `kì lân 麒麟`（源头标汉越）会被判成读音对不上。"""
+    d = ud.normalize("NFD", s.lower())
+    tone = "".join(c for c in d if c in _TONES)
+    base = ud.normalize("NFC", "".join(c for c in d if c not in _TONES))
+    if len(base) >= 2 and base.endswith("y") and base[-2] not in _VOW:
+        base = base[:-1] + "i"
+    return base + tone
+
+
+def hv_readings(pairs):
+    """[(越南语词, 汉字串)]（只许传 S2/S4 那两档）→ {字: {音节键…}}。"""
+    rd = {}
+    for w, h in pairs:
+        ss = [syllable_key(x) for x in w.split()]
+        if len(ss) == len(h):
+            for c, k in zip(h, ss):
+                rd.setdefault(c, set()).add(k)
+    return rd
+
+
+def reading_meaning_ok(word, han, rd, zh_gloss, t2s):
+    """W1 升级判据：每个字的汉越音都等于对应音节 **且** 汉字（繁或简）至少一个出现在中文释义里。"""
+    ss = [syllable_key(x) for x in word.split()]
+    if len(ss) != len(han) or not zh_gloss:
+        return False
+    if not all(c in rd and k in rd[c] for c, k in zip(han, ss)):
+        return False
+    simp = t2s(han)
+    return any(c in zh_gloss for c in han) or any(c in zh_gloss for c in simp)
+

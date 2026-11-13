@@ -100,6 +100,8 @@ export type GermanExample = {
   text: string;
   zh: string | null;
   ref: string | null;
+  /** B31：源头例句标签（`|` 分隔；de 只有 `figurative`，见 de/pipeline/example_tags.py） */
+  tags: string | null;
 };
 
 export type GermanInflection = { base: string; label: string | null; clickable: boolean };
@@ -371,12 +373,16 @@ export class GermanDictService {
                   CASE WHEN region IS NULL THEN 0 ELSE 1 END, id`),
 
       examples: this.db.prepare(`
-        SELECT e.sense_id, e.text, e.ref,
+        SELECT e.sense_id, e.text, e.ref, e.tags,
                (SELECT text FROM example_gloss WHERE example_id=e.id AND lang='zh') AS zh
           FROM example e
          WHERE e.word = ? AND COALESCE(e.hidden,0)=0
-         ORDER BY CASE WHEN e.sense_id IS NULL THEN 1 ELSE 0 END, e.id
+         ORDER BY CASE WHEN e.sense_id IS NULL THEN 1 ELSE 0 END,
+                  CASE WHEN e.tags IS NOT NULL THEN 0 ELSE 1 END, e.id
          LIMIT 40`),
+      // ⬆ B31（2026-11-07，照 fr 用户 11-06 定的口径）：带标签的例句排前面。
+      //    每词只取 40 条、每条义项只印 3 条；按 id 排时 190 条带标签的只露出 46 条（24%），
+      //    改后 145 条（76%）。
 
 
         // ══ 搭配反查（2026-09-12）════════════════════════════════════════════
@@ -657,8 +663,8 @@ export class GermanDictService {
       readings,
       senses: this.sensesOf(row.id),
       examples: (this.q.examples.all(row.word) as Array<{
-        sense_id: number | null; text: string; ref: string | null; zh: string | null;
-      }>).map((e) => ({ senseId: e.sense_id, text: e.text, zh: e.zh, ref: e.ref })),
+        sense_id: number | null; text: string; ref: string | null; zh: string | null; tags: string | null;
+      }>).map((e) => ({ senseId: e.sense_id, text: e.text, zh: e.zh, ref: e.ref, tags: e.tags })),
       collocations: this.q.colloc.all(row.id) as GermanCollocation[],
       inflections: inf(this.q.inflOf.all(row.id)),
       derivations: inf(this.q.derivOf.all(row.id)),

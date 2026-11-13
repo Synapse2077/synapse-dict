@@ -61,6 +61,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 
 import dbtool   # noqa: E402
 import paths    # noqa: E402
+import example_tags as XT   # noqa: E402  B31：例句标签判据唯一的家
 from ingest_relations import sense_index   # noqa: E402  判据只许一份
 from intake_edition_words import EDITIONS, norm_apos   # noqa: E402
 
@@ -154,6 +155,7 @@ def scan(ids, sidx, tidx, editions):
                         key = (w, t)
                         tr = (ex.get("english") or ex.get("translation") or "").strip()
                         lang = "en" if ex.get("english") else TR_LANG[ed]
+                        tg = XT.example_tags(ex)
                         if key not in rows:
                             # 🔴 计数放在**行真正产生**的地方，不放在"桥命中"的地方。
                             #    第一版数的是**触发次数**（同一句在多个义项/多个版里
@@ -168,7 +170,7 @@ def scan(ids, sidx, tidx, editions):
                                 "ref": (ex.get("ref") or "").strip() or None,
                                 "src_gloss": gloss0[:300] or None,
                                 "src_translation": None, "src_lang": None,
-                                "src": "%s-edition" % ed}
+                                "src": "%s-edition" % ed, "_tags": set()}
                         else:
                             stat["同句被多版/多义项给出（合并）"] += 1
                             if rows[key]["sense_id"] is None and sid is not None:
@@ -176,6 +178,8 @@ def scan(ids, sidx, tidx, editions):
                                 stat["合并时补上了义项挂载"] += 1
                                 if from_text_bridge:
                                     stat["文本桥补挂（去重后的行）"] += 1
+                        # 🔴 B31：入库只留先到的那一行，但**标签取所有出现处的并集**（前九门同款）
+                        rows[key]["_tags"] |= tg
                         if tr:
                             if lang in PUBLISH:
                                 g = glosses.setdefault(key, {})
@@ -187,6 +191,9 @@ def scan(ids, sidx, tidx, editions):
                                 rows[key]["src_lang"] = lang
                                 stat["证据层译文·" + lang] += 1
         stat["扫完 " + ed] += 1
+    for r in rows.values():
+        r["tags"] = XT.join_tags(r.pop("_tags"))
+    stat["带例句标签（B31）"] = sum(1 for r in rows.values() if r["tags"])
     return rows, glosses, stat
 
 
@@ -298,7 +305,7 @@ def main():
         return 0
 
     ex_rows = [(r["word"], r["sense_id"], r["text"], r["bold"], r["ref"],
-                r["src_gloss"], r["src_translation"], r["src_lang"], 0, r["src"])
+                r["src_gloss"], r["src_translation"], r["src_lang"], 0, r["src"], r["tags"])
                for r in rows.values()]
     # 🔴 `expect` 比的是**增量**不是总数。同一个错今天第三次（频次层/录音层/这里）——
     #    不是手滑，是我写收割器的固定套路有问题：`rows` 是**整轮扫描的产物**，
@@ -316,8 +323,8 @@ def main():
                         expect={"#example": d_ex, "#example_gloss": d_gl}) as s:
         s.executemany(
             "INSERT OR IGNORE INTO example "
-            "(word,sense_id,text,bold,ref,src_gloss,src_translation,src_lang,hidden,src) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)", ex_rows)
+            "(word,sense_id,text,bold,ref,src_gloss,src_translation,src_lang,hidden,src,tags) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)", ex_rows)
         eid = {(w, t): i for i, w, t in s.execute("SELECT id, word, text FROM example")}
         s.executemany(
             "INSERT OR IGNORE INTO example_gloss (example_id,lang,text,src) VALUES (?,?,?,?)",

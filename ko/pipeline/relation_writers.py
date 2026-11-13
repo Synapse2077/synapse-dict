@@ -21,6 +21,7 @@ WRITERS = {
     "intake_word_formation": "K11 构词公式（`A + B`）迁成关系边",
     "intake_idiom_components": "K15 谚语词条的成分拆解迁成关系边",
     "reclass_nonexamples": "K33 「例句」层里的词表/关系指针迁成关系边",
+    "backfill_hanja_k35": "K35 构词表（K33 迁来的 `漢字/한글` 对子）里、谚文词身上还没有任何汉字形的那批 ⇒ `hanja_spelling`",
 }
 
 

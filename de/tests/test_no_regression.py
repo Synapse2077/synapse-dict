@@ -91,6 +91,7 @@ from normalize_region import DOMAIN as REGION_DOMAIN      # noqa: E402
 from drop_article_forms import bad_rows as _article_forms # noqa: E402
 from drop_bad_comparatives import bad_rows as _bad_comparatives  # noqa: E402
 from backfill_field_src import unsourced as _unsourced      # noqa: E402
+import example_tags as _xt                                  # noqa: E402  B31
 
 # 🔴 `sense_relation.kind` 有**两个**生成者，值域是它们的并集：
 #    阶段 5c 的 `harvest_relations.KIND`（12 个）＋ 阶段 2a 的 `recover_alt_of.REL_KIND`。
@@ -463,6 +464,17 @@ def build(con, trace=None, only=None):
         q1("SELECT COUNT(*) FROM example_gloss g LEFT JOIN example e ON e.id=g.example_id "
            "WHERE e.id IS NULL"))
     add("E", "E5 例句没有中文", q1(Q_EXAMPLE_NO_ZH))
+    # B31（2026-11-07）：例句标签。判据 import 生成侧那一份（`example_tags`），不另抄。
+    #   E6 值域外／乱序 —— 页面按 DE_EXAMPLE_TAG_LABELS 印中文，值域外的键会被静默不印。
+    #   E7 带标签的行比声明的少 —— 重建 `example` 时漏了标签，别的闸一条都看不见。
+    #      期望值**独立声明**在 `_xt.EXPECT_TAGGED`（不写在断言里，字面量闸管的就是这个）。
+    _hastags = any(r[1] == "tags" for r in con.execute("PRAGMA table_info(example)"))
+    add("E", "E6 例句标签值域外或乱序（B31）",
+        sum(1 for (v,) in con.execute("SELECT tags FROM example WHERE tags IS NOT NULL")
+            if _xt.bad_tag_value(v)) if _hastags else 0)
+    add("E", "E7 例句标签少了（B31，少于 example_tags.EXPECT_TAGGED）",
+        max(0, _xt.EXPECT_TAGGED - (q1("SELECT COUNT(*) FROM example WHERE tags IS NOT NULL")
+                                    if _hastags else 0)))
 
     # ── F 组：语义关系（阶段 5c）───────────────────────────────
     add("F", "F1 关系目标为空或自指",
@@ -751,6 +763,13 @@ def mutate():
         check("M7", "DELETE FROM example_gloss WHERE rowid IN "
                     "(SELECT rowid FROM example_gloss WHERE lang='zh' LIMIT 700)",
               "E5 例句没有中文")
+        # B31：值域外的键、整条标签被清掉 —— 各造一条
+        check("M-B31a", "UPDATE example SET tags='figurative|Germany' WHERE id="
+                        "(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)",
+              "E6 例句标签值域外或乱序（B31）")
+        check("M-B31b", "UPDATE example SET tags=NULL WHERE id="
+                        "(SELECT MAX(id) FROM example WHERE tags IS NOT NULL)",
+              "E7 例句标签少了（B31，少于 example_tags.EXPECT_TAGGED）")
         check("M8", "UPDATE sense_relation SET kind='ZZZ' WHERE rowid IN "
                     "(SELECT rowid FROM sense_relation LIMIT 15)", "F3 关系 kind 值域外")
         check("M9", "UPDATE audio SET region='de-XX', region_src=NULL WHERE rowid IN "

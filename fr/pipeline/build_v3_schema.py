@@ -251,6 +251,7 @@ ADD_COLUMNS = [
     ('pronunciation', 'pos', 'TEXT'),                   # fr/fixes/backfill_pronunciation_pos.py
     ('sense', 'entry_id', 'INTEGER'),                   # fr/pipeline/build_entry_layer.py
     ('sense', 'hidden', 'INTEGER NOT NULL DEFAULT 0'),  # fr/pipeline/build_entry_layer.py
+    ('example', 'tags', 'TEXT'),                         # fr/pipeline/example_tags.py（B31，2026-11-06）
 ]
 
 

@@ -70,6 +70,7 @@ from fix_stress_position import fix as stress_fix   # noqa: E402
 from fix_example_field_swap import broken, load_forms, SWAP_SRC   # noqa: E402
 from fix_ipa_xsampa import BAD as XSAMPA_BAD, ENTITY as IPA_ENTITY   # noqa: E402
 from fix_example_near_dup import same_sentence   # noqa: E402
+import example_tags as _xt                       # noqa: E402  B31
 _SAME_SQL = "same_sentence(text)"
 from ingest_audio import region_of as audio_region    # noqa: E402
 from ingest_examples import clean_bold                # noqa: E402
@@ -342,6 +343,15 @@ def build(con):
         sum(1 for (v,) in con.execute(
                 "SELECT g.text FROM example_gloss g JOIN example e ON e.id=g.example_id "
                 " WHERE g.lang='zh' AND COALESCE(e.hidden,0)=0") if not has_han(v)))
+    # B31（2026-11-07）：例句标签。判据 import 生成侧那一份（`example_tags`），不另抄。
+    #   F10 值域外／乱序 —— 页面按 PT_EXAMPLE_TAG_LABELS 印中文，值域外的键会被静默不印。
+    #   F11 带标签的行比声明的少 —— 重建 `example` 时漏了标签；期望值**独立声明**在
+    #       `_xt.EXPECT_TAGGED`（不写在断言里 —— 字面量闸管的就是这个）。
+    _has = any(r[1] == "tags" for r in con.execute("PRAGMA table_info(example)"))
+    _tg = [v for (v,) in con.execute("SELECT tags FROM example WHERE tags IS NOT NULL")] if _has else []
+    add("F", "F10 例句标签值域外或乱序（B31）", sum(1 for v in _tg if _xt.bad_tag_value(v)))
+    add("F", "F11 例句标签少了（B31，少于 example_tags.EXPECT_TAGGED）",
+        max(0, _xt.EXPECT_TAGGED - len(_tg)))
     add("F", "F5 example.word 不在 dict",
         q1("SELECT COUNT(*) FROM (SELECT DISTINCT word FROM example "
            "EXCEPT SELECT word FROM dict)"))
@@ -441,7 +451,7 @@ def run(trace=False):
 
 # 🔴 变异条数**独立声明**（原来写死在 `print` 和 `return` 里两处）。加一条 `check()` 就改这里 ——
 #    pt 账的闸 2026-10-27 栽过同一个形状：写死 `== 6` 而变异是 8 条 ⇒ 全过也永远退 1。
-N_MUT = 14
+N_MUT = 16   # +2 B31 例句标签（值域外的键、标签被清）
 
 
 def mutate():
@@ -524,6 +534,14 @@ def mutate():
               "UPDATE example_gloss SET text='the cat sleeps' WHERE lang='zh' "
               "AND example_id=(SELECT MIN(example_id) FROM example_gloss WHERE lang='zh')",
               "F9 🔴 例句的中文译文里一个汉字都没有（外审第二轮）")
+        # B31：值域外的键、整条标签被清掉 —— 各造一条
+        check("B31 例句标签塞一个值域外的键（地区）",
+              "UPDATE example SET tags='collocation|Brazil' WHERE id="
+              "(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)",
+              "F10 例句标签值域外或乱序（B31）")
+        check("B31 清掉一条例句的标签",
+              "UPDATE example SET tags=NULL WHERE id=(SELECT MAX(id) FROM example WHERE tags IS NOT NULL)",
+              "F11 例句标签少了（B31，少于 example_tags.EXPECT_TAGGED）")
         check("把 `北里奥格兰德` 的「北」抹掉",
               "UPDATE sense_gloss SET text=REPLACE(text,'北里奥格兰德','里奥格兰德') "
               "WHERE lang='zh' AND sense_id=(SELECT s.id FROM sense s "

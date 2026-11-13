@@ -74,15 +74,15 @@ export const POS_LABELS: Record<string, string> = {
 // 语域标签 → 中文（对应 build.py REGISTERS）。
 export const REGISTER_LABELS: Record<string, string> = {
   colloquial: '口语', vulgar: '粗俗', slang: '俚语', derogatory: '贬义',
-  offensive: '冒犯', humorous: '诙谐', literary: '文学', dated: '旧式',
+  offensive: '冒犯', humorous: '诙谐', literary: '书面', dated: '过时',
   euphemistic: '委婉', informal: '非正式', formal: '正式', pejorative: '贬义',
-  childish: '童语', poetic: '诗歌', familiar: '亲昵', proscribed: '非规范',
-  nonstandard: '非标准', obsolete: '废弃', historical: '历史', archaic: '古语',
-  rare: '罕见', uncommon: '少见', neologism: '新词', Internet: '网络',
+  childish: '童语', poetic: '诗歌', familiar: '通俗', proscribed: '非规范',
+  nonstandard: '非标准', obsolete: '已废', historical: '历史', archaic: '古旧',
+  rare: '罕用', uncommon: '少见', neologism: '新词', Internet: '网络',
   misspelling: '误拼', 'pronunciation-spelling': '音写', dialectal: '方言',
   regional: '地区性', jargon: '行话', slur: '蔑称', ironic: '反讽',
   sarcastic: '讽刺', endearing: '亲昵', emphatic: '强调', rhetoric: '修辞',
-  bureaucratese: '官腔', Leet: 'Leet黑话', figuratively: '比喻',
+  bureaucratese: '官腔', Leet: 'Leet黑话', figuratively: '转义',
   // 🔴 2026-08-26（fr 阶段 8）补：fr 的 register 全量 40 种里**这 7 种查不到中文**，
   //    会把生标签（`World-War-I`）直接印在义项旁边。
   //    是渲染后契约闸逮到的 —— 数据层闸看不见「标签映射不全」这类缺陷。
@@ -101,7 +101,7 @@ export const REGISTER_LABELS: Record<string, string> = {
   anglicism: '英语借词', 'false-anglicism': '假英语词',
   'extremely-rare': '极罕见', 'very-rare': '很罕见', rarer: '较罕见',
   'seldom-used': '少用', 'more-common': '较常用', 'less-common': '较少用', common: '常用',
-  proverbial: '谚语', hapax: '孤例', meliorative: '褒义', 'very-familiar': '很随便',
+  proverbial: '谚语', hapax: '孤例', meliorative: '褒义', 'very-familiar': '极通俗',
   broadly: '广义', especially: '尤指', specifically: '特指', literally: '字面义',
   metonymically: '转喻', 'by-analogy': '类比', hyperbole: '夸张', idiomatic: '习语',
   collectively: '集合用法', generically: '泛指', physical: '具体义',
@@ -149,7 +149,7 @@ export const REL_TAG_LABELS: Record<string, string> = {
   ...REGISTER_LABELS,
   diminutive: '指小', augmentative: '指大', pejorative: '贬义',
   masculine: '阳性', feminine: '阴性', 'masculine-feminine': '阴阳',
-  singular: '单数', plural: '复数', alternative: '异体', obsolete: '废弃',
+  singular: '单数', plural: '复数', alternative: '异体', obsolete: '已废',
   verb: '动词', noun: '名词', adjective: '形容词', adverb: '副词',
   // 关系类型自身作为标签是冗余的 ⇒ 空串＝不渲染
   synonym: '', 'synonym-of': '', antonym: '', also: '', related: '',

@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
-EXPECT_MAX = 31          # 新增一条 B 就改这里（2026-11-05 B31 十门例句标签） —— 删掉最后一条时它是唯一会响的东西
+EXPECT_MAX = 34          # 新增一条 B 就改这里（2026-11-12 B34 变异台账漏登；2026-11-05 B31 例句标签／B32 共用语体标签中文名；2026-11-11 B33 对外发布前的授权合规） —— 删掉最后一条时它是唯一会响的东西
 
 # (门, 计划表, 节起始标题, 编号前缀)。节＝起始标题到下一个同级或更高级标题。
 SECTIONS = [
@@ -188,19 +188,28 @@ def main():
 
     print("\n■ 变异（内存里的文本）")
     ko = plans["KO_PLAN.md"]
-    k14 = next(l for l in ko.splitlines() if l.startswith("| **K14** |"))
+    # 🔴 2026-11-12：原来拿现成的开着的 K14 当素材，K14 11-03 结清后 ko 一笔不剩 ⇒ `next()` 崩、变异整套没跑
+    #    （变异把前提寄托在现状上，B20 同形）。⇒ 自己合成一笔开着的 K99，插在欠账节标题下；索引行也合成。
+    KO_HEAD, IDX_HEAD = "## 六、📋 欠账", "## 各门开着的账（索引）"
+    k99 = "| **K99** | 变异合成的待办 | 1 | 现场 | 完成条件 |"
+    ko_open = ko.replace(KO_HEAD + "\n", KO_HEAD + "\n" + k99 + "\n", 1)
+    ko_shut = ko.replace(KO_HEAD + "\n", KO_HEAD + "\n" + k99.replace("| **K99** |", "| ~~**K99**~~ |") + "\n", 1)
+    bl_k99 = backlog.replace(IDX_HEAD + "\n", IDX_HEAD + "\n| ko | K99 | 变异 | 变异 |\n", 1)
+    assert ko_open != ko and ko_shut != ko and bl_k99 != backlog, "变异素材没插进去（节标题改了？）"
     last_b = next(l for l in reversed(backlog.splitlines()) if re.match(r"^\| (~~)?\*\*B\d+", l))
     de = plans["DE_PLAN.md"]
     c4 = next(l for l in de.splitlines() if l.startswith("| C4 |"))
-    b1 = next(l for l in backlog.splitlines() if l.startswith("| **B1** |"))
+    # 同上（11-12）：B1 早已结清；取第一条开着的 B（没有开着的 ⇒ 断言大声失败，不静默跳过）
+    b1 = next((l for l in backlog.splitlines() if re.match(r"^\| \*\*B\d+\*\* \|", l)), None)
+    assert b1, "账本里没有开着的 B，G1 变异没有素材 —— 改成合成一条"
     b1c = re.split(r"(?<!\\)\|", b1)
     cases = [
-        ("ko 新开一笔没进索引", "G4", backlog, dict(plans, **{"KO_PLAN.md": ko.replace(k14, k14 + "\n" + k14.replace("K14", "K99"))})),
-        ("ko 结清 K14 而索引没划", "G4", backlog, dict(plans, **{"KO_PLAN.md": ko.replace(k14, k14.replace("| **K14** |", "| ~~**K14**~~ |"))})),
+        ("ko 新开一笔没进索引", "G4", backlog, dict(plans, **{"KO_PLAN.md": ko_open})),
+        ("ko 结清 K99 而索引没划", "G4", bl_k99, dict(plans, **{"KO_PLAN.md": ko_shut})),
         ("删掉最后一条 B", "G2", backlog.replace(last_b + "\n", ""), plans),
         ("合计行数字过期", "G3", re.sub(r"各门待办 \d+", "各门待办 1", backlog), plans),
         ("de 收尾单加一行", "G5", backlog, dict(plans, **{"DE_PLAN.md": de.replace(c4, c4 + "\n" + c4.replace("C4", "C99"))})),
-        ("B1 的结清条件被清空", "G1", backlog.replace(b1, "|".join(b1c[:6] + [" "] + b1c[7:])), plans),
+        ("开着的 B 结清条件被清空", "G1", backlog.replace(b1, "|".join(b1c[:6] + [" "] + b1c[7:])), plans),
         ("（反控）原样", None, backlog, plans),
     ]
     dead = 0

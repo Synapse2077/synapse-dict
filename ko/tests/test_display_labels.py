@@ -83,6 +83,12 @@ SHEETS = [
      " WHERE r.tags IS NOT NULL AND COALESCE(r.hidden,0)=0",
      "关系边的源头标签（`sense_relation.tags` —— `KoRelationRow` 渲染的那一列）",
      30, "KO_RELATION_TAG_SKIP"),
+    # B31（2026-11-07）：源头例句标签。读者口径＝`korean.ts` 的 examples 查询 SELECT 了 `x.tags`、
+    #    只在 `hidden=0` 的行上 ⇒ 这里也只查可见行。值域外的键组件静默不印（不拿英文键兜底）。
+    ("KO_EXAMPLE_TAG_LABELS",
+     "SELECT DISTINCT je.value FROM example x, json_each('[\"' || replace(x.tags, '|', '\",\"') || '\"]') je"
+     " WHERE x.tags IS NOT NULL AND COALESCE(x.hidden,0)=0",
+     "例句标签（`example.tags` —— `KoreanEntryView` 例句前的胶囊）", 10, None),
 ]
 
 def parse_keys(body):

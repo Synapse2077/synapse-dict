@@ -1222,3 +1222,72 @@ def audio_hidden_why(word, key, variant_pairs):
 
 def variant_pair_key(a, b):
     return frozenset((norm_vi(a), norm_vi(b)))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# ⑪ 例句标签（B31，2026-11-07）
+# ══════════════════════════════════════════════════════════════════════════
+# 源头在 `senses[].examples[]` 上标了 `tags`／`raw_tags`。ru（R25）、fr、en、de、es 已做；
+# **按语种解耦**：vi 的值域、白名单写在这里（判据唯一的家），不 import 别门。
+#
+# 十二份切片全量值域（2026-11-07 只读扫 1.5 秒）：
+#   · en 版 15,231 条里带 446：`collocation` 334；书写系统 `Traditional-Chinese` 40／`Pinyin` 29／
+#     `Simplified-Chinese` 12（汉越词例句的汉字行，不是标签）；语体个位数（`slang` 3／`disapproving` 2／
+#     `literary`／`figuratively`／`humorous`／`proscribed` 各 1）；`raw_tags` 46 种，只有
+#     `saying`／`Vietnamese saying`／`proverb`／`disparaging` 可归类，其余是自由文本（`of a woman`）。
+#   · vi 版 42,840 条里带 32：`raw_tags` 是越南语 —— `tục ngữ`（谚语）7 ＋ 缩写 `tng` 1、
+#     `ca dao`（歌谣）3 ＋ `Ca dao` 1、`thành ngữ`／`Thành ngữ`（成语）2、`tags: colloquial` 1；
+#     其余是作者名与书名（`Truyện Kiều`、`Hồ Chí Minh`），那是出处不是标签。
+#   · zh 繁体版带 2：`越南書面語`（书面语）2；`漢越詞` 是词源说明不收。
+#   · 其余九版：0（fr 版 1 条是 `Redoublement ; sens plus fort` 自由文本）。
+#
+# 判据（照 fr／en／de／es 用户定的同一套口径）：逐字白名单；收类型与语体，不收地区、书写系统、
+# 语法、自由文本。⭐ **新键 `folk-verse`（歌谣）**：`ca dao` 是越南民间歌谣体裁，与谚语（`tục ngữ`）
+# 在越南语词典里是并列的两类，并进谚语就抹平了源头的区分。
+EXAMPLE_TAG_ORDER = (
+    "collocation", "proverb", "saying", "idiom", "folk-verse",
+    "colloquial", "slang", "literary", "proscribed",
+    "humorous", "derogatory", "figurative",
+)
+_EX_TAGS = {
+    "collocation": "collocation",
+    "colloquial": "colloquial", "slang": "slang", "literary": "literary", "proscribed": "proscribed",
+    "humorous": "humorous", "disapproving": "derogatory", "figuratively": "figurative",
+}
+# `raw_tags` 源头原文 → 我们的键。**逐字**（大小写都分开登记，不做 lower）。
+_EX_RAW = {
+    "proverb": "proverb", "tục ngữ": "proverb", "tng": "proverb",
+    "saying": "saying", "Vietnamese saying": "saying",
+    "thành ngữ": "idiom", "Thành ngữ": "idiom",
+    "ca dao": "folk-verse", "Ca dao": "folk-verse",
+    "disparaging": "derogatory",
+    "越南書面語": "literary",
+}
+# ⚠️ 有意不收：`rhyming slang` 2（一种文字游戏，不是语体）、`figurative, humorous` 1（复合自由文本）、
+#    `tiếng mắng`／`tiếng mắng chửi`（骂人话，各 1，没有对应的键）、`nói vần`（押韵说法）、`Sino-Vietnamese` 23
+#    （词源说明）、作者名／书名（出处）、`Southern dialect`／`Hà Tĩnh dialect`（地区）。
+
+
+def example_tags(x):
+    """源头一条例句（dict）→ 入库字符串（`|` 分隔、按 EXAMPLE_TAG_ORDER 排）；没有 → None。"""
+    ks = set()
+    for t in x.get("tags") or ():
+        k = _EX_TAGS.get(t)
+        if k:
+            ks.add(k)
+    for t in x.get("raw_tags") or ():
+        k = _EX_RAW.get(t)
+        if k:
+            ks.add(k)
+    out = [k for k in EXAMPLE_TAG_ORDER if k in ks]
+    return "|".join(out) if out else None
+
+
+def bad_example_tags(v):
+    """例句层闸 X16 的判据：值域外的键、重复、或没按 EXAMPLE_TAG_ORDER 排。"""
+    if v is None:
+        return False
+    ks = v.split("|")
+    if any(k not in EXAMPLE_TAG_ORDER for k in ks):
+        return True
+    return ks != [k for k in EXAMPLE_TAG_ORDER if k in ks]

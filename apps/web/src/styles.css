@@ -456,23 +456,12 @@ button.brand:focus-visible {
   flex-wrap: wrap;
 }
 
-.collins-stars {
-  color: var(--star);
-  font-size: 14px;
-  letter-spacing: 1px;
-}
-
 .badge {
   display: inline-block;
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-}
-
-.badge.oxford {
-  background: var(--accent-soft);
-  color: var(--accent);
 }
 
 /* 角色：地区徽标（de 读音区的「奥地利」）—— 有意**用中性底色**，
@@ -760,6 +749,11 @@ button.brand:focus-visible {
 
 .sense-item {
   line-height: 1.6;
+}
+/* K20（ko）：关系链接带词条锚跳过来时，高亮那个词条的义项（`부인(否認)` 落到 否認 那几条） */
+.sense-item.ko-entry-hit {
+  background: var(--accent-soft);
+  border-radius: 6px;
 }
 
 /* 义项折叠开关。产品是划词弹窗，`mano` 的 26 条义项一屏铺不下，
@@ -2683,3 +2677,11 @@ button.brand:focus-visible {
 .ru-infl-forms { color: var(--text); }
 .ru-etym { margin-top: 10px; }
 .ru-etym-text { margin: 0 0 6px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+
+/* B31（2026-11-06）：例句前的源头标签（搭配／谚语／转义…）。跨语种通用类名，
+   ru 用的是自己的 `.ru-chip`（先做的模板），之后的语种都用这一个。 */
+.ex-chip {
+  display: inline-block; font-size: 11px; font-weight: 400; color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin: 0 6px 0 0;
+  vertical-align: 1px; font-style: normal;
+}

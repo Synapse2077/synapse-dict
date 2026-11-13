@@ -107,6 +107,7 @@ export type JapaneseExample = {
   ruby: Array<[string, string]>;    // 振假名 [[汉字, 读音], …]
   ref: string | null;
   bold: Array<[number, number]>;
+  tags: string | null;              // B31：源头例句标签（`|` 分隔，受控值域见 ja/pipeline/example_tags.py）
 };
 
 export type JapaneseInflection = {
@@ -397,7 +398,7 @@ export class JapaneseDictService {
       `),
 
       examples: this.db.prepare(`
-        SELECT x.sense_id, x.text, x.ref, x.bold, x.roman, x.ruby,
+        SELECT x.sense_id, x.text, x.ref, x.bold, x.roman, x.ruby, x.tags,
                (SELECT text FROM example_gloss WHERE example_id=x.id AND lang='zh') AS zh,
                (SELECT text FROM example_gloss WHERE example_id=x.id AND lang='en') AS en
         FROM example x
@@ -656,6 +657,7 @@ export class JapaneseDictService {
         ruby: parseJson<Array<[string, string]>>((x.ruby as string) ?? null, []),
         ref: (x.ref as string) ?? null,
         bold: parseJson<Array<[number, number]>>((x.bold as string) ?? null, []),
+        tags: (x.tags as string) ?? null,
       }));
 
     // ── 变形 ──

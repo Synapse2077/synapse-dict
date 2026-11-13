@@ -32,7 +32,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService, probeLanguages, LANGUAGES, type ItalianEntry } from '@synapse-dict/dict-core';
-import { POS_LABELS, REL_LABELS, itAudioRegion } from '@synapse-dict/dict-labels';
+import { POS_LABELS, REL_LABELS, itAudioRegion, IT_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 import { ItalianEntryView, groupItSenses, getInitialLang, readingBelongsTo, EXAMPLES,
          hashFor } from './App';
 
@@ -61,7 +61,35 @@ function visibleText(html: string): string {
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 }
 
+const EX_CHIP = /<span class="ex-chip">([^<]*)<\/span>/g;
+/** 词条上全部例句（义项下的 ＋ 词条级的）。 */
+const allEx = (e: ItalianEntry) => [...e.examples, ...e.senses.flatMap((x) => x.examples)];
 const CHECKS: Check[] = [
+  {
+    // B31（2026-11-07）：源头例句标签（搭配／谚语／转义…）。值域外的键组件静默不印（不拿英文键兜底）。
+    name: '🔴 例句标签键必须有中文名（B31）',
+    hit: (e) => {
+      const nolab = allEx(e).flatMap((x) => (x.tags ?? '').split('|').filter((k) => k && !IT_EXAMPLE_TAG_LABELS[k]));
+      return nolab.length ? `例句标签键没有中文名：${[...new Set(nolab)].join('、')}` : null;
+    },
+  },
+  {
+    // B31：按**块**对（fr／en／de／es 同款）—— 每个 `ex-it` 块剥掉 chip 后的原句 ↔ 接口里同一句的 tags。
+    name: '🔴 例句块的标签胶囊必须与该句的源头标签逐个一致（B31）',
+    hit: (e, html) => {
+      const exs = allEx(e);
+      for (const m of html.matchAll(/<div class="ex-it" lang="it">([\s\S]*?)<\/div>/g)) {
+        const chips = [...m[1].matchAll(EX_CHIP)].map((c) => c[1]);
+        const body = visibleText(m[1].replace(EX_CHIP, '')).replace(/\s+/g, ' ').trim();
+        const x = exs.find((y) => y.text.replace(/\s+/g, ' ').trim() === body);
+        const want = (x?.tags ?? '').split('|').filter(Boolean).map((k) => IT_EXAMPLE_TAG_LABELS[k]);
+        if (chips.join('|') !== want.join('|')) {
+          return `「${body.slice(0, 30)}」印了 [${chips.join('、')}]，应为 [${want.join('、')}]`;
+        }
+      }
+      return null;
+    },
+  },
   {
     // ③ 的回归测试
     name: '🔴 有可见义项就必须渲染出「释义」区块',
@@ -350,7 +378,9 @@ function targets(limit: number): string[] {
      WHERE i.label_zh='复数' GROUP BY b.id HAVING count(DISTINCT i.word_id) > 1`)) set.add(w);
   // 🔴 `--limit` 是从头切的 —— 排在后面的取样面会被整段切掉。
   //    「藏起来的例句」那族只有 87 条，切没了检查就永远命中 0 ⇒ **必覆盖面排最前**。
-  const must = q(`SELECT DISTINCT word FROM example WHERE COALESCE(hidden,0)=1`);
+  // B31：带标签的例句（230 条）—— 全量进必覆盖面，否则「胶囊逐个一致」在 --limit 下可能命中 0
+  const must = [...new Set([...q(`SELECT DISTINCT word FROM example WHERE COALESCE(hidden,0)=1`),
+                            ...q(`SELECT DISTINCT word FROM example WHERE tags IS NOT NULL AND COALESCE(hidden,0)=0`)])];
   for (const w of must) set.delete(w);
   const all = [...must, ...set];
   return limit > 0 ? all.slice(0, limit) : all;
@@ -362,6 +392,11 @@ function run(words: string[], quiet = false): number {
   // ⚠️ 每条都要跑一次完整 React 渲染，上万条要十几分钟。**必须有进度**，
   //    否则跑起来跟卡死分不出来（今天已经在跑批上栽过一次：命令接了 `| tail` 把输出憋住了）。
   if (!quiet) console.log(`■ 待渲染 ${words.length.toLocaleString()} 个词条`);
+  // B31：例句标签**全值域**查漏（不靠抽到哪页）
+  const keys = new Set((db.prepare('SELECT DISTINCT tags FROM example WHERE tags IS NOT NULL').all() as Array<{ tags: string }>)
+    .flatMap((r) => r.tags.split('|')));
+  const nolab = [...keys].filter((k) => !IT_EXAMPLE_TAG_LABELS[k]);
+  if (nolab.length) fails.set('🔴 例句标签值域里有键没有中文名（全库）', nolab);
   for (const w of words) {
     if (!quiet && n > 0 && n % 2000 === 0) {
       console.log(`   [${n.toLocaleString()}/${words.length.toLocaleString()}] 已发现不符 ` +
@@ -424,6 +459,9 @@ function mutate(words: string[]): void {
      (e) => { if (e.senses[0]) e.senses[0].zh = 'undefined'; }],
     // 2026-08-21：搭配去重做在 `italian.ts` 的 colsQuery 侧，这条检查读的是
     // `e.collocations` 这个**数据结果**，所以变异也打在数据上（不是 html）。
+    ['B31：给例句塞一个没有中文名的标签键',
+     (e) => { allEx(e).find((y) => y.tags)!.tags = 'collocation|zzz-nokey'; },
+     (e) => allEx(e).some((y) => !!y.tags)],
     ['把一条搭配复制成两条',
      (e) => { if (e.collocations[0]) e.collocations.push({ ...e.collocations[0] }); },
      (e) => e.collocations.length > 0],
@@ -431,6 +469,10 @@ function mutate(words: string[]): void {
 
   // 「组件少渲染了一块」——用正则把渲染结果里的那一块抠掉，检查必须报出来。
   const htmlCases: HtmlCase[] = [
+    ['B31：组件漏渲染例句标签胶囊', (h) => h.replace(EX_CHIP, ''),
+     (e) => allEx(e).some((y) => !!y.tags)],
+    ['B31：每条例句前都塞一个「搭配」', (h) => h.replace(/<div class="ex-it" lang="it">/g, '$&<span class="ex-chip">搭配</span>'),
+     (e) => allEx(e).length > 0],
     ['组件漏渲染义项中文', (h) => h.replace(/<div class="sense-zh">[\s\S]*?<\/div>/g, ''),
      (e) => e.senses.some((x) => !!x.zh)],
     ['组件漏渲染意语原文', (h) => h.replace(/<div class="sense-src" lang="it">[\s\S]*?<\/div>/g, ''),

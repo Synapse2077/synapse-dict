@@ -47,6 +47,14 @@ function bodyText(html: string): string {
 
 type Check = { word: string; name: string; hit: (t: string, e: any, html: string) => string | null };
 
+/** K20：页面上那条关系链接的落点与悬停提示（按可见文字精确找 `<a class="rel-link">`）。 */
+function relLink(html: string, target: string): { href: string; title: string | null } | null {
+  for (const m of html.matchAll(/<a class="rel-link" href="#([^"]*)"(?: title="([^"]*)")?>([^<]*)<\/a>/g)) {
+    if (m[3] === target) return { href: decodeURIComponent(m[1]), title: m[2] ?? null };
+  }
+  return null;
+}
+
 const CHECKS: Check[] = [
   // ══ 韩语特有的字段，必须真的印到页面上 ══
   // 🔴 每一条都写成「这个词必须看得到 X」，不是「渲染没报错」——
@@ -68,6 +76,24 @@ const CHECKS: Check[] = [
     hit: (t) => (/活用.*共 \d+ 个形式/.test(t) ? null : '活用区没写共多少个形式') },
   { word: '꽃', name: '关系类别用中文名（不是英文原码）',
     hit: (t) => (t.includes('配用量词') ? null : '看不到「配用量词」——counter 没映射') },
+  // B31（2026-11-07）：源头例句标签。读者口径 —— 已知搭配那一句前面必须印「搭配」，已知谚语那一句前面印「谚语」
+  //    （数据侧：回归闸 R32／R33、外锚闸「键对上而标签不同」只证明「库里有」）。
+  // 🔴 判据按**块**：在 `example-text` 块里找正文恰好等于这一句的那块，再看块里的胶囊 ——
+  //    整页找字会被别的例句的胶囊顶替（ru C28 第一版就这么配错了块）。
+  { word: '실', name: '🔴 B31：已知搭配那一句前面印着「搭配」',
+    hit: (_t, _e, html) => {
+      const m = [...html.matchAll(/<div class="example-text" lang="ko">([\s\S]*?)<\/div>/g)]
+        .find((b) => b[1].replace(/<span class="ex-chip">[^<]*<\/span>/g, '') === '실을 감다');
+      if (!m) return '页面上找不到例句 실을 감다';
+      return /<span class="ex-chip">搭配<\/span>/.test(m[1]) ? null : '那一句前面没有「搭配」胶囊';
+    } },
+  { word: '개', name: '🔴 B31：已知谚语那一句前面印着「谚语」',
+    hit: (_t, _e, html) => {
+      const m = [...html.matchAll(/<div class="example-text" lang="ko">([\s\S]*?)<\/div>/g)]
+        .find((b) => b[1].includes('서당 개 삼 년이면 풍월을 읊는다.'));
+      if (!m) return '页面上找不到那句谚语';
+      return /<span class="ex-chip">谚语<\/span>/.test(m[1]) ? null : '那一句前面没有「谚语」胶囊';
+    } },
   { word: '사랑', name: '例句与译文印出来了',
     hit: (t) => (t.includes('사랑해') && t.includes('爱') ? null : '看不到例句或译文') },
 
@@ -174,6 +200,41 @@ const CHECKS: Check[] = [
     hit: (t) => (!t.includes('同形词可能不同') ? null : '-하다 词被误标') },
   { word: '아름답다', name: 'K17 反向：只有一个词条的不标',
     hit: (t) => (!t.includes('同形词可能不同') ? null : '单词条被误标') },
+  // ── K20（2026-11-11）：关系边落到具体词条。悬停提示原来取「词形下排第一的那句」，同形异义时 47% 是别的词。
+  //    正反都断言（本闸没有变异档，正反互为对方的变异）。
+  { word: '朝', name: 'K20：조정(朝廷) 的提示是 朝廷，不是同形词 漕艇（划船）',
+    hit: (_t, _e, html) => {
+      const l = relLink(html, '조정(朝廷)');
+      if (!l) return '找不到链接 조정(朝廷)';
+      return l.title && l.title.includes('朝廷') && !l.title.includes('划船') ? null : `提示是「${l.title}」`;
+    } },
+  { word: '不', name: 'K20：多字汉字 不明 直达谚文词 불명（不再先落到只有一条指针的汉字页）',
+    hit: (_t, _e, html) => {
+      const l = relLink(html, '不明');
+      return l && l.href === '불명' ? null : `落点是 ${l?.href ?? '（没有链接）'}`;
+    } },
+  { word: '単', name: 'K20 反向：单字汉字目标 單 仍落到字符页（不落到同音词堆 단）',
+    hit: (_t, _e, html) => {
+      const l = relLink(html, '單');
+      return l && l.href === '單' ? null : `落点是 ${l?.href ?? '（没有链接）'}`;
+    } },
+  // 🔴 第一版用的是 `器` 页的 `사기` —— 它已被「单字派生」规则锚到 沙器（提示「瓷器，陶瓷」是对的），闸红是例子选错了
+  { word: '아내', name: 'K20：认不准是哪个词的链接，提示列出各同形词（用「／」隔开，不冒充其中一个）',
+    hit: (_t, _e, html) => {
+      const l = relLink(html, '부인');
+      if (!l) return '找不到链接 부인';
+      return l.title && l.title.includes(' ／ ') ? null : `提示是「${l.title}」`;
+    } },
+  { word: '器', name: 'K20：单字派生 사기 锚到 沙器，提示是瓷器（不是 詐欺／士氣）',
+    hit: (_t, _e, html) => {
+      const l = relLink(html, '사기');
+      return l && l.title && l.title.includes('瓷') && !l.title.includes(' ／ ') ? null : `提示是「${l?.title}」`;
+    } },
+  { word: '조정', name: 'K20：落点页上 朝廷 那个词条的义项带着词条标记（跳过来能高亮）',
+    hit: (_t, e, html) => {
+      const id = (e.senses ?? []).find((x: any) => x.zh === '朝廷')?.entryId;
+      return id != null && html.includes(`data-ko-entry="${id}"`) ? null : '义项上没有词条标记';
+    } },
   { word: '가다', name: '录音不是张冠李戴的 `Y.mp3`',
     hit: (_t, e) => ((e.audio ?? []).some((a: any) => a.file === 'Y.mp3')
       ? '挂着 `Y.mp3`（同一个文件挂在 45 个词上）' : null) },

@@ -49,6 +49,20 @@ KNOWN = (
     ("шильбовый", "ru-edition", "... редкая рыба — гигантский", None, None, None),
     ("недобрать", "ru-edition", "◆ Отсутствует пример",
      "Отсутствует пример употребления (см. рекомендации).", "占位串（源头写着「缺例句」）", None),
+    # ── 2026-11-11 R3 例句那一半（ru-crit-24 重切），逐条对着 dump 原文读过：
+    #   括号整组归中文（旧版切不开）／成语记号 \ue0c3 删
+    ("кладка", "zh-edition-simp", "\ue0c3Кла́дка яи́ц", "Кла́дка яи́ц", None, "(鸡、昆虫等)产卵；下蛋."),
+    #   分项编号 `1）` 归中文（第一版留在俄文尾巴上）
+    ("концерт", "zh-edition-simp", "Коша́чий конце́рт", None, None, "1）猫叫春；2)不和谐的音乐(或歌唱等)."),
+    #   `` `ё `` ＝ 坏掉的 Л
+    ("поднести", "zh-edition-simp", "`ёо́дку ～сло́", "Ло́дку ～сло́ к бе́регу", None, "小船被冲到了岸边。"),
+    #   \ue4d5 ＝ 破折号
+    ("сатана", "zh-edition-simp", "\ue0c3Муж и жена́", "Муж и жена́ — одна́ сатана́", None,
+     "〈谚〉丈夫和妻子的志趣是一致的；两口子一个鼻孔出气."),
+    #   俄文括号里的「或」留在俄文（旧版切成三段）
+    ("карьера", "zh-edition-simp", "блестя́щая(或блиста́тельная) ～", None, None, "锦绣前程"),
+    #   普通数字跟前一段（第一版让作品号 92 跑进中文）
+    ("опус", "zh-edition-simp", "седьма́я симфо́ния Бетхо́вена, ～ 92", None, None, "贝多芬第九十二号第七交响乐"),
 )
 COV_FLOOR = {"pub": 320000}      # 可出版例句不许少于这个数（2026-10-23 落库 329,970）
 
@@ -96,12 +110,10 @@ def checks(con):
             "TRIM(hidden_why)<>'')")
     out.append(("X2", bad == 0, "hidden 与 hidden_why 不一致 %d 行" % bad))
 
-    # X3 出版正文 ＝ 收它的那个函数重算（zh-s 重切对 text_pub 必须为空）
+    # X3 出版正文 ＝ 收它的那个函数重算（zh-s 重切的行也一样：v24 起清私用区字形，2026-11-11；切不开的 text_pub 必须为空）
     bad3, eg3 = 0, []
     for r in rows:
-        if "#p" in r[9]:
-            ok = r[5] is None
-        elif r[7] == XL.ZH_SPLIT_FAIL:
+        if r[7] == XL.ZH_SPLIT_FAIL:
             ok = r[5] is None
         else:
             # R24：首行出处搬进 ref ⇒ 正文是切过的，而且出处**必须真的落在 ref 里**（不是丢了）
@@ -339,10 +351,12 @@ def _mutations():
         ("X6", "把 entry_id 挪到下一个 entry（张冠李戴）",
          {"X5"},   # 义项的 entry 不再等于例句的 entry
          ["UPDATE example SET entry_id=entry_id+1 WHERE id%97=0"]),
-        ("X7", "把 vi 版的越南语译文收进来当中文", set(),
-         ["INSERT INTO example_gloss(id,example_id,lang,text,src) SELECT -id,id,'zh','«变异»hàng hóa',"
-          "'vi-edition' FROM example WHERE src='vi-edition' AND hidden=0 AND id NOT IN "
-          "(SELECT example_id FROM example_gloss) LIMIT 20"]),
+        # 🔴 2026-11-05：原写法是「给**还没有译文**的 vi 版例句插一行越南语译文」—— R28 把那批清到 0 之后
+        #    INSERT 一行都没插、变异静默变成空操作（B20 那一类：前提寄托在现状上）。⇒ 改写一条**已有的**译文，不依赖现状
+        #    连带 X13：vi 版例句的中文绝大多数是 6d 模型译文 ⇒ 被改写的那一行原是模型译文，X13 核对「模型译文 ＝ 答案文件」当然红
+        ("X7", "把 vi 版的越南语译文收进来当中文", {"X13"},
+         ["UPDATE example_gloss SET src='vi-edition', text='«变异»hàng hóa' WHERE id=(SELECT MIN(g.id) FROM example_gloss g "
+          "JOIN example e ON e.id=g.example_id WHERE e.src='vi-edition' AND e.hidden=0 AND g.lang='zh')"]),
         ("X8", "把同一格里藏起来的重复行放出来",
          {"X11"},   # 同 X4：分母变大、中文比例倒退
          ["UPDATE example SET hidden=0, hidden_why=NULL WHERE hidden_why='%s'" % XL.DUP]),
@@ -353,6 +367,12 @@ def _mutations():
          {"X3"},   # 库里那行与坏判据仍不一致的其余 fr 行 —— 只改了 KNOWN 那一行的库值，判据补丁让其余行也红
          ["UPDATE example SET text_pub=NULL WHERE src='fr-edition' AND text LIKE 'беречь деньги : %'"],
          lambda orig: (lambda src, text: text.strip() if src == "fr-edition" else orig(src, text))),
+        # R3 例句那一半（ru-crit-24）：zh-s 出版清洗坏掉 ⇒ `` `ёо́дку`` 回到读者面前
+        ("X10", "判据坏掉：zh-s 不再还原坏掉的 Л／私用区字形（库与判据一起坏）",
+         {"X3"},   # 判据补丁让其余清洗过的 zh-s 行也与库不一致
+         ["UPDATE example SET text_pub=NULL WHERE src='zh-edition-simp' AND text LIKE '`ёо́дку ～сло́%' "
+          "AND word_id=(SELECT id FROM dict WHERE word='поднести')"],
+         lambda orig: (lambda src, text: text.strip() if src == "zh-edition-simp" else orig(src, text))),
         ("X11", "藏掉一半中文例句（覆盖率倒退）",
          {"X2", "X7", "X9"},   # 只改 hidden 不写 why（X2）、译文挂在被藏例句上（X7）、借用的出处消失（X9）
          ["UPDATE example SET hidden=1 WHERE id IN (SELECT example_id FROM example_gloss WHERE lang='zh') "
@@ -399,8 +419,14 @@ def mutate():
                 con = sqlite3.connect(cp)
                 for s in sqls:
                     con.execute(s)
+                changed = con.total_changes
                 con.commit()
                 con.close()
+                # 🔴 2026-11-05（X7 栽过）：注入一行都没改到 ＝ 空操作，报「没逮到」会让人去查闸 —— 单独判死
+                if sqls and not changed:
+                    print("   🔴🔴 %-4s **注入是空操作**（0 行被改，前提已不成立）—— %s" % (cid, why))
+                    fails.append(cid)
+                    continue
                 if patch:
                     criteria.example_text_pub = patch(orig)
                 con = _open()

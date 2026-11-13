@@ -67,3 +67,10 @@ export const DE_REGION_LABELS: Record<string, string> = {
   Northeastern: '东北部', Northwestern: '西北部',
   Southeastern: '东南部', Southwestern: '西南部',
 };
+
+/** 例句标签（B31，2026-11-07）：`example.tags` 的受控值域（`de/pipeline/example_tags.EXAMPLE_TAG_ORDER`）。
+ *  德文版只给得出 `figurative`（`tags: figurative` ＋ `raw_tags: bildlich`）；地区变体不收（同 fr 口径）。
+ *  ⚠️ 键没映射就不印（不拿英文键兜底）—— 契约闸按库里全值域查漏。 */
+export const DE_EXAMPLE_TAG_LABELS: Record<string, string> = {
+  figurative: '转义',
+};

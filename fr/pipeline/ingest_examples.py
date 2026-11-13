@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dbtool                              # noqa: E402
 import paths                               # noqa: E402
 from intake_fr_words import norm_apos      # noqa: E402
+import example_tags as XT                  # noqa: E402  B31：例句标签判据唯一的家
 
 # (键, 路径, lang_code 过滤, 源头译文是什么语言)
 SOURCES = [
@@ -101,7 +102,7 @@ def harvest(con, limit=0):
         if sid is not None:
             ref2sense[ref] = sid
 
-    seen = set()
+    seen = {}                 # (词,句) → rows 里那一行（B31：重复出现时并入标签）
     rows = []
     for name, path, lc, tlang in SOURCES:
         if not Path(path).exists():
@@ -148,10 +149,13 @@ def harvest(con, limit=0):
                             st["空 text"] += 1
                             continue
                         k = (w, t)
+                        tg = XT.example_tags(x)
                         if k in seen:
                             st["(词,句) 重复（跨源或跨义项）"] += 1
+                            # 🔴 B31：入库只留先到的那一行，但**标签取并集** ——
+                            #    否则 en 版标的 `collocation` 会被先到的 fr 版那一行静默吞掉。
+                            seen[k]["_tags"] |= tg
                             continue
-                        seen.add(k)
                         tr = norm(x.get("translation"))
                         rows.append({
                             # 🔴 `word` 必须过 `norm_apos` —— 全库唯一约定（直撇）。
@@ -163,7 +167,9 @@ def harvest(con, limit=0):
                             "src_translation": tr or None,
                             "src_lang": tlang if tr else None,
                             "src": name,
+                            "_tags": set(tg),
                         })
+                        seen[k] = rows[-1]
                         add += 1
                         if sid:
                             st["✓ 确定性挂上义项"] += 1
@@ -172,6 +178,9 @@ def harvest(con, limit=0):
                         if tr and tlang in PUBLISH:
                             st["源头译文可直接进出版层（%s）" % tlang] += 1
         print("   %-12s 收 %s 条" % (name, format(add, ",")))
+    for r in rows:
+        r["tags"] = XT.join_tags(r.pop("_tags"))
+    st["带例句标签（B31）"] = sum(1 for r in rows if r["tags"])
     st["合计入库行"] = len(rows)
     st["不同句子"] = len({r["text"] for r in rows})
     return rows, st
@@ -187,9 +196,9 @@ def apply_rows(rows):
                         expect={"#example": len(rows), "#example_gloss": len(pub)}) as s:
         s.executemany(
             "INSERT OR IGNORE INTO example "
-            "(word,sense_id,text,bold,ref,src_gloss,src_translation,src_lang,hidden,src) "
+            "(word,sense_id,text,bold,ref,src_gloss,src_translation,src_lang,hidden,src,tags) "
             "VALUES (:word,:sense_id,:text,:bold,:ref,:src_gloss,:src_translation,"
-            ":src_lang,0,:src)", rows)
+            ":src_lang,0,:src,:tags)", rows)
         # 英文译文按 (word,text) 回查 id
         s.execute("CREATE TEMP TABLE _en (word TEXT, text TEXT, tr TEXT)")
         s.executemany("INSERT INTO _en VALUES (?,?,?)",

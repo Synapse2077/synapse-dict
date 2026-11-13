@@ -44,6 +44,7 @@ from build_ex_rel import KEEP, HIDDEN, DROP                     # noqa: E402
 from hide_non_examples import WHERE as NOT_EXAMPLE              # noqa: E402
 from split_quote_ref import YEAR, ref_leaked                    # noqa: E402
 from translate_examples import SRC as EX_SRC                    # noqa: E402
+import example_tags as _xt                                      # noqa: E402  B31
 from build_legacy_sense import PHON_LINE, POS_LINE, SECTION_LINE  # noqa: E402
 _sys.path.insert(0, str(_ROOT.parent / "scripts"))
 from zh_t2s import t2s as zh_t2s                                # noqa: E402
@@ -387,6 +388,15 @@ def build(con, only=None):
     #    判据：中文/英文长度比的中位数是稳定的；若 `zh(X)` 配 `en(X+1)` 明显更合理，就是错位。
     #    ⚠️ 它只逮得到长度差得开的那些，是**下限不是总量** —— 所以修的时候按整批扩。
     add("D", "D8 例句译文错开一位（下限）", _shifted(con))
+    # B31（2026-11-07）：例句标签。判据 import 生成侧那一份（`example_tags`），不另抄。
+    #   D9  值域外／乱序 —— 页面按 EN_EXAMPLE_TAG_LABELS 印中文，值域外的键会被静默不印。
+    #   D10 带标签的行比声明的少 —— 重建 `example` 时漏了标签（比如拿没有 `tg` 的旧中间件跑
+    #       `build_ex_rel`），别的闸一条都看不见。期望值**独立声明**在 `_xt.EXPECT_TAGGED`。
+    add("D", "D9 例句标签值域外或乱序（B31）",
+        sum(1 for (v,) in con.execute("SELECT tags FROM example WHERE tags IS NOT NULL")
+            if _xt.bad_tag_value(v)))
+    add("D", "D10 例句标签少了（B31，应 %s 行）" % format(_xt.EXPECT_TAGGED, ","),
+        max(0, _xt.EXPECT_TAGGED - q("SELECT COUNT(*) FROM example WHERE tags IS NOT NULL")))
     add("D", "D7 中文里没有一个汉字",
         sum(1 for (z,) in con.execute("SELECT text FROM example_gloss")
             if not CJK.search(z or "")))
@@ -641,6 +651,13 @@ def mutate():
                               "容忍以我们的名义犯下的血腥罪行，我们终将为此负责。')"),
                     c.execute("INSERT INTO example_gloss(example_id,lang,text) "
                               "VALUES(2,'zh','以法律的名义，站住！')")))
+    case("例句标签值域外（B31）", "D9 例句标签值域外或乱序（B31）",
+         lambda c: c.execute("INSERT INTO example(id,word,text,hidden,tags) "
+                             "VALUES(1,'x','make a decision',0,'collocation|UK')"))
+    # 🔴 D10 数的是「少了几行」：注入**比声明少一行**的标签，而不是空库（空库天然报满数，证明不了什么）
+    case("例句标签少了一行（B31）", "D10 例句标签少了（B31，应 %s 行）" % format(_xt.EXPECT_TAGGED, ","),
+         lambda c: c.executemany("INSERT INTO example(id,word,text,hidden,tags) VALUES(?,'x',?,0,'collocation')",
+                                 [(k, "c%d" % k) for k in range(1, _xt.EXPECT_TAGGED)]))
     case("译文里没有汉字", "D7 中文里没有一个汉字",
          lambda c: (c.execute("INSERT INTO example(id,word,text,hidden) "
                               "VALUES(1,'x','a + b → c',0)"),
@@ -664,7 +681,8 @@ def mutate():
     #   · C1 是**反面**判据（"多地区行被压没了吗"）—— 空库里本来就没有多地区行
     #   · F2 数的是"尺子少了几把"—— 空库里五把全没有
     #   其余任何一条在空库上报非零，都说明判据把"没有数据"当成了"有缺陷"。
-    EMPTY_OK = ("C1 ", "F2 ")
+    #   · D10 数的是"例句标签少了几行"—— 空库里一行都没有（它的变异注入的是少一行，见上）
+    EMPTY_OK = ("C1 ", "F2 ", "D10 ")
     clean = [x for x in clean if not x[1].startswith(EMPTY_OK)]
     good = not clean
     ok += good
@@ -692,7 +710,7 @@ CREATE TABLE pronunciation(id INTEGER PRIMARY KEY, word_id INT, entry_id INT,
   ipa TEXT, notation TEXT, region TEXT, src TEXT, is_primary INT DEFAULT 0, tags TEXT);
 CREATE TABLE example(id INTEGER PRIMARY KEY, word TEXT, sense_id INT, text TEXT,
   bold TEXT, ref TEXT, src_gloss TEXT, src_translation TEXT, src_lang TEXT,
-  hidden INT DEFAULT 0, src TEXT);
+  hidden INT DEFAULT 0, src TEXT, tags TEXT);
 CREATE TABLE example_gloss(example_id INT, lang TEXT, text TEXT, src TEXT);
 CREATE TABLE collocation(id INTEGER PRIMARY KEY, text TEXT);
 CREATE TABLE collocation_gloss(collocation_id INT, lang TEXT, text TEXT);

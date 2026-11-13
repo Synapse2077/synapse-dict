@@ -61,6 +61,8 @@ import sqlite3
 
 import dbtool
 import paths
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent))
+import example_tags as XT   # B31：例句标签判据唯一的家
 
 f = lambda n: format(n, ",")
 _simp = set()
@@ -127,6 +129,7 @@ def harvest(con):
     br = bridges(con)
     simp = simplified_only(con)
     rows, stat, best = [], collections.Counter(), {}
+    tags = collections.defaultdict(set)   # B31：(词,句) → 所有出现处的标签并集（不论哪版留下）
     # 🔴 例句的**身份**（一行 `example`）和它的**译文**（多行 `example_gloss`）是两回事。
     #    第一版把两者绑在一起：同词同句多版都有时留信息最多的那一条，**另一版的译文被一起丢掉**
     #    ⇒ 免费中文译文从 8,288 掉到 3,739，因为英文版先到、英文译文占住了那一行。
@@ -183,6 +186,7 @@ def harvest(con):
                         if tr and tlang:
                             glosses.setdefault((w, t, tlang), (tr, src))
                         k = (w, t)
+                        tags[k] |= XT.example_tags(x)
                         cur = best.get(k)
                         # 同词同句多版都有 ⇒ **留信息最多的那条**（有译文 > 没译文），
                         # 不是"先到先得"。判据确定、可复现。
@@ -206,7 +210,8 @@ def harvest(con):
                         stat[src + "/收下"] += 1
                         if sid:
                             stat[src + "/  其中挂上了义项"] += 1
-    rows = [v[1] for v in best.values()]
+    rows = [v[1] + (XT.join_tags(tags[k]),) for k, v in best.items()]
+    stat["带例句标签（B31）"] = sum(1 for r in rows if r[12])
     return rows, glosses, stat
 
 
@@ -243,15 +248,15 @@ def main():
             "#dict": 0, "#entry": 0, "#sense": 0}) as con:
         con.execute("DELETE FROM example_gloss")
         con.execute("DELETE FROM example")
-        for col in ("roman", "ruby"):
+        for col in ("roman", "ruby", "tags"):
             try:
                 con.execute("ALTER TABLE example ADD COLUMN %s TEXT" % col)
             except sqlite3.OperationalError:
                 pass
         con.executemany(
             "INSERT OR IGNORE INTO example(word,sense_id,text,bold,ref,src_gloss,"
-            "src_translation,src_lang,roman,ruby,hidden,src) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            "src_translation,src_lang,roman,ruby,hidden,src,tags) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
         ids = {(w, t): i for i, w, t in
                con.execute("SELECT id, word, text FROM example")}
         con.executemany(

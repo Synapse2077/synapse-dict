@@ -38,6 +38,7 @@ import sqlite3
 
 import dbtool
 import paths
+import example_tags as XT   # B31：例句标签判据唯一的家
 
 ING = paths.WORK / "ingest" / "ex_rel.jsonl"
 SRC = "en-edition"
@@ -71,7 +72,8 @@ def collect(con):
     for ref, s in q("SELECT src_ref, sense_id FROM sense_src WHERE sense_id IS NOT NULL"):
         sid[ref] = s
     ex_rows, rel_rows = [], []
-    ex_seen, rel_seen = set(), set()
+    ex_seen, rel_seen = {}, set()      # ex_seen：(词,句) → ex_rows 下标（B31：重复处并入标签）
+    ex_tags = []                       # 与 ex_rows 平行的标签集合
     stat = collections.Counter()
     for line in ING.open(encoding="utf-8"):
         o = json.loads(line)
@@ -83,10 +85,15 @@ def collect(con):
         for e in o["ex"]:
             stat["ex 源"] += 1
             key = (w, e["t"])
+            if "tg" in e:
+                stat["ex 带 tg 字段"] += 1
             if key in ex_seen:
                 stat["ex 去重"] += 1
+                # 🔴 B31：入库只留先到的那一行，但**标签取并集**（fr 同款）
+                ex_tags[ex_seen[key]] |= set(e.get("tg") or ())
                 continue
-            ex_seen.add(key)
+            ex_seen[key] = len(ex_rows)
+            ex_tags.append(set(e.get("tg") or ()))
             s = sid.get("%s#%d" % (base, e["i"]))
             stat["ex 挂上义项" if s else "ex 挂不上"] += 1
             ex_rows.append((w, s, e["t"], json.dumps(e["b"]) if e.get("b") else None,
@@ -119,6 +126,7 @@ def collect(con):
             rel_rows.append((i, s, kind, t,
                              json.dumps(r["g"], ensure_ascii=False) if r["g"] else None,
                              hid, SRC, "%s#%s" % (base, r["i"] if r["i"] is not None else "-")))
+    ex_rows = [r + (XT.join_tags(t),) for r, t in zip(ex_rows, ex_tags)]
     return ex_rows, rel_rows, stat
 
 
@@ -196,7 +204,7 @@ def main(run=False):
         s.execute("DELETE FROM example")
         s.execute("DELETE FROM sense_relation WHERE kind<>'alt_of'")
         s.executemany("INSERT INTO example (word,sense_id,text,bold,ref,src_gloss,"
-                      "src_translation,src_lang,hidden,src) VALUES (?,?,?,?,?,?,?,?,?,?)", ex)
+                      "src_translation,src_lang,hidden,src,tags) VALUES (?,?,?,?,?,?,?,?,?,?,?)", ex)
         s.executemany("INSERT INTO sense_relation (word_id,sense_id,kind,target,tags,"
                       "hidden,src,src_ref) VALUES (?,?,?,?,?,?,?,?)", rel)
     con = sqlite3.connect("file:%s?mode=ro" % paths.DB, uri=True)

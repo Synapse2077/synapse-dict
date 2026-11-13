@@ -93,6 +93,7 @@ export type FrenchExample = {
   en: string | null;          // 13,181 条源头自带的英文译文（免费的交叉真值）
   ref: string | null;         // 文献出处
   bold: Array<[number, number]>;
+  tags: string | null;        // B31：源头例句标签（`|` 分隔，受控值域见 fr/pipeline/example_tags.py）
 };
 
 // 变形关系：这个词形是谁的什么形式。
@@ -505,13 +506,18 @@ export class FrenchDictService {
     // 🔴 `hidden` 必须过滤：加了列不改这里 = 白做（it 上栽过，
     //    `gatto` 的下位词照样渲染出断括号，而那个脚本的 --verify 还报了绿）。
     this.exampleQuery = this.db.prepare(`
-      SELECT e.sense_id, e.text, e.ref, e.bold,
+      SELECT e.sense_id, e.text, e.ref, e.bold, e.tags,
              (SELECT text FROM example_gloss WHERE example_id = e.id AND lang = 'zh') AS zh,
              (SELECT text FROM example_gloss WHERE example_id = e.id AND lang = 'en') AS en
       FROM example e
       WHERE e.word = ? AND COALESCE(e.hidden, 0) = 0
-      ORDER BY CASE WHEN e.sense_id IS NULL THEN 1 ELSE 0 END, e.sense_id, e.id
+      ORDER BY CASE WHEN e.sense_id IS NULL THEN 1 ELSE 0 END, e.sense_id,
+               CASE WHEN e.tags LIKE '%collocation%' THEN 0 WHEN e.tags IS NOT NULL THEN 1 ELSE 2 END,
+               e.id
     `);
+    // ⬆ B31（2026-11-06，用户定）：同一义项内**搭配排最前、其余带标签的其次**。
+    //    页面每条义项只印前 3 条（未挂义项的印 6 条）；按 id 排时 en 版的搭配入库晚、
+    //    几乎全被 fr 版长引文挤出去 —— 搭配只露出 39%（1,204／3,080）。
 
     // ⚠️ 排序照 es 的三条理由：① 默认播**法国音**（fr-FR 占 85%，但 fr-CA/fr-CH 共 2.5 万条，
     //    不排序会随机播到魁北克音）；② 地区来源可信的（`tag`）排前面，`speaker` 推定的排后面；
@@ -958,10 +964,10 @@ export class FrenchDictService {
       readings,
       examples: deep ? (this.exampleQuery.all(row.word) as Array<{
         sense_id: number | null; text: string; ref: string | null; bold: string | null;
-        zh: string | null; en: string | null;
+        zh: string | null; en: string | null; tags: string | null;
       }>).map((e) => ({
         senseId: e.sense_id, text: e.text, zh: e.zh, en: e.en,
-        ref: e.ref, bold: parseBold(e.bold),
+        ref: e.ref, bold: parseBold(e.bold), tags: e.tags,
       })) : [],
       collocations: (this.colsQuery.all(row.id) as Array<{
         text: string; zh: string | null; src: string | null;

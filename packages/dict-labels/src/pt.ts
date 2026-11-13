@@ -57,3 +57,9 @@ export function ptInflHeading(labels: (string | null)[]): string {
   return labels.some((l) => [...ptPartsOf(l)].some((p) => PT_VERB_SET.has(p)))
     ? '变位形式' : '词形变化';
 }
+
+/** 例句标签（B31，2026-11-07）：`example.tags` 的受控值域（`pt/pipeline/example_tags.EXAMPLE_TAG_ORDER`）。
+ *  ⚠️ 键没映射就不印（不拿英文键兜底）—— 契约闸按库里全值域查漏。 */
+export const PT_EXAMPLE_TAG_LABELS: Record<string, string> = {
+  collocation: '搭配', proverb: '谚语',
+};

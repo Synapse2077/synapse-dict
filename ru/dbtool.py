@@ -175,6 +175,7 @@ TRACK_TABLES = [
                 # ── ru 独有的两张 ──
                 'stress',        # 🆕 重音层，九门里第一次
                 'inflection',    # 屈折层，预计九门里最大（vi 是**有意不建**，方向相反）
+                'entry_class',   # R16（2026-11-11）：变格/变位类，en 版 `class`
                 # 🔴 **`pronunciation_entry` 有意不在这张表里** —— 它**没建**：
                 #    阶段 4 量出 1.43%（< 5% 门槛）。同形异重音词改由
                 #    `pronunciation.entry_id` 列接住（RU_PLAN §11.3）。

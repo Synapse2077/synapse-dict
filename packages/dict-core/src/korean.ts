@@ -89,7 +89,18 @@ export type KoreanRelation = {
    * 见 `ko/pipeline/resolve_relation_targets.py` 的阶梯式判据。
    */
   targetNorm: string | null;
-  /** 目标的中文释义（一句），给读者判断要不要点 */
+  /**
+   * K20（2026-11-11）：边指向的**那个词条**（`sense_relation.target_entry_id`），认不准就 `null`。
+   * 有它时链接落到 `targetEntryWord` 并高亮那个词条的义项；`부인(否認)` 不再只落到「부인 这个词形」。
+   */
+  targetEntryId: number | null;
+  /** 那个词条的词头（多字汉字目标 `不明` 锚到的是 `불명`，与 `targetNorm` 不同）。 */
+  targetEntryWord: string | null;
+  /**
+   * 目标的中文释义，给读者判断要不要点。
+   * 🔴 K20：有词条锚 ⇒ 取那个词条的；没有 ⇒ 目标词形下**每个词条各一句、最多 3 个**，用「／」隔开。
+   *    原来取「词形下排第一的那句」，同形异义时 47% 是别的词（`조정(朝廷)` 提示「划船」）。
+   */
   zh: string | null;
   /**
    * 源头给的标签数组（JSON 字符串）。展示层用 `koRelationTagLabels()` 取中文名，
@@ -102,8 +113,25 @@ export type KoreanRelation = {
 
 export type KoreanRelationGroup = { kind: string; items: KoreanRelation[] };
 
+/**
+ * K20：关系链接的悬停提示。有词条锚 ⇒ 那个词条的第一句（锚到的词条没有中文就**不给**，不退回别的同形词）；
+ * 没锚 ⇒ 目标词形下每个词条各一句，去重、最多 3 个，用「 ／ 」隔开（用户 2026-11-11 选的 ①：列全候选，不猜）。
+ */
+export function relationTooltip(anchor: number | null, anchored: string | null,
+                                candidates: string | null): string | null {
+  if (anchor != null) return anchored;
+  if (!candidates) return null;
+  const seen: string[] = [];
+  for (const z of candidates.split(String.fromCharCode(31))) {
+    if (z && !seen.includes(z)) seen.push(z);
+  }
+  return seen.length ? seen.slice(0, 3).join(' ／ ') : null;
+}
+
 export type KoreanSense = {
   id: number;
+  /** K20：义项属于哪个词条 —— 关系链接带着词条锚跳过来时，按它滚到并高亮。 */
+  entryId: number | null;
   etymNo: string | null;
   /** `${版}:${etym_no}` —— 八门共用 `<EtymologyNote>` 的键（见 senses 查询的注释）。 */
   etymKey: string | null;
@@ -124,6 +152,8 @@ export type KoreanExample = {
   en: string | null;
   ref: string | null;
   roman: string | null;
+  /** B31：源头例句标签（`|` 分隔，受控值域见 ko/pipeline/criteria.py） */
+  tags: string | null;
 };
 
 /** 活用表的一行：一个语法位置 → 一个或多个形式。 */
@@ -255,7 +285,7 @@ export class KoreanDictService {
 
       // 出版层义项。🔴 `hidden = 0` —— 那 200,207 条空壳是 K10（文件头⑤）。
       senses: this.db.prepare(`
-        SELECT s.id, s.pos, e.etym_no AS etymNo,
+        SELECT s.id, s.entry_id AS entryId, s.pos, e.etym_no AS etymNo,
                -- 🔴🔴 2026-09-26（K26）：这一列以前不存在，于是 38,796 条词源正文
                --    一个字都到不了读者面前。八门共用的 EtymologyNote 用
                --    「版 ＋ 冒号 ＋ etym_no」当键，而 ko 的义项只端了 etymNo，
@@ -301,10 +331,22 @@ export class KoreanDictService {
                --    从建库起就存着，没人读过，是渲染出来才看见的。
                -- ⚠️ 这一段同样**不能用反引号**（见上面那条注释）：它在 JS 模板串里。
                r.tags AS tags,
+               -- K20：词条锚、锚到的词头、悬停提示。提示有锚取那个词条的第一句；没锚取词形下
+               --   每个词条各一句（调用方去重、截 3 个、用「／」拼）—— 不再冒充排第一的那个同形词。
+               --   分隔符用 char(31)，正文里不会出现。
+               r.target_entry_id AS targetEntryId,
+               (SELECT d3.word FROM entry e3 JOIN dict d3 ON d3.id = e3.word_id
+                 WHERE e3.id = r.target_entry_id) AS targetEntryWord,
                (SELECT g.text FROM sense s2 JOIN sense_gloss g ON g.sense_id = s2.id
-                 JOIN dict d2 ON d2.id = s2.word_id
-                 WHERE d2.word_norm = r.target_norm AND g.lang='zh' AND s2.hidden = 0
-                 ORDER BY s2.rank LIMIT 1) AS zh
+                 WHERE s2.entry_id = r.target_entry_id AND g.lang='zh' AND s2.hidden = 0
+                 ORDER BY s2.rank, s2.id LIMIT 1) AS zhAnchored,
+               (SELECT group_concat(z, char(31)) FROM (
+                  SELECT (SELECT g.text FROM sense s2 JOIN sense_gloss g ON g.sense_id = s2.id
+                           WHERE s2.entry_id = e2.id AND g.lang='zh' AND s2.hidden = 0
+                           ORDER BY s2.rank, s2.id LIMIT 1) AS z
+                  FROM entry e2 JOIN dict d2 ON d2.id = e2.word_id
+                  WHERE d2.word_norm = r.target_norm
+                  ORDER BY e2.etym_no, e2.id)) AS zhCandidates
         FROM sense_relation r
         WHERE r.word_id = ? AND COALESCE(r.hidden,0) = 0
         ORDER BY r.kind, r.id
@@ -314,7 +356,7 @@ export class KoreanDictService {
       //    （K15 成分拆解 / K11 构词公式 / 占位标签 / 多行 blob）——
       //    `hidden_why` 说得出每一条为什么不显示。
       examples: this.db.prepare(`
-        SELECT x.sense_id AS senseId, x.text, x.ref, x.roman,
+        SELECT x.sense_id AS senseId, x.text, x.ref, x.roman, x.tags,
                (SELECT text FROM example_gloss WHERE example_id=x.id AND lang='zh') AS zh,
                (SELECT text FROM example_gloss WHERE example_id=x.id AND lang='en') AS en
         FROM example x
@@ -405,7 +447,8 @@ export class KoreanDictService {
 
     // 关系分到义项级 / 词级
     const relRows = this.q.relations.all(id) as unknown as
-      (KoreanRelation & { senseId: number | null })[];
+      (KoreanRelation & { senseId: number | null; zhAnchored: string | null;
+        zhCandidates: string | null })[];
     const bySense = new Map<number, KoreanRelation[]>();
     const wordLevel: KoreanRelation[] = [];
     for (const r of relRows) {
@@ -416,7 +459,10 @@ export class KoreanDictService {
       //    ⚠️ 往 `KoreanRelation` 加字段时，这一行必须跟着加。
       const item: KoreanRelation = {
         kind: r.kind, target: r.target,
-        targetNorm: r.targetNorm ?? null, zh: r.zh ?? null,
+        targetNorm: r.targetNorm ?? null,
+        targetEntryId: r.targetEntryId ?? null,
+        targetEntryWord: r.targetEntryWord ?? null,
+        zh: relationTooltip(r.targetEntryId ?? null, r.zhAnchored ?? null, r.zhCandidates ?? null),
         tags: r.tags ?? null,
       };
       if (r.senseId == null) wordLevel.push(item);
@@ -429,6 +475,7 @@ export class KoreanDictService {
 
     const senseViews: KoreanSense[] = senses.map((s) => ({
       id: s.id,
+      entryId: s.entryId ?? null,
       etymNo: s.etymNo ?? null,
       etymKey: s.etymKey ?? null,
       pos: s.pos ?? null,

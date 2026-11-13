@@ -30,6 +30,8 @@ sys.path.insert(0, str(HERE.parent / "pipeline"))
 
 import paths                                          # noqa: E402
 import han_sources as HS                              # noqa: E402
+sys.path.insert(0, str(HERE.parent.parent / "scripts"))
+from zh_t2s import t2s                                # noqa: E402  W1
 from criteria import is_han_headword                  # noqa: E402
 
 _RULES = ",".join("'%s'" % r for r in HS.RULES)
@@ -70,6 +72,26 @@ def h7_unnamed_share(c):
     return n
 
 
+# W1（2026-11-07）：`reading-meaning-v1` 的行数 —— **独立声明**（`[[expectation-must-be-declared]]`）。
+#   首次落库：build_han_layer 的升级判据给出 449 行，`--resync-rule` 原地写入。改它必须写理由。
+W1_UPGRADED = 449
+
+
+def h11_w1_rows_satisfy(c):
+    """W1：每一行 `reading-meaning-v1` 都必须真满足升级判据（`HS.reading_meaning_ok`，import 不重写）。
+    读音表照建层时的口径重建：只取 S2/S4 两档的行。"""
+    word = dict(c.execute("SELECT id, word FROM dict"))
+    rd = HS.hv_readings([(word[w], h) for w, h in c.execute(
+        "SELECT word_id, han FROM han_spelling WHERE rule_ver IN ('src-zh-etym-v1','src-en-etym-v1')")])
+    zh = {}
+    for w, t in c.execute("SELECT s.word_id, g.text FROM sense_gloss g JOIN sense s ON s.id=g.sense_id "
+                          "WHERE g.lang='zh' AND COALESCE(s.hidden,0)=0"):
+        zh[w] = zh.get(w, "") + " " + (t or "")
+    return sum(1 for w, h in c.execute(
+        "SELECT word_id, han FROM han_spelling WHERE rule_ver='reading-meaning-v1'")
+        if not HS.reading_meaning_ok(word[w], h, rd, zh.get(w, ""), t2s))
+
+
 CHECKS = [
     ("H1", "han_spelling 非空", lambda c: c.execute(
         "SELECT COUNT(*) FROM han_spelling").fetchone()[0] > 0, True),
@@ -101,6 +123,10 @@ CHECKS = [
     ("H10", "entry_id 要么为空要么真指向一条 entry", lambda c: c.execute(
         "SELECT COUNT(*) FROM han_spelling h LEFT JOIN entry e ON e.id=h.entry_id "
         "WHERE h.entry_id IS NOT NULL AND e.id IS NULL").fetchone()[0], 0),
+    ("H11", "W1：升到 reading-meaning-v1 的每一行都真满足「汉越音逐字对上 ∧ 与中文释义共字」",
+     h11_w1_rows_satisfy, 0),
+    ("H12", "W1：reading-meaning-v1 的行数（独立声明 W1_UPGRADED）", lambda c: c.execute(
+        "SELECT COUNT(*) FROM han_spelling WHERE rule_ver='reading-meaning-v1'").fetchone()[0], W1_UPGRADED),
 ]
 # 🔴 **H11 写了又删掉**：我本来加了一条「最弱那批确实带着 rule_ver」，
 #    判据是 `rule_ver='codepoint-v1' AND rule_ver=''` —— **恒为 0，永远绿**。
@@ -108,7 +134,7 @@ CHECKS = [
 #    留着只会让花名册看起来更长。真正要的是**读者口径**那一条
 #    （展示层不许给 codepoint-v1 印「汉越字」），而展示层还不存在 ⇒ 记欠账 **W6**，
 #    不在这儿放占位符。
-ROSTER = ("H1", "H2", "H3", "H4", "H5", "H6", "H8", "H9", "H10")
+ROSTER = ("H1", "H2", "H3", "H4", "H5", "H6", "H8", "H9", "H10", "H11", "H12")
 # 🔴 H7 有意不进花名册：它**只报数不判红**。进了花名册就得有期望值，
 #    而它要量的东西（兜底救回多少）**没有正确答案**，只有趋势。
 #    写在这儿是为了让「想过了」和「漏了」分得开。
@@ -159,6 +185,15 @@ MUTATIONS = [
     ("H9", "让一条指向不存在的 dict",
      "UPDATE han_spelling SET word_id=99999999 WHERE id=(SELECT MIN(id) FROM han_spelling)",
      {"H4": "join 不上 dict 之后字数检查也够不着它"}),
+    # W1：把一条**没有中文释义**的码位推定行硬升上去（判据不满足）⇒ H11 红；行数随之 +1 ⇒ H12 连带
+    ("H11", "把一条不满足判据的 codepoint-v1 行升成 reading-meaning-v1",
+     "UPDATE han_spelling SET rule_ver='reading-meaning-v1' WHERE id=(SELECT MIN(h.id) FROM han_spelling h "
+     "WHERE h.rule_ver='codepoint-v1' AND NOT EXISTS(SELECT 1 FROM sense s JOIN sense_gloss g ON g.sense_id=s.id "
+     "AND g.lang='zh' WHERE s.word_id=h.word_id))",
+     {"H12": "多了一行 reading-meaning-v1"}),
+    ("H12", "把一条 reading-meaning-v1 退回 codepoint-v1（升级被静默撤销的样子）",
+     "UPDATE han_spelling SET rule_ver='codepoint-v1' WHERE id="
+     "(SELECT MIN(id) FROM han_spelling WHERE rule_ver='reading-meaning-v1')", {}),
     ("H10", "让 entry_id 指向不存在的 entry",
      "UPDATE han_spelling SET entry_id=99999999 WHERE id=(SELECT MIN(id) FROM han_spelling)", {}),
 ]

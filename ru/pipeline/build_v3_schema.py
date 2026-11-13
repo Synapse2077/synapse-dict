@@ -210,6 +210,24 @@ DDL = [
       UNIQUE(src_ref)
     )"""),
     ("idx_infl_entry", "CREATE INDEX IF NOT EXISTS idx_infl_entry ON inflection(entry_id)"),
+    # ── R16（2026-11-11）：变格／变位类（en 版 `class`），判据 `criteria` ⑪c ──────────
+    ("entry_class", """
+    CREATE TABLE IF NOT EXISTS entry_class (
+      id       INTEGER PRIMARY KEY,
+      entry_id INTEGER NOT NULL REFERENCES entry(id),
+      -- 体系看源头变位表模板：noun（词干类型＋重音型）／adj（形容词重音码）／verb（变位类）
+      -- 🔴 与 `entry.declension`（ru 版传统第一/二/三变格）是两套分类，不许并列
+      system   TEXT,
+      kind     TEXT,                             -- stem / accent / conj
+      code     TEXT,                             -- 剥出来的类别码：velar／c／a*②／1a
+      raw      TEXT NOT NULL,                    -- 源头原文整串（`2a imperfective transitive`）
+      hidden   INTEGER NOT NULL DEFAULT 0,
+      hidden_why TEXT,
+      src      TEXT NOT NULL,
+      -- 一个 entry 同一族可以多值（两体动词、异读重音）⇒ 一值一行
+      UNIQUE(entry_id, raw)
+    )"""),
+    ("idx_entry_class_entry", "CREATE INDEX IF NOT EXISTS idx_entry_class_entry ON entry_class(entry_id)"),
     ("idx_infl_form", "CREATE INDEX IF NOT EXISTS idx_infl_form ON inflection(form)"),
 
     # ── 义项两层（SCHEMA §2.-1）───────────────────────────────────

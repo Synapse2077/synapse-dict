@@ -22,7 +22,7 @@ import { getService } from '@synapse-dict/dict-core';
 import { VietnameseEntryView, EXAMPLES } from './App';
 import { POS_LABELS, REL_LABELS, VI_POS_LABELS, VI_RELATION_LABELS,
          VI_DIALECT_LABELS, VI_ETYM_TYPE_LABELS, VI_SPELLING_RULE,
-         VI_EDITION_LABELS } from '@synapse-dict/dict-labels';
+         VI_EDITION_LABELS, VI_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 
 const svc = getService('vi') as unknown as {
   getEntry(w: string): any;
@@ -358,6 +358,24 @@ const CHECKS: Check[] = [
       const bad = texts.filter((x) => HANGUL.test(x));
       return bad.length ? `例句正文里有韩文：${bad[0].slice(0, 40)}` : null;
     } },
+  // B31（2026-11-07）：源头例句标签。读者口径 —— 已知搭配那一句前面必须印「搭配」，
+  //    已知谚语那一句前面必须印「谚语」；数据侧（例句层闸 X16／X17）只证明「库里有」。
+  // 🔴 判据按**块**：在 `vi-example` 块里找正文**恰好等于**这一句的那块，再看块里的胶囊 ——
+  //    整页找「搭配」二字会被别的例句的胶囊顶替（ru C28 第一版就这么配错了块）。
+  { word: 'nhà', name: '🔴 B31：已知搭配那一句前面印着「搭配」',
+    hit: (_t, _e, html) => {
+      const m = [...html.matchAll(/<div class="vi-example">([\s\S]*?)<\/div>/g)]
+        .find((b) => /<span class="vi-example-text">nhà khoa học<\/span>/.test(b[1]));
+      if (!m) return '页面上找不到例句 nhà khoa học';
+      return /<span class="ex-chip">搭配<\/span>/.test(m[1]) ? null : '那一句前面没有「搭配」胶囊';
+    } },
+  { word: 'cây', name: '🔴 B31：已知谚语那一句前面印着「谚语」',
+    hit: (_t, _e, html) => {
+      const m = [...html.matchAll(/<div class="vi-example">([\s\S]*?)<\/div>/g)]
+        .find((b) => b[1].includes('Ăn quả nhớ kẻ trồng cây.'));
+      if (!m) return '页面上找不到那句谚语';
+      return /<span class="ex-chip">谚语<\/span>/.test(m[1]) ? null : '那一句前面没有「谚语」胶囊';
+    } },
   { word: 'nhà', name: '🔴 页面上没有假名',
     hit: (t) => (KANA.test(t) ? '页面上出现了假名' : null) },
 
@@ -485,12 +503,19 @@ function sweep(words: string[]) {
     'SELECT DISTINCT src FROM etymology').all() as Array<{ src: string }>).map((r) => r.src);
   const missEdition = allEditions.filter((x) => VI_EDITION_LABELS[x] === undefined);
 
+  // B31：例句标签的全库值域（库里出现的每个键都要有中文名，否则组件静默不印）
+  const allExTags = [...new Set((db.prepare(
+    'SELECT DISTINCT tags FROM example WHERE tags IS NOT NULL').all() as Array<{ tags: string }>)
+    .flatMap((r) => r.tags.split('|')))];
+  const missExTag = allExTags.filter((x) => VI_EXAMPLE_TAG_LABELS[x] === undefined);
+
   const dom: Array<[string, string[], number]> = [
     ['关系类别', missKind, allKinds.length],
     ['方言点', missDialect, allDialects.length],
     ['词性', missPos, allPos.length],
     ['词源类型', missEtym, allEtym.length],
     ['词源来源版', missEdition, allEditions.length],
+    ['例句标签', missExTag, allExTags.length],
   ];
   console.log('\n── 值域覆盖（**跨全库**，不只抽样词）');
   for (const [name, miss, tot] of dom) {

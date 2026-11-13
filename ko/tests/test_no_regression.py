@@ -314,6 +314,34 @@ CHECKS = [
      "起点：560 行括号内容整段丢了（`성두(星斗)`→`성두`、`굿재이(강원, 경남, 전남, 충북)`→`굿재이`）＋"
      "1 条边（`우기다 → 우격`）＋ 7 个落点；非 0 ⇒ 有人重跑了旧收割器或把落点判据改回半角括号"),
 
+    # 🔴 R32／R33（2026-11-07，B31）：源头例句标签。判据 import `criteria.bad_example_tags`，不在这儿重写。
+    #    R32 值域外／乱序 —— 页面按 KO_EXAMPLE_TAG_LABELS 印中文，值域外的键会被静默不印。
+    #    R33 带标签的行数**＝独立声明的 235**（`[[expectation-must-be-declared]]`）：重建 `example`
+    #        漏了标签列，别的闸一条都看不见（行数、文本、译文都不变）。改它必须写理由。
+    ("R32", "例句标签都在受控值域里且按序（B31）", "@example_tags_bad", 0,
+     "非 0 ⇒ 有人往 `example.tags` 里写了 `criteria.EXAMPLE_TAG_ORDER` 之外的键（展示层会静默不印）"),
+    ("R33", "带例句标签的行数（B31）",
+     "SELECT COUNT(*) FROM example WHERE tags IS NOT NULL", 235,
+     "2026-11-07 首次回填：harvest() 给的（词，正文）235 个（搭配 199／谚语 11／口语 8…）全部落上；"
+     "少了 ⇒ 重建漏了标签；多了 ⇒ 判据放宽了，先核再改这个数"),
+
+    # 🔴 R34（2026-11-07，K35）：构词表（K33 迁来的 `漢字/한글` 对子）里，谚文词身上一个汉字形都没有的
+    #    只许剩**人工判掉的那几条**（`backfill_hanja_k35.ADJUDICATED_REJECT`，现 1 条：`一日虐` 源头错字）。
+    #    判据 import 补边脚本的 `classify()`，不在这儿重写。多了 ⇒ 补的边被删／新收了构词表而没补；
+    #    少了 ⇒ 有人把判掉的那条也挂上了。
+    ("R34", "构词表里还没有汉字形的谚文词＝人工判掉的那几条（K35）", "@k35_blank", 0,
+     "2026-11-07 补 75 条 `hanja_spelling`（`구비`←口碑／具備、`열대어`←熱帶魚…）；碰撞 150 对有意不收（同形异义，等 K20）"),
+
+    # 🔴 R35／R36（2026-11-11，K20）：关系边落到具体词条 `sense_relation.target_entry_id`（派生列，只由
+    #    `anchor_relation_targets.py` 写）。R35 是不动点：库里的值 ≠ 判据重算 ⇒ 有脚本往关系层／`entry.hanja`／
+    #    `sense.hidden` 写了东西而没重跑锚定（这张表有 8 个写入方，补收一次就会静默留下旧锚）。
+    #    R36 已知答案（逐条读库与源头声明，**不从现状推**），每一种规则支都有一条：
+    ("R35", "关系边的词条锚＝判据重算（K20 不动点）", "@k20_fixpoint", 0,
+     "2026-11-11 落库 58,025 条（括号汉字 5,590／多字汉字 735／汉字页指针 42,585／单字派生 9,115）；"
+     "非 0 ⇒ 跑 `ko/pipeline/anchor_relation_targets.py --apply`"),
+    ("R36", "关系边词条锚的已知答案（K20）", "@k20_known", 0,
+     "四条规则各有正例（戰車／朝廷／不明→불명／詐欺→사기／歐→歐美）与反例（单字 `單`、"
+     "`애호(愛護)` 不许被单字派生错锚成 愛好、`부인(婦人)`），见 `K20_KNOWN`"),
     ("R8", "`entry.hanja` 没有被搬到 `dict` 上",
      "SELECT COUNT(*) FROM pragma_table_info('dict') WHERE name='hanja'", 0,
      "1,944 个词形对应 ≥2 个不同汉字（`양` → 壤/兩/良/陽/孃/洋/量/羊），"
@@ -322,7 +350,7 @@ CHECKS = [
 
 
 # 🔴 回归闸应该有多少条。**这个数是声明，不是数出来的** —— 见 `_audit_checks`。
-R_ROSTER = 31
+R_ROSTER = 36
 
 
 def _audit_checks():
@@ -661,13 +689,59 @@ def _paren_text(con):
     return len(upd) + len(gain) + len(K.norms(con)) + anchor
 
 
+def _k20_fixpoint(con):
+    from anchor_relation_targets import plan
+    return len(plan(con)[0])
+
+
+# (所在页, target, 期望的词, 期望的汉字)；期望 None ＝ 不许锚。每条规则支至少一条，正反都有。
+K20_KNOWN = (
+    ("車", "전차(戰車)", "전차", "戰車"),          # ① 括号汉字：戰車 而不是 電車
+    ("朝", "조정(朝廷)", "조정", "朝廷"),          # ①：不是 漕艇（划船）
+    ("不", "不明", "불명", "不明"),                # ② 多字汉字：直达谚文词
+    ("詐欺", "사기", "사기", "詐欺"),              # ③ 汉字页指针
+    ("歐", "구미", "구미", "歐美"),                # ④ 单字派生：不是 口味／龜尾
+    ("単", "單", None, None),                      # 单字汉字目标不锚（会落到 단 那一堆同音词）
+    ("홑", "單", None, None),
+    ("愛", "애호(愛護)", None, None),              # ④ 不许越过括号：我们没有 愛護，不能锚成 愛好
+    ("人", "부인(婦人)", None, None),              # 同上：부인 下只有 夫人·否認
+)
+
+
+def _k20_known(con):
+    bad = 0
+    for sw, t, w, h in K20_KNOWN:
+        got = con.execute(
+            "SELECT d2.word, e.hanja FROM sense_relation r JOIN dict d ON d.id = r.word_id "
+            "LEFT JOIN entry e ON e.id = r.target_entry_id LEFT JOIN dict d2 ON d2.id = e.word_id "
+            "WHERE r.hidden = 0 AND d.word = ? AND r.target = ?", (sw, t)).fetchall()
+        bad += 1 if not got else sum(1 for g in got if g != (w, h))
+    return bad
+
+
 def _xsampa(con):
     sys.path.insert(0, str(paths.ROOT / "ko" / "pipeline"))
     from fix_xsampa_ipa import is_bad
     return sum(1 for (v,) in con.execute("SELECT ipa FROM pronunciation") if is_bad(v))
 
 
+def _example_tags_bad(con):
+    from criteria import bad_example_tags
+    return sum(1 for (v,) in con.execute("SELECT tags FROM example WHERE tags IS NOT NULL")
+               if bad_example_tags(v))
+
+
+def _k35_blank(con):
+    from backfill_hanja_k35 import classify, ADJUDICATED_REJECT
+    blank = set(classify(con)[0]["空白"])
+    return len(blank ^ set(ADJUDICATED_REJECT))     # 对称差：多一条、少一条都红
+
+
 _FUNCS = {"@schema_drift": _schema_drift,
+          "@k20_fixpoint": _k20_fixpoint,
+          "@k20_known": _k20_known,
+          "@k35_blank": _k35_blank,
+          "@example_tags_bad": _example_tags_bad,
           "@relation_writer": _relation_writer,
           "@paren_text": _paren_text,
           "@xsampa": _xsampa,

@@ -38,7 +38,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { enExamLabels, enSenseTopics } from '@synapse-dict/dict-labels';
+import { enExamLabels, enSenseTopics, EN_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 import { EnglishEntryView, capAudios } from './App';
 
 const svc = getService('en') as unknown as {
@@ -205,9 +205,16 @@ const CHECKS: Check[] = [
     },
   },
   {
-    name: '🔴 C2 柯林斯星级有值却没渲染',
-    hit: (e, h) => (e.rulers.collins && !/★/.test(text(h)))
-      ? `collins=${e.rulers.collins}，页面上没有星级` : null,
+    // 🔴 B33（2026-11-13 用户定，**断言翻面**）：原来锁「有星级就必须印」，现在锁「页面上不印」。
+    //    柯林斯星级／Oxford 3000 经 ECDICT 转手、源自两家的专有词表，名字是商标。
+    //    用户定的范围是**只不显示**：库和接口照旧带这两个字段（内部尺子），这条只管页面。
+    //    取样专挑库里 `collins IS NOT NULL` 的词（见下「考纲/柯林斯尺子」）⇒ 这条不是在空集上绿。
+    name: '🔴 C2 页面上印出柯林斯星级／Oxford 3000（B33）',
+    hit: (_e, h) => {
+      // 只认那两样标记本身：裸词「Collins」会出现在正文（draw/run/word 页 5 条），那是内容不是标记。
+      const m = h.match(/collins-stars|badge oxford|Oxford 3000|Collins \d 星|[★☆]/);
+      return m ? `页面上有「${m[0]}」` : null;
+    },
   },
 
   // ───────────────── D. 音标 / 录音 ─────────────────
@@ -311,6 +318,26 @@ const CHECKS: Check[] = [
   {
     // `hide_non_examples.py` 藏起来的三族（维护提示 / 占位符 / 关系数据错放）
     // 一条都不许回到页面上。服务层 `WHERE e.hidden = 0` 一旦被改坏，这条会红。
+    // B31（2026-11-07）：源头例句标签（搭配…）。按**块**对（fr 同款）：每个 `ex-en` 块剥掉 chip 后的原句
+    //    ↔ 接口里同一句的 tags，chip 必须逐个一致。整页找字会被短搭配「包含」误判。
+    name: '🔴 E5 例句块的标签胶囊与该句源头标签不一致（B31）',
+    hit: (e, h) => {
+      const exs = e.senses.flatMap((s: Entry) => s.examples) as Array<{ text: string; tags: string | null }>;
+      const nolab = exs.flatMap((x) => (x.tags ?? '').split('|').filter((k) => k && !EN_EXAMPLE_TAG_LABELS[k]));
+      if (nolab.length) return `例句标签键没有中文名：${[...new Set(nolab)].join('、')}`;
+      for (const m of h.matchAll(/<div class="ex-en" lang="en">([\s\S]*?)<\/div>/g)) {
+        const chips = [...m[1].matchAll(/<span class="ex-chip">([^<]*)<\/span>/g)].map((c) => c[1]);
+        const body = text(m[1].replace(/<span class="ex-chip">[^<]*<\/span>/g, ''));
+        const x = exs.find((y) => norm(y.text) === body);
+        const want = (x?.tags ?? '').split('|').filter(Boolean).map((k) => EN_EXAMPLE_TAG_LABELS[k]);
+        if (chips.join('|') !== want.join('|')) {
+          return `「${body.slice(0, 30)}」印了 [${chips.join('、')}]，应为 [${want.join('、')}]`;
+        }
+      }
+      return null;
+    },
+  },
+  {
     name: '🔴 E4 藏起来的例句漏到了页面上',
     hit: (e, h) => {
       const rows = db.prepare(
@@ -423,6 +450,10 @@ const arms: Array<[string, string]> = [
   ['例句有出处 ref', `SELECT d.word FROM dict d JOIN sense s ON s.word_id=d.id
       JOIN example e ON e.sense_id=s.id
       WHERE e.hidden=0 AND e.ref IS NOT NULL GROUP BY d.id LIMIT ${PER}`],
+  // B31：带标签的例句（按标签值轮转，小键 1–2 条也取得到）
+  ['例句带标签', `SELECT word FROM (SELECT d.word, e.tags, ROW_NUMBER() OVER (PARTITION BY e.tags ORDER BY e.id) rn
+      FROM dict d JOIN sense s ON s.word_id=d.id JOIN example e ON e.sense_id=s.id
+      WHERE e.hidden=0 AND e.tags IS NOT NULL) GROUP BY word ORDER BY MIN(rn), word LIMIT ${PER}`],
   ['有隐藏例句', `SELECT d.word FROM dict d JOIN sense s ON s.word_id=d.id
       JOIN example e ON e.sense_id=s.id WHERE e.hidden=1 GROUP BY d.id LIMIT ${PER}`],
   ['词条级关系', `SELECT d.word FROM dict d JOIN sense_relation r ON r.word_id=d.id
@@ -479,7 +510,10 @@ const MUTS: Mut[] = [
       ? h.replace('</article>', `<div class="sense-detail">${e.legacy.text}</div></article>`)
       : h)],
   ['C1 考纲标签没渲染', (h) => h.replace(/<span class="badge tag">[^<]*<\/span>/g, '')],
-  ['C2 柯林斯星级没渲染', (h) => h.replace(/★/g, '')],
+  ['C2 页面又印出柯林斯星级（B33 之前的形状）',
+    (h) => h.replace(/(<div class="entry-meta-row">)/, '$1<span class="collins-stars" title="Collins 3 星">★★★☆☆</span>')],
+  ['C2 页面又印出 Oxford 3000 徽章',
+    (h) => h.replace(/(<div class="entry-meta-row">)/, '$1<span class="badge oxford">Oxford 3000</span>')],
   ['D1 音标没渲染',
     (h) => h.replace(/class="phonetic-value">[^<]*</g, 'class="phonetic-value">/xx/<')],
   ['D2 录音没渲染', (h) => h.replace(/class="audio-chip"/g, 'class="x"')],
@@ -497,6 +531,10 @@ const MUTS: Mut[] = [
   ['E3 出处排在引文后面（改前的顺序）',
     (h) => h.replace(/(<div class="ex-ref">[^<]*<\/div>)(<div class="ex-en" lang="en">[^<]*<\/div>)/g,
                      '$2$1')],
+  ['E5 例句标签胶囊没渲染（组件漏写那一行）',
+    (h) => h.replace(/<span class="ex-chip">[^<]*<\/span>/g, '')],
+  ['E5 每条例句前都塞一个「搭配」（标签张冠李戴）',
+    (h) => h.replace(/<div class="ex-en" lang="en">/g, '$&<span class="ex-chip">搭配</span>')],
   ['E4 隐藏的例句漏到页面上（服务层 hidden=0 被改坏）',
     (h, e) => {
       const r = db.prepare(
@@ -577,6 +615,14 @@ for (const c of CHECKS) {
   red++;
   console.log(`   🔴 ${c.name}  ${cn} 条${acc ? `  ← 超出已接受上限 ${acc[0]}` : ''}`);
   for (const x of arr) console.log(`        ${x}`);
+}
+// B31：例句标签**全值域**查漏（不靠抽到哪页）
+{
+  const keys = new Set((db.prepare('SELECT DISTINCT tags FROM example WHERE tags IS NOT NULL').all() as Array<{ tags: string }>)
+    .flatMap((r) => r.tags.split('|')));
+  const nolab = [...keys].filter((k) => !EN_EXAMPLE_TAG_LABELS[k]);
+  if (nolab.length) { red++; console.log(`   🔴 例句标签值域里有键没有中文名（全库）：${nolab.join('、')}`); }
+  else console.log(`   ✅ 例句标签全值域 ${keys.size} 个键都有中文名（B31）`);
 }
 console.log(red ? `\n🔴 ${red} 条红` : `\n✅ 全部通过（${CHECKS.length} 条断言）`);
 

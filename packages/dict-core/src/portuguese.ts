@@ -101,6 +101,7 @@ export type PortugueseExample = {
   en: string | null;
   ref: string | null;
   bold: Array<[number, number]>;
+  tags: string | null;    // B31：源头例句标签（`|` 分隔，受控值域见 pt/pipeline/example_tags.py）
 };
 
 export type PortugueseInflection = {
@@ -378,13 +379,15 @@ export class PortugueseDictService {
                   id`),
 
       examples: this.db.prepare(`
-        SELECT e.sense_id, e.text, e.ref, e.bold,
+        SELECT e.sense_id, e.text, e.ref, e.bold, e.tags,
                (SELECT text FROM example_gloss WHERE example_id=e.id AND lang='zh') AS zh,
                (SELECT text FROM example_gloss WHERE example_id=e.id AND lang='en') AS en
           FROM example e
          WHERE e.word = ? AND COALESCE(e.hidden,0)=0
-         ORDER BY CASE WHEN e.sense_id IS NULL THEN 1 ELSE 0 END, e.id
+         ORDER BY CASE WHEN e.sense_id IS NULL THEN 1 ELSE 0 END,
+                  CASE WHEN e.tags IS NOT NULL THEN 0 ELSE 1 END, e.id
          LIMIT 40`),
+      // ⬆ B31（2026-11-07）：带标签的例句排前面（与 de 同一套上限、同一个口径）。可见 126 → 127／128。
 
 
         // ══ 搭配反查（2026-09-12）════════════════════════════════════════════
@@ -693,10 +696,10 @@ export class PortugueseDictService {
       readings,
       examples: (this.q.examples.all(w) as Array<{
         sense_id: number | null; text: string; ref: string | null;
-        bold: string | null; zh: string | null; en: string | null;
+        bold: string | null; zh: string | null; en: string | null; tags: string | null;
       }>).map((e) => ({
         senseId: e.sense_id, text: e.text, zh: e.zh, en: e.en, ref: e.ref,
-        bold: parseBold(e.bold),
+        bold: parseBold(e.bold), tags: e.tags,
       })),
       collocations: this.q.colloc.all(id) as PortugueseCollocation[],
       inflections,

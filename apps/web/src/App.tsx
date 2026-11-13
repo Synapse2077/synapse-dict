@@ -2,24 +2,24 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   GENDER_LABELS, POS_LABELS, REGISTER_LABELS, NUMBER_LABELS, TOPIC_LABELS,
   REL_LABELS, EXCHANGE_LABELS, TRANS_LABELS,
-  ES_REGION_LABELS, ES_ARTICLE, ES_CONJ_LABELS,
-  IT_REGION_LABELS, IT_GRAMMAR_LABELS, IT_ARTICLE, IT_AUX_LABELS, IT_CONJ_LABELS, IT_NUMBER_NOTE_LABELS,
+  ES_REGION_LABELS, ES_ARTICLE, ES_CONJ_LABELS, ES_EXAMPLE_TAG_LABELS,
+  IT_REGION_LABELS, IT_GRAMMAR_LABELS, IT_ARTICLE, IT_AUX_LABELS, IT_CONJ_LABELS, IT_NUMBER_NOTE_LABELS, IT_EXAMPLE_TAG_LABELS,
   itAudioRegion,
   FR_AUX_LABELS, FR_VGROUP_LABELS, FR_ADJPOS_LABELS, FR_REGION_LABELS,
-  FR_REGION_CODE_LABELS, FR_PRON_CONTEXT_LABELS, FR_ARTICLE,
-  PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE, ptInflHeading,
-  DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel,
-  EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels, enSenseTopics,
+  FR_REGION_CODE_LABELS, FR_PRON_CONTEXT_LABELS, FR_ARTICLE, FR_EXAMPLE_TAG_LABELS,
+  PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE, ptInflHeading, PT_EXAMPLE_TAG_LABELS,
+  DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel, DE_EXAMPLE_TAG_LABELS,
+  EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels, enSenseTopics, EN_EXAMPLE_TAG_LABELS,
   etymologyBrief, audioChipLabels,
-  JA_POS_LABELS, JA_KANJI_GRADE_LABELS, JA_RELATION_LABELS, JA_RELATION_SECTION, jaPitchType,
+  JA_POS_LABELS, JA_KANJI_GRADE_LABELS, JA_RELATION_LABELS, JA_RELATION_SECTION, jaPitchType, JA_EXAMPLE_TAG_LABELS,
   JA_KANJI_READING_KIND, JA_KANJI_READING_SUBKIND, JA_KANJI_READING_ORDER,
   JA_REGISTER_LABELS, JA_REGION_LABELS, JA_GRAMMAR_LABELS, JA_USAGE_LABELS,
   jaVclassLabel, mostSpecificTopics,
-  KO_POS_LABELS, KO_RELATION_LABELS, KO_ANNOTATION_KINDS, koRelationTagLabels,
+  KO_POS_LABELS, KO_RELATION_LABELS, KO_ANNOTATION_KINDS, koRelationTagLabels, KO_EXAMPLE_TAG_LABELS,
   KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE, KO_EDITION_LABELS,
   koConjMeaningDependent, koHanjaIsMixed,
   VI_POS_LABELS, VI_RELATION_LABELS, VI_DIALECT_LABELS, VI_ETYM_TYPE_LABELS,
-  VI_SPELLING_RULE, VI_EDITION_LABELS, viEditionRank,
+  VI_SPELLING_RULE, VI_EDITION_LABELS, viEditionRank, VI_EXAMPLE_TAG_LABELS,
   RU_POS_LABELS, RU_RELATION_LABELS, RU_ASPECT_SUBKIND_LABELS, RU_FAMILY_POS_LABELS, RU_FAMILY_FORM_LABELS,
   RU_ASPECT_LABELS, RU_GENDER_LABELS, RU_INFL_TAG_LABELS, RU_GRAMMAR_LABELS, RU_USAGE_LABELS, RU_EXAMPLE_TAG_LABELS,
   RU_EDITION_LABELS, RU_DIALECT_LABELS, RU_ETYM_TYPE_LABELS,
@@ -48,7 +48,8 @@ type EnFormOf = { base: string; label: string | null; kind: string; clickable: b
 type EnReading = { ipa: string; notation: string; region: string | null; src: string };
 type EnAudio = { file: string; url: string | null; region: string | null;
                  regionSrc: string | null; speaker: string | null };
-type EnExample = { text: string; zh: string | null; ref: string | null; modern: string | null };
+type EnExample = { text: string; zh: string | null; ref: string | null; modern: string | null;
+  tags: string | null };   // B31：源头例句标签（搭配…），`|` 分隔
 type EnSense = {
   id: number; rank: number; pos: string | null; en: string | null; zh: string | null;
   /** 义项中文的来源：model:def ／ template:form_of ／ ecdict-core ／ ecdict */
@@ -64,7 +65,7 @@ type EnSense = {
 type EnEntry = {
   lang: 'en';
   id: number; word: string; pos: string | null; isLemma: boolean;
-  rulers: { collins: number | null; oxford: number | null; examTag: string | null;
+  rulers: { examTag: string | null;
             bnc: number | null; freqRank: number | null; freqZipf: number | null };
   readings: EnReading[];
   audio: EnAudio[];
@@ -174,6 +175,7 @@ type SpanishEntry = {
 // 两者都带 `senseId`，所以挂在**对应的义项下面**，不是笼统堆在词条末尾。
 type SpanishExample = {
   id: number; senseId: number | null; text: string; zh: string | null; ref: string | null;
+  tags: string | null;           // B31：源头例句标签（搭配…），`|` 分隔
 };
 type SpanishRelation = {
   senseId: number | null; kind: string; target: string; tags: string[]; linkable: boolean;
@@ -206,7 +208,8 @@ type SpanishUnifiedSense = {
 };
 
 // Italian entry (意语专属 schema：本质字段 aux/conj/gender/plural 为一等公民)
-type ItExample = { text: string; zh: string | null; en: string | null; ref: string | null };
+type ItExample = { text: string; zh: string | null; en: string | null; ref: string | null;
+  tags: string | null };   // B31：源头例句标签（搭配…），`|` 分隔
 type ItSense = {
   /** 这条义项自己的语义关系（2026-09-12 补）。词条级那一份只留没有义项归属的。 */
   relations: ItRelationGroup[];
@@ -336,6 +339,7 @@ type FrReading = {
 type FrExample = {
   senseId: number | null; text: string; zh: string | null;
   en: string | null; ref: string | null; bold: Array<[number, number]>;
+  tags: string | null;           // B31：源头例句标签（搭配／谚语／转义…），`|` 分隔
 };
 type FrRelationGroup = {
   kind: string;
@@ -429,6 +433,7 @@ type PtReading = {
 type PtExample = {
   senseId: number | null; text: string; zh: string | null;
   en: string | null; ref: string | null; bold: Array<[number, number]>;
+  tags: string | null;           // B31：源头例句标签（搭配／谚语），`|` 分隔
 };
 type PtInflection = { base: string; label: string | null; clickable: boolean };
 type PtForm = { form: string; label: string | null };
@@ -534,7 +539,8 @@ type DeReading = {
   ipa: string; notation: string | null; region: string | null;
   pos: string | null; primary: boolean; src: string | null;
 };
-type DeExample = { senseId: number | null; text: string; zh: string | null; ref: string | null };
+type DeExample = { senseId: number | null; text: string; zh: string | null; ref: string | null;
+  tags: string | null };   // B31：源头例句标签（转义），`|` 分隔
 type DeInflection = { base: string; label: string | null; clickable: boolean };
 type DeForm = { form: string; label: string | null };
 type DeAudio = { url: string; region: string | null; regionSrc: string | null; speaker: string | null };
@@ -623,6 +629,7 @@ type JaExample = {
   senseId: number | null; text: string; zh: string | null; en: string | null;
   roman: string | null; ruby: Array<[string, string]>;
   ref: string | null; bold: Array<[number, number]>;
+  tags: string | null;           // B31：源头例句标签（搭配／谚语…），`|` 分隔
 };
 // 汉字音訓読み（阶段 4c）。⚠️ 同样是 `japanese.ts` 的**手抄副本**，见 `JaSense` 那条注释。
 type JaKanjiReading = {
@@ -1320,15 +1327,6 @@ const SpeakerIcon = () => (
     <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
   </svg>
 );
-
-function CollinsStars({ rating }: { rating: number | null }) {
-  if (!rating) return null;
-  return (
-    <span className="collins-stars" title={`Collins ${rating} 星`}>
-      {'★'.repeat(rating)}{'☆'.repeat(5 - rating)}
-    </span>
-  );
-}
 
 // --- App ---
 
@@ -2171,8 +2169,9 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
       <header className="entry-header">
         <h2 className="entry-word">{entry.word}</h2>
         <div className="entry-meta-row">
-          <CollinsStars rating={r.collins} />
-          {r.oxford === 1 && <span className="badge oxford">Oxford 3000</span>}
+          {/* 🔴 B33（2026-11-13 用户定）：柯林斯星级／Oxford 3000 **不上页面**。两样都经 ECDICT
+              转手、源自柯林斯与牛津的专有词表，名字本身是商标；ECDICT 的 MIT 管不到上游。
+              数据留在库里当内部尺子（同 ja `core_level`），接口也不返回 —— 契约闸 C2 锁。 */}
           {/* ⭐ 考纲标签是 en 独有的资产（五门都没有），放在最显眼处 */}
           {exams.map((t) => <span className="badge tag" key={t}>{t}</span>)}
           {!entry.isLemma && <span className="badge">变形</span>}
@@ -2423,7 +2422,9 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                                fr/pt 的 `.ex-fr`/`.ex-pt` 就是「类名加了、样式没跟上」，
                                用户当时的原话是「这个页面排版很奇怪」。 */}
                         {x.ref && <div className="ex-ref">{x.ref}</div>}
-                        <div className="ex-en" lang="en">{x.text}</div>
+                        {/* B31：源头例句标签（搭配…）。键没映射就不印 —— 不拿英文键兜底（契约闸全值域查漏） */}
+                        <div className="ex-en" lang="en">{x.tags ? x.tags.split('|').filter((t) => EN_EXAMPLE_TAG_LABELS[t]).map((t) => (
+                          <span key={t} className="ex-chip">{EN_EXAMPLE_TAG_LABELS[t]}</span>)) : null}{x.text}</div>
                         {/* 🔴 阶段 5e 之前 zh 一律为 null —— **例句照样显示**，不靠中文过滤 */}
                         {x.zh && <div className="ex-zh">{x.zh}</div>}
                         {x.modern && <div className="ex-zh">今：{x.modern}</div>}
@@ -2797,7 +2798,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
                                  onWord={onWord} />
                     {entry.examples.filter((x) => x.senseId === s.id).slice(0, 3).map((x) => (
                       <div className="sense-example" key={x.id}>
-                        <div className="ex-es" lang="es">{x.text}</div>
+                        <div className="ex-es" lang="es"><EsExTags tags={x.tags} />{x.text}</div>
                         {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
                       </div>
                     ))}
@@ -2851,7 +2852,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
           <h3>例句</h3>
           {entry.examples.filter((x) => !x.senseId).slice(0, 6).map((x) => (
             <div className="sense-example" key={x.id}>
-              <div className="ex-es" lang="es">{x.text}</div>
+              <div className="ex-es" lang="es"><EsExTags tags={x.tags} />{x.text}</div>
               {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
             </div>
           ))}
@@ -3048,7 +3049,9 @@ export function groupItSenses(senses: ItSense[]): {
 function ItExampleView({ ex }: { ex: ItExample }) {
   return (
     <div className="sense-example">
-      <div className="ex-it" lang="it">{ex.text}</div>
+      {/* B31：源头例句标签（搭配…）。键没映射就不印 —— 不拿英文键兜底（契约闸全值域查漏） */}
+      <div className="ex-it" lang="it">{ex.tags ? ex.tags.split('|').filter((t) => IT_EXAMPLE_TAG_LABELS[t]).map((t) => (
+        <span key={t} className="ex-chip">{IT_EXAMPLE_TAG_LABELS[t]}</span>)) : null}{ex.text}</div>
       {ex.zh && <div className="ex-zh">{ex.zh}</div>}
       {ex.ref && <div className="ex-ref">{ex.ref}</div>}
     </div>
@@ -3536,6 +3539,13 @@ const SUP = /\^\((\[[^\])]*\]|[^\])]*)\)/g;
 const WLINK = /\[\[w:[^|\]]*\|([^\]]*)\]\]/g;
 // 整行就是一条「维基百科条目」参见（16 条）—— 那不是例句，不渲染。
 const WIKI_ONLY = /^\s*\[\[w:[^\]]*\]\]\s*sur l[’']encyclopédie/i;
+/** B31：例句前的源头标签（搭配／谚语／转义…）。键没映射就不印 —— 不拿英文键兜底（契约闸全值域查漏）。 */
+function FrExTags({ tags }: { tags: string | null }) {
+  if (!tags) return null;
+  return <>{tags.split('|').filter((t) => FR_EXAMPLE_TAG_LABELS[t]).map((t) => (
+    <span key={t} className="ex-chip">{FR_EXAMPLE_TAG_LABELS[t]}</span>))}</>;
+}
+
 function FrText({ text: raw }: { text: string }) {
   const text = raw.replace(WLINK, '$1');
   const parts: Array<string | { sup: string }> = [];
@@ -3788,7 +3798,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                            —— es 展示层已知的三条线索之一就是「超长内容撑版面」。 */}
                     {entry.examples.filter((x) => x.senseId === s.id && !WIKI_ONLY.test(x.text)).slice(0, 3).map((x, xi) => (
                       <div className="sense-example" key={xi}>
-                        <div className="ex-fr" lang="fr"><FrText text={x.text} /></div>
+                        <div className="ex-fr" lang="fr"><FrExTags tags={x.tags} /><FrText text={x.text} /></div>
                         {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
                       </div>
                     ))}
@@ -3875,7 +3885,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           <h3>例句</h3>
           {entry.examples.filter((x) => x.senseId === null && !WIKI_ONLY.test(x.text)).slice(0, 6).map((x, i) => (
             <div className="sense-example" key={i}>
-              <div className="ex-fr" lang="fr"><FrText text={x.text} /></div>
+              <div className="ex-fr" lang="fr"><FrExTags tags={x.tags} /><FrText text={x.text} /></div>
               {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
             </div>
           ))}
@@ -4166,7 +4176,7 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
                     )}
                     {entry.examples.filter((x) => x.senseId === s.id && shownEx.has(x)).map((x, xi) => (
                       <div className="sense-example" key={xi}>
-                        <div className="ex-pt" lang="pt">{x.text}</div>
+                        <div className="ex-pt" lang="pt"><PtExTags tags={x.tags} />{x.text}</div>
                         {x.zh && <div className="ex-zh">{x.zh}</div>}
                         {!x.zh && x.en && <div className="ex-zh">{x.en}</div>}
                         {ptCleanRef(x.ref) && <div className="ex-ref">{ptCleanRef(x.ref)}</div>}
@@ -4246,7 +4256,7 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
               后果是同一页上两种例句样式并存。 */}
           {entry.examples.filter((x) => x.senseId === null).slice(0, 12).map((x, i) => (
             <div className="sense-example" key={i}>
-              <div className="ex-pt" lang="pt">{x.text}</div>
+              <div className="ex-pt" lang="pt"><PtExTags tags={x.tags} />{x.text}</div>
               {x.zh && <div className="ex-zh">{x.zh}</div>}
               {!x.zh && x.en && <div className="ex-zh">{x.en}</div>}
               {ptCleanRef(x.ref) && <div className="ex-ref">{ptCleanRef(x.ref)}</div>}
@@ -4331,6 +4341,34 @@ function DeSenseChips({ sense }: { sense: DeSense }) {
  *   · 挂在义项上的：嵌在该义项下，**每条义项最多 3 句**（与 es/fr/pt 同一上限）
  *   · `senseId` 为空的：另起一个词条级「例句」区，**最多 12 句**
  */
+/** B31：pt 例句前的源头标签（同 DeExTags）。 */
+function PtExTags({ tags }: { tags: string | null }) {
+  if (!tags) return null;
+  return <>{tags.split('|').filter((t) => PT_EXAMPLE_TAG_LABELS[t]).map((t) => (
+    <span key={t} className="ex-chip">{PT_EXAMPLE_TAG_LABELS[t]}</span>))}</>;
+}
+
+/** B31：vi 例句前的源头标签（同 DeExTags）。 */
+function ViExTags({ tags }: { tags: string | null }) {
+  if (!tags) return null;
+  return <>{tags.split('|').filter((t) => VI_EXAMPLE_TAG_LABELS[t]).map((t) => (
+    <span key={t} className="ex-chip">{VI_EXAMPLE_TAG_LABELS[t]}</span>))}</>;
+}
+
+/** B31：es 例句前的源头标签（同 DeExTags）。 */
+function EsExTags({ tags }: { tags: string | null }) {
+  if (!tags) return null;
+  return <>{tags.split('|').filter((t) => ES_EXAMPLE_TAG_LABELS[t]).map((t) => (
+    <span key={t} className="ex-chip">{ES_EXAMPLE_TAG_LABELS[t]}</span>))}</>;
+}
+
+/** B31：例句前的源头标签。键没映射就不印 —— 不拿英文键兜底（契约闸全值域查漏）。 */
+function DeExTags({ tags }: { tags: string | null }) {
+  if (!tags) return null;
+  return <>{tags.split('|').filter((t) => DE_EXAMPLE_TAG_LABELS[t]).map((t) => (
+    <span key={t} className="ex-chip">{DE_EXAMPLE_TAG_LABELS[t]}</span>))}</>;
+}
+
 export function deShownExamples(
   senses: { id: number }[],
   examples: { senseId: number | null }[],
@@ -4593,7 +4631,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                             ⭐ 这条是**只有渲染成品才发现得了**的缺陷：
                                数据完全正确，`ref` 挂在对的那条例句上，闸永远绿。 */}
                         {x.ref && <div className="example-ref">{x.ref}</div>}
-                        <div className="example-de">{x.text}</div>
+                        <div className="example-de"><DeExTags tags={x.tags} />{x.text}</div>
                         {x.zh && <div className="example-zh">{x.zh}</div>}
                       </div>
                     ))}
@@ -4667,7 +4705,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
               <li className="example-item" key={i}>
                 {/* 出处在前、引文在后 —— 理由同上面义项内那段 */}
                 {e.ref && <div className="example-ref">{e.ref}</div>}
-                <div className="example-de">{e.text}</div>
+                <div className="example-de"><DeExTags tags={e.tags} />{e.text}</div>
                 {e.zh && <div className="example-zh">{e.zh}</div>}
               </li>
             ))}
@@ -5258,7 +5296,9 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
         //    **一个 class 都不写反而在它的视野外** —— 与「空标签」同族的盲区。
         //    ⇒ 契约闸补了一条盯它。
         <li className="example-item" key={i}>
-          <div className="example-text"><JaRuby text={x.text} ruby={x.ruby} /></div>
+          {/* B31：源头例句标签（搭配…）。键没映射就不印 —— 不拿英文键兜底（契约闸全值域查漏） */}
+          <div className="example-text">{x.tags ? x.tags.split('|').filter((t) => JA_EXAMPLE_TAG_LABELS[t]).map((t) => (
+            <span key={t} className="ex-chip">{JA_EXAMPLE_TAG_LABELS[t]}</span>)) : null}<JaRuby text={x.text} ruby={x.ruby} /></div>
           {x.roman && <div className="example-roman">{x.roman}</div>}
           {/* 🔴 中文优先、英文兜底 —— 但**两个都印不出来时不印空行**。
               中文版白送了 8,586 条译文，英文版 20,632 条。 */}
@@ -5495,6 +5535,9 @@ type KoRelation = {
   target: string;
   /** 链接落点（解析后的词头），查不到是 null ⇒ 印成纯文本。 */
   targetNorm: string | null;
+  /** K20：边指向的那个词条（认不准是 null）及其词头。有它 ⇒ 链接落到那个词、高亮那个词条。 */
+  targetEntryId: number | null;
+  targetEntryWord: string | null;
   zh: string | null;
   /**
    * 源头给的标签数组（JSON 字符串）。`koRelationTagLabels()` 只取认得出的那些，
@@ -5507,6 +5550,8 @@ type KoSense = {
   // 🔴 `etymKey`（`<版>:<etym_no>`）是共用组件 `<EtymologyNote>` 的键。
   //    K26 之前这一行不存在 ⇒ 38,796 条词源正文到不了读者面前。
   id: number; etymNo: string | null; etymKey: string | null; pos: string | null;
+  /** K20：义项属于哪个词条（关系链接带锚跳过来时按它高亮）。 */
+  entryId: number | null;
   zh: string | null; en: string | null; ko: string | null;
   zhFromModel: boolean;
   relations: KoRelationGroup[];
@@ -5514,6 +5559,7 @@ type KoSense = {
 type KoExample = {
   senseId: number | null; text: string;
   zh: string | null; en: string | null; ref: string | null; roman: string | null;
+  tags: string | null;           // B31：源头例句标签（搭配／谚语／敬语…），`|` 分隔
 };
 type KoEntryRow = {
   hanja: string | null; pos: string | null; etymNo: string | null;
@@ -5560,10 +5606,15 @@ function KoRelationRow({ group, onWord, hideKind }: {
       )}
       {group.items.map((t, i) => (
         <span key={`${t.target}-${i}`} className="rel-item">
-          {!annotation && t.targetNorm ? (
-            <a className="rel-link" href={`#${hashFor(t.targetNorm)}`}
+          {!annotation && (t.targetEntryWord ?? t.targetNorm) ? (
+            // K20：有词条锚 ⇒ 落到锚到的那个词（多字汉字 `不明` → `불명`），并记下要高亮的词条
+            <a className="rel-link" href={`#${hashFor((t.targetEntryWord ?? t.targetNorm)!)}`}
               title={t.zh ?? undefined}
-              onClick={(e) => { e.preventDefault(); onWord(t.targetNorm!); }}>{t.target}</a>
+              onClick={(e) => {
+                e.preventDefault();
+                pendingKoEntry = t.targetEntryId;
+                onWord((t.targetEntryWord ?? t.targetNorm)!);
+              }}>{t.target}</a>
           ) : (
             <span className="rel-plain" title={t.zh ?? undefined}>{t.target}</span>
           )}
@@ -5614,10 +5665,23 @@ function KoReadingRow({ p, speak }: {
   );
 }
 
+// K20：关系链接点下去时要高亮的词条。模块级而不是进 hash —— hash 的格式十门共用，牵扯历史记录与回退。
+//   只在本页渲染后被消费一次（找不到那个词条的义项也清掉，免得挂到之后别的页上）。
+let pendingKoEntry: number | null = null;
+
 export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
   entry: KoEntry; speakLocale: string; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  const [hitEntry, setHitEntry] = useState<number | null>(null);
+  useEffect(() => {
+    const id = pendingKoEntry;
+    pendingKoEntry = null;
+    if (id == null || !entry.senses.some((s) => s.entryId === id)) { setHitEntry(null); return; }
+    setHitEntry(id);
+    const el = document.querySelector(`[data-ko-entry="${id}"]`);
+    if (el) el.scrollIntoView({ block: 'center' });
+  }, [entry]);
   // 按「词性 ＋ 词源号」断组 —— 与前七门同一条规矩：词性相同**且**词源相同才合并，
   // 否则同形异源被并进一组（`사랑` 的两个词条，第二个的汉字表记是 舍廊）。
   const groups: Array<{ key: string; pos: string | null; etymNo: string | null;
@@ -5695,7 +5759,8 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
     <ul className="example-list">
       {xs.map((x, i) => (
         <li className="example-item" key={i}>
-          <div className="example-text" lang="ko">{x.text}</div>
+          <div className="example-text" lang="ko">{x.tags ? x.tags.split('|').filter((t) => KO_EXAMPLE_TAG_LABELS[t]).map((t) => (
+            <span key={t} className="ex-chip">{KO_EXAMPLE_TAG_LABELS[t]}</span>)) : null}{x.text}</div>
           {x.roman && <div className="example-roman">{x.roman}</div>}
           {(x.zh || x.en) && <div className="example-zh">{x.zh ?? x.en}</div>}
           {x.ref && <div className="example-ref">{x.ref}</div>}
@@ -5705,7 +5770,8 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
   );
 
   const renderSense = (s: KoSense) => (
-    <li key={s.id} className="sense-item">
+    <li key={s.id} className={s.entryId != null && s.entryId === hitEntry ? 'sense-item ko-entry-hit' : 'sense-item'}
+      data-ko-entry={s.entryId ?? undefined}>
       {/* 三语：中文 → 英文 → 韩语原文（`[[gloss-three-languages]]`）。
           ⚠️ 没有中文时英文顶上来当主释义，不缩成带徽标的补充行 ——
           否则这批义项在页面上整个「没有释义」。 */}
@@ -6041,6 +6107,7 @@ type ViSense = {
 type ViExample = {
   senseId: number | null; text: string; ref: string | null;
   zh: string | null; en: string | null;
+  tags: string | null;           // B31：源头例句标签（搭配／谚语／歌谣…），`|` 分隔
 };
 type ViEntry = {
   lang: 'vi';
@@ -6382,7 +6449,7 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
                 ))}
                 {(bySense.get(s.id) ?? []).map((x) => (
                   <div key={x.text} className="vi-example">
-                    <span className="vi-example-text">{x.text}</span>
+                    <ViExTags tags={x.tags} /><span className="vi-example-text">{x.text}</span>
                     {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
                     {x.en ? <span className="vi-example-en">{x.en}</span> : null}
                     {/* 🔴🔴 W10：`ref` 是**出处**。vi 版 709 条 translation 里一条真译文都没有
@@ -6419,7 +6486,7 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
           <h3 className="vi-sec-title">例句</h3>
           {entryLevelEx.map((x) => (
             <div key={x.text} className="vi-example">
-              <span className="vi-example-text">{x.text}</span>
+              <ViExTags tags={x.tags} /><span className="vi-example-text">{x.text}</span>
               {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
               {x.en ? <span className="vi-example-en">{x.en}</span> : null}
               {x.ref ? <span className="vi-example-ref">出处：{x.ref}</span> : null}

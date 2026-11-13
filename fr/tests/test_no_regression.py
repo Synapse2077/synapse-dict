@@ -61,6 +61,7 @@ import build_pronunciation_layer as _pron                 # noqa: E402
 import clean_reading_intruders as _intr                   # noqa: E402
 import strip_zh_gloss_period as _per                      # noqa: E402
 import build_search_prefix as _pref                       # noqa: E402
+import example_tags as _xt                                # noqa: E402  B31
 from intake_fr_words import norm_apos                     # noqa: E402
 sys.path.insert(0, str(HERE.parent.parent / "scripts"))
 from zh_t2s import t2s as _t2s                            # noqa: E402
@@ -325,6 +326,18 @@ def special(con, trace=False):
            "SELECT 1 FROM example_gloss g WHERE g.example_id=e.id AND g.lang='zh')")
     one("E3", "translate_examples", "08-26", "例句没有中文译文", n, nv)
 
+    # E4／E5：例句标签（B31，2026-11-06）。判据 import 生成侧那一份（`example_tags`），不另抄。
+    #   E4 值域外／乱序 —— 契约闸按 FR_EXAMPLE_TAG_LABELS 印中文，值域外的键会被静默不印。
+    #   E5 带标签的行比声明的少 —— 重建 `example` 时漏了标签列，别的闸一条都看不见
+    #      （行数不变、文本不变、中文不变）。期望值**独立声明**在 `_xt.EXPECT_TAGGED`。
+    has = any(r[1] == "tags" for r in con.execute("PRAGMA table_info(example)"))
+    tg = list(con.execute("SELECT e.tags, e.hidden FROM example e WHERE e.tags IS NOT NULL")) if has else []
+    n = sum(1 for v, _h in tg if _xt.bad_tag_value(v))
+    nv = sum(1 for v, h in tg if not h and _xt.bad_tag_value(v))
+    one("E4", "example_tags", "11-06", "例句标签值域外或乱序（B31）", n, nv)
+    n = max(0, _xt.EXPECT_TAGGED - len(tg))
+    one("E5", "example_tags", "11-06", "例句标签少了（应 %s 行，B31）" % format(_xt.EXPECT_TAGGED, ","), n, n)
+
     # ── F 组：结构不变量（**这些必须恒为 0**）────────────────────────────
     # 🔴 F1 是 2026-08-26 `attach_orphan_examples` 立的硬不变量：例句的词 == 义项的词
     n = q("SELECT COUNT(*) FROM example e JOIN sense s ON s.id=e.sense_id "
@@ -504,6 +517,11 @@ MUTATIONS = [
     ("E1", "UPDATE example SET text='Synonym: mutation' WHERE id="
            "(SELECT e.id FROM example e JOIN sense s ON s.id=e.sense_id "
            " WHERE COALESCE(s.hidden,0)=0 LIMIT 1)"),
+    # B31：值域外的键、整条标签被清掉 —— 各造一条
+    ("E4", "UPDATE example SET tags='collocation|UK' WHERE id="
+           "(SELECT MIN(id) FROM example WHERE tags IS NOT NULL AND hidden=0)"),
+    ("E5", "UPDATE example SET tags=NULL WHERE id="
+           "(SELECT MIN(id) FROM example WHERE tags IS NOT NULL)"),
     ("F1", "UPDATE example SET word=word||'ZZ' WHERE id="
            "(SELECT id FROM example WHERE sense_id IS NOT NULL LIMIT 1)"),
     ("A5", "INSERT INTO pronunciation (word_id,ipa,notation,is_primary,src,src_ref) "
@@ -621,7 +639,14 @@ def mutate(only=()):
     for cid, sql in todo:
         t0 = time.time()
         con.execute("BEGIN")
+        c0 = con.total_changes
         con.execute(sql)
+        # 🔴 注入 0 行＝什么都没造，「没逮住」与「逮住了」都无从谈起 ⇒ 直接判死
+        #    （ru 11-05：X7 的前提被推进掉之后成了空操作，照样报绿）
+        if con.total_changes == c0:
+            con.execute("ROLLBACK")
+            print("   🔴 变异没改到任何行 %-5s —— 前提已不成立，改变异 SQL" % cid, flush=True)
+            continue
         after = {r[0]: (r[4], r[5]) for r in run(con)}
         con.execute("ROLLBACK")                      # ← 干净还原，不留痕
         b, a = base.get(cid, (0, 0)), after.get(cid, (0, 0))

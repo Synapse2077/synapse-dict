@@ -41,6 +41,7 @@
     "gate:es-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-es.tsx",
     "gate:fr-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-fr.tsx",
     "gate:pt-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-pt.tsx",
+    "gate:it-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check.tsx",
     "gate:colloc-display": "tsx --tsconfig apps/web/tsconfig.json apps/web/src/contract-check-colloc.tsx",
     "gate:display": "python3 -u scripts/run_display_gates.py",
     "gate:first-build": "python3 -u scripts/test_first_build_gate.py",

@@ -34,7 +34,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
 import { SpanishEntryView, capAudios } from './App';
-import { ES_REGION_LABELS } from '@synapse-dict/dict-labels';
+import { ES_REGION_LABELS, ES_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 
 const svc = getService('es') as unknown as {
   getEntry(w: string): unknown;
@@ -47,7 +47,7 @@ type EsEntry = {
   unifiedSenses: Array<{ id: number; pos: string | null; title: string; detail: string | null }>;
   baseForms: string[]; inflNotes: string[];
   forms: Array<{ word: string; label: string }>;
-  examples: Array<{ text: string; senseId: number | null }>;
+  examples: Array<{ text: string; senseId: number | null; tags: string | null }>;
   homographs: Array<{ word: string }>;
   audios: Array<{ file: string; url: string | null; region: string | null;
     speaker: string | null }>;
@@ -69,7 +69,34 @@ function visibleText(html: string): string {
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 }
 
+const EX_CHIP = /<span class="ex-chip">([^<]*)<\/span>/g;
 const CHECKS: Check[] = [
+  {
+    // B31（2026-11-07）：源头例句标签（搭配／谚语／转义…）。按**块**对（fr／en／de 同款）：
+    //    每个 `ex-es` 块剥掉 chip 后的原句 ↔ 接口里同一句的 tags，chip 必须逐个一致。
+    name: '🔴 例句标签键必须有中文名（B31）',
+    hit: (e) => {
+      const exs = e.examples;
+      const nolab = exs.flatMap((x) => (x.tags ?? '').split('|').filter((k) => k && !ES_EXAMPLE_TAG_LABELS[k]));
+      return nolab.length ? `例句标签键没有中文名：${[...new Set(nolab)].join('、')}` : null;
+    },
+  },
+  {
+    name: '🔴 例句块的标签胶囊必须与该句的源头标签逐个一致（B31）',
+    hit: (e, html) => {
+      const exs = e.examples;
+      for (const m of html.matchAll(/<div class="ex-es" lang="es">([\s\S]*?)<\/div>/g)) {
+        const chips = [...m[1].matchAll(EX_CHIP)].map((c) => c[1]);
+        const body = visibleText(m[1].replace(EX_CHIP, '')).replace(/\s+/g, ' ').trim();
+        const x = exs.find((y) => y.text.replace(/\s+/g, ' ').trim() === body);
+        const want = (x?.tags ?? '').split('|').filter(Boolean).map((k) => ES_EXAMPLE_TAG_LABELS[k]);
+        if (chips.join('|') !== want.join('|')) {
+          return `「${body.slice(0, 30)}」印了 [${chips.join('、')}]，应为 [${want.join('、')}]`;
+        }
+      }
+      return null;
+    },
+  },
   {
     name: '🔴 有可见义项就必须渲染出「释义」区块',
     hit: (e, html) => (e.unifiedSenses.length > 0 && !html.includes('>释义<')
@@ -247,16 +274,20 @@ function targets(limit: number): string[] {
   //    `words.slice(0, 4000)`，①②③ 就已经 5,599 个 ⇒ 录音那条变异会报「可试对象 0」，
   //    也就是一条**永远通过**的假闸（上面 ①②③ 交错就是为了治这个，这里同理）。
   const famD = q(`SELECT DISTINCT word FROM audio`);
+  // B31：带标签的例句（632 条），按标签值轮转取
+  const famE = q(`SELECT word FROM (SELECT word, tags, ROW_NUMBER() OVER (PARTITION BY tags ORDER BY id) rn
+     FROM example WHERE tags IS NOT NULL) GROUP BY word ORDER BY MIN(rn), word LIMIT 600`);
   // 🔴 **三族轮转交错，不是首尾相接。** 第一版按 ①②③ 顺序拼，而 ①② 就有 4,399 个 ——
   //    `--limit 3000` 和变异验证的 `slice(0,4000)` 都取不到 ③，
   //    「补收词头的变形形区块」那条变异报「可试对象 0」。
   //    交错之后任何一个 `--limit` 都会同时覆盖三族。
   const must: string[] = [];
-  for (let i = 0; i < Math.max(famA.length, famB.length, famC.length, famD.length); i += 1) {
+  for (let i = 0; i < Math.max(famA.length, famB.length, famC.length, famD.length, famE.length); i += 1) {
     if (i < famA.length) must.push(famA[i]);
     if (i < famB.length) must.push(famB[i]);
     if (i < famC.length) must.push(famC[i]);
     if (i < famD.length) must.push(famD[i]);
+    if (i < famE.length) must.push(famE[i]);
   }
 
   const set = new Set<string>();
@@ -278,6 +309,11 @@ function run(words: string[], quiet = false): number {
   const fails = new Map<string, string[]>();
   let n = 0;
   if (!quiet) console.log(`■ 待渲染 ${words.length.toLocaleString()} 个词条`);
+  // B31：例句标签**全值域**查漏（不靠抽到哪页）
+  const keys = new Set((db.prepare('SELECT DISTINCT tags FROM example WHERE tags IS NOT NULL').all() as Array<{ tags: string }>)
+    .flatMap((r) => r.tags.split('|')));
+  const nolab = [...keys].filter((k) => !ES_EXAMPLE_TAG_LABELS[k]);
+  if (nolab.length) fails.set('🔴 例句标签值域里有键没有中文名（全库）', nolab);
   for (const w of words) {
     if (!quiet && n > 0 && n % 2000 === 0) {
       console.log(`   [${n.toLocaleString()}/${words.length.toLocaleString()}] 已发现不符 ` +
@@ -337,6 +373,9 @@ function mutate(words: string[]): void {
      (e) => e.baseForms.length > 0],
     // ⚠️ 这条只能做成**数据**变异：库里的地区取值现在全都映射得到（2026-09-13 补完
     //    `Chiloé` 之后），真实数据里已经没有能触发它的词 ⇒ 改 HTML 的话「可试对象 0」。
+    ['B31：给例句塞一个没有中文名的标签键',
+     (e) => { e.examples.find((y) => y.tags)!.tags = 'collocation|zzz-nokey'; },
+     (e) => e.examples.some((y) => !!y.tags)],
     ['🔴 录音地区给一个映射表里没有的原名',
      (e) => { if (e.audios[0]) { e.audios[0].region = 'Neverland'; e.audios[0].speaker = null; } },
      (e) => capAudios(e.audios ?? []).length > 0],
@@ -358,6 +397,10 @@ function mutate(words: string[]): void {
     ['组件漏渲染音标', (h) => h.replace(/phonetic-value/g, 'x-value'),
      (e) => !!e.phonetic],
     ['组件漏渲染例句', (h) => h.replace(/<div class="ex-es"[^>]*>[\s\S]*?<\/div>/g, ''),
+     (e) => e.examples.length > 0],
+    ['B31：组件漏渲染例句标签胶囊', (h) => h.replace(EX_CHIP, ''),
+     (e) => e.examples.some((y) => !!y.tags)],
+    ['B31：每条例句前都塞一个「搭配」', (h) => h.replace(/<div class="ex-es" lang="es">/g, '$&<span class="ex-chip">搭配</span>'),
      (e) => e.examples.length > 0],
     ['🔴 组件漏渲染真人录音行', (h) => h.replace(/class="audio-chip/g, 'class="x-chip'),
      (e) => capAudios(e.audios ?? []).length > 0],

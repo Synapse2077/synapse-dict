@@ -29,6 +29,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
+import { PT_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 import { PortugueseEntryView, capAudios } from './App';
 
 const svc = getService('pt') as unknown as {
@@ -55,7 +56,28 @@ const norm = (x: string) => x
 const text = (h: string) => norm(h.replace(/<[^>]*>/g, ' '));
 const count = (h: string, re: RegExp) => (h.match(re) ?? []).length;
 
+const EX_CHIP = /<span class="ex-chip">([^<]*)<\/span>/g;
 const CHECKS: Check[] = [
+  {
+    // B31（2026-11-07）：源头例句标签（搭配／谚语）。按**块**对（fr／en／de 同款）：
+    //    每个 `ex-pt` 块剥掉 chip 后的原句 ↔ 接口里同一句的 tags，chip 必须逐个一致。
+    name: '🔴 例句块的标签胶囊与该句源头标签不一致（B31）',
+    hit: (e, h) => {
+      const exs = e.examples as Array<{ text: string; tags: string | null }>;
+      const nolab = exs.flatMap((x) => (x.tags ?? '').split('|').filter((k) => k && !PT_EXAMPLE_TAG_LABELS[k]));
+      if (nolab.length) return `例句标签键没有中文名：${[...new Set(nolab)].join('、')}`;
+      for (const m of h.matchAll(/<div class="ex-pt" lang="pt">([\s\S]*?)<\/div>/g)) {
+        const chips = [...m[1].matchAll(EX_CHIP)].map((c) => c[1]);
+        const body = text(m[1].replace(EX_CHIP, ''));
+        const x = exs.find((y) => norm(y.text) === body);
+        const want = (x?.tags ?? '').split('|').filter(Boolean).map((k) => PT_EXAMPLE_TAG_LABELS[k]);
+        if (chips.join('|') !== want.join('|')) {
+          return `「${body.slice(0, 30)}」印了 [${chips.join('、')}]，应为 [${want.join('、')}]`;
+        }
+      }
+      return null;
+    },
+  },
   {
     name: '🔴 有义项却整块释义不渲染（it `TVTB` 那个形状）',
     hit: (e, h) => (e.senses.length > 0 && !/class="sense-zh"/.test(h))
@@ -281,6 +303,9 @@ const arms: Array<[string, string]> = [
                    WHERE q.word_id=d.id AND q.region='pt-PT' AND q.ipa<>p.ipa)
                  GROUP BY d.id LIMIT ${PER}`],
   ['有录音', `SELECT word FROM audio GROUP BY word LIMIT ${PER}`],
+  // B31：带标签的例句（128 条）
+  ['例句带标签', `SELECT word FROM example WHERE tags IS NOT NULL AND COALESCE(hidden,0)=0
+                 GROUP BY word LIMIT ${PER}`],
   ['例句有中文', `SELECT e.word FROM example e
                  JOIN example_gloss g ON g.example_id=e.id AND g.lang='zh'
                  WHERE COALESCE(e.hidden,0)=0 GROUP BY e.word LIMIT ${PER}`],
@@ -320,7 +345,9 @@ for (const w of words) {
       .replace(/class="sense-src-lang"/g, 'class="x"')
       .replace(/class="sense-rels"/g, 'class="x"')
       .replace(/class="alt-of-row"/g, 'class="x"')
-      .replace(/class="sense-altof"/g, 'class="x"');
+      .replace(/class="sense-altof"/g, 'class="x"')
+      // B31：模拟组件漏写 `<PtExTags>` 那一行
+      .replace(EX_CHIP, '');
     // ⑤ 关系组里**少渲染一个目标**（＝ 截断回来了）。
     //    ⚠️ 不能直接 `replace(/class="rel-link"/, …)` —— 全页第一个 `.rel-link`
     //    很可能是异体指针或变形形（断言那边刚因为同一个原因报过 4 条假红）。
@@ -354,6 +381,14 @@ for (const c of CHECKS) {
   red++;
   console.log(`   🔴 ${c.name}`);
   for (const x of arr) console.log(`        ${x}`);
+}
+// B31：例句标签**全值域**查漏（不靠抽到哪页）
+{
+  const keys = new Set((db.prepare('SELECT DISTINCT tags FROM example WHERE tags IS NOT NULL').all() as Array<{ tags: string }>)
+    .flatMap((r) => r.tags.split('|')));
+  const nolab = [...keys].filter((k) => !PT_EXAMPLE_TAG_LABELS[k]);
+  if (nolab.length) { red++; console.log(`   🔴 例句标签值域里有键没有中文名（全库）：${nolab.join('、')}`); }
+  else console.log(`   ✅ 例句标签全值域 ${keys.size} 个键都有中文名（B31）`);
 }
 console.log(red ? `\n🔴 ${red} 条红` : `\n✅ 全部通过（${CHECKS.length} 条断言）`);
 if (mutate) console.log(`\n（--mutate：抹掉 audio-chip / sense-src-lang / sense-rels / alt-of-row / sense-altof 五个类名，`

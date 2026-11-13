@@ -288,7 +288,8 @@ def main():
     ap.add_argument("--load", action="store_true", help="把答案文件写进库（默认干跑）")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--load-tags", default="", help="逗号分隔的答案文件名（如 ru-C1,en-C1）；默认是 5b 那两份")
-    ap.add_argument("--prune-xl", action="store_true", help="撤掉过不了 sense_hidden_why 的破例义项")
+    ap.add_argument("--prune-xl", action="store_true",
+                    help="撤掉不该在的破例义项：过不了 sense_hidden_why，或词元已有别的可印义项")
     a = ap.parse_args()
 
     if a.prune_xl:
@@ -473,6 +474,15 @@ def prune_xl(dry=True):
     bad = [(sid, xid) for sid, xid, lang, text in con.execute(
         "SELECT s.id, x.id, x.lang, x.text FROM sense s JOIN sense_src x ON x.sense_id=s.id "
         "WHERE x.lang IN ('fr','vi','pl')") if _C.sense_hidden_why(lang, text)]
+    # 🔴 第二种「不该在」：**破例条件不再成立** —— 词元已经有了别的可印义项（与义项闸 E6 同一个条件）。
+    #    2026-11-07 R3 把 zh-s 的纸质词典洗出释义后，29 个原本空白的词元有了中文版自己的释义 ⇒ 破例撤下。
+    #    钱没丢：译文在 `xl-` 答案文件里按 `sense_src.id` 存着，页面再变空白时 `--load` 原样收回。
+    seen = {b[0] for b in bad}
+    bad += [(sid, xid) for sid, xid in con.execute(
+        "SELECT s.id, x.id FROM sense s JOIN sense_src x ON x.sense_id=s.id "
+        "WHERE x.lang IN ('fr','vi','pl') AND EXISTS(SELECT 1 FROM sense s2 JOIN sense_src x2 "
+        "ON x2.sense_id=s2.id WHERE s2.word_id=s.word_id AND s2.hidden=0 AND x2.lang IN ('en','ru','zh'))")
+        if sid not in seen]
     ng = con.execute("SELECT COUNT(*) FROM sense_gloss WHERE sense_id IN (%s)"
                      % (",".join(str(b[0]) for b in bad) or "0")).fetchone()[0]
     con.close()
@@ -485,6 +495,8 @@ def prune_xl(dry=True):
         s.executemany("DELETE FROM sense_gloss WHERE sense_id=?", [(b[0],) for b in bad])
         s.executemany("UPDATE sense_src SET sense_id=NULL WHERE id=?", [(b[1],) for b in bad])
         s.executemany("DELETE FROM sense WHERE id=?", [(b[0],) for b in bad])
+    # 🔴 挂在这些义项上的例句要解开（2026-11-07 撤 26 条时漏了 3 句 ⇒ 例句闸 X5）—— `sense_id` 归例句层同步管
+    print("⇒ 下一步必须：python3 -u ru/pipeline/example_layer.py --sync")
 
 
 def load(dry=True, main_tags=("ru-S1-slice2", "en-S1-slice2"), xl_tag="xl"):

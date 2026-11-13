@@ -95,9 +95,10 @@ def collect(conn, limit=None, verbose=True):
                     st["ptr" if via else "ev"][via or ("不出版·" + lang)] += 1
                     continue
                 sid += 1
-                why = criteria.sense_hidden_why(lang, text)
+                why = criteria.sense_hidden_why(lang, text, src)
                 senses.append((sid, word_id, entry_id, si, 1 if why else 0, why))
-                pub_text = criteria.zh_gloss_tidy(text) if lang == "zh" else text
+                # R3（ru-crit-23）：zh 出版文本走 `zh_publish_text`（纸质词典洗成释义），不再只是最小清洗
+                pub_text = criteria.zh_publish_text(text, src) if lang == "zh" else text
                 glosses.append((sid, lang, pub_text, src))
                 ev.append((word_id, entry_id, sid, lang, text, None, src, sref_s))
                 seen = {}

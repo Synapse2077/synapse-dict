@@ -259,6 +259,7 @@ ADD_COLUMNS = [
     ('sense', 'entry_id', 'INTEGER'),                            # pt/pipeline/build_entry_layer.py
     ('sense', 'hidden', 'INTEGER NOT NULL DEFAULT 0'),           # pt/pipeline/build_entry_layer.py
     ('sense_relation', 'hidden', 'INTEGER NOT NULL DEFAULT 0'),  # pt/fixes/hide_dup_word_level_relations.py
+    ('example', 'tags', 'TEXT'),                                 # pt/pipeline/example_tags.py（B31，2026-11-07）
 ]
 
 
