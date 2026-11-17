@@ -47,6 +47,7 @@
 // ============================================================================
 import { DatabaseSync } from 'node:sqlite';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
+import { sourcesForWord, type SourceLink } from './sources.js';
 
 export type VietnameseSearchItem = {
   id: number;
@@ -157,6 +158,8 @@ export type VietnameseEntry = {
   lang: 'vi';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
+  sources: SourceLink[];
   isLemma: boolean;
   syllables: number;
   entries: VietnameseEntryView[];
@@ -423,6 +426,7 @@ export class VietnameseDictService {
       lang: 'vi',
       id,
       word: hit.word,
+      sources: sourcesForWord(this.db, id, hit.word, 'vi'),
       isLemma: !!hit.isLemma,
       syllables: hit.syllables,
       entries: this.q.entries.all(id) as unknown as VietnameseEntryView[],

@@ -14,6 +14,7 @@ import { etymKeyOfEntry } from './etym.js';
 // 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts）。
 import { collocationParts, looseForms, type CollocationDetail } from './collocation.js';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
+import { sourcesForWord, type SourceLink } from './sources.js';
 
 // 一条搜索结果**不是词头本身**时，说明它是从哪儿反查到的。2026-09-12。
 // 目前只有一种：`collocation`（搭配 / 固定短语）。
@@ -201,6 +202,8 @@ export type SpanishEntry = {
   lang: 'es';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
+  sources: SourceLink[];
   phonetic: string | null;       // España 半岛标准音（distinción，含 θ）
   phoneticLatam: string | null;  // América 拉美音（seseo，θ→s 规则派生；与半岛同则为 null）
   pos: string | null;
@@ -386,6 +389,7 @@ function mapEntry(row: EsRow): SpanishEntry {
     lang: 'es',
     id: row.id,
     word: row.word,
+    sources: [],   // 由服务层按真实 src 填（B33①）
     phonetic,
     phoneticLatam: seseoLatam(phonetic),               // América seseo（θ→s 派生）
     pos: row.pos,
@@ -1101,6 +1105,7 @@ export class SpanishDictService {
     }
 
     entry.tts = this.ttsFor(entry.word, entry.phonetic);
+    entry.sources = sourcesForWord(this.db, entry.id, entry.word, 'es');
     return entry;
   }
 

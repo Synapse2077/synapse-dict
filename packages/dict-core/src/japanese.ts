@@ -36,6 +36,7 @@
 // ============================================================================
 import { DatabaseSync } from 'node:sqlite';
 import { etymKeyOfEntry } from './etym.js';
+import { sourcesForWord, type SourceLink } from './sources.js';
 
 export type JapaneseSearchItem = {
   id: number;
@@ -128,6 +129,8 @@ export type JapaneseEntry = {
   lang: 'ja';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
+  sources: SourceLink[];
   pos: string | null;
   kanjiGrade: string | null;   // 常用/教育/人名用/表外 —— 单字条目才有
   // 活用类（五段/一段/サ変/カ変…）。🔴 **词元的属性**，不是某个形的属性 ——
@@ -691,6 +694,7 @@ export class JapaneseDictService {
 
     return {
       lang: 'ja', id, word: head.word as string,
+      sources: sourcesForWord(this.db, id, head.word as string, 'ja'),
       etymologyEditions: this.etymEditions,
       // 键＝`${edition}:${etym_no}`，与展示层 `etymKeyOfEntry()` 拼出来的逐字一致
       etymologyTexts: Object.fromEntries(

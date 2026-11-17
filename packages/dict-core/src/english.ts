@@ -64,6 +64,7 @@
 import { DatabaseSync } from 'node:sqlite';
 // 词源号解析：与 de 共用一份（两门的 `sense` 都没有 `entry_id`，只能看 `src_ref` 的形状）。
 import { etymKeyOfSrcRef } from './etym.js';
+import { sourcesForWord, type SourceLink } from './sources.js';
 // 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts 的实测数字）。
 import { dropDuplicatedAtSenseLevel } from './relations.js';
 
@@ -165,6 +166,8 @@ export type EnglishEntry = {
   lang: 'en';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts —— 不可按语种想当然。 */
+  sources: SourceLink[];
   pos: string | null;
   isLemma: boolean;
   rulers: EnglishRulers;
@@ -456,6 +459,7 @@ export class EnglishDictService {
       lang: 'en',
       id: row.id,
       word: row.word,
+      sources: sourcesForWord(this.db, row.id, row.word, 'en'),
       pos: row.pos,
       isLemma: !!row.is_lemma,
       rulers: {

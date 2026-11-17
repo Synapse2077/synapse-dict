@@ -54,6 +54,7 @@
 //    ⇒ 排掉那一族之后，真正当链接渲染的 204,185 条里空链 **17.69%**。
 // ============================================================================
 import { DatabaseSync } from 'node:sqlite';
+import { sourcesForWord, type SourceLink } from './sources.js';
 
 export type KoreanSearchItem = {
   id: number;
@@ -179,6 +180,8 @@ export type KoreanEntry = {
   lang: 'ko';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
+  sources: SourceLink[];
   isLemma: boolean;
   roman: string | null;
   entries: KoreanEntryView[];
@@ -521,6 +524,7 @@ export class KoreanDictService {
       lang: 'ko',
       id,
       word: hit.word,
+      sources: sourcesForWord(this.db, id, hit.word, 'ko'),
       isLemma: !!hit.is_lemma,
       roman: entries.find((e) => e.roman)?.roman ?? null,
       entries,

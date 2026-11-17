@@ -24,6 +24,7 @@ import { etymKeyOfEntry } from './etym.js';
 // 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts）。
 import { collocationParts, looseForms, type CollocationDetail } from './collocation.js';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
+import { sourcesForWord, type SourceLink } from './sources.js';
 
 // API 列表项契约（与其它服务结构一致；结构化类型，无需跨语种 import）。
 export type FrenchSearchItem = {
@@ -157,6 +158,8 @@ export type FrenchEntry = {
   lang: 'fr';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
+  sources: SourceLink[];
   ipa: string | null;           // = readings 里 isPrimary 那条，供词头单行展示
   pos: string | null;
   isLemma: boolean;
@@ -936,6 +939,7 @@ export class FrenchDictService {
 
     const entry: FrenchEntry = {
       lang: 'fr',
+      sources: [],   // getEntry 拿到 db 后按真实 src 填（B33①）
       etymologyEditions: this.etymEditions,
       // 键 ＝ `${edition}:${etym_no}`，与 `etymKeyOfEntry()` 拼出来的那把逐字一致。
       etymologyTexts: Object.fromEntries(
@@ -1000,6 +1004,7 @@ export class FrenchDictService {
     const row = this.row(keyword);
     if (!row) return null;
     const entry = this.mapEntry(row, true);
+    entry.sources = sourcesForWord(this.db, entry.id, entry.word, 'fr');
 
     // 解析每个原形词义（单层，供变形页内联展示各原形是什么意思）。
     // ⚠️ `deep=false` —— 原形的例句不取，那是另一页的事，取了白花时间。

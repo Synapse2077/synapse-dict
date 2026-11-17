@@ -14,6 +14,7 @@ import { etymKeyOfEntry } from './etym.js';
 // 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts）。
 import { collocationParts, looseForms, type CollocationDetail } from './collocation.js';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
+import { sourcesForWord, type SourceLink } from './sources.js';
 
 // API 列表项契约（与其它服务结构一致；结构化类型，无需跨语种 import）。
 export type ItalianSearchItem = {
@@ -184,6 +185,8 @@ export type ItalianEntry = {
   lang: 'it';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
+  sources: SourceLink[];
   // 默认展示的读音（= `readings` 里 isPrimary 那条）。
   // 🔴 2026-08-18 阶段 8：来源从 `dict.ipa` 列换成 `pronunciation` 表。
   //    影响面实测：**513,775 个词形从「没有音标」变成有**（列只填过 588,280 个，
@@ -989,6 +992,7 @@ export class ItalianDictService {
     const senses = this.buildSenses(row.id, ex);
     return {
       lang: 'it',
+      sources: [],   // getEntry 拿到 db 后按真实 src 填（B33①）
       etymologyEditions: this.etymEditions,
       // 键 ＝ `${edition}:${etym_no}`，与 `etymKeyOfEntry()` 拼出来的那把逐字一致。
       etymologyTexts: Object.fromEntries(
@@ -1171,6 +1175,7 @@ export class ItalianDictService {
     }
     if (!row) return null;
     const entry = this.mapEntry(row);
+    entry.sources = sourcesForWord(this.db, entry.id, entry.word, 'it');
     // ⚠️ 用 **DB 里的词形**算哈希，不是用户输入的 —— 查询会走归一列（撇号/重音符/大小写）
     entry.tts = this.ttsFor(entry.word);
 

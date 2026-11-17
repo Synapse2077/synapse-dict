@@ -55,6 +55,7 @@ import { etymKeyOfSrcRef } from './etym.js';
 // 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts 的实测数字）。
 import { collocationParts, looseForms, type CollocationDetail } from './collocation.js';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
+import { sourcesForWord, type SourceLink } from './sources.js';
 
 export type GermanSearchItem = {
   id: number;
@@ -161,6 +162,8 @@ export type GermanEntry = {
   lang: 'de';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
+  sources: SourceLink[];
   pos: string | null;
   isLemma: boolean;
   freqZipf: number | null;
@@ -633,6 +636,7 @@ export class GermanDictService {
     }
     return {
       lang: 'de',
+      sources: [],   // getEntry 拿到 db 后按真实 src 填（B33①）
       etymologyEditions: this.etymEditions,
       // 键 ＝ `${edition}:${etym_no}`，与 `etymKeyOfEntry()` 拼出来的那把逐字一致。
       etymologyTexts: Object.fromEntries(
@@ -687,6 +691,10 @@ export class GermanDictService {
     const row = (this.q.head.get(kw) ?? this.q.headCI.get(kw, kw)) as DeRow | undefined;
     if (!row) return null;
     const entry = this.mapEntry(row);
+    // ⚠️ 必须在这里赋，不能放到 return 之前：下面 `if (entry.senses.length > 0)
+    //    return entry;` 是**早退分支**，Haus 这类有义项的词全从那儿走 ——
+    //    放结尾等于只给"没有义项的变形页"填了来源。
+    entry.sources = sourcesForWord(this.db, entry.id, entry.word, 'de');
 
     // 变形页：把它指向的原形内联进来，读者不必再点一次。
     //

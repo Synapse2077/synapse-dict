@@ -24,7 +24,9 @@
  *      「无词性的组不许无标题地跟在别的组后面」这条断言只有 en 需要（es 73 词、it 1,455 词）。
  *   ② **`topic` 桶按来源分**：kaikki 是上千种英文 slug（有意不显示），
  *      老词典层是中文短码（`计`／`医`／`化`，**必须显示**）。两个方向都要守。
- *   ③ **ECDICT 尺子是 en 独有的产品价值**（考纲/柯林斯/牛津），不渲染就白买了。
+ *   ③ **ECDICT 尺子（考纲/柯林斯/牛津）只当内部尺子，不上页面** ——
+ *      B33（2026-11-13／11-17 用户两次定）：经 ECDICT 转手、源自别家的专有词表，
+ *      数据留在库里，页面一个字都不印。C1/C2 是**反向断言**（印出来就红）。
  *   ④ **书证出处必须在引文前面** —— 2026-09-09 外审三次独立读错才改的顺序，
  *      而**数据完全正确、闸永远绿**：`ref` 挂在对的那条例句上，错的只是先后。
  *
@@ -38,7 +40,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { getService } from '@synapse-dict/dict-core';
-import { enExamLabels, enSenseTopics, EN_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
+import { enSenseTopics, EN_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 import { EnglishEntryView, capAudios } from './App';
 
 const svc = getService('en') as unknown as {
@@ -192,16 +194,17 @@ const CHECKS: Check[] = [
 
   // ───────────────── C. 尺子（en 独有资产）─────────────────
   {
-    // ⚠️ 断言的是**每一个考纲标签都到了页面上**，不是「有没有印过标签」——
-    //    后者拿 `.badge tag` 存不存在当判据，而那个类名义项标签也在用，
-    //    于是「考纲全丢、义项标签还在」会被判成绿。**判据要指名道姓。**
-    name: '🔴 C1 考纲标签有值却没渲染（en 独有，五门都没有）',
-    hit: (e, h) => {
-      const want = enExamLabels(e.rulers.examTag);
-      if (!want.length) return null;
-      const t = text(h);
-      const miss = want.filter((x) => !t.includes(x));
-      return miss.length ? `考纲 ${want.join('/')}，页面上缺 ${miss.join('/')}` : null;
+    // 🔴 B33（2026-11-17 用户定，**断言翻面**）：原来锁「有考纲就必须印」，现在锁「页面不印」。
+    //    考纲标签（中考/高考/四级/六级/考研/托福/雅思/GRE）经 ECDICT 转手、只有英语有，
+    //    与柯林斯星级／Oxford 3000 同一个理由。用户定的范围是**只不显示**：
+    //    库和接口照旧带 `exam_tag`（内部尺子），这条只管页面。
+    //    ⚠️ 只认「标签形状」，不认裸词 ——「考研」这类词也可能出现在释义正文里，
+    //       那是内容不是标记（与 C2 同一条判据纪律）。
+    //    取样专挑库里 `exam_tag IS NOT NULL` 的词（见下「考纲/柯林斯尺子」）⇒ 不在空集上绿。
+    name: '🔴 C1 页面印出考纲标签（B33）',
+    hit: (_e, h) => {
+      const m = h.match(/<span class="badge tag">\s*(中考|高考|四级|六级|考研|托福|雅思|GRE)\s*<\/span>/);
+      return m ? `页面上有「${m[0]}」` : null;
     },
   },
   {
@@ -438,7 +441,7 @@ const arms: Array<[string, string]> = [
       LIMIT ${PER}`],
   ['有英文定义', `SELECT d.word FROM dict d JOIN sense s ON s.word_id=d.id
       JOIN sense_gloss g ON g.sense_id=s.id AND g.lang='en' GROUP BY d.id LIMIT ${PER}`],
-  ['考纲/柯林斯尺子',
+  ['考纲/柯林斯尺子（只用来验「不印」）',
     `SELECT word FROM dict WHERE exam_tag IS NOT NULL AND collins IS NOT NULL LIMIT ${PER}`],
   ['多读音', `SELECT d.word FROM dict d JOIN pronunciation p ON p.word_id=d.id
       GROUP BY d.id HAVING COUNT(DISTINCT p.ipa)>1 LIMIT ${PER}`],
@@ -509,7 +512,8 @@ const MUTS: Mut[] = [
     (h, e) => (e.legacy
       ? h.replace('</article>', `<div class="sense-detail">${e.legacy.text}</div></article>`)
       : h)],
-  ['C1 考纲标签没渲染', (h) => h.replace(/<span class="badge tag">[^<]*<\/span>/g, '')],
+  ['C1 页面又印出考纲标签（B33 之前的形状）',
+    (h) => h.replace(/(<div class="entry-meta-row">)/, '$1<span class="badge tag">托福</span>')],
   ['C2 页面又印出柯林斯星级（B33 之前的形状）',
     (h) => h.replace(/(<div class="entry-meta-row">)/, '$1<span class="collins-stars" title="Collins 3 星">★★★☆☆</span>')],
   ['C2 页面又印出 Oxford 3000 徽章',

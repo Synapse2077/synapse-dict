@@ -39,6 +39,7 @@
 // 一律端出原值 ＋ 布尔，不在 SQL 里 COALESCE 掉语义（`[[it-display-layer-stage8]]`）。
 // ============================================================================
 import { DatabaseSync } from 'node:sqlite';
+import { sourcesForWord, type SourceLink } from './sources.js';
 
 export type RussianSearchItem = { id: number; word: string; brief: string | null; isLemma: boolean };
 
@@ -124,6 +125,8 @@ export type RussianEntry = {
   lang: 'ru';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
+  sources: SourceLink[];
   isLemma: boolean;
   entries: RussianEntryPart[];
   senses: RussianSense[];
@@ -339,6 +342,7 @@ export class RussianDictService {
       lang: 'ru',
       id,
       word: hit.word,
+      sources: sourcesForWord(this.db, id, hit.word, 'ru'),
       isLemma: !!hit.isLemma,
       entries,
       senses,

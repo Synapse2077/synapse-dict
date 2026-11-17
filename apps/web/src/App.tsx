@@ -9,7 +9,7 @@ import {
   FR_REGION_CODE_LABELS, FR_PRON_CONTEXT_LABELS, FR_ARTICLE, FR_EXAMPLE_TAG_LABELS,
   PT_VCONJ_LABELS, PT_REGION_LABELS, PT_ARTICLE, ptInflHeading, PT_EXAMPLE_TAG_LABELS,
   DE_ARTICLE, DE_AUX_LABELS, DE_VCLASS_BASE, DE_REGION_LABELS, relTagLabel, DE_EXAMPLE_TAG_LABELS,
-  EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enExamLabels, enSenseTopics, EN_EXAMPLE_TAG_LABELS,
+  EN_REGION_LABELS, EN_RELATION_LABELS, enLabel, enSenseTopics, EN_EXAMPLE_TAG_LABELS,
   etymologyBrief, audioChipLabels,
   JA_POS_LABELS, JA_KANJI_GRADE_LABELS, JA_RELATION_LABELS, JA_RELATION_SECTION, jaPitchType, JA_EXAMPLE_TAG_LABELS,
   JA_KANJI_READING_KIND, JA_KANJI_READING_SUBKIND, JA_KANJI_READING_ORDER,
@@ -26,6 +26,11 @@ import {
 } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
+
+/** B33①：词条来源，镜像 `dict-core/src/sources.ts` 的 `SourceLink`。
+ *  九门 Entry 的类型在 App.tsx 里是**手抄的镜像**，这里只加一个可选的公共字段，
+ *  不逐个类型展开 —— 来源行在九门视图外面统一渲染。 */
+type EntrySource = { code: string; label: string; url: string | null };
 
 type LanguageMeta = { code: string; label: string; name: string; speak: string };
 
@@ -1349,6 +1354,8 @@ export default function App() {
   const [entryLoading, setEntryLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
+  // B33②：数据来源与许可页（页脚「数据来源与许可」和顶栏「关于」都开它）。
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultListRef = useRef<HTMLDivElement>(null);
@@ -1715,19 +1722,30 @@ export default function App() {
               <span className="brand-sub">Synapse Dict</span>
             </span>
           </button>
-          <button
-            className="theme-toggle"
-            onClick={toggleTheme}
-            title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
-            aria-label="切换主题"
-            type="button"
-          >
-            {theme === 'dark' ? (
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z" /></svg>
-            ) : (
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" /></svg>
-            )}
-          </button>
+          <div className="brand-actions">
+            <button
+              className="about-toggle"
+              onClick={() => setAboutOpen(true)}
+              title="关于本词典 · 数据来源与许可"
+              aria-label="关于本词典 · 数据来源与许可"
+              type="button"
+            >
+              关于
+            </button>
+            <button
+              className="theme-toggle"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
+              aria-label="切换主题"
+              type="button"
+            >
+              {theme === 'dark' ? (
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z" /></svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" /></svg>
+              )}
+            </button>
+          </div>
         </div>
 
         {languages.length > 1 && (
@@ -1926,9 +1944,19 @@ export default function App() {
             </div>
           </div>
         )}
+        {/* B33①：许可要求署名 —— 每页底部链接回维基词典原页面。
+            放在九门视图外面，是因为来源行**不属于某个语种的版式**：
+            改一处，十门都有；各视图里再写一遍迟早会漏（[[decision-not-propagated-across-editions]]）。 */}
+        {entry && (
+          <SourceLine
+            sources={(entry as { sources?: EntrySource[] }).sources}
+            onAbout={() => setAboutOpen(true)}
+          />
+        )}
       </div>
 
       {toast && <div className="speak-toast" role="status">{toast}</div>}
+      {aboutOpen && <AboutPanel onClose={() => setAboutOpen(false)} />}
     </div>
   );
 }
@@ -2143,7 +2171,10 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
   speak: (word: string, locale: string) => void;
 }) {
   const r = entry.rulers;
-  const exams = enExamLabels(r.examTag);
+  // 🔴 B33（2026-11-17 用户定）：考纲标签（中考/高考/四级/六级/考研/托福/雅思/GRE）
+  //    **整类不上页面** —— 与柯林斯星级／Oxford 3000 同一个理由：经 ECDICT 转手，
+  //    且只有英语有。数据留在库里与接口上当内部尺子，这里只是不渲染。
+  //    契约闸 C1 已翻面锁「页面不许出现考纲标签」。
   // ⚠️ **类名一律用共用的那一套**（`.sense-*` / `.rel-*` / `.example-*` / `.exchange-*`）。
   //    我第一版发明了 13 个 `en-*` 类名 —— **`styles.css` 里一条都没有**，
   //    页面能渲染但完全没有样式；而且 `layout-probe` 数的是 `class="rel-row"`，
@@ -2172,8 +2203,8 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
           {/* 🔴 B33（2026-11-13 用户定）：柯林斯星级／Oxford 3000 **不上页面**。两样都经 ECDICT
               转手、源自柯林斯与牛津的专有词表，名字本身是商标；ECDICT 的 MIT 管不到上游。
               数据留在库里当内部尺子（同 ja `core_level`），接口也不返回 —— 契约闸 C2 锁。 */}
-          {/* ⭐ 考纲标签是 en 独有的资产（五门都没有），放在最显眼处 */}
-          {exams.map((t) => <span className="badge tag" key={t}>{t}</span>)}
+          {/* 🔴 B33（2026-11-17 用户定）：考纲标签（托福/雅思/GRE/考研…）同样整类不上页面，
+              理由与上一行相同 —— 来自 ECDICT，且只有英语有。契约闸 C1 已翻面。 */}
           {!entry.isLemma && <span className="badge">变形</span>}
         </div>
       </header>
@@ -6990,5 +7021,100 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
         );
       })}
     </article>
+  );
+}
+
+// ============================================================================
+// B33①／②：来源行与「关于」页
+//
+// ① 的来源**由服务层按数据库里的真实 src 算好**（`sourcesForWord`），前端不猜：
+//    · ru `дом` 同时用到 ru/zh/en/pl/fr 五个语言版；
+//    · en 门 242 万词条只有 ECDICT、没有任何维基来源；
+//    · 变形词条的来源只在 `entry` 表上。
+//    在这些形态上「按语种拼一个 wiktionary.org/wiki/词」都会给出假出处。
+//
+// ② 的内容是 CC BY-SA 4.0 的署名义务：来源、加工方式、许可、贡献者。
+//    ⚠️ 不写「数据来自维基词典，版权所有」这种含糊话 —— 许可要求的是
+//       **署名 + 相同方式共享**，读者要能顺着链接找到原页面和许可原文。
+// ============================================================================
+
+function SourceLine({ sources, onAbout }: {
+  sources?: EntrySource[];
+  onAbout: () => void;
+}) {
+  if (!sources || sources.length === 0) return null;
+  return (
+    <div className="source-line">
+      <span className="source-label">来源</span>
+      {sources.map((s, i) => (
+        <Fragment key={s.code}>
+          {i > 0 && <span className="source-sep">·</span>}
+          {s.url
+            ? <a className="source-link" href={s.url} target="_blank"
+                 rel="noopener noreferrer">{s.label}</a>
+            : <span className="source-name">{s.label}</span>}
+        </Fragment>
+      ))}
+      <button className="source-about" onClick={onAbout} type="button">
+        数据来源与许可
+      </button>
+    </div>
+  );
+}
+
+function AboutPanel({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="about-overlay" role="dialog" aria-modal="true"
+         aria-labelledby="about-title" onClick={onClose}>
+      <div className="about-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="about-head">
+          <h2 className="about-title" id="about-title">关于突触词典</h2>
+          <button className="about-close" onClick={onClose} type="button"
+                  aria-label="关闭">×</button>
+        </div>
+        <div className="about-body">
+          <section className="about-section">
+            <h3 className="about-sec-title">数据来源</h3>
+            <ul className="about-list">
+              <li>词条、释义与例句主要来自
+                <a href="https://zh.wiktionary.org/" target="_blank" rel="noopener noreferrer">维基词典（Wiktionary）</a>，
+                经由 <a href="https://kaikki.org/" target="_blank" rel="noopener noreferrer">kaikki.org</a>
+                的离线抽取副本进入本词典。</li>
+              <li>英语词条的部分释义来自
+                <a href="https://github.com/skywind3000/ECDICT" target="_blank" rel="noopener noreferrer">ECDICT</a>。</li>
+              <li>发音录音来自 Wikimedia Commons；没有录音的词由本地语音合成。</li>
+            </ul>
+          </section>
+          <section className="about-section">
+            <h3 className="about-sec-title">我们做了什么</h3>
+            <ul className="about-list">
+              <li>对源头数据做了清洗、去重、合并与重新组织 —— 同一个词条可能汇总多个语言版的内容。</li>
+              <li>中文释义与例句译文由机器翻译生成。</li>
+              <li>频率、难度等信息由我们统计或标注。</li>
+            </ul>
+          </section>
+          <section className="about-section">
+            <h3 className="about-sec-title">许可与署名</h3>
+            <ul className="about-list">
+              <li>词典数据整体按
+                <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>
+                许可提供；这包括我们基于维基词典数据加工、翻译产生的部分。</li>
+              <li>维基词典内容由 Wikimedia 贡献者创作；kaikki.org 提供机器可读的抽取数据。</li>
+              <li>ECDICT 是独立开源项目，按其自身许可提供。</li>
+              <li>程序代码不受上述数据许可约束。</li>
+            </ul>
+          </section>
+          <p className="about-foot">
+            每个词条页底部的「来源」一行会链接到它在维基词典上的原页面。
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }

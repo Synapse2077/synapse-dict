@@ -2685,3 +2685,76 @@ button.brand:focus-visible {
   border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; margin: 0 6px 0 0;
   vertical-align: 1px; font-style: normal;
 }
+
+/* ============================================================
+   B33①／②（2026-11-17）：词条来源行与「关于／数据来源」页
+   ------------------------------------------------------------
+   来源行在九门视图外面统一渲染（App.tsx），所以这里用跨语种通用类名，
+   十门共用一套。许可要求署名，这一块是发布前置，不是装修。
+   ============================================================ */
+.brand-actions {
+  display: flex; align-items: center; gap: 8px;
+}
+
+.about-toggle {
+  height: 34px; padding: 0 12px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--surface-soft);
+  color: var(--text-secondary); font-size: 13px; cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.about-toggle:hover {
+  color: var(--text); border-color: var(--border-strong); background: var(--surface-hover);
+}
+
+.source-line {
+  margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+  font-size: 12.5px; color: var(--text-tertiary);
+}
+.source-label { color: var(--text-tertiary); }
+.source-sep { color: var(--text-tertiary); }
+.source-link {
+  color: var(--text-secondary); text-decoration: none;
+  border-bottom: 1px dotted var(--border-strong);
+}
+.source-link:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.source-name { color: var(--text-secondary); }
+.source-about {
+  margin-left: 4px; border: 0; background: none; padding: 0;
+  color: var(--text-tertiary); font-size: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.source-about:hover { color: var(--accent); }
+
+.about-overlay {
+  position: fixed; inset: 0; z-index: 50; background: rgba(8, 12, 20, 0.45);
+  display: grid; place-items: center; padding: 24px;
+}
+.about-panel {
+  width: min(680px, 100%); max-height: min(80vh, 720px); overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; box-shadow: var(--shadow);
+}
+.about-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 24px 12px; position: sticky; top: 0;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.about-title { margin: 0; font-size: 18px; color: var(--text); }
+.about-close {
+  width: 32px; height: 32px; border-radius: 8px; border: 0;
+  background: var(--surface-soft); color: var(--text-secondary);
+  font-size: 20px; line-height: 1; cursor: pointer;
+}
+.about-close:hover { background: var(--surface-hover); color: var(--text); }
+.about-body {
+  padding: 8px 24px 22px; color: var(--text-secondary);
+  font-size: 13.5px; line-height: 1.75;
+}
+.about-section { margin-top: 16px; }
+.about-sec-title { margin: 0 0 6px; font-size: 13px; color: var(--text); }
+.about-list { margin: 0; padding-left: 20px; }
+.about-list li { margin: 4px 0; }
+.about-list a { color: var(--accent); text-decoration: none; }
+.about-list a:hover { text-decoration: underline; }
+.about-foot { margin: 18px 0 0; color: var(--text-tertiary); font-size: 12.5px; }

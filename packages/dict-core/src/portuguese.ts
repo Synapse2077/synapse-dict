@@ -36,6 +36,7 @@ import { etymKeyOfEntry } from './etym.js';
 // 词条级关系去重：义项下已经印过的，词条级不再印一遍（见 relations.ts 的实测数字）。
 import { collocationParts, looseForms, type CollocationDetail } from './collocation.js';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
+import { sourcesForWord, type SourceLink } from './sources.js';
 
 export type PortugueseSearchItem = {
   id: number;
@@ -173,6 +174,8 @@ export type PortugueseEntry = {
   lang: 'pt';
   id: number;
   word: string;
+  /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
+  sources: SourceLink[];
   ipaBr: string | null;         // 巴西标准音（readings 里 pt-BR 或通用的第一条）
   ipaPt: string | null;         // 欧洲标准音
   pos: string | null;
@@ -669,6 +672,7 @@ export class PortugueseDictService {
 
     const entry: PortugueseEntry = {
       lang: 'pt', id, word: w,
+      sources: [],   // getEntry 拿到 db 后按真实 src 填（B33①）
       etymologyEditions: this.etymEditions,
       // 键 ＝ `${edition}:${etym_no}`，与 `etymKeyOfEntry()` 拼出来的那把逐字一致。
       etymologyTexts: Object.fromEntries(
@@ -738,6 +742,7 @@ export class PortugueseDictService {
         senses: this.sensesOf(bid),
       });
     }
+    entry.sources = sourcesForWord(this.db, entry.id, entry.word, 'pt');
     return entry;
   }
 
