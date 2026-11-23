@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """展示层汇总闸的**源码 sha 台账** —— B14「改代码让闸过期，没有任何机制」的触发点。2026-10-27。
 
-═══ 判据 ═══
+═══ 判据（2026-11-23 起：累计欠账，到阈值才红）═══
 `npm run gate:display` 跑完，把它**读的那批源码**逐文件的 sha256 记下来（连同绿没绿）。
-账的闸（vi/ru 的 V9、ko 的 P12）调 `reasons()`：
-    · 从没跑过            ⇒ 红
-    · 上次跑是红的        ⇒ 红
-    · 有文件改过／新增／删掉 ⇒ 红，并点名是哪几个文件
+账的闸（vi/ru 的 V9、ko 的 P12）调 `check()`：
+    · 从没跑过              ⇒ 红
+    · 上次跑是红的          ⇒ 红
+    · 新出现的变化累加进 `pending`（`seen` 快照保证同一批只算一次）
+        · `pending < LIMIT` ⇒ **只提示、不红**（「已欠 N/50 次改动」）
+        · `pending ≥ LIMIT` ⇒ 红，逼你跑
+    · 跑绿后 `pending` 归零
+阈值默认 **50**，`DISPLAY_STAMP_LIMIT` 可覆盖。
+🔴 为什么改：用户 2026-11-23「汇总闸每次跑太费劲，代码改动频繁，可以每改动 100 次跑一次」。
+   阈值定为 50（100 太远、30 太近）。**代价**：阈值内不红 ⇒ 回归可能积累一批才发现，定位要二分。
+   ⚠️ 这条不是把闸拆掉 —— 到 50 会自己红；`rare-han` 则单独移出汇总（只在库变时需要）。
 锚的是**内容**不是时间：改回去 sha 就对上（照搬 vi `gates.MUTLOG` 的形状）。
 
 ═══ 为什么挂在账的闸上、不挂在 `gates.self_check()` 上 ═══
@@ -101,34 +108,65 @@ def load():
         raise SystemExit("🔴 展示层台账读不动：%s（%s）—— 别当成「没欠」" % (STAMP, e))
 
 
+LIMIT = int(os.environ.get("DISPLAY_STAMP_LIMIT", "50"))
+
+
 def record(files, ok):
     """`run_display_gates.py` 跑完调。files 要在**开跑之前**取（跑的途中改了文件 ⇒ 下次照样欠）。"""
     STAMP.parent.mkdir(parents=True, exist_ok=True)
-    STAMP.write_text(json.dumps({"ok": bool(ok), "files": files,
+    STAMP.write_text(json.dumps({"ok": bool(ok), "files": files, "seen": files, "pending": 0,
                                  "when": datetime.datetime.now().isoformat(timespec="seconds")},
                                 ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-def reasons(stamp, now):
-    """纯函数。→ 欠账说明列表（空 ＝ 当前这版源码上跑绿过）。"""
-    fix = "⇒ `npm run gate:display`"
-    if stamp is None:
-        return ["展示层汇总闸从没在这套台账下跑过 %s" % fix]
-    if not stamp.get("ok"):
-        return ["展示层汇总闸上次跑是**红的**（%s）%s" % (stamp.get("when", "?"), fix)]
-    old = stamp.get("files", {})
-    changed = sorted(k for k in now if k in old and old[k] != now[k])
-    added = sorted(set(now) - set(old))
-    gone = sorted(set(old) - set(now))
-    if not (changed or added or gone):
+def _diff(old, now):
+    """→ 变化的键列表（改过／新增／删掉）。纯函数，自检直接测它。"""
+    return ([k for k in now if k in old and old[k] != now[k]]
+            + sorted(set(now) - set(old))
+            + sorted(set(old) - set(now)))
+
+
+def _save(stamp):
+    tmp = STAMP.with_name(STAMP.name + ".tmp")
+    tmp.write_text(json.dumps(stamp, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(STAMP)
+
+
+def check():
+    """账的闸调这个。**只报不拦**：汇总闸正在跑你时返回空。
+
+    ═══ 2026-11-23：从「改了就红」改成「累计欠账，到 `LIMIT` 才红」 ═══
+    用户：「汇总闸每次跑太费劲，代码改动频繁，可以每改动 100 次跑一次」。
+    ⇒ 每次检查把**新出现的变化数**累加进 `pending`（`seen` 快照保证同一批只算一次）；
+    `pending < LIMIT` 时只打一行提示、**不红**；到 `LIMIT` 才红，逼你跑。
+    跑绿后 `record()` 把 `pending` 归零。阈值默认 50（`DISPLAY_STAMP_LIMIT` 可覆盖）。
+    ⚠️ 代价写清楚：阈值内不红＝回归可能积累一批才发现，定位要二分。
+    """
+    if os.environ.get("DISPLAY_GATES_RUNNING"):
         return []
-    parts = []
-    for tag, xs in (("改过", changed), ("新增", added), ("删掉", gone)):
-        if xs:
-            parts.append("%s %d 个（%s%s）" % (tag, len(xs), "、".join(xs[:4]),
-                                             " …" if len(xs) > 4 else ""))
-    return ["展示层汇总闸跑绿之后源码或库变了：%s（上次 %s）%s"
-            % ("；".join(parts), stamp.get("when", "?"), fix)]
+    stamp = load()
+    now = current()
+    if stamp is None:
+        return ["展示层汇总闸从没在这套台账下跑过 ⇒ `npm run gate:display`"]
+    if not stamp.get("ok"):
+        return ["展示层汇总闸上次跑是**红的**（%s）⇒ `npm run gate:display`" % stamp.get("when", "?")]
+    seen = stamp.get("seen") or stamp.get("files", {})
+    pending = int(stamp.get("pending", 0))
+    d = _diff(seen, now)
+    if d:
+        pending += len(d)
+        stamp["pending"] = pending
+        stamp["seen"] = now
+        _save(stamp)
+        if any(k.startswith("db:") for k in d):
+            print("⚠️ 库变了 ⇒ 记得单独跑 `npm run gate:rare-han`（罕用字切片可能要重建）")
+        if pending < LIMIT:
+            print("⚠️ 展示层闸已欠 %d/%d 次改动（到 %d 才红）—— 方便时跑 `npm run gate:display`"
+                  % (pending, LIMIT, LIMIT))
+    if pending >= LIMIT:
+        return ["展示层汇总闸已欠 **%d/%d** 次改动，必须重跑 ⇒ `npm run gate:display`"
+                % (pending, LIMIT)]
+    return []
 
 
 def notice():
@@ -142,40 +180,50 @@ def notice():
         print("■ 🔴 " + b)
 
 
-def check():
-    """账的闸调这个。汇总闸正在跑你时返回空 —— 那时台账必然过期，不拆这个环就永远红。"""
-    if os.environ.get("DISPLAY_GATES_RUNNING"):
-        return []
-    return reasons(load(), current())
-
-
 if __name__ == "__main__":
-    now = current()
     if "--mutate" in sys.argv:
-        k = next(iter(now))
-        dbk = next((x for x in now if x.startswith("db:")), None)
-        if dbk is None:                   # 台账里一门库都没有 ⇒ 写库永远不会让它过期
-            print("  🔴 台账里没有任何 `db:` 条目")
-            sys.exit(1)
-        green = {"ok": True, "files": dict(now), "when": "t"}
-        cases = [
-            ("从没跑过", None, now, True),
-            ("上次跑红", dict(green, ok=False), now, True),
-            ("改了一个文件", green, dict(now, **{k: "0" * 16}), True),
-            ("新增一个文件", green, dict(now, **{"apps/web/src/__new__.tsx": "x"}), True),
-            ("删掉一个文件", green, {x: v for x, v in now.items() if x != k}, True),
-            ("库被写过", green, dict(now, **{dbk: "0:0"}), True),
-            ("（反控）没变", green, now, False),
-        ]
-        dead = 0
-        for name, st, cur, want in cases:
-            got = bool(reasons(st, cur))
-            dead += got != want
-            print("  %s %s" % ("✅" if got == want else "🔴 没逮到", name))
-        print("  变异 %d/%d" % (len(cases) - dead, len(cases)))
-        sys.exit(1 if dead else 0)
-    bad = reasons(load(), now)
-    print("■ 展示层台账：%d 个源码文件" % len(now))
+        # `mutation_stamp` 跑本档时会设 `DISPLAY_GATES_RUNNING=1`（那是给汇总闸内部用的），
+        # `check()` 一开头见它就直接返回空 ⇒ 「欠 50/50 红」永远测不到。
+        # 自检测的是计数机制本身，先清掉这个短路。
+        os.environ.pop("DISPLAY_GATES_RUNNING", None)
+        fails = []
+
+        def ck(name, cond):
+            if not cond:
+                fails.append(name)
+            print("  %s %s" % ("✅" if cond else "🔴 没逮到", name))
+
+        # ① 纯函数
+        ck("改一个文件", _diff({"a": "1"}, {"a": "2"}) == ["a"])
+        ck("新增一个文件", _diff({}, {"a": "1"}) == ["a"])
+        ck("删掉一个文件", _diff({"a": "1"}, {}) == ["a"])
+        ck("（反控）没变", _diff({"a": "1"}, {"a": "1"}) == [])
+        # ② 机制：临时台账 + 伪造 current（不碰真源码/真库）
+        real_stamp, real_current = STAMP, current
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            STAMP = Path(td) / "s.json"
+            state = {"a": "1"}
+            current = lambda: dict(state)                      # noqa: E731
+            record(state, True)
+            ck("跑绿后不欠", check() == [])
+            state["a"] = "2"
+            ck("欠 1/%d 不红" % LIMIT, check() == [])
+            for i in range(LIMIT - 2):
+                state["a"] = str(100 + i)
+                check()
+            state["a"] = "final"
+            ck("欠 %d/%d 红" % (LIMIT, LIMIT), bool(check()))
+            record(state, True)
+            ck("重新跑绿后归零", check() == [])
+        STAMP, current = real_stamp, real_current
+        print("  变异 %d/%d" % (9 - len(fails), 9))
+        sys.exit(1 if fails else 0)
+    now = current()
+    bad = check()
+    stamp = load()
+    pend = int((stamp or {}).get("pending", 0))
+    print("■ 展示层台账：%d 个源码文件（欠 %d/%d 次改动）" % (len(now), pend, LIMIT))
     for b in bad:
         print("  🔴 " + b)
     print("  ✅ 当前源码上跑绿过" if not bad else "")

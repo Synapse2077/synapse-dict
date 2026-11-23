@@ -55,6 +55,7 @@ GATES = {
     "gate:audio-labels": "apps/web/src/contract-check-audio.tsx",
     "gate:etym-display": "apps/web/src/contract-check-etym.tsx",
     "gate:layout": "apps/web/src/contract-check-layout.tsx",
+    "gate:about": "apps/web/src/contract-check-about.tsx",   # B33：「关于」页是 CC BY-SA 署名交付物
     "gate:css-audit": "apps/web/src/css-audit.ts",
     "gate:dispatch-audit": "apps/web/src/dispatch-audit.ts",
     "gate:redundant-related": "scripts/test_redundant_related_gate.py",
@@ -68,8 +69,12 @@ GATES = {
     "gate:backlog": "scripts/test_backlog_gate.py",             # B5：顶层账本与各门计划表对得上
     "gate:empty-entries": "scripts/test_empty_entry_gate.py",   # 2026-11-17：有词条但页面上没有任何可读内容（十门基线，只许降）
     "gate:zh-t2s": "scripts/zh_t2s.py",                         # B29：跨门繁→简判据的自测（65 条真句子）
-    "gate:rare-han": "scripts/rare_han_font.py",               # B29：罕用汉字兜底字体 —— 库里每个扩展 B+ 字都有切片、三份字表对得上、字体栈都带它（＋变异）
+    # 🔴 2026-11-23：`gate:rare-han` **移出汇总闸**（用户定：改动频繁，别每次都付 18 分钟）。
+    #    它只在**库变了**时才需要（重建罕用字切片），与样式/组件改动无关。
+    #    `display_stamp.check()` 检测到 `db:*` 变化时会打印提示；写库后单独跑 `npm run gate:rare-han`。
+    #    入口保留在 package.json，闸本身与变异不动。
     "gate:etym-criterion": "scripts/ingest_etymology.py",       # B4：「这段不是词源」判据自测（套话各一例＋该保留的反控）
+    "gate:example-residue": "scripts/test_example_template_residue_gate.py",  # B35：十门例句模板残渣全库扫描
     "gate:small-undo": "scripts/test_small_undo.py",             # 写库闸门的小改动模式：撤销后逐行一致、撤不干净的必须拒绝
     "gate:schema-drift": "scripts/test_schema_drift_gate.py",   # B24：九门库里的建表语句与建表脚本逐表对账（列＋约束/唯一键，＋变异）
     "gate:track": "scripts/test_track_gate.py",                 # B7：十门写库闸门的追踪清单与库两个方向对得上（＋变异）
@@ -97,7 +102,12 @@ GATES = {
 
 # 有意不进汇总的 `gate:*`：各门自己的闸，由 `<lang>/gates.py` 跑（查询计划闸要先有本门 ANALYZE）。
 # 🔴 package.json 新加的 `gate:*` 两边都不在 ⇒ G0 红（新闸没归类＝没人跑，B15 的病）。
-OWN_LANG = frozenset({"gate:ko-labels", "gate:ko-plans", "gate:vi-plans", "gate:ru-plans", "gate:display"})
+OWN_LANG = frozenset({
+    "gate:ko-labels", "gate:ko-plans", "gate:vi-plans", "gate:ru-plans", "gate:display",
+    # 2026-11-23：罕用字闸移出汇总（只在库变时需要，冷缓存要 18 分钟）。
+    # 写库后单独跑；`display_stamp.check()` 检测到 db 变化会提示。
+    "gate:rare-han",
+})
 
 # 已登记、仍开着的红：闸 → {断言编号: 条数}。🔴 锚在常量上，不从现状推。
 DEBT = {

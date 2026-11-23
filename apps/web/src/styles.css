@@ -785,6 +785,13 @@ button.brand:focus-visible {
 .sense-item {
   line-height: 1.6;
 }
+/* 2026-11-23：长义项列表（en `take` 72 条、ja `上下` 68 条）加一条细分隔线 ——
+   只靠 14px 间距，扫读时分不出「这一条到哪儿结束」。
+   分隔线用最淡的边框色，深色主题自动跟着变量走。 */
+.sense-item + .sense-item {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
 /* K20（ko）：关系链接带词条锚跳过来时，高亮那个词条的义项（`부인(否認)` 落到 否認 那几条） */
 .sense-item.ko-entry-hit {
   background: var(--accent-soft);
@@ -1111,6 +1118,16 @@ button.brand:focus-visible {
     border-bottom: 1px solid var(--border);
   }
 
+  /* 2026-11-23：窄屏下空态原来按桌面尺寸留 28px 上下内边距 + 26px emoji，
+     整块占掉详情上方一截 —— 压成一行提示。 */
+  .list-hint {
+    padding: 10px 16px;
+  }
+  .list-hint .hint-emoji {
+    font-size: 16px;
+    margin-bottom: 2px;
+  }
+
   .detail-column {
     height: auto;
     padding: 28px 22px;
@@ -1123,6 +1140,22 @@ button.brand:focus-visible {
   .empty-state {
     margin-top: 4vh;
   }
+
+  /* 🔴 2026-11-23：375px 下「关于／主题」两个按钮**在 DOM 里但看不见** ——
+     flex-wrap 把 `brand-actions` 换行后又被 `flex: 1 1 100%` 的搜索框挤掉了。
+     改成两行 grid：第一行品牌／语言／操作，第二行搜索框独占。 */
+  .top-bar {
+    display: grid;
+    grid-template-columns: auto auto 1fr auto;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand { grid-column: 1; grid-row: 1; }
+  .lang-picker { grid-column: 2; grid-row: 1; }
+  /* ⚠️ 必须显式 grid-row:1：按 DOM 顺序自动放置时，搜索框（占第 2 行）之后
+     光标已移到第 3 行，只写 grid-column 会把按钮放到搜索框下面（CDP 实测 y=116）。 */
+  .brand-actions { grid-column: 4; grid-row: 1; justify-self: end; margin-left: 0; }
+  .search-input-wrap { grid-column: 1 / -1; grid-row: 2; order: 0; }
 }
 
 /* ---- 发音提示（设备缺该语言语音时） ---- */
@@ -1479,6 +1512,14 @@ button.brand:focus-visible {
    `inline-block` 之间天然可断 ⇒ 在**词与词之间**换行，不把一个词从中间劈开。
    版式溢出闸 `contract-check-overflow.tsx` 盯着它（拿掉这一行当场红）。 */
 .rel-item { display: inline-block; margin-right: 8px; }
+/* 2026-11-23：相邻关系词之间加一个浅分隔点 —— 一串 `confiscate seize apprehend …`
+   读起来像一个复合词。只在两个 `rel-item` 之间加；它后面的「再显示」按钮不是
+   `rel-item`，所以列表末尾不会多出一个点。 */
+.rel-item + .rel-item::before {
+  content: '·';
+  margin: 0 4px 0 0;
+  color: var(--text-tertiary);
+}
 
 /* 🔴 2026-09-10：这条规则是给 `<a>` 写的 —— 它只定颜色和点线下划线，
    **没有重置 `background` / `border` / `padding` / `font`**，而 `styles.css` 里

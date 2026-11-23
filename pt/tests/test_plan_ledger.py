@@ -335,7 +335,9 @@ DONE = {
                                  " WHERE k='dict_fingerprint'").fetchone()[0]))),
     "C46": _both(_has("packages/dict-core/src/portuguese.ts", "altOfBySense"),
                  _has("apps/web/src/App.tsx", "sense-altof")),
-    "C47": _has("apps/web/src/App.tsx", "x.senseId === null).slice(0, 12)"),
+    # 2026-11-23：词条级例句从「硬 slice(0,12)」改成分页组件，判据跟着实现走。
+    "C47": _has("apps/web/src/App.tsx",
+                "items={entry.examples.filter((x) => x.senseId === null)} limit={12}"),
     # C49 自指：P3 这套机制自己在跑，就是它的交付物
     "C49": lambda _c: (len(DONE) >= 16 and bool(claims()),
                        "DONE %d 条 / 收尾单自称已做 %d 条" % (len(DONE), len(claims()))),

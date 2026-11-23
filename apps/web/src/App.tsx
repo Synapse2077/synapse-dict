@@ -1131,7 +1131,8 @@ function RelationRow({ rels, onWord }: {
   rels: SpanishRelation[]; onWord: (w: string) => void;
 }) {
   // 2026-11-17：长关系组默认 20 个，其余可展开。hook 必须在早退之前。
-  const [openKinds, setOpenKinds] = useState<Record<string, boolean>>({});
+  // 2026-11-23：每次 +100，不再一次全展开。
+  const [shownCounts, setShownCounts] = useState<Record<string, number>>({});
   if (rels.length === 0) return null;
   const byKind = new Map<string, SpanishRelation[]>();
   for (const r of rels) {
@@ -1141,9 +1142,9 @@ function RelationRow({ rels, onWord }: {
   return (
     <div className="rel-groups">
       {[...byKind].map(([kind, list]) => {
-        const open = !!openKinds[kind];
-        const shown = (open || expandAll()) ? list : list.slice(0, REL_PREVIEW);
-        const rest = list.length - shown.length;
+        const limit = expandAll() ? list.length : Math.max(REL_PREVIEW, shownCounts[kind] ?? 0);
+        const shown = list.slice(0, limit);
+        const rest = list.length - limit;
         return (
           <div className="rel-group" key={kind}>
             <span className="rel-kind">{REL_LABELS[kind] || kind}</span>
@@ -1161,13 +1162,15 @@ function RelationRow({ rels, onWord }: {
             ))}
             {rest > 0 && (
               <button className="rel-more" type="button"
-                      onClick={() => setOpenKinds((v) => ({ ...v, [kind]: true }))}>
-                展开其余 {rest} 个
+                      onClick={() => setShownCounts((v) => ({
+                        ...v, [kind]: Math.min((v[kind] ?? REL_PREVIEW) + REL_PAGE, list.length),
+                      }))}>
+                再显示 {Math.min(REL_PAGE, rest)} 个（剩 {rest}）
               </button>
             )}
-            {open && (
+            {!expandAll() && limit > REL_PREVIEW && (
               <button className="rel-more" type="button"
-                      onClick={() => setOpenKinds((v) => ({ ...v, [kind]: false }))}>收起</button>
+                      onClick={() => setShownCounts((v) => ({ ...v, [kind]: 0 }))}>收起</button>
             )}
           </div>
         );
@@ -2891,12 +2894,15 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
                     )}
                     <RelationRow rels={entry.relations.filter((r) => r.senseId === s.id)}
                                  onWord={onWord} />
-                    {entry.examples.filter((x) => x.senseId === s.id).slice(0, 3).map((x) => (
-                      <div className="sense-example" key={x.id}>
-                        <div className="ex-es" lang="es"><EsExTags tags={x.tags} />{x.text}</div>
-                        {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
-                      </div>
-                    ))}
+                    <CollapsibleExamples
+                      items={entry.examples.filter((x) => x.senseId === s.id)}
+                      limit={3}
+                      render={(x) => (
+                        <div className="sense-example" key={x.id}>
+                          <div className="ex-es" lang="es"><EsExTags tags={x.tags} />{x.text}</div>
+                          {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
+                        </div>
+                      )} />
                   </li>
                 ))}
                 {grp.senses.length > SENSE_PREVIEW && (
@@ -2953,12 +2959,15 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
       {entry.examples.some((x) => !x.senseId) && (
         <section className="entry-section">
           <h3>例句</h3>
-          {entry.examples.filter((x) => !x.senseId).slice(0, 6).map((x) => (
-            <div className="sense-example" key={x.id}>
-              <div className="ex-es" lang="es"><EsExTags tags={x.tags} />{x.text}</div>
-              {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
-            </div>
-          ))}
+          <CollapsibleExamples
+            items={entry.examples.filter((x) => !x.senseId)}
+            limit={6}
+            render={(x) => (
+              <div className="sense-example" key={x.id}>
+                <div className="ex-es" lang="es"><EsExTags tags={x.tags} />{x.text}</div>
+                {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
+              </div>
+            )} />
         </section>
       )}
 
@@ -3183,6 +3192,48 @@ const expandAll = () => !!(globalThis as { __EXPAND_ALL__?: boolean }).__EXPAND_
 
 const REL_PREVIEW = 20;
 const SENSE_PREVIEW = 6;
+/** 点一次「展开其余」追加多少项。2026-11-23：从「一次全展开」改成分页。 */
+const REL_PAGE = 100;
+
+/** 单组长尾的分页展开。`expandAll()`（渲染闸）下直接全量，闸才能验完整内容。 */
+function usePaged(total: number, initial: number, step = REL_PAGE) {
+  const [shown, setShown] = useState(initial);
+  const limit = expandAll() ? total : Math.min(shown, total);
+  return {
+    limit,
+    rest: total - limit,
+    more: () => setShown((n) => Math.min(n + step, total)),
+    less: () => setShown(initial),
+  };
+}
+
+/** 例句长尾的分页展开。`step` 默认 10 —— 例句比关系词重，一次 100 条引文太长。 */
+function CollapsibleExamples<T>({ items, limit, render, step = 10, inList = false }: {
+  items: T[]; limit: number; step?: number;
+  /** 渲染在 `<ul>` 里时按钮必须包成 `<li>`，否则是非法 HTML。 */
+  inList?: boolean;
+  render: (x: T, i: number) => ReactNode;
+}) {
+  const { limit: n, rest, more, less } = usePaged(items.length, limit, step);
+  const More = inList ? 'li' : 'span';
+  return (
+    <>
+      {items.slice(0, n).map(render)}
+      {rest > 0 && (
+        <More className={inList ? 'sense-more-row' : undefined}>
+          <button className="rel-more" type="button" onClick={more}>
+            再显示 {Math.min(step, rest)} 条（剩 {rest}）
+          </button>
+        </More>
+      )}
+      {!expandAll() && n > limit && (
+        <More className={inList ? 'sense-more-row' : undefined}>
+          <button className="rel-more" type="button" onClick={less}>收起</button>
+        </More>
+      )}
+    </>
+  );
+}
 
 function CollapsibleSenses({ senses, render, limit = SENSE_PREVIEW, itemTag = 'li' }: {
   senses: unknown[];
@@ -3212,9 +3263,9 @@ function RelationTargets({ targets, onWord }: {
   targets: Array<{ word: string; clickable?: boolean; linkable?: boolean }>;
   onWord: (w: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const shown = (open || expandAll()) ? targets : targets.slice(0, REL_PREVIEW);
-  const rest = targets.length - shown.length;
+  // 2026-11-23：一次全展开改成**每次 +100**（2,000 项一次进 DOM 没有意义）。
+  const { limit, rest, more, less } = usePaged(targets.length, REL_PREVIEW);
+  const shown = targets.slice(0, limit);
   return (
     <>
       {shown.map((t, i) => (
@@ -3226,12 +3277,12 @@ function RelationTargets({ targets, onWord }: {
         </span>
       ))}
       {rest > 0 && (
-        <button className="rel-more" type="button" onClick={() => setOpen(true)}>
-          展开其余 {rest} 个
+        <button className="rel-more" type="button" onClick={more}>
+          再显示 {Math.min(REL_PAGE, rest)} 个（剩 {rest}）
         </button>
       )}
-      {open && targets.length > REL_PREVIEW && (
-        <button className="rel-more" type="button" onClick={() => setOpen(false)}>收起</button>
+      {!expandAll() && limit > REL_PREVIEW && (
+        <button className="rel-more" type="button" onClick={less}>收起</button>
       )}
     </>
   );
@@ -3473,9 +3524,8 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }
                     )}
                     {/* 挂在这条义项上的例句。中文 100%（阶段 5 全量翻译），
                         所以这里不做「有没有中文」的分支 —— 有就一定有。 */}
-                    {s.examples.slice(0, 3).map((x, xi) => (
-                      <ItExampleView ex={x} key={xi} />
-                    ))}
+                    <CollapsibleExamples items={s.examples} limit={3}
+                      render={(x, xi) => <ItExampleView ex={x} key={xi} />} />
                   </li>
                 ))}
                 {grp.senses.length > SENSE_PREVIEW && (
@@ -3568,7 +3618,8 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }
       {entry.examples.length > 0 && (
         <section className="entry-section">
           <h3>例句</h3>
-          {entry.examples.map((x, i) => <ItExampleView ex={x} key={i} />)}
+          <CollapsibleExamples items={entry.examples} limit={6}
+            render={(x, i) => <ItExampleView ex={x} key={i} />} />
         </section>
       )}
 
@@ -3964,12 +4015,15 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                     {/* 这条义项下的例句（阶段 5，中文 99.9%）。
                         🔴 限 3 条：`passer` 有 138 条例句，全铺出来会把释义挤没
                            —— es 展示层已知的三条线索之一就是「超长内容撑版面」。 */}
-                    {entry.examples.filter((x) => x.senseId === s.id && !WIKI_ONLY.test(x.text)).slice(0, 3).map((x, xi) => (
-                      <div className="sense-example" key={xi}>
-                        <div className="ex-fr" lang="fr"><FrExTags tags={x.tags} /><FrText text={x.text} /></div>
-                        {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
-                      </div>
-                    ))}
+                    <CollapsibleExamples
+                      items={entry.examples.filter((x) => x.senseId === s.id && !WIKI_ONLY.test(x.text))}
+                      limit={3}
+                      render={(x, xi) => (
+                        <div className="sense-example" key={xi}>
+                          <div className="ex-fr" lang="fr"><FrExTags tags={x.tags} /><FrText text={x.text} /></div>
+                          {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
+                        </div>
+                      )} />
                   </li>
                 ))}
                 {grp.senses.length > SENSE_PREVIEW && (
@@ -4059,12 +4113,15 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
       {entry.examples.some((x) => x.senseId === null) && (
         <section className="entry-section">
           <h3>例句</h3>
-          {entry.examples.filter((x) => x.senseId === null && !WIKI_ONLY.test(x.text)).slice(0, 6).map((x, i) => (
-            <div className="sense-example" key={i}>
-              <div className="ex-fr" lang="fr"><FrExTags tags={x.tags} /><FrText text={x.text} /></div>
-              {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
-            </div>
-          ))}
+          <CollapsibleExamples
+            items={entry.examples.filter((x) => x.senseId === null && !WIKI_ONLY.test(x.text))}
+            limit={6}
+            render={(x, i) => (
+              <div className="sense-example" key={i}>
+                <div className="ex-fr" lang="fr"><FrExTags tags={x.tags} /><FrText text={x.text} /></div>
+                {x.zh && <div className="ex-zh"><FrText text={x.zh} /></div>}
+              </div>
+            )} />
         </section>
       )}
 
@@ -4348,14 +4405,17 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
                         <PtRelationGroups groups={s.relations} onWord={onWord} />
                       </div>
                     )}
-                    {entry.examples.filter((x) => x.senseId === s.id && shownEx.has(x)).map((x, xi) => (
-                      <div className="sense-example" key={xi}>
-                        <div className="ex-pt" lang="pt"><PtExTags tags={x.tags} />{x.text}</div>
-                        {x.zh && <div className="ex-zh">{x.zh}</div>}
-                        {!x.zh && x.en && <div className="ex-zh">{x.en}</div>}
-                        {ptCleanRef(x.ref) && <div className="ex-ref">{ptCleanRef(x.ref)}</div>}
-                      </div>
-                    ))}
+                    <CollapsibleExamples
+                      items={entry.examples.filter((x) => x.senseId === s.id && shownEx.has(x))}
+                      limit={3}
+                      render={(x, xi) => (
+                        <div className="sense-example" key={xi}>
+                          <div className="ex-pt" lang="pt"><PtExTags tags={x.tags} />{x.text}</div>
+                          {x.zh && <div className="ex-zh">{x.zh}</div>}
+                          {!x.zh && x.en && <div className="ex-zh">{x.en}</div>}
+                          {ptCleanRef(x.ref) && <div className="ex-ref">{ptCleanRef(x.ref)}</div>}
+                        </div>
+                      )} />
                   </li>
                 ))}
                 {grp.senses.length > SENSE_PREVIEW && (
@@ -4436,14 +4496,15 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
               这块原来用的是 `.example-list`/`.example-item`/`.example-text`——**全项目独一份**，
               而 es/it/fr **以及 pt 自己的义项内例句**用的都是 `.sense-example`/`.ex-*`。
               后果是同一页上两种例句样式并存。 */}
-          {entry.examples.filter((x) => x.senseId === null).slice(0, 12).map((x, i) => (
-            <div className="sense-example" key={i}>
-              <div className="ex-pt" lang="pt"><PtExTags tags={x.tags} />{x.text}</div>
-              {x.zh && <div className="ex-zh">{x.zh}</div>}
-              {!x.zh && x.en && <div className="ex-zh">{x.en}</div>}
-              {ptCleanRef(x.ref) && <div className="ex-ref">{ptCleanRef(x.ref)}</div>}
-            </div>
-          ))}
+          <CollapsibleExamples items={entry.examples.filter((x) => x.senseId === null)} limit={12}
+            render={(x, i) => (
+              <div className="sense-example" key={i}>
+                <div className="ex-pt" lang="pt"><PtExTags tags={x.tags} />{x.text}</div>
+                {x.zh && <div className="ex-zh">{x.zh}</div>}
+                {!x.zh && x.en && <div className="ex-zh">{x.en}</div>}
+                {ptCleanRef(x.ref) && <div className="ex-ref">{ptCleanRef(x.ref)}</div>}
+              </div>
+            )} />
         </section>
       )}
 
@@ -4463,14 +4524,14 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
 function PtRelationGroups(
   { groups, onWord }: { groups: PtRelationGroup[]; onWord: (w: string) => void },
 ) {
-  // 2026-11-17：长关系组默认 20 个，其余可展开。
-  const [openKinds, setOpenKinds] = useState<Record<string, boolean>>({});
+  // 2026-11-17：长关系组默认 20 个，其余可展开。2026-11-23：每次 +100。
+  const [shownCounts, setShownCounts] = useState<Record<string, number>>({});
   return (
     <>
       {groups.map((g) => {
-        const open = !!openKinds[g.kind];
-        const shown = (open || expandAll()) ? g.targets : g.targets.slice(0, REL_PREVIEW);
-        const rest = g.targets.length - shown.length;
+        const limit = expandAll() ? g.targets.length : Math.max(REL_PREVIEW, shownCounts[g.kind] ?? 0);
+        const shown = g.targets.slice(0, limit);
+        const rest = g.targets.length - limit;
         return (
           <div className="rel-group" key={g.kind}>
             <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
@@ -4487,13 +4548,15 @@ function PtRelationGroups(
             </span>
             {rest > 0 && (
               <button className="rel-more" type="button"
-                      onClick={() => setOpenKinds((v) => ({ ...v, [g.kind]: true }))}>
-                展开其余 {rest} 个
+                      onClick={() => setShownCounts((v) => ({
+                        ...v, [g.kind]: Math.min((v[g.kind] ?? REL_PREVIEW) + REL_PAGE, g.targets.length),
+                      }))}>
+                再显示 {Math.min(REL_PAGE, rest)} 个（剩 {rest}）
               </button>
             )}
-            {open && (
+            {!expandAll() && limit > REL_PREVIEW && (
               <button className="rel-more" type="button"
-                      onClick={() => setOpenKinds((v) => ({ ...v, [g.kind]: false }))}>收起</button>
+                      onClick={() => setShownCounts((v) => ({ ...v, [g.kind]: 0 }))}>收起</button>
             )}
           </div>
         );
@@ -4607,6 +4670,11 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
   speak: (word: string, locale: string) => void;
 }) {
   const [openDeGroups, setOpenDeGroups] = useState<Record<number, boolean>>({});
+  // 2026-11-23：词形变化/构词从「展开就一次全渲染」改成分页（`überlegen` 有 531 个变形）。
+  // 用户 2026-09-12 的「先全部展示、不设 limit」是**观察态**，注释里写着「看完再定上限、
+  // 有截断必须说总数」—— 现在就是那一步。
+  const formsPaged = usePaged(entry.forms.length, 24);
+  const derivPaged = usePaged(entry.derivedForms.length, 24);
   // 分组结果在两处用到（渲染、以及算词源序号），先算一次。
   const deGroups = groupDeSenses(entry.senses);
   const deEtymOrder = etymOrder(deGroups);
@@ -4807,34 +4875,32 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                                    所以我的文本快照里一直是「下位 Ammenfrau Amtfrau …」。
                                    **导出器造出来的假象会骗走评审意见** —— 那个文件头
                                    自己写着这句话，这次是它的反方向。 */}
-                            {g.targets.map((t, ti) => (
-                              <span className="rel-item" key={ti}>
-                                {t.clickable
-                                  ? <a className="rel-link" href={`#${hashFor(t.word)}`}
-                                      onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
-                                  : <span className="rel-plain">{t.word}</span>}
-                              </span>
-                            ))}
+                            {/* 2026-11-23：义项级关系原来在这里**全量 map**（de `Tag` 一页 1,409 项）；
+                                改用通用 `RelationTargets` —— 首屏 20、每次 +100。 */}
+                            <RelationTargets targets={g.targets} onWord={onWord} />
                           </span>
                         ))}
                       </div>
                     )}
                     {/* 🔴 挂在这条义项上的例句（见下面词条级例句区那段长注释）。
                         每条最多 3 句，与 es/fr/pt 同一个上限。 */}
-                    {entry.examples.filter((x) => x.senseId === s.id && shownEx.has(x)).map((x, xi) => (
-                      <div className="sense-example" key={xi}>
-                        {/* 🔴🔴 **出处在前、引文在后** —— en 2026-09-09 外审改过的同一条，
-                            de 一直是「引文 → 中文 → 出处」。外审当时**三次独立读错**，
-                            都判成「出处混在例句前／顺序混乱／张冠李戴」，
-                            因为读者无从判断那行出处属于上一条还是下一条。
-                            维基词典自己的体例也是出处引出引文。
-                            ⭐ 这条是**只有渲染成品才发现得了**的缺陷：
-                               数据完全正确，`ref` 挂在对的那条例句上，闸永远绿。 */}
-                        {x.ref && <div className="example-ref">{x.ref}</div>}
-                        <div className="example-de"><DeExTags tags={x.tags} />{x.text}</div>
-                        {x.zh && <div className="example-zh">{x.zh}</div>}
-                      </div>
-                    ))}
+                    <CollapsibleExamples
+                      items={entry.examples.filter((x) => x.senseId === s.id && shownEx.has(x))}
+                      limit={3}
+                      render={(x, xi) => (
+                        <div className="sense-example" key={xi}>
+                          {/* 🔴🔴 **出处在前、引文在后** —— en 2026-09-09 外审改过的同一条，
+                              de 一直是「引文 → 中文 → 出处」。外审当时**三次独立读错**，
+                              都判成「出处混在例句前／顺序混乱／张冠李戴」，
+                              因为读者无从判断那行出处属于上一条还是下一条。
+                              维基词典自己的体例也是出处引出引文。
+                              ⭐ 这条是**只有渲染成品才发现得了**的缺陷：
+                                 数据完全正确，`ref` 挂在对的那条例句上，闸永远绿。 */}
+                          {x.ref && <div className="example-ref">{x.ref}</div>}
+                          <div className="example-de"><DeExTags tags={x.tags} />{x.text}</div>
+                          {x.zh && <div className="example-zh">{x.zh}</div>}
+                        </div>
+                      )} />
                   </li>
                 ))}
                 {grp.senses.length > SENSE_PREVIEW && (
@@ -4909,14 +4975,18 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
         <section className="entry-section">
           <h3>例句</h3>
           <ul className="example-list">
-            {entry.examples.filter((x) => !x.senseId && shownEx.has(x)).map((e, i) => (
-              <li className="example-item" key={i}>
-                {/* 出处在前、引文在后 —— 理由同上面义项内那段 */}
-                {e.ref && <div className="example-ref">{e.ref}</div>}
-                <div className="example-de"><DeExTags tags={e.tags} />{e.text}</div>
-                {e.zh && <div className="example-zh">{e.zh}</div>}
-              </li>
-            ))}
+            <CollapsibleExamples
+              inList
+              items={entry.examples.filter((x) => !x.senseId && shownEx.has(x))}
+              limit={12}
+              render={(e, i) => (
+                <li className="example-item" key={i}>
+                  {/* 出处在前、引文在后 —— 理由同上面义项内那段 */}
+                  {e.ref && <div className="example-ref">{e.ref}</div>}
+                  <div className="example-de"><DeExTags tags={e.tags} />{e.text}</div>
+                  {e.zh && <div className="example-zh">{e.zh}</div>}
+                </li>
+              )} />
           </ul>
         </section>
       )}
@@ -4948,13 +5018,21 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           **有截断就必须说总数**，否则读者以为就这么多（`contract-check-pt` 那条断言）。 */}
           <h3>词形变化</h3>
           <div className="de-form-grid">
-            <CollapsibleSenses senses={entry.forms} limit={24} itemTag="div" render={(fm: any) => (
+            {entry.forms.slice(0, formsPaged.limit).map((fm: any) => (
               <span className="de-form-cell" key={`${fm.form}-${fm.label}`}>
                 <a className="rel-link" href={`#${hashFor(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
                 {fm.label && <span className="de-form-label">{fm.label}</span>}
               </span>
-            )} />
+            ))}
+            {formsPaged.rest > 0 && (
+              <button className="rel-more" type="button" onClick={formsPaged.more}>
+                再显示 {Math.min(REL_PAGE, formsPaged.rest)} 个（剩 {formsPaged.rest}）
+              </button>
+            )}
+            {!expandAll() && formsPaged.limit > 24 && (
+              <button className="rel-more" type="button" onClick={formsPaged.less}>收起</button>
+            )}
           </div>
         </section>
       )}
@@ -4969,13 +5047,21 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           **有截断就必须说总数**，否则读者以为就这么多（`contract-check-pt` 那条断言）。 */}
           <h3>构词</h3>
           <div className="de-form-grid">
-            {entry.derivedForms.map((fm, i) => (
+            {entry.derivedForms.slice(0, derivPaged.limit).map((fm, i) => (
               <span className="de-form-cell" key={i}>
                 <a className="rel-link" href={`#${hashFor(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
                 {fm.label && <span className="de-form-label">{fm.label}</span>}
               </span>
             ))}
+            {derivPaged.rest > 0 && (
+              <button className="rel-more" type="button" onClick={derivPaged.more}>
+                再显示 {Math.min(REL_PAGE, derivPaged.rest)} 个（剩 {derivPaged.rest}）
+              </button>
+            )}
+            {!expandAll() && derivPaged.limit > 24 && (
+              <button className="rel-more" type="button" onClick={derivPaged.less}>收起</button>
+            )}
           </div>
         </section>
       )}
@@ -5329,10 +5415,9 @@ function JaRelationRow({ group, onWord }: {
   group: { kind: string; targets: Array<{ word: string; clickable: boolean }> };
   onWord: (w: string) => void;
 }) {
-  // 2026-11-17：长关系组默认 20 个，其余可展开。
-  const [open, setOpen] = useState(false);
-  const shown = (open || expandAll()) ? group.targets : group.targets.slice(0, REL_PREVIEW);
-  const rest = group.targets.length - shown.length;
+  // 2026-11-17：长关系组默认 20 个，其余可展开。2026-11-23：每次 +100。
+  const { limit, rest, more, less } = usePaged(group.targets.length, REL_PREVIEW);
+  const shown = group.targets.slice(0, limit);
   return (
     <div className="rel-row">
       <span className="rel-kind">
@@ -5347,12 +5432,12 @@ function JaRelationRow({ group, onWord }: {
         </span>
       ))}
       {rest > 0 && (
-        <button className="rel-more" type="button" onClick={() => setOpen(true)}>
-          展开其余 {rest} 个
+        <button className="rel-more" type="button" onClick={more}>
+          再显示 {Math.min(REL_PAGE, rest)} 个（剩 {rest}）
         </button>
       )}
-      {open && (
-        <button className="rel-more" type="button" onClick={() => setOpen(false)}>收起</button>
+      {!expandAll() && limit > REL_PREVIEW && (
+        <button className="rel-more" type="button" onClick={less}>收起</button>
       )}
     </div>
   );
@@ -5497,9 +5582,10 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
               </li>
   );
 
-  const renderExamples = (xs: JaExample[]) => (
+  // 2026-11-23：原来**全量渲染**（`ある` 一页 105 条）；改为首屏 `limit` 条、每次 +10。
+  const renderExamples = (xs: JaExample[], limit = 3) => (
     <ul className="example-list">
-      {xs.map((x, i) => (
+      <CollapsibleExamples inList items={xs} limit={limit} render={(x, i) => (
         // 🔴 2026-09-17：原来是个**没有 class 的裸 `<li>`**，于是例句块没有左竖线、
         //    没有缩进、没有上下留白 —— 释义和例句的五行齐刷刷贴在一起，
         //    读者分不出哪行是释义、哪行是例句（用户原话：「这四行应该怎样展示合理呢」）。
@@ -5518,7 +5604,7 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
           {(x.zh || x.en) && <div className="example-zh">{x.zh ?? x.en}</div>}
           {x.ref && <div className="example-ref">{x.ref}</div>}
         </li>
-      ))}
+      )} />
     </ul>
   );
 
@@ -5671,7 +5757,7 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
       {entryLevel.length > 0 && (
         <section className="entry-section">
           <h3>例句</h3>
-          {renderExamples(entryLevel)}
+          {renderExamples(entryLevel, 6)}
         </section>
       )}
 
@@ -5810,10 +5896,9 @@ function KoRelationRow({ group, onWord, hideKind }: {
   group: KoRelationGroup; onWord: (w: string) => void; hideKind?: boolean;
 }) {
   const annotation = KO_ANNOTATION_KINDS.has(group.kind);
-  // 2026-11-17：长关系组默认 20 个，其余可展开。
-  const [open, setOpen] = useState(false);
-  const shown = (open || expandAll()) ? group.items : group.items.slice(0, REL_PREVIEW);
-  const rest = group.items.length - shown.length;
+  // 2026-11-17：长关系组默认 20 个，其余可展开。2026-11-23：每次 +100。
+  const { limit, rest, more, less } = usePaged(group.items.length, REL_PREVIEW);
+  const shown = group.items.slice(0, limit);
   return (
     <div className="rel-row">
       {!hideKind && (
@@ -5840,12 +5925,12 @@ function KoRelationRow({ group, onWord, hideKind }: {
         </span>
       ))}
       {rest > 0 && (
-        <button className="rel-more" type="button" onClick={() => setOpen(true)}>
-          展开其余 {rest} 个
+        <button className="rel-more" type="button" onClick={more}>
+          再显示 {Math.min(REL_PAGE, rest)} 个（剩 {rest}）
         </button>
       )}
-      {open && (
-        <button className="rel-more" type="button" onClick={() => setOpen(false)}>收起</button>
+      {!expandAll() && limit > REL_PREVIEW && (
+        <button className="rel-more" type="button" onClick={less}>收起</button>
       )}
     </div>
   );
@@ -5975,9 +6060,10 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
     }))
     .filter((g) => g.items.length > 0);
 
-  const renderExamples = (xs: KoExample[]) => (
+  // 2026-11-23：原来**全量渲染**（`대다` 一页 125 条）；改为首屏 `limit` 条、每次 +10。
+  const renderExamples = (xs: KoExample[], limit = 3) => (
     <ul className="example-list">
-      {xs.map((x, i) => (
+      <CollapsibleExamples inList items={xs} limit={limit} render={(x, i) => (
         <li className="example-item" key={i}>
           <div className="example-text" lang="ko">{x.tags ? x.tags.split('|').filter((t) => KO_EXAMPLE_TAG_LABELS[t]).map((t) => (
             <span key={t} className="ex-chip">{KO_EXAMPLE_TAG_LABELS[t]}</span>)) : null}{x.text}</div>
@@ -5985,7 +6071,7 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
           {(x.zh || x.en) && <div className="example-zh">{x.zh ?? x.en}</div>}
           {x.ref && <div className="example-ref">{x.ref}</div>}
         </li>
-      ))}
+      )} />
     </ul>
   );
 
@@ -6241,7 +6327,7 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
       {entryLevel.length > 0 && (
         <section className="entry-section">
           <h3>例句</h3>
-          {renderExamples(entryLevel)}
+          {renderExamples(entryLevel, 6)}
         </section>
       )}
 
@@ -6667,16 +6753,17 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
                     ))}
                   </div>
                 ))}
-                {(bySense.get(s.id) ?? []).map((x) => (
-                  <div key={x.text} className="vi-example">
-                    <ViExTags tags={x.tags} /><span className="vi-example-text">{x.text}</span>
-                    {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
-                    {x.en ? <span className="vi-example-en">{x.en}</span> : null}
-                    {/* 🔴🔴 W10：`ref` 是**出处**。vi 版 709 条 translation 里一条真译文都没有
-                        （214 条整串是 `.`）。排在译文位置就是印「译文：.」。 */}
-                    {x.ref ? <span className="vi-example-ref">出处：{x.ref}</span> : null}
-                  </div>
-                ))}
+                <CollapsibleExamples items={bySense.get(s.id) ?? []} limit={3}
+                  render={(x) => (
+                    <div key={x.text} className="vi-example">
+                      <ViExTags tags={x.tags} /><span className="vi-example-text">{x.text}</span>
+                      {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
+                      {x.en ? <span className="vi-example-en">{x.en}</span> : null}
+                      {/* 🔴🔴 W10：`ref` 是**出处**。vi 版 709 条 translation 里一条真译文都没有
+                          （214 条整串是 `.`）。排在译文位置就是印「译文：.」。 */}
+                      {x.ref ? <span className="vi-example-ref">出处：{x.ref}</span> : null}
+                    </div>
+                  )} />
               </li>
             ))}
           </ol>
@@ -6704,14 +6791,15 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
       {entryLevelEx.length > 0 && (
         <section className="vi-examples-entry">
           <h3 className="vi-sec-title">例句</h3>
-          {entryLevelEx.map((x) => (
-            <div key={x.text} className="vi-example">
-              <ViExTags tags={x.tags} /><span className="vi-example-text">{x.text}</span>
-              {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
-              {x.en ? <span className="vi-example-en">{x.en}</span> : null}
-              {x.ref ? <span className="vi-example-ref">出处：{x.ref}</span> : null}
-            </div>
-          ))}
+          <CollapsibleExamples items={entryLevelEx} limit={6}
+            render={(x) => (
+              <div key={x.text} className="vi-example">
+                <ViExTags tags={x.tags} /><span className="vi-example-text">{x.text}</span>
+                {x.zh ? <span className="vi-example-zh">{x.zh}</span> : null}
+                {x.en ? <span className="vi-example-en">{x.en}</span> : null}
+                {x.ref ? <span className="vi-example-ref">出处：{x.ref}</span> : null}
+              </div>
+            )} />
         </section>
       )}
 
@@ -6948,8 +7036,8 @@ function RuExamples({ items, word }: { items: RuExample[]; word: string }) {
 }
 
 function RuRelations({ rels, onWord }: { rels: RuRelation[]; onWord: (w: string) => void }) {
-  // 2026-11-17：长关系组默认 20 个，其余可展开。
-  const [openKinds, setOpenKinds] = useState<Record<string, boolean>>({});
+  // 2026-11-17：长关系组默认 20 个，其余可展开。2026-11-23：每次 +100。
+  const [shownCounts, setShownCounts] = useState<Record<string, number>>({});
   // 渲染期去重：键是 (kind, target)（`relations.ts` 同一条判据）；数据不动
   const seen = new Set<string>();
   const byKind = new Map<string, RuRelation[]>();
@@ -6979,28 +7067,45 @@ function RuRelations({ rels, onWord }: { rels: RuRelation[]; onWord: (w: string)
             const a = sub.get(g);
             if (a) a.push(r); else sub.set(g, [r]);
           }
+          // 2026-11-23：展开后从「一次全渲染」改成分页（`ебать` 的词族近千条）。
+          // 按 sub group 顺序累计，最后一组可以被切开 —— 带计数，不是死胡同。
+          const famLimit = expandAll() ? items.length : Math.max(30, shownCounts[kind] ?? 0);
+          let taken = 0;
           return (
             <details key={kind} className="ru-rel ru-family" open={items.length <= 30}>
               <summary><span className="ru-rel-kind">{ruRelLabel(kind)}</span><span className="ru-count">{items.length}</span></summary>
-              {[...sub.entries()].map(([g, rs]) => (
-                <div key={g} className="ru-family-group">
-                  <span className="ru-family-pos">{g ? (RU_FAMILY_POS_LABELS[g] ?? g) : '未分组'}</span>
-                  {rs.map((r, i) => (
-                    <span key={r.target}>
-                      {i > 0 ? <span className="ru-sep">、</span> : null}
-                      {link(r)}
-                      {r.formGroup ? <span className="ru-chip">
-                        {r.formGroup.split('+').map((f) => RU_FAMILY_FORM_LABELS[f] ?? f).join('·')}</span> : null}
-                    </span>
-                  ))}
-                </div>
-              ))}
+              {[...sub.entries()].map(([g, rs]) => {
+                if (taken >= famLimit) return null;
+                const show = rs.slice(0, famLimit - taken);
+                taken += show.length;
+                return (
+                  <div key={g} className="ru-family-group">
+                    <span className="ru-family-pos">{g ? (RU_FAMILY_POS_LABELS[g] ?? g) : '未分组'}</span>
+                    {show.map((r, i) => (
+                      <span key={r.target}>
+                        {i > 0 ? <span className="ru-sep">、</span> : null}
+                        {link(r)}
+                        {r.formGroup ? <span className="ru-chip">
+                          {r.formGroup.split('+').map((f) => RU_FAMILY_FORM_LABELS[f] ?? f).join('·')}</span> : null}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })}
+              {famLimit < items.length && (
+                <button className="rel-more" type="button"
+                        onClick={() => setShownCounts((v) => ({
+                          ...v, [kind]: Math.min(Math.max(30, v[kind] ?? 0) + REL_PAGE, items.length),
+                        }))}>
+                  再显示 {Math.min(REL_PAGE, items.length - famLimit)} 个（剩 {items.length - famLimit}）
+                </button>
+              )}
             </details>
           );
         }
-        const open = !!openKinds[kind];
-        const shown = (open || expandAll()) ? items : items.slice(0, REL_PREVIEW);
-        const rest = items.length - shown.length;
+        const limit = expandAll() ? items.length : Math.max(REL_PREVIEW, shownCounts[kind] ?? 0);
+        const shown = items.slice(0, limit);
+        const rest = items.length - limit;
         return (
           <div key={kind} className="ru-rel">
             <span className="ru-rel-kind">{ruRelLabel(kind)}</span>
@@ -7012,12 +7117,16 @@ function RuRelations({ rels, onWord }: { rels: RuRelation[]; onWord: (w: string)
               </span>
             ))}
             {rest > 0 && (
-              <button className="rel-more" type="button" onClick={() => setOpenKinds((v) => ({ ...v, [kind]: true }))}>
-                展开其余 {rest} 个
+              <button className="rel-more" type="button"
+                      onClick={() => setShownCounts((v) => ({
+                        ...v, [kind]: Math.min((v[kind] ?? REL_PREVIEW) + REL_PAGE, items.length),
+                      }))}>
+                再显示 {Math.min(REL_PAGE, rest)} 个（剩 {rest}）
               </button>
             )}
-            {open && (
-              <button className="rel-more" type="button" onClick={() => setOpenKinds((v) => ({ ...v, [kind]: false }))}>收起</button>
+            {!expandAll() && limit > REL_PREVIEW && (
+              <button className="rel-more" type="button"
+                      onClick={() => setShownCounts((v) => ({ ...v, [kind]: 0 }))}>收起</button>
             )}
           </div>
         );
@@ -7242,7 +7351,7 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
 //       **署名 + 相同方式共享**，读者要能顺着链接找到原站点和许可原文。
 // ============================================================================
 
-function AboutPanel({ onClose }: { onClose: () => void }) {
+export function AboutPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);

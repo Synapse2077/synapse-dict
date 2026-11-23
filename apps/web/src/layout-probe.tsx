@@ -34,10 +34,7 @@ import { createElement, type ComponentType } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 (globalThis as { __EXPAND_ALL__?: boolean }).__EXPAND_ALL__ = true;   // 折叠默认展开：闸验证完整内容（见 App.tsx expandAll）
 import { getService } from '@synapse-dict/dict-core';
-import {
-  EnglishEntryView, GermanEntryView, SpanishEntryView, ItalianEntryView,
-  FrenchEntryView, PortugueseEntryView,
-} from './App';
+import { VIEWS, assertViewsRegistered } from './views';
 
 type Any = Record<string, any>;
 const argv = process.argv.slice(2);
@@ -45,29 +42,48 @@ const arg = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i +
 const TOP = Number(arg('--top') ?? 8);
 const ONLY = arg('--lang');
 
-/** 每门语言：服务 key、视图组件、locale。⚠️ props 与各自的契约闸保持一致。 */
-const LANGS: Array<[string, any, string]> = [
-  // 🔴 2026-09-08 补 en —— 这张表原本只有五门，**探针的名字叫「六门语言」但少一门**。
-  //    en 阶段 8 之前用的是老扁平视图，接上 v3 视图后必须进这张表，
-  //    否则英语的排版事故一条都量不到（`[[it-display-layer-stage8]]`）。
-  ['en', EnglishEntryView, 'en-US'],
-  ['de', GermanEntryView, 'de-DE'],
-  ['es', SpanishEntryView, 'es-ES'],
-  ['it', ItalianEntryView, 'it-IT'],
-  ['fr', FrenchEntryView, 'fr-FR'],
-  ['pt', PortugueseEntryView, 'pt-PT'],
-];
+/** 每门语言：服务 key、视图组件、locale —— 登记表在 `views.ts`（2026-11-23 起唯一一份）。
+ *  🔴 这张表原来只有六门。ja/ko/vi/ru 四门的排版成因从来没量过 ——
+ *    而 ja 的教训正是「十六条契约闸全绿、用户看了说乱糟糟」。 */
+const LANGS: Array<[string, any, string]> = Object.entries(VIEWS)
+  .map(([lang, [View, locale]]) => [lang, View, locale] as [string, any, string]);
+try { assertViewsRegistered(); } catch (e) {
+  console.error(String(e instanceof Error ? e.message : e));
+  process.exit(1);
+}
+if (ONLY && !VIEWS[ONLY]) {
+  console.error(`🔴 认不出语种 ${JSON.stringify(ONLY)}；登记了的：${Object.keys(VIEWS).join(' ')}`);
+  process.exit(1);
+}
 
-/** 极端取样：每一支问的都是「哪种长尾最可能撑破页面」。 */
-const ARMS: Array<[string, string]> = [
-  ['义项最多', `SELECT d.word FROM dict d JOIN sense s ON s.word_id=d.id
-                 GROUP BY d.id ORDER BY COUNT(*) DESC LIMIT ?`],
-  ['关系最多', `SELECT d.word FROM dict d JOIN sense_relation r ON r.word_id=d.id
-                 WHERE COALESCE(r.hidden,0)=0 GROUP BY d.id ORDER BY COUNT(*) DESC LIMIT ?`],
-  ['例句最多', `SELECT e.word FROM example e WHERE COALESCE(e.hidden,0)=0
-                 GROUP BY e.word ORDER BY COUNT(*) DESC LIMIT ?`],
-  ['词形最长', `SELECT word FROM dict ORDER BY LENGTH(word) DESC LIMIT ?`],
-];
+/** 极端取样：每一支问的都是「哪种长尾最可能撑破页面」。
+ *  🔴 2026-11-23 扩十门时逐列探测：`sense_relation.hidden` 只有部分门有，
+ *    `example` 的关联键六门按 `word` 文本、vi/ru 按 `word_id`。
+ *    写死一种形状会让缺列的门**静默跳过那一支**（`catch { continue }`），
+ *    而探针照样打一片绿 —— 「少一门」与「这门很干净」在输出上分不开。 */
+function armsFor(db: any): Array<[string, string]> {
+  const has = (tbl: string, col: string) => {
+    try { return db.prepare(`PRAGMA table_info(${tbl})`).all().some((r: any) => r.name === col); }
+    catch { return false; }
+  };
+  const relHidden = has('sense_relation', 'hidden') ? ' AND COALESCE(r.hidden,0)=0' : '';
+  const example = has('example', 'word_id')
+    ? `SELECT d.word FROM example e JOIN dict d ON d.id=e.word_id
+       GROUP BY e.word_id ORDER BY COUNT(*) DESC LIMIT ?`
+    : `SELECT e.word FROM example e WHERE ${has('example', 'hidden') ? 'COALESCE(e.hidden,0)=0 AND ' : ''}1=1
+       GROUP BY e.word ORDER BY COUNT(*) DESC LIMIT ?`;
+  const senseHidden = has('sense', 'hidden') ? ' AND COALESCE(s.hidden,0)=0' : '';
+  return [
+    ['义项最多', `SELECT d.word FROM dict d JOIN sense s ON s.word_id=d.id
+                   WHERE 1=1${senseHidden}
+                   GROUP BY d.id ORDER BY COUNT(*) DESC LIMIT ?`],
+    ['关系最多', `SELECT d.word FROM dict d JOIN sense_relation r ON r.word_id=d.id
+                   WHERE 1=1${relHidden}
+                   GROUP BY d.id ORDER BY COUNT(*) DESC LIMIT ?`],
+    ['例句最多', example],
+    ['词形最长', `SELECT word FROM dict ORDER BY LENGTH(word) DESC LIMIT ?`],
+  ];
+}
 
 const text = (h: string) => h.replace(/<[^>]*>/g, ' ')
   .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -106,7 +122,7 @@ for (const [lang, View, locale] of LANGS) {
   if (ONLY && lang !== ONLY) continue;
   const svc = getService(lang) as unknown as { getEntry(w: string): unknown; db: any };
   const seen = new Set<string>();
-  for (const [arm, sql] of ARMS) {
+  for (const [arm, sql] of armsFor(svc.db)) {
     let got: Array<{ word: string }> = [];
     try { got = svc.db.prepare(sql).all(TOP) as Array<{ word: string }>; }
     catch { continue; }                       // 该语种没有这张表就跳过这一支
@@ -150,7 +166,9 @@ for (const [lang, View, locale] of LANGS) {
         unbreak, unbreakWho: who,
         relRow: (html.match(/class="rel-row"/g) ?? []).length,
         relMaxItems,
-        formCells: (html.match(/class="de-form-grid"|class="form-cell"|class="[^"]*form[^"]*grid/g) ?? []).length,
+        // 与 measure-render-extremes.tsx 同一份单元判据（de-form-cell／de-infl／form-item）。
+        // 原来只数 `form-cell`／`de-form-grid`，531 个变形的 de `überlegen` 会被报成 2。
+        formCells: (html.match(/class="de-form-cell"|class="de-infl"|class="form-item"|class="infl-form"|class="ru-infl-table"/g) ?? []).length,
       });
     }
   }

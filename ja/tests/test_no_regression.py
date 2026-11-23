@@ -34,6 +34,7 @@ ja 这一轮自己也演过同一出：阶段 1 的罗马字断言写成 `romaji
 """
 import json
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -480,10 +481,18 @@ def build(con):
     src_files = ([Path(x) for x in ovr.split(",") if x] if ovr else
                  [HERE.parent.parent / "packages/dict-core/src/japanese.ts",
                   HERE.parent.parent / "apps/web/src/App.tsx"])
+    def _code_only(p):
+        # 🔴 2026-11-23：**注释里提到列名 ≠ 接进展示层**。App.tsx 的 B33 说明里
+        #    本来就有「同 ja `core_level`」这一句注释，X3 从 11-17 起一直红着没人跑
+        #    （ja 直到今天才写库，回归闸才被调用）。
+        #    真接上必然在代码或 SQL 字符串里写列名 —— 字符串**不**剥掉，所以仍会红。
+        t = p.read_text(encoding="utf-8")
+        t = re.sub(r"/\*.*?\*/", "", t, flags=re.S)
+        return re.sub(r"//[^\n]*", "", t)
+
     a(("X", "X3 核心词等级被接进了展示层（它是内部尺子，不是可印的难度标签）", sum(
         1 for f in src_files if f.exists()
-        and ("core_level" in f.read_text(encoding="utf-8")
-             or "core_src" in f.read_text(encoding="utf-8")))))
+        and ("core_level" in _code_only(f) or "core_src" in _code_only(f)))))
     # ⚠️ X4 只问在不在，不问几条（同 J3）：这一列整批被清空时 X1/X2 恒为 0。
     a(("X", "X4 核心词等级整批没了（只问在不在）", q(
         "SELECT COUNT(*)=0 FROM dict WHERE core_level IS NOT NULL")))
