@@ -23,6 +23,7 @@ export * from './etym.js';
 export * from './relations.js';
 export * from './collocation.js';
 export * from './sources.js';
+export * from './blank.js';
 
 type DictionaryRow = {
   id: number;

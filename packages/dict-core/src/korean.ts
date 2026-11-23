@@ -55,6 +55,7 @@
 // ============================================================================
 import { DatabaseSync } from 'node:sqlite';
 import { sourcesForWord, type SourceLink } from './sources.js';
+import { isEmptyEntry } from './blank.js';
 
 export type KoreanSearchItem = {
   id: number;
@@ -182,6 +183,8 @@ export type KoreanEntry = {
   word: string;
   /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
   sources: SourceLink[];
+  /** 数据层全空（见 blank.ts）：页面明说「暂无可发布的释义」，不给空白页。 */
+  blank: boolean;
   isLemma: boolean;
   roman: string | null;
   entries: KoreanEntryView[];
@@ -525,6 +528,7 @@ export class KoreanDictService {
       id,
       word: hit.word,
       sources: sourcesForWord(this.db, id, hit.word, 'ko'),
+      blank: isEmptyEntry(this.db, 'ko', id),
       isLemma: !!hit.is_lemma,
       roman: entries.find((e) => e.roman)?.roman ?? null,
       entries,

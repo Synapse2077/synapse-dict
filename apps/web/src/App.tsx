@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   GENDER_LABELS, POS_LABELS, REGISTER_LABELS, NUMBER_LABELS, TOPIC_LABELS,
   REL_LABELS, EXCHANGE_LABELS, TRANS_LABELS,
@@ -26,11 +27,6 @@ import {
 } from '@synapse-dict/dict-labels';
 
 // ---- Shared types ----
-
-/** B33①：词条来源，镜像 `dict-core/src/sources.ts` 的 `SourceLink`。
- *  九门 Entry 的类型在 App.tsx 里是**手抄的镜像**，这里只加一个可选的公共字段，
- *  不逐个类型展开 —— 来源行在九门视图外面统一渲染。 */
-type EntrySource = { code: string; label: string; url: string | null };
 
 type LanguageMeta = { code: string; label: string; name: string; speak: string };
 
@@ -1134,6 +1130,8 @@ function HumanAudioRow({ audios, word, fallback, regionLabel }: {
 function RelationRow({ rels, onWord }: {
   rels: SpanishRelation[]; onWord: (w: string) => void;
 }) {
+  // 2026-11-17：长关系组默认 20 个，其余可展开。hook 必须在早退之前。
+  const [openKinds, setOpenKinds] = useState<Record<string, boolean>>({});
   if (rels.length === 0) return null;
   const byKind = new Map<string, SpanishRelation[]>();
   for (const r of rels) {
@@ -1142,27 +1140,38 @@ function RelationRow({ rels, onWord }: {
   }
   return (
     <div className="rel-groups">
-      {[...byKind].map(([kind, list]) => (
-        <div className="rel-group" key={kind}>
-          <span className="rel-kind">{REL_LABELS[kind] || kind}</span>
-          {list.map((r, i) => (
-            <span key={i} className="rel-item">
-              {r.linkable
-                ? <a className="rel-link" href={`#${hashFor(r.target)}`}
-                     onClick={(ev) => { ev.preventDefault(); onWord(r.target); }}>{r.target}</a>
-                : <span className="rel-plain">{r.target}</span>}
-              {/* 🔴 2026-08-21：原来是 `r.tags.join('·')` —— 把原始英文标签直接印出来
-                  （`casilla diminutive`、`近义 diñar slang`）。映射表的家在
-                  `@synapse-dict/dict-labels`，不在这里新增。空串＝有意不显示
-                  （`synonym` 这类关系类型自身作标签是冗余的）。 */}
-              {(() => {
-                const zh = r.tags.map(relTagLabel).filter(Boolean);
-                return zh.length > 0 && <span className="rel-tag">{zh.join('·')}</span>;
-              })()}
-            </span>
-          ))}
-        </div>
-      ))}
+      {[...byKind].map(([kind, list]) => {
+        const open = !!openKinds[kind];
+        const shown = (open || expandAll()) ? list : list.slice(0, REL_PREVIEW);
+        const rest = list.length - shown.length;
+        return (
+          <div className="rel-group" key={kind}>
+            <span className="rel-kind">{REL_LABELS[kind] || kind}</span>
+            {shown.map((r, i) => (
+              <span key={i} className="rel-item">
+                {r.linkable
+                  ? <a className="rel-link" href={`#${hashFor(r.target)}`}
+                       onClick={(ev) => { ev.preventDefault(); onWord(r.target); }}>{r.target}</a>
+                  : <span className="rel-plain">{r.target}</span>}
+                {(() => {
+                  const zh = r.tags.map(relTagLabel).filter(Boolean);
+                  return zh.length > 0 && <span className="rel-tag">{zh.join('·')}</span>;
+                })()}
+              </span>
+            ))}
+            {rest > 0 && (
+              <button className="rel-more" type="button"
+                      onClick={() => setOpenKinds((v) => ({ ...v, [kind]: true }))}>
+                展开其余 {rest} 个
+              </button>
+            )}
+            {open && (
+              <button className="rel-more" type="button"
+                      onClick={() => setOpenKinds((v) => ({ ...v, [kind]: false }))}>收起</button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1356,6 +1365,17 @@ export default function App() {
   const [reloadKey, setReloadKey] = useState(0);
   // B33②：数据来源与许可页（页脚「数据来源与许可」和顶栏「关于」都开它）。
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [langOpen, setLangOpen] = useState(false);
+
+  // 语言下拉：点外面关掉（mousedown，避免点菜单项时先触发关闭）
+  useEffect(() => {
+    if (!langOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.lang-picker')) setLangOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [langOpen]);
   const [toast, setToast] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultListRef = useRef<HTMLDivElement>(null);
@@ -1702,67 +1722,53 @@ export default function App() {
     inputRef.current?.focus();
   }, []);
 
+  // 空壳词条（2026-11-17 用户定）：搜索保留、页面明说，不给说不清原因的空白页。
+  // 判据在服务层 `dict-core/src/blank.ts`，与 `scripts/test_empty_entry_gate.py` 同一口径。
+  const blankEntry = !!(entry as { blank?: boolean } | null)?.blank;
+
   return (
     <div className="dict-app">
-      <div className="search-column">
-        <div className="brand-bar">
-          {/* 🔴 用真的 `<button>`，不是给 `<div>` 挂 onClick ——
-              后者键盘按不到、读屏器不认，而且得自己补 `role`/`tabIndex`/回车处理。
-              ⚠️ `<button>` 的内容模型只允许 phrasing content，**里面不能放 `<div>`**
-                （React 不会报，但那是无效 HTML）⇒ 三个 `<div>` 改成 `<span>`，
-                并在 CSS 里给 `.brand-name`/`.brand-sub` 显式 `display: block`
-                —— 它们原来靠 div 的默认块级拿到换行和 `margin-top`。
-              ⚠️ 按钮默认外壳（边框/背景/padding/字体）必须重置，否则 logo 会被
-                框起来 —— `[[PITFALLS 44/50]]`：同一个坑在 `.rel-link` 上栽过两次。 */}
-          <button className="brand" onClick={goHome} type="button"
-                  title="回到首页" aria-label="回到首页">
-            <span className="brand-mark">突</span>
-            <span className="brand-text">
-              <span className="brand-name">突触词典</span>
-              <span className="brand-sub">Synapse Dict</span>
-            </span>
-          </button>
-          <div className="brand-actions">
-            <button
-              className="about-toggle"
-              onClick={() => setAboutOpen(true)}
-              title="关于本词典 · 数据来源与许可"
-              aria-label="关于本词典 · 数据来源与许可"
-              type="button"
-            >
-              关于
-            </button>
-            <button
-              className="theme-toggle"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
-              aria-label="切换主题"
-              type="button"
-            >
-              {theme === 'dark' ? (
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z" /></svg>
-              ) : (
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" /></svg>
-              )}
-            </button>
-          </div>
-        </div>
+      {/* 2026-11-17 界面骨架：顶栏（品牌／语言／搜索／操作）+ 左结果栏 + 右详情。
+          语言从 11 个 pill 改成下拉 —— pill 占三行，语言越多越挤。 */}
+      <header className="top-bar">
+        <button className="brand" onClick={goHome} type="button"
+                title="回到首页" aria-label="回到首页">
+          <span className="brand-mark">突</span>
+          <span className="brand-text">
+            <span className="brand-name">突触词典</span>
+            <span className="brand-sub">Synapse Dict</span>
+          </span>
+        </button>
 
         {languages.length > 1 && (
-          <div className="lang-switch" role="tablist" aria-label="词典语言">
-            {languages.map((l) => (
-              <button
-                key={l.code}
-                className={l.code === lang ? 'lang-pill active' : 'lang-pill'}
-                onClick={() => setLang(l.code)}
-                type="button"
-                role="tab"
-                aria-selected={l.code === lang}
-                title={l.label}
-              >
-                {l.name}
-              </button>
-            ))}
+          <div className="lang-picker">
+            <button
+              className="lang-picker-btn"
+              onClick={() => setLangOpen((v) => !v)}
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={langOpen}
+              title={activeLang ? `当前：${activeLang.name}` : '选择语言'}
+            >
+              <span className="lang-picker-name">{activeLang?.name ?? '语言'}</span>
+              <span className="lang-picker-caret">▾</span>
+            </button>
+            {langOpen && (
+              <div className="lang-menu" role="listbox" aria-label="词典语言">
+                {languages.map((l) => (
+                  <button
+                    key={l.code}
+                    className={l.code === lang ? 'lang-option active' : 'lang-option'}
+                    onClick={() => { setLang(l.code); setLangOpen(false); }}
+                    type="button"
+                    role="option"
+                    aria-selected={l.code === lang}
+                  >
+                    {l.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1780,6 +1786,33 @@ export default function App() {
           {loading && <span className="search-spinner" />}
         </div>
 
+        <div className="brand-actions">
+          <button
+            className="about-toggle"
+            onClick={() => setAboutOpen(true)}
+            title="关于本词典 · 数据来源与许可"
+            aria-label="关于本词典 · 数据来源与许可"
+            type="button"
+          >
+            关于
+          </button>
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? '切换到浅色' : '切换到深色'}
+            aria-label="切换主题"
+            type="button"
+          >
+            {theme === 'dark' ? (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z" /></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" /></svg>
+            )}
+          </button>
+        </div>
+      </header>
+
+      <aside className="search-column">
         <div className="result-list" ref={resultListRef}>
           {results.map((item, i) => (
             <button
@@ -1825,42 +1858,48 @@ export default function App() {
               没有找到匹配词条
             </div>
           )}
+          {!query.trim() && (
+            <div className="list-hint">
+              <span className="hint-emoji">⌨️</span>
+              输入单词开始查询
+            </div>
+          )}
         </div>
-      </div>
+      </aside>
 
       <div className="detail-column">
         {/* SWR：有词条就一直显示（含切换/加载中），避免闪空或回弹欢迎页 */}
-        {entry && entry.lang === 'en' && (
+        {entry && !blankEntry && entry.lang === 'en' && (
           <EnglishEntryView entry={entry as EnEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
-        {entry && entry.lang === 'it' && (
+        {entry && !blankEntry && entry.lang === 'it' && (
           <ItalianEntryView entry={entry as ItEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
-        {entry && entry.lang === 'fr' && (
+        {entry && !blankEntry && entry.lang === 'fr' && (
           <FrenchEntryView entry={entry as FrEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
-        {entry && entry.lang === 'pt' && (
+        {entry && !blankEntry && entry.lang === 'pt' && (
           <PortugueseEntryView entry={entry as PtEntry} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
-        {entry && entry.lang === 'de' && (
+        {entry && !blankEntry && entry.lang === 'de' && (
           <GermanEntryView entry={entry as DeEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
         )}
 
-        {entry && entry.lang === 'ja' && (
+        {entry && !blankEntry && entry.lang === 'ja' && (
           <JapaneseEntryView entry={entry as JaEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
-        {entry && entry.lang === 'vi' && (
+        {entry && !blankEntry && entry.lang === 'vi' && (
           <VietnameseEntryView entry={entry as ViEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
-        {entry && entry.lang === 'ko' && (
+        {entry && !blankEntry && entry.lang === 'ko' && (
           <KoreanEntryView entry={entry as KoEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
-        {entry && entry.lang === 'ru' && (
+        {entry && !blankEntry && entry.lang === 'ru' && (
           <RussianEntryView entry={entry as unknown as RuEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} />
         )}
 
@@ -1875,7 +1914,7 @@ export default function App() {
             页面上既有越南语词条、又跟着一行「展示层还没接上」。
             ⚠️ 这张白名单与上面那串 `entry.lang === 'xx'` 分发块是**两份名单**，
               而在此之前**没有任何东西对账** ⇒ 已做成闸 `dispatch-audit.ts`。 */}
-        {entry && !['en', 'it', 'fr', 'pt', 'de', 'ja', 'ko', 'vi', 'ru'].includes(entry.lang) && (
+        {entry && !blankEntry && !['en', 'it', 'fr', 'pt', 'de', 'ja', 'ko', 'vi', 'ru'].includes(entry.lang) && (
           entry.lang === 'es'
             ? <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
             : (
@@ -1944,15 +1983,11 @@ export default function App() {
             </div>
           </div>
         )}
-        {/* B33①：许可要求署名 —— 每页底部链接回维基词典原页面。
-            放在九门视图外面，是因为来源行**不属于某个语种的版式**：
-            改一处，十门都有；各视图里再写一遍迟早会漏（[[decision-not-propagated-across-editions]]）。 */}
-        {entry && (
-          <SourceLine
-            sources={(entry as { sources?: EntrySource[] }).sources}
-            onAbout={() => setAboutOpen(true)}
-          />
-        )}
+        {/* B33①（2026-11-17 用户定）：词条页**不放**逐条来源行。
+            维基媒体使用条款的署名方式二选一 —— 链接到被复用的文章，**或**
+            链接到稳定的在线副本（Wiktionary 项目主页即符合）⇒ 署名统一放
+            「关于」页即可，词条页回到干净版式。
+            数据层的 `sources`（每个词条真实用到哪些语言版）保留，只是不渲染。 */}
       </div>
 
       {toast && <div className="speak-toast" role="status">{toast}</div>}
@@ -2194,6 +2229,10 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
   const senseGroups = groupEnSenses(entry.senses);
   // 词源编号：**按出场顺序重排**，理由见 `etymOrder()`（两个来源的编号不同源）。
   const enEtymOrder = etymOrder(senseGroups);
+  // 2026-11-17：长义项组默认只露前 SENSE_PREVIEW 条，其余可展开（不是死胡同）。
+  const [openSenseGroups, setOpenSenseGroups] = useState<Record<number, boolean>>({});
+  const [openReadings, setOpenReadings] = useState<Record<string, boolean>>({});
+  const [openExamples, setOpenExamples] = useState<Record<string, boolean>>({});
 
   return (
     <article className="entry-detail">
@@ -2233,20 +2272,37 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
           {regions.map((reg) => {
             const label = reg ? (EN_REGION_LABELS[reg] ?? reg) : null;
             const uniq = [...new Set(byRegion.get(reg)!.map((r) => r.ipa))];
-            return uniq.map((ipa, i) => (i === 0 ? (
-              <button className="phonetic-btn" key={`${reg}|${ipa}`} type="button"
-                      onClick={() => speak(entry.word, localeOf(reg))}
-                      title={reg ? `播放${label}式发音` : '播放发音'}>
-                {label && <span className="phonetic-label">{label}</span>}
-                <span className="phonetic-value">/{ipa}/</span>
-                <SpeakerIcon />
-              </button>
-            ) : (
-              <span className="phonetic-btn phonetic-alt" key={`${reg}|${ipa}`}
-                    title={label ? `${label}式的另一种记法` : '另一种记法'}>
-                <span className="phonetic-value">/{ipa}/</span>
-              </span>
-            )));
+            const open = !!openReadings[reg] || expandAll();
+            return (
+              <Fragment key={reg || '_'}>
+                <button className="phonetic-btn" type="button"
+                        onClick={() => speak(entry.word, localeOf(reg))}
+                        title={reg ? `播放${label}式发音` : '播放发音'}>
+                  {label && <span className="phonetic-label">{label}</span>}
+                  <span className="phonetic-value">/{uniq[0]}/</span>
+                  <SpeakerIcon />
+                </button>
+                {uniq.length > 1 && !open && (
+                  <button className="phonetic-alt-more" type="button"
+                          title={label ? `${label}式的其他记法` : '其他记法'}
+                          onClick={() => setOpenReadings((v) => ({ ...v, [reg]: true }))}>
+                    +{uniq.length - 1} 种记法
+                  </button>
+                )}
+                {open && uniq.slice(1).map((ipa) => (
+                  <span className="phonetic-btn phonetic-alt" key={`${reg}|${ipa}`}
+                        title={label ? `${label}式的另一种记法` : '另一种记法'}>
+                    <span className="phonetic-value">/{ipa}/</span>
+                  </span>
+                ))}
+                {open && (
+                  <button className="phonetic-alt-more" type="button"
+                          onClick={() => setOpenReadings((v) => ({ ...v, [reg]: false }))}>
+                    收起
+                  </button>
+                )}
+              </Fragment>
+            );
           })}
         </div>
       )}
@@ -2331,7 +2387,7 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
               : senseGroups.length > 1
                 && <div className="pos-group-label pos-group-unset">未标注词性</div>}
           <ol className="sense-list">
-            {grp.senses.map((s) => {
+            {(openSenseGroups[gi] || expandAll() ? grp.senses : grp.senses.slice(0, SENSE_PREVIEW)).map((s) => {
               /* ⚠️ topic 桶**按来源分**（2026-09-09 改）：
                    · kaikki 的 topic 是上千种英文 slug（`natural-sciences`），
                      没有映射表 ⇒ 有意不显示（见 dict-labels/src/en.ts）；
@@ -2358,6 +2414,10 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                 if (!byText.has(zh)) byText.set(zh, false);
               }
               const chips = [...byText].map(([text, topic]) => ({ text, topic }));
+              // 2026-11-17：每义项默认 3 条例句，其余可展开（引文很长，3 条已占不少版面）。
+              const exKey = `${gi}-${s.id}`;
+              const exOpen = !!openExamples[exKey];
+              const exShown = (exOpen || expandAll()) ? s.examples : s.examples.slice(0, 3);
               return (
               <li className="sense-item" key={s.id}>
                 {/* 🔴 徽标**跟在中文后面同一行**，与 es/it/fr/pt/de 一致
@@ -2413,21 +2473,14 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                 {s.relations.map((g) => (
                   <div className="rel-row" key={g.kind}>
                     <span className="rel-kind">{EN_RELATION_LABELS[g.kind] ?? g.kind}</span>
-                    {g.targets.map((t, i) => (
-                      <span className="rel-item" key={i}>
-                        {t.clickable
-                          ? <a className="rel-link" href={`#${hashFor(t.word)}`}
-                              onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
-                          : <span className="rel-plain">{t.word}</span>}
-                      </span>
-                    ))}
+                    <RelationTargets targets={g.targets} onWord={onWord} />
                   </div>
                 ))}
                 {s.examples.length > 0 && (
                   <ul className="sense-example-list">
                     {/* 🔴 不折叠（同上）。原来 `slice(0, 4)`：21,314 条义项超限，
                         **静默折掉 51,402 句**，同样没有任何提示。 */}
-                    {s.examples.map((x, i) => (
+                    {exShown.map((x, i) => (
                       <li className="sense-example" key={i}>
                         {/* 🔴🔴 **出处在前、引文在后**（2026-09-09 外审改）。
                             原来的顺序是 引文→中文→出处，出处落在译文之后 ——
@@ -2461,11 +2514,27 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
                         {x.modern && <div className="ex-zh">今：{x.modern}</div>}
                       </li>
                     ))}
+                    {s.examples.length > 3 && (
+                      <li className="sense-example">
+                        <button className="rel-more" type="button"
+                                onClick={() => setOpenExamples((v) => ({ ...v, [exKey]: !v[exKey] }))}>
+                          {exOpen ? '收起' : `展开其余 ${s.examples.length - 3} 条`}
+                        </button>
+                      </li>
+                    )}
                   </ul>
                 )}
               </li>
               );
             })}
+            {grp.senses.length > SENSE_PREVIEW && (
+              <li className="sense-more-row">
+                <button className="rel-more" type="button"
+                        onClick={() => setOpenSenseGroups((v) => ({ ...v, [gi]: !v[gi] }))}>
+                  {openSenseGroups[gi] ? '收起' : `展开其余 ${grp.senses.length - SENSE_PREVIEW} 条`}
+                </button>
+              </li>
+            )}
           </ol>
           </div>
           ))}
@@ -2506,14 +2575,7 @@ export function EnglishEntryView({ entry, speakLocale, onWord, speak }: {
               <span className="rel-kind">{EN_RELATION_LABELS[g.kind] ?? g.kind}</span>
               {/* 🔴 不折叠（同义项级那条）。原来 `slice(0, 20)` + `+N`：
                   848 组超限、24,525 个目标。`+N` 比静默丢好，但仍是**看不到内容的死胡同**。 */}
-              {g.targets.map((t, i) => (
-                <span className="rel-item" key={i}>
-                  {t.clickable
-                    ? <a className="rel-link" href={`#${hashFor(t.word)}`}
-                              onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
-                    : <span className="rel-plain">{t.word}</span>}
-                </span>
-              ))}
+              <RelationTargets targets={g.targets} onWord={onWord} />
             </div>
           ))}
         </section>
@@ -2602,6 +2664,8 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
   //    固定条数至少是可解释的。
   // 分组结果在两处用到（渲染、以及算词源序号），先算一次。**不再切片。**
   const esGroups = groupUnifiedByPos(entry.unifiedSenses);
+  // 2026-11-17：长义项组默认 6 条，其余可展开。
+  const [openEsGroups, setOpenEsGroups] = useState<Record<number, boolean>>({});
   const esEtymOrder = etymOrder(esGroups);
 
   // 方针④三级兜底在音标行上的落法：有成品合成音就播文件，没有才降到浏览器 TTS。
@@ -2795,7 +2859,7 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
                 <div className="pos-group-label">{posLabel(grp.pos)}</div>
               )}
               <ol className="sense-list">
-                {grp.senses.map((s) => (
+                {(openEsGroups[gi] || expandAll() ? grp.senses : grp.senses.slice(0, SENSE_PREVIEW)).map((s) => (
                   <li className="sense-item" key={s.id}>
                     <div className="sense-zh">
                       {s.title}
@@ -2835,6 +2899,14 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
                     ))}
                   </li>
                 ))}
+                {grp.senses.length > SENSE_PREVIEW && (
+                  <li className="sense-more-row">
+                    <button className="rel-more" type="button"
+                            onClick={() => setOpenEsGroups((v) => ({ ...v, [gi]: !v[gi] }))}>
+                      {openEsGroups[gi] ? '收起' : `展开其余 ${grp.senses.length - SENSE_PREVIEW} 条`}
+                    </button>
+                  </li>
+                )}
               </ol>
             </div>
           ))}
@@ -2902,16 +2974,13 @@ export function SpanishEntryView({ entry, speakLocale, onWord, speak, onColloc }
           <h3>变形形</h3>
           <p className="it-note">源头未收录本词的词条页，暂无释义；以下是库中指向它的变形形。</p>
           <ul className="infl-notes">
-            {entry.forms.slice(0, 24).map((f, i) => (
-              <li key={i}>
+            <CollapsibleSenses senses={entry.forms} limit={24} render={(f: any) => (
+              <li key={`${f.word}-${f.label}`}>
                 <a className="rel-link" href={`#${hashFor(f.word)}`}
                   onClick={(e) => { e.preventDefault(); onWord(f.word); }}>{f.word}</a>
                 {' — '}{f.label}
               </li>
-            ))}
-            {entry.forms.length > 24 && (
-              <li className="base-more">… 共 {entry.forms.length} 个变形形</li>
-            )}
+            )} />
           </ul>
         </section>
       )}
@@ -3103,6 +3172,71 @@ function ItExampleView({ ex }: { ex: ItExample }) {
 //    （同一文件内 REGION_LABELS 与 REGION_ZH 两张西语地区表已经重复过一次）。
 // ⚠️ 两个语种的服务端字段名不同（it 叫 `linkable`、fr 叫 `clickable`），
 //    这里**两个都认** —— 与其改动已经跑绿的服务端契约，不如在展示层容纳差异。
+// 2026-11-17 界面改版：长列表默认收起。
+// 🔴 用户 2026-09-10 定过「不要擅自折叠信息」—— 那条针对的是**静默丢弃**
+//    （`slice(0,12)` 且一个字都不说，读者不知道自己没看全）。
+//    这里：默认收起 + 明确的「展开其余 N 个」+ 能再收起，信息一个不少、随时可以看全，
+//    与 `docs/DISPLAY_EXTREMES.md` §四「折叠可以，死胡同不行」一致。
+// 契约闸用：渲染前置 `globalThis.__EXPAND_ALL__ = true` ⇒ 所有折叠默认展开，
+// 断言仍能验证完整内容。浏览器里没人设置它，恒为 false。
+const expandAll = () => !!(globalThis as { __EXPAND_ALL__?: boolean }).__EXPAND_ALL__;
+
+const REL_PREVIEW = 20;
+const SENSE_PREVIEW = 6;
+
+function CollapsibleSenses({ senses, render, limit = SENSE_PREVIEW, itemTag = 'li' }: {
+  senses: unknown[];
+  render: (s: any) => ReactNode;
+  limit?: number;
+  /** 放在 `<ol>/<ul>` 里用 `li`，放在普通容器里用 `div`（de 的变形网格）。 */
+  itemTag?: 'li' | 'div';
+}) {
+  const [open, setOpen] = useState(false);
+  const shown = (open || expandAll()) ? senses : senses.slice(0, limit);
+  const More = itemTag;
+  return (
+    <>
+      {shown.map(render)}
+      {senses.length > limit && (
+        <More className="sense-more-row">
+          <button className="rel-more" type="button" onClick={() => setOpen((v) => !v)}>
+            {open ? '收起' : `展开其余 ${senses.length - limit} 条`}
+          </button>
+        </More>
+      )}
+    </>
+  );
+}
+
+function RelationTargets({ targets, onWord }: {
+  targets: Array<{ word: string; clickable?: boolean; linkable?: boolean }>;
+  onWord: (w: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const shown = (open || expandAll()) ? targets : targets.slice(0, REL_PREVIEW);
+  const rest = targets.length - shown.length;
+  return (
+    <>
+      {shown.map((t, i) => (
+        <span className="rel-item" key={`${t.word}-${i}`}>
+          {(t.clickable ?? t.linkable)
+            ? <a className="rel-link" href={`#${hashFor(t.word)}`}
+                 onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
+            : <span className="rel-plain">{t.word}</span>}
+        </span>
+      ))}
+      {rest > 0 && (
+        <button className="rel-more" type="button" onClick={() => setOpen(true)}>
+          展开其余 {rest} 个
+        </button>
+      )}
+      {open && targets.length > REL_PREVIEW && (
+        <button className="rel-more" type="button" onClick={() => setOpen(false)}>收起</button>
+      )}
+    </>
+  );
+}
+
 function RelationGroups({ groups, onWord }: {
   groups: Array<{
     kind: string;
@@ -3116,14 +3250,7 @@ function RelationGroups({ groups, onWord }: {
       {groups.map((g) => (
         <div className="rel-group" key={g.kind}>
           <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
-          {g.targets.map((t) => (
-            <span className="rel-item" key={t.word}>
-              {(t.linkable ?? t.clickable)
-                ? <a className="rel-link" href={`#${hashFor(t.word)}`}
-                     onClick={(ev) => { ev.preventDefault(); onWord(t.word); }}>{t.word}</a>
-                : <span className="rel-plain">{t.word}</span>}
-            </span>
-          ))}
+          <RelationTargets targets={g.targets} onWord={onWord} />
         </div>
       ))}
     </div>
@@ -3141,6 +3268,7 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }
   onColloc?: (text: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  const [openItGroups, setOpenItGroups] = useState<Record<number, boolean>>({});
   // 分组结果在两处用到（渲染、以及算词源序号），先算一次。
   const itGroups = groupItSenses(entry.senses);
   const itEtymOrder = etymOrder(itGroups);
@@ -3300,7 +3428,7 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }
                 </div>
               )}
               <ol className="sense-list">
-                {grp.senses.map((s, i) => (
+                {(openItGroups[gi] || expandAll() ? grp.senses : grp.senses.slice(0, SENSE_PREVIEW)).map((s, i) => (
                   <li className="sense-item" key={i}>
                     <div className="sense-zh">
                       {s.zh || <span className="sense-missing">（待补）</span>}
@@ -3350,6 +3478,14 @@ export function ItalianEntryView({ entry, speakLocale, onWord, speak, onColloc }
                     ))}
                   </li>
                 ))}
+                {grp.senses.length > SENSE_PREVIEW && (
+                  <li className="sense-more-row">
+                    <button className="rel-more" type="button"
+                            onClick={() => setOpenItGroups((v) => ({ ...v, [gi]: !v[gi] }))}>
+                      {openItGroups[gi] ? '收起' : `展开其余 ${grp.senses.length - SENSE_PREVIEW} 条`}
+                    </button>
+                  </li>
+                )}
               </ol>
             </div>
           ))}
@@ -3602,6 +3738,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
   onColloc?: (text: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  const [openFrGroups, setOpenFrGroups] = useState<Record<number, boolean>>({});
   const posParts = entry.pos ? entry.pos.split('/') : [];
   // 🔴 族 D：读音归属要知道**这一页有哪些词性组**。算一次，词头行与组头共用同一份 ——
   //    两处各算一次就会在「组的边界」上悄悄分叉。
@@ -3782,7 +3919,7 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                 </div>
               )}
               <ol className="sense-list">
-                {grp.senses.map((s, i) => (
+                {(openFrGroups[gi] || expandAll() ? grp.senses : grp.senses.slice(0, SENSE_PREVIEW)).map((s, i) => (
                   <li className="sense-item" key={s.id ?? i}>
                     <div className="sense-zh">
                       {s.zh || <span className="sense-missing">（待补）</span>}
@@ -3835,6 +3972,14 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                     ))}
                   </li>
                 ))}
+                {grp.senses.length > SENSE_PREVIEW && (
+                  <li className="sense-more-row">
+                    <button className="rel-more" type="button"
+                            onClick={() => setOpenFrGroups((v) => ({ ...v, [gi]: !v[gi] }))}>
+                      {openFrGroups[gi] ? '收起' : `展开其余 ${grp.senses.length - SENSE_PREVIEW} 条`}
+                    </button>
+                  </li>
+                )}
               </ol>
             </div>
           ))}
@@ -3942,17 +4087,14 @@ export function FrenchEntryView({ entry, speakLocale, onWord, speak, onColloc }:
         <section className="entry-section">
           <h3>词形变化</h3>
           <ul className="form-list">
-            {entry.forms.slice(0, 40).map((f, i) => (
-              <li className="form-item" key={i}>
+            <CollapsibleSenses senses={entry.forms} limit={40} render={(f: any) => (
+              <li className="form-item" key={`${f.form}-${f.label}`}>
                 <a className="rel-link" href={`#${hashFor(f.form)}`}
                    onClick={(e) => { e.preventDefault(); onWord(f.form); }}>{f.form}</a>
                 {f.label && <span className="form-label">{f.label}</span>}
               </li>
-            ))}
+            )} />
           </ul>
-          {entry.forms.length > 40 && (
-            <div className="form-more">… 共 {entry.forms.length} 种形式</div>
-          )}
         </section>
       )}
     </article>
@@ -4064,6 +4206,7 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
   entry: PtEntry; onWord: (w: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  const [openPtGroups, setOpenPtGroups] = useState<Record<number, boolean>>({});
   // 分组结果在两处用到（渲染、以及算词源序号），先算一次。
   const ptGroups = groupPtSenses(entry.senses);
   const ptEtymOrder = etymOrder(ptGroups);
@@ -4166,7 +4309,7 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
                   texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
               {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
               <ol className="sense-list">
-                {grp.senses.map((s, i) => (
+                {(openPtGroups[gi] || expandAll() ? grp.senses : grp.senses.slice(0, SENSE_PREVIEW)).map((s, i) => (
                   <li className="sense-item" key={i}>
                     <div className="sense-zh">
                       {s.zh || <span className="sense-missing">（待补）</span>}
@@ -4215,6 +4358,14 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
                     ))}
                   </li>
                 ))}
+                {grp.senses.length > SENSE_PREVIEW && (
+                  <li className="sense-more-row">
+                    <button className="rel-more" type="button"
+                            onClick={() => setOpenPtGroups((v) => ({ ...v, [gi]: !v[gi] }))}>
+                      {openPtGroups[gi] ? '收起' : `展开其余 ${grp.senses.length - SENSE_PREVIEW} 条`}
+                    </button>
+                  </li>
+                )}
               </ol>
             </div>
           ))}
@@ -4312,24 +4463,41 @@ export function PortugueseEntryView({ entry, onWord, speak, onColloc }: {
 function PtRelationGroups(
   { groups, onWord }: { groups: PtRelationGroup[]; onWord: (w: string) => void },
 ) {
+  // 2026-11-17：长关系组默认 20 个，其余可展开。
+  const [openKinds, setOpenKinds] = useState<Record<string, boolean>>({});
   return (
     <>
-      {groups.map((g) => (
-        <div className="rel-group" key={g.kind}>
-          <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
-          <span className="rel-targets">
-            {g.targets.map((t, i) => (
-              <span key={i}>
-                {i > 0 && '、'}
-                {t.clickable
-                  ? <a className="rel-link" href={`#${hashFor(t.word)}`}
-                      onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
-                  : <span className="rel-plain">{t.word}</span>}
-              </span>
-            ))}
-          </span>
-        </div>
-      ))}
+      {groups.map((g) => {
+        const open = !!openKinds[g.kind];
+        const shown = (open || expandAll()) ? g.targets : g.targets.slice(0, REL_PREVIEW);
+        const rest = g.targets.length - shown.length;
+        return (
+          <div className="rel-group" key={g.kind}>
+            <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
+            <span className="rel-targets">
+              {shown.map((t, i) => (
+                <span key={i}>
+                  {i > 0 && '、'}
+                  {t.clickable
+                    ? <a className="rel-link" href={`#${hashFor(t.word)}`}
+                        onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
+                    : <span className="rel-plain">{t.word}</span>}
+                </span>
+              ))}
+            </span>
+            {rest > 0 && (
+              <button className="rel-more" type="button"
+                      onClick={() => setOpenKinds((v) => ({ ...v, [g.kind]: true }))}>
+                展开其余 {rest} 个
+              </button>
+            )}
+            {open && (
+              <button className="rel-more" type="button"
+                      onClick={() => setOpenKinds((v) => ({ ...v, [g.kind]: false }))}>收起</button>
+            )}
+          </div>
+        );
+      })}
     </>
   );
 }
@@ -4438,6 +4606,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
   onColloc?: (text: string) => void;
   speak: (word: string, locale: string) => void;
 }) {
+  const [openDeGroups, setOpenDeGroups] = useState<Record<number, boolean>>({});
   // 分组结果在两处用到（渲染、以及算词源序号），先算一次。
   const deGroups = groupDeSenses(entry.senses);
   const deEtymOrder = etymOrder(deGroups);
@@ -4578,7 +4747,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                   texts={entry.etymologyTexts} editions={entry.etymologyEditions} />
               {grp.pos && <div className="pos-group-label">{posLabel(grp.pos)}</div>}
               <ol className="sense-list">
-                {grp.senses.map((s, i) => (
+                {(openDeGroups[gi] || expandAll() ? grp.senses : grp.senses.slice(0, SENSE_PREVIEW)).map((s, i) => (
                   <li className="sense-item" key={i}>
                     <div className="sense-zh">
                       {s.zh || <span className="sense-missing">（待补）</span>}
@@ -4668,6 +4837,14 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
                     ))}
                   </li>
                 ))}
+                {grp.senses.length > SENSE_PREVIEW && (
+                  <li className="sense-more-row">
+                    <button className="rel-more" type="button"
+                            onClick={() => setOpenDeGroups((v) => ({ ...v, [gi]: !v[gi] }))}>
+                      {openDeGroups[gi] ? '收起' : `展开其余 ${grp.senses.length - SENSE_PREVIEW} 条`}
+                    </button>
+                  </li>
+                )}
               </ol>
             </div>
           ))}
@@ -4771,13 +4948,13 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           **有截断就必须说总数**，否则读者以为就这么多（`contract-check-pt` 那条断言）。 */}
           <h3>词形变化</h3>
           <div className="de-form-grid">
-            {entry.forms.map((fm, i) => (
-              <span className="de-form-cell" key={i}>
+            <CollapsibleSenses senses={entry.forms} limit={24} itemTag="div" render={(fm: any) => (
+              <span className="de-form-cell" key={`${fm.form}-${fm.label}`}>
                 <a className="rel-link" href={`#${hashFor(fm.form)}`}
                   onClick={(e) => { e.preventDefault(); onWord(fm.form); }}>{fm.form}</a>
                 {fm.label && <span className="de-form-label">{fm.label}</span>}
               </span>
-            ))}
+            )} />
           </div>
         </section>
       )}
@@ -4809,14 +4986,7 @@ export function GermanEntryView({ entry, speakLocale, onWord, speak, onColloc }:
           {entry.relations.map((g, i) => (
             <div className="rel-row" key={i}>
               <span className="rel-kind">{REL_LABELS[g.kind] || g.kind}</span>
-              {g.targets.map((t, ti) => (
-                <span className="rel-item" key={ti}>
-                  {t.clickable
-                    ? <a className="rel-link" href={`#${hashFor(t.word)}`}
-                        onClick={(e) => { e.preventDefault(); onWord(t.word); }}>{t.word}</a>
-                    : <span className="rel-plain">{t.word}</span>}
-                </span>
-              ))}
+              <RelationTargets targets={g.targets} onWord={onWord} />
             </div>
           ))}
         </section>
@@ -5159,12 +5329,16 @@ function JaRelationRow({ group, onWord }: {
   group: { kind: string; targets: Array<{ word: string; clickable: boolean }> };
   onWord: (w: string) => void;
 }) {
+  // 2026-11-17：长关系组默认 20 个，其余可展开。
+  const [open, setOpen] = useState(false);
+  const shown = (open || expandAll()) ? group.targets : group.targets.slice(0, REL_PREVIEW);
+  const rest = group.targets.length - shown.length;
   return (
     <div className="rel-row">
       <span className="rel-kind">
         {JA_RELATION_LABELS[group.kind] ?? relTagLabel(group.kind)}
       </span>
-      {group.targets.map((t) => (
+      {shown.map((t) => (
         <span key={t.word} className="rel-item">
           {t.clickable
             ? <a className="rel-link" href={`#${hashFor(t.word)}`}
@@ -5172,6 +5346,14 @@ function JaRelationRow({ group, onWord }: {
             : <span className="rel-plain">{t.word}</span>}
         </span>
       ))}
+      {rest > 0 && (
+        <button className="rel-more" type="button" onClick={() => setOpen(true)}>
+          展开其余 {rest} 个
+        </button>
+      )}
+      {open && (
+        <button className="rel-more" type="button" onClick={() => setOpen(false)}>收起</button>
+      )}
     </div>
   );
 }
@@ -5628,6 +5810,10 @@ function KoRelationRow({ group, onWord, hideKind }: {
   group: KoRelationGroup; onWord: (w: string) => void; hideKind?: boolean;
 }) {
   const annotation = KO_ANNOTATION_KINDS.has(group.kind);
+  // 2026-11-17：长关系组默认 20 个，其余可展开。
+  const [open, setOpen] = useState(false);
+  const shown = (open || expandAll()) ? group.items : group.items.slice(0, REL_PREVIEW);
+  const rest = group.items.length - shown.length;
   return (
     <div className="rel-row">
       {!hideKind && (
@@ -5635,10 +5821,9 @@ function KoRelationRow({ group, onWord, hideKind }: {
           {KO_RELATION_LABELS[group.kind] ?? relTagLabel(group.kind)}
         </span>
       )}
-      {group.items.map((t, i) => (
+      {shown.map((t, i) => (
         <span key={`${t.target}-${i}`} className="rel-item">
           {!annotation && (t.targetEntryWord ?? t.targetNorm) ? (
-            // K20：有词条锚 ⇒ 落到锚到的那个词（多字汉字 `不明` → `불명`），并记下要高亮的词条
             <a className="rel-link" href={`#${hashFor((t.targetEntryWord ?? t.targetNorm)!)}`}
               title={t.zh ?? undefined}
               onClick={(e) => {
@@ -5649,15 +5834,19 @@ function KoRelationRow({ group, onWord, hideKind }: {
           ) : (
             <span className="rel-plain" title={t.zh ?? undefined}>{t.target}</span>
           )}
-          {/* 🔴 源头的标签：`녀자` 的「朝鲜」、`소세지` 的「非规범」、
-              `따듯하다` 的「语感弱」。**挂在目标后面不挂在整组上** ——
-              同一组里每条边的标签不一样（`연` 的 related 里既有延边形也有普通形）。
-              认不出的码不印（`koRelationTagLabels` 只认白名单）。 */}
           {koRelationTagLabels(t.tags).map((lb) => (
             <span key={lb} className="badge rel-tag">{lb}</span>
           ))}
         </span>
       ))}
+      {rest > 0 && (
+        <button className="rel-more" type="button" onClick={() => setOpen(true)}>
+          展开其余 {rest} 个
+        </button>
+      )}
+      {open && (
+        <button className="rel-more" type="button" onClick={() => setOpen(false)}>收起</button>
+      )}
     </div>
   );
 }
@@ -5862,7 +6051,7 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
           {posLabel(g.pos, 'ko') && (
             <div className="pos-group-label">{posLabel(g.pos, 'ko')}</div>
           )}
-          <ol className="sense-list">{g.senses.map(renderSense)}</ol>
+          <ol className="sense-list"><CollapsibleSenses senses={g.senses} render={renderSense} /></ol>
         </div>
       ))}
     </section>
@@ -6759,6 +6948,8 @@ function RuExamples({ items, word }: { items: RuExample[]; word: string }) {
 }
 
 function RuRelations({ rels, onWord }: { rels: RuRelation[]; onWord: (w: string) => void }) {
+  // 2026-11-17：长关系组默认 20 个，其余可展开。
+  const [openKinds, setOpenKinds] = useState<Record<string, boolean>>({});
   // 渲染期去重：键是 (kind, target)（`relations.ts` 同一条判据）；数据不动
   const seen = new Set<string>();
   const byKind = new Map<string, RuRelation[]>();
@@ -6807,16 +6998,27 @@ function RuRelations({ rels, onWord }: { rels: RuRelation[]; onWord: (w: string)
             </details>
           );
         }
+        const open = !!openKinds[kind];
+        const shown = (open || expandAll()) ? items : items.slice(0, REL_PREVIEW);
+        const rest = items.length - shown.length;
         return (
           <div key={kind} className="ru-rel">
             <span className="ru-rel-kind">{ruRelLabel(kind)}</span>
-            {items.map((r, i) => (
+            {shown.map((r, i) => (
               <span key={r.target}>
                 {i > 0 ? <span className="ru-sep">、</span> : null}
                 {link(r)}
                 {r.subkind ? <span className="ru-chip">{r.subkind.split('+').map((x) => RU_ASPECT_SUBKIND_LABELS[x] ?? x).join('·')}</span> : null}
               </span>
             ))}
+            {rest > 0 && (
+              <button className="rel-more" type="button" onClick={() => setOpenKinds((v) => ({ ...v, [kind]: true }))}>
+                展开其余 {rest} 个
+              </button>
+            )}
+            {open && (
+              <button className="rel-more" type="button" onClick={() => setOpenKinds((v) => ({ ...v, [kind]: false }))}>收起</button>
+            )}
           </div>
         );
       })}
@@ -7025,42 +7227,20 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
 }
 
 // ============================================================================
-// B33①／②：来源行与「关于」页
+// B33②：「关于」页 —— 数据来源与许可
 //
 // ① 的来源**由服务层按数据库里的真实 src 算好**（`sourcesForWord`），前端不猜：
 //    · ru `дом` 同时用到 ru/zh/en/pl/fr 五个语言版；
 //    · en 门 242 万词条只有 ECDICT、没有任何维基来源；
 //    · 变形词条的来源只在 `entry` 表上。
-//    在这些形态上「按语种拼一个 wiktionary.org/wiki/词」都会给出假出处。
+//    ⇒ 数据层留着（导出/核查用得上），但**不在词条页渲染**（2026-11-17 用户定，见 B33）。
 //
 // ② 的内容是 CC BY-SA 4.0 的署名义务：来源、加工方式、许可、贡献者。
+//    维基媒体条款的署名方式二选一：链接到被复用的文章**或**链接到稳定的在线副本。
+//    我们走第二种 ⇒ 这里必须列出 Wiktionary 项目主页（各语言版）。
 //    ⚠️ 不写「数据来自维基词典，版权所有」这种含糊话 —— 许可要求的是
-//       **署名 + 相同方式共享**，读者要能顺着链接找到原页面和许可原文。
+//       **署名 + 相同方式共享**，读者要能顺着链接找到原站点和许可原文。
 // ============================================================================
-
-function SourceLine({ sources, onAbout }: {
-  sources?: EntrySource[];
-  onAbout: () => void;
-}) {
-  if (!sources || sources.length === 0) return null;
-  return (
-    <div className="source-line">
-      <span className="source-label">来源</span>
-      {sources.map((s, i) => (
-        <Fragment key={s.code}>
-          {i > 0 && <span className="source-sep">·</span>}
-          {s.url
-            ? <a className="source-link" href={s.url} target="_blank"
-                 rel="noopener noreferrer">{s.label}</a>
-            : <span className="source-name">{s.label}</span>}
-        </Fragment>
-      ))}
-      <button className="source-about" onClick={onAbout} type="button">
-        数据来源与许可
-      </button>
-    </div>
-  );
-}
 
 function AboutPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
@@ -7083,9 +7263,22 @@ function AboutPanel({ onClose }: { onClose: () => void }) {
             <h3 className="about-sec-title">数据来源</h3>
             <ul className="about-list">
               <li>词条、释义与例句主要来自
-                <a href="https://zh.wiktionary.org/" target="_blank" rel="noopener noreferrer">维基词典（Wiktionary）</a>，
+                <a href="https://www.wiktionary.org/" target="_blank" rel="noopener noreferrer">维基词典（Wiktionary）</a>，
                 经由 <a href="https://kaikki.org/" target="_blank" rel="noopener noreferrer">kaikki.org</a>
                 的离线抽取副本进入本词典。</li>
+              <li>用到的语言版：
+                <a href="https://en.wiktionary.org/" target="_blank" rel="noopener noreferrer">英语</a> ·
+                <a href="https://de.wiktionary.org/" target="_blank" rel="noopener noreferrer">德语</a> ·
+                <a href="https://fr.wiktionary.org/" target="_blank" rel="noopener noreferrer">法语</a> ·
+                <a href="https://it.wiktionary.org/" target="_blank" rel="noopener noreferrer">意大利语</a> ·
+                <a href="https://es.wiktionary.org/" target="_blank" rel="noopener noreferrer">西班牙语</a> ·
+                <a href="https://pt.wiktionary.org/" target="_blank" rel="noopener noreferrer">葡萄牙语</a> ·
+                <a href="https://ja.wiktionary.org/" target="_blank" rel="noopener noreferrer">日语</a> ·
+                <a href="https://ko.wiktionary.org/" target="_blank" rel="noopener noreferrer">韩语</a> ·
+                <a href="https://vi.wiktionary.org/" target="_blank" rel="noopener noreferrer">越南语</a> ·
+                <a href="https://ru.wiktionary.org/" target="_blank" rel="noopener noreferrer">俄语</a> ·
+                <a href="https://zh.wiktionary.org/" target="_blank" rel="noopener noreferrer">中文</a>
+              </li>
               <li>英语词条的部分释义来自
                 <a href="https://github.com/skywind3000/ECDICT" target="_blank" rel="noopener noreferrer">ECDICT</a>。</li>
               <li>发音录音来自 Wikimedia Commons；没有录音的词由本地语音合成。</li>
@@ -7111,7 +7304,7 @@ function AboutPanel({ onClose }: { onClose: () => void }) {
             </ul>
           </section>
           <p className="about-foot">
-            每个词条页底部的「来源」一行会链接到它在维基词典上的原页面。
+            署名与许可统一在本页说明，词条页不再逐条标注。
           </p>
         </div>
       </div>

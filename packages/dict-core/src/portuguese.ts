@@ -37,6 +37,7 @@ import { etymKeyOfEntry } from './etym.js';
 import { collocationParts, looseForms, type CollocationDetail } from './collocation.js';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
 import { sourcesForWord, type SourceLink } from './sources.js';
+import { isEmptyEntry } from './blank.js';
 
 export type PortugueseSearchItem = {
   id: number;
@@ -176,6 +177,8 @@ export type PortugueseEntry = {
   word: string;
   /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
   sources: SourceLink[];
+  /** 数据层全空（见 blank.ts）：页面明说「暂无可发布的释义」，不给空白页。 */
+  blank: boolean;
   ipaBr: string | null;         // 巴西标准音（readings 里 pt-BR 或通用的第一条）
   ipaPt: string | null;         // 欧洲标准音
   pos: string | null;
@@ -673,6 +676,7 @@ export class PortugueseDictService {
     const entry: PortugueseEntry = {
       lang: 'pt', id, word: w,
       sources: [],   // getEntry 拿到 db 后按真实 src 填（B33①）
+      blank: false,   // getEntry 拿到 db 后覆盖
       etymologyEditions: this.etymEditions,
       // 键 ＝ `${edition}:${etym_no}`，与 `etymKeyOfEntry()` 拼出来的那把逐字一致。
       etymologyTexts: Object.fromEntries(
@@ -743,6 +747,7 @@ export class PortugueseDictService {
       });
     }
     entry.sources = sourcesForWord(this.db, entry.id, entry.word, 'pt');
+    entry.blank = isEmptyEntry(this.db, 'pt', entry.id);
     return entry;
   }
 

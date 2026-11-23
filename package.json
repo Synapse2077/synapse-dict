@@ -51,6 +51,7 @@
     "gate:batch-audit": "python3 scripts/batch_audit.py --selftest",
     "gate:mutation-debt": "python3 scripts/mutation_stamp.py && python3 scripts/mutation_stamp.py --mutate",
     "gate:backlog": "python3 -u scripts/test_backlog_gate.py",
+    "gate:empty-entries": "python3 -u scripts/test_empty_entry_gate.py",
     "gate:zh-t2s": "python3 scripts/zh_t2s.py",
     "gate:track": "python3 -u scripts/test_track_gate.py --mutate",
     "gate:rare-han": "python3 -u scripts/rare_han_font.py --mutate",

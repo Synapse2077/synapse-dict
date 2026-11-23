@@ -18,6 +18,7 @@
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+(globalThis as { __EXPAND_ALL__?: boolean }).__EXPAND_ALL__ = true;   // 折叠默认展开：闸验证完整内容（见 App.tsx expandAll）
 import { getService } from '@synapse-dict/dict-core';
 import { VietnameseEntryView, EXAMPLES } from './App';
 import { POS_LABELS, REL_LABELS, VI_POS_LABELS, VI_RELATION_LABELS,

@@ -56,6 +56,7 @@ import { etymKeyOfSrcRef } from './etym.js';
 import { collocationParts, looseForms, type CollocationDetail } from './collocation.js';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
 import { sourcesForWord, type SourceLink } from './sources.js';
+import { isEmptyEntry } from './blank.js';
 
 export type GermanSearchItem = {
   id: number;
@@ -164,6 +165,8 @@ export type GermanEntry = {
   word: string;
   /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
   sources: SourceLink[];
+  /** 数据层全空（见 blank.ts）：页面明说「暂无可发布的释义」，不给空白页。 */
+  blank: boolean;
   pos: string | null;
   isLemma: boolean;
   freqZipf: number | null;
@@ -637,6 +640,7 @@ export class GermanDictService {
     return {
       lang: 'de',
       sources: [],   // getEntry 拿到 db 后按真实 src 填（B33①）
+      blank: false,   // getEntry 拿到 db 后覆盖
       etymologyEditions: this.etymEditions,
       // 键 ＝ `${edition}:${etym_no}`，与 `etymKeyOfEntry()` 拼出来的那把逐字一致。
       etymologyTexts: Object.fromEntries(
@@ -695,6 +699,7 @@ export class GermanDictService {
     //    return entry;` 是**早退分支**，Haus 这类有义项的词全从那儿走 ——
     //    放结尾等于只给"没有义项的变形页"填了来源。
     entry.sources = sourcesForWord(this.db, entry.id, entry.word, 'de');
+    entry.blank = isEmptyEntry(this.db, 'de', entry.id);
 
     // 变形页：把它指向的原形内联进来，读者不必再点一次。
     //

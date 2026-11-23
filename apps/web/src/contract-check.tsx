@@ -31,6 +31,7 @@
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+(globalThis as { __EXPAND_ALL__?: boolean }).__EXPAND_ALL__ = true;   // 折叠默认展开：闸验证完整内容（见 App.tsx expandAll）
 import { getService, probeLanguages, LANGUAGES, type ItalianEntry } from '@synapse-dict/dict-core';
 import { POS_LABELS, REL_LABELS, itAudioRegion, IT_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 import { ItalianEntryView, groupItSenses, getInitialLang, readingBelongsTo, EXAMPLES,

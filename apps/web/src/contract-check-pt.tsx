@@ -28,6 +28,7 @@
  */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+(globalThis as { __EXPAND_ALL__?: boolean }).__EXPAND_ALL__ = true;   // 折叠默认展开：闸验证完整内容（见 App.tsx expandAll）
 import { getService } from '@synapse-dict/dict-core';
 import { PT_EXAMPLE_TAG_LABELS } from '@synapse-dict/dict-labels';
 import { PortugueseEntryView, capAudios } from './App';

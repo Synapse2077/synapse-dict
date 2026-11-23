@@ -66,6 +66,7 @@ GATES = {
     "gate:first-build": "scripts/test_first_build_gate.py",   # B6/B22：库不存在时 dbtool 的三条路径
     "gate:consult": "scripts/consult.py",                       # B8/B9：咨询工具的离线自检
     "gate:backlog": "scripts/test_backlog_gate.py",             # B5：顶层账本与各门计划表对得上
+    "gate:empty-entries": "scripts/test_empty_entry_gate.py",   # 2026-11-17：有词条但页面上没有任何可读内容（十门基线，只许降）
     "gate:zh-t2s": "scripts/zh_t2s.py",                         # B29：跨门繁→简判据的自测（65 条真句子）
     "gate:rare-han": "scripts/rare_han_font.py",               # B29：罕用汉字兜底字体 —— 库里每个扩展 B+ 字都有切片、三份字表对得上、字体栈都带它（＋变异）
     "gate:etym-criterion": "scripts/ingest_etymology.py",       # B4：「这段不是词源」判据自测（套话各一例＋该保留的反控）

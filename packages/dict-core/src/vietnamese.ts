@@ -48,6 +48,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { dropDuplicatedAtSenseLevel } from './relations.js';
 import { sourcesForWord, type SourceLink } from './sources.js';
+import { isEmptyEntry } from './blank.js';
 
 export type VietnameseSearchItem = {
   id: number;
@@ -160,6 +161,8 @@ export type VietnameseEntry = {
   word: string;
   /** 这一页的数据来自哪些外部来源（B33①）。见 sources.ts。 */
   sources: SourceLink[];
+  /** 数据层全空（见 blank.ts）：页面明说「暂无可发布的释义」，不给空白页。 */
+  blank: boolean;
   isLemma: boolean;
   syllables: number;
   entries: VietnameseEntryView[];
@@ -427,6 +430,7 @@ export class VietnameseDictService {
       id,
       word: hit.word,
       sources: sourcesForWord(this.db, id, hit.word, 'vi'),
+      blank: isEmptyEntry(this.db, 'vi', id),
       isLemma: !!hit.isLemma,
       syllables: hit.syllables,
       entries: this.q.entries.all(id) as unknown as VietnameseEntryView[],

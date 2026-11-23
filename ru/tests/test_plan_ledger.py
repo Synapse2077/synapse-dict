@@ -45,6 +45,7 @@ ko 的阶段 5/6/7 正是这样。⇒ **V2 专治这个。**
    当场以为欠账表里多了一行残留。⇒ 跑变异时别碰那个文件。
 """
 import argparse
+import os
 import re
 import sqlite3
 import sys
@@ -618,8 +619,15 @@ def v9():
         bad.append(("V9", "闸 %s 欠着没跑（这次写库动了 %s）"
                     % (n, "、".join(info.get("tables") or []) or "?")))
     # 🔴 **变异欠账也算红。** 普通档全绿只说明「检查还在」，不说明「检查逮得到东西」。
+    # 🔴 **正在跑这一档的变异时，不许读它的旧账。** `mutation_stamp` 是在子进程
+    #    退出**之后**才记账的 ⇒ 变异内部跑到本闸时，台账上还是上一次的结果。
+    #    不豁免就是自指死锁：变异 → 汇总 → 本闸读到旧账 → 红 → 变异判失败 → 下次还红。
+    #    （与上面的 `self_names` 是同一形状：闸不能因为「自己正在跑」而判自己红。）
+    running = os.environ.get("MUTATION_STAMP_RUNNING")
     for n, why in gates.mutation_debt():
         if n in self_names:
+            continue
+        if running and n == running:
             continue
         bad.append(("V9", "闸 %s **欠一次变异验证**：%s" % (n, why)))
     # 🔴 **自己那笔账照样印出来，只是不计入红** —— 不许因为「不算红」就不说。
