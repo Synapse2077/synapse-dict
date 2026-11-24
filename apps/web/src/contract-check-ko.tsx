@@ -21,7 +21,7 @@ import { getService } from '@synapse-dict/dict-core';
 import { KoreanEntryView, EXAMPLES, hashFor } from './App';
 import { etymologyBrief } from '@synapse-dict/dict-labels';
 import { KO_RELATION_LABELS, KO_ANNOTATION_KINDS, POS_LABELS,
-         KO_POS_LABELS, KO_CONJ_CLASS_LABELS } from '@synapse-dict/dict-labels';
+         KO_POS_LABELS, KO_CONJ_CLASS_LABELS, KO_PRON_REGION_LABELS } from '@synapse-dict/dict-labels';
 
 const svc = getService('ko') as unknown as {
   getEntry(w: string): any;
@@ -239,6 +239,26 @@ const CHECKS: Check[] = [
   { word: '가다', name: '录音不是张冠李戴的 `Y.mp3`',
     hit: (_t, e) => ((e.audio ?? []).some((a: any) => a.file === 'Y.mp3')
       ? '挂着 `Y.mp3`（同一个文件挂在 45 个词上）' : null) },
+  // 🔴 2026-11-24：读音区两行同地区时原来各印一遍 `SK-Standard,Seoul` ——
+  //    一本中文词典里的英文码，而且让两条读音看着像两个地区。
+  //    ① 地区必须印中文名 ② 相邻同地区只印一次。
+  //    反向控制靠 `KO_PRON_REGION_LABELS` 的全值域覆盖（见下方 domain 扫描）。
+  { word: '析', name: '🔴 读音区地区印中文名、相邻同地区只印一次',
+    hit: (t: string, e: any) => {
+      const regions = (e.pronunciations ?? []).map((p: any) => p.region).filter(Boolean);
+      if (new Set(regions).size !== 1 || regions.length < 2) return '`析` 不是「两条读音同一个地区」⇒ 这条检查空过了';
+      if (t.includes('SK-Standard,Seoul')) return '页面上印着源头码 SK-Standard,Seoul';
+      const n = (t.match(/首尔标准音/g) ?? []).length;
+      return n === 1 ? null : `「首尔标准音」印了 ${n} 次（两条同地区读音应只印 1 次）`;
+    } },
+  // 反方向：地区不同时两个都要印（`신의주` 是朝鲜／首尔两套读音）。
+  { word: '신의주', name: '🔴 地区不同时两个地区都印出来',
+    hit: (t: string, e: any) => {
+      const regions = new Set((e.pronunciations ?? []).map((p: any) => p.region).filter(Boolean));
+      if (regions.size < 2) return '`신의주` 没有两个地区 ⇒ 这条检查空过了，换样本词';
+      const miss = [...regions].filter((r) => !t.includes(KO_PRON_REGION_LABELS[r as string] ?? (r as string)));
+      return miss.length === 0 ? null : `页面上看不到地区 ${miss.join(',')}`;
+    } },
 ];
 
 /** 全量扫描：对每个抽样词渲染一遍，盯**跨词的结构性契约**。 */
@@ -336,6 +356,21 @@ const heavy = (db.prepare(
   + ' GROUP BY r.word_id ORDER BY COUNT(*) DESC LIMIT 40').all() as { word: string }[])
   .map((r) => r.word);
 red += sweep([...(EXAMPLES.ko ?? []), ...heavy]);
+
+// 2026-11-24：读音地区码必须全部有中文名 —— 查**全库值域**，不只抽样词。
+// 「抽样没抽到」和「值域里没有」长得一模一样，而读者会遇到后者。
+{
+  const regions = (db.prepare(
+    'SELECT DISTINCT region FROM pronunciation WHERE region IS NOT NULL').all() as
+    Array<{ region: string }>).map((r) => r.region);
+  const miss = regions.filter((r) => KO_PRON_REGION_LABELS[r] === undefined);
+  if (miss.length) {
+    red += 1;
+    console.log(`   🔴 读音地区码没有中文名（全库）：${miss.join('、')}`);
+  } else {
+    console.log(`   ✅ 读音地区码全值域 ${regions.length} 个都有中文名`);
+  }
+}
 
 if (red) { console.log(`\n🔴 ko 展示层契约闸：${red} 条红`); process.exit(1); }
 console.log('\n■ ko 展示层契约闸全绿 ✓');

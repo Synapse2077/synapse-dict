@@ -69,10 +69,10 @@ GATES = {
     "gate:backlog": "scripts/test_backlog_gate.py",             # B5：顶层账本与各门计划表对得上
     "gate:empty-entries": "scripts/test_empty_entry_gate.py",   # 2026-11-17：有词条但页面上没有任何可读内容（十门基线，只许降）
     "gate:zh-t2s": "scripts/zh_t2s.py",                         # B29：跨门繁→简判据的自测（65 条真句子）
-    # 🔴 2026-11-23：`gate:rare-han` **移出汇总闸**（用户定：改动频繁，别每次都付 18 分钟）。
-    #    它只在**库变了**时才需要（重建罕用字切片），与样式/组件改动无关。
-    #    `display_stamp.check()` 检测到 `db:*` 变化时会打印提示；写库后单独跑 `npm run gate:rare-han`。
-    #    入口保留在 package.json，闸本身与变异不动。
+    # 2026-11-24：**按库指纹条件执行**（`DATA_ONLY`）—— 库没变的批次跳过，
+    # 库一变就必须跑。用户 2026-11-23 定「别每次都付 18 分钟」，但只打印提示守不住，
+    # 改成一库变化就强制跑（不再只是提示）。
+    "gate:rare-han": "scripts/rare_han_font.py",
     "gate:etym-criterion": "scripts/ingest_etymology.py",       # B4：「这段不是词源」判据自测（套话各一例＋该保留的反控）
     "gate:example-residue": "scripts/test_example_template_residue_gate.py",  # B35：十门例句模板残渣全库扫描
     "gate:small-undo": "scripts/test_small_undo.py",             # 写库闸门的小改动模式：撤销后逐行一致、撤不干净的必须拒绝
@@ -102,12 +102,16 @@ GATES = {
 
 # 有意不进汇总的 `gate:*`：各门自己的闸，由 `<lang>/gates.py` 跑（查询计划闸要先有本门 ANALYZE）。
 # 🔴 package.json 新加的 `gate:*` 两边都不在 ⇒ G0 红（新闸没归类＝没人跑，B15 的病）。
-OWN_LANG = frozenset({
-    "gate:ko-labels", "gate:ko-plans", "gate:vi-plans", "gate:ru-plans", "gate:display",
-    # 2026-11-23：罕用字闸移出汇总（只在库变时需要，冷缓存要 18 分钟）。
-    # 写库后单独跑；`display_stamp.check()` 检测到 db 变化会提示。
-    "gate:rare-han",
-})
+OWN_LANG = frozenset({"gate:ko-labels", "gate:ko-plans", "gate:vi-plans", "gate:ru-plans", "gate:display"})
+
+# 2026-11-24：**只依赖库**的闸。库指纹（`display_stamp` 里的 `db:*`）没变就跳过，
+# 一变就必须跑。判据是「上次跑绿时的库」与「现在的库」逐字节对比，不靠时间、不靠人记。
+DATA_ONLY = frozenset({"gate:rare-han"})
+
+
+def data_gate_skip(g, old_db, now_db):
+    """只依赖库的闸：库指纹没变 ⇒ 跳过。纯函数，变异直接测它。"""
+    return g in DATA_ONLY and old_db == now_db
 
 # 已登记、仍开着的红：闸 → {断言编号: 条数}。🔴 锚在常量上，不从现状推。
 DEBT = {
@@ -192,8 +196,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mutate", action="store_true")
     a = ap.parse_args()
-    print("■ 跨门展示层／契约闸汇总（%d 道）" % len(GATES))
     files = display_stamp.current()        # 🔴 开跑之前取：跑的途中改了文件 ⇒ 下次照样欠
+    # 2026-11-24：只依赖库的闸（`DATA_ONLY`）按**库指纹**决定跑不跑 —— 库没变的批次跳过。
+    _stamp_db = {k: v for k, v in ((display_stamp.load() or {}).get("files") or {}).items()
+                 if k.startswith("db:")}
+    _now_db = {k: v for k, v in files.items() if k.startswith("db:")}
+    skip = sorted(g for g in GATES if data_gate_skip(g, _stamp_db, _now_db))
+    todo = [g for g in GATES if g not in skip]
+    if skip:
+        print("■ 跨门展示层／契约闸汇总（%d 道；库没变，跳过 %d 道库相关闸）"
+              % (len(GATES), len(skip)))
+    else:
+        print("■ 跨门展示层／契约闸汇总（%d 道）" % len(GATES))
     ros = roster()
     for b in ros:
         print("  🔴 " + b)
@@ -202,15 +216,18 @@ def main():
     #    判据没病，是测量环境坏了。⚠️ 不去调宽 de 的预算（它的注释写明「不要靠调高倍数让它变绿」）。
     #    清单靠 grep 计时判据得来（2026-10-27 只有 de 一处）；再有别的就加进来。
     TIMED = {"ledger:de", "gate:page-timing"}   # 页面计时闸：fr 那页并发下 17→29 ms 的抖动实测过
-    rest = [g for g in GATES if g not in TIMED]
+    rest = [g for g in todo if g not in TIMED]
     with ThreadPoolExecutor(8) as ex:
         res = dict(zip(rest, ex.map(run, rest)))
-    for g in GATES:
+    for g in todo:
         if g in TIMED:
             res[g] = run(g)
-    res = {g: res[g] for g in GATES}
     red = len(ros)
-    for g, (code, out, dt) in res.items():
+    for g in GATES:
+        if g in skip:
+            print("  ⏭ %-24s 跳过（库没变）" % g)
+            continue
+        code, out, dt = res[g]
         ok, why = judge(g, code, out)
         red += not ok
         print("  %s %-24s %4.0fs  %s" % ("✅" if ok else "🔴", g, dt, why))
@@ -243,6 +260,15 @@ def main():
         hit = ok == want
         dead += not hit
         print("  %s %-24s → %s" % ("✅" if hit else "🔴 没逮到", name, why or "（绿）"))
+    # 2026-11-24：库指纹决定 DATA_ONLY 闸跑不跑
+    for name, got, want in [
+        ("库没变 ⇒ 跳过 rare-han", data_gate_skip("gate:rare-han", {"db:en": "1"}, {"db:en": "1"}), True),
+        ("库变了 ⇒ 不跳过", data_gate_skip("gate:rare-han", {"db:en": "1"}, {"db:en": "2"}), False),
+        ("别的闸不看库指纹", data_gate_skip("gate:fr-display", {"db:en": "1"}, {"db:en": "1"}), False),
+    ]:
+        hit = got == want
+        dead += not hit
+        print("  %s %-24s → %s" % ("✅" if hit else "🔴 没逮到", name, got))
     # 名册：假装多了一个没进名单的闸文件
     GATES_BAK = dict(GATES)
     GATES.pop("gate:colloc-display")

@@ -285,6 +285,20 @@ export const KO_PRON_SRC_NOTE: Record<string, string> = {
 };
 
 /**
+ * 读音区 `pronunciation.region` 的展示名。2026-11-24。
+ *
+ * 🔴 原来直接印源头码：`析` 的页面上两行都写着 **`SK-Standard,Seoul`** ——
+ *    一本中文词典里的一串英文，读者既不知道指什么，也分不出两行是不是同一个地区。
+ *    全库值域目前是两个（110,236 / 8），但判据不按「这两个值」写：
+ *    ko 契约闸查的是**全库 `pronunciation.region` 值域**，
+ *    源头下一版多给一个码就当场红（与词性/关系类别同一种覆盖闸）。
+ */
+export const KO_PRON_REGION_LABELS: Record<string, string> = {
+  'SK-Standard,Seoul': '首尔标准音',
+  'North-Korea': '朝鲜',
+};
+
+/**
  * 词源段的来源标注（2026-10-27，K36①）。页尾「其余词源」区里中文版与英文版的词源会并排出现，
  * **不标来源就像同一个词有两个来历** —— 它们是两部词典各自的说法（照 vi 的 `VI_EDITION_LABELS`）。
  */

@@ -113,6 +113,13 @@ export function audioChipLabels<T extends AudioChipLike>(
       const idx = out.map((l, i) => (l === label ? i : -1)).filter((i) => i >= 0);
       const vals = idx.map((i) => step(audios[i]) ?? '');
       if (new Set(vals).size < 2) continue; // 这一级分不开这一组
+      // 🔴 2026-11-24：**只有一部分录音有这条事实时也不加。**
+      //    接上 ru 之后暴露的：一组里一条是 Lingua Libre 文件名
+      //    （`LL-Q7737 (rus)-…`），另一条是 `Ru-<词>.ogg` —— 括号注只在前者存在，
+      //    于是页面排出「未标注 · rus」和「未标注」。**「rus」是语言码，不是差别**，
+      //    读者会以为其中一条是"俄语录音"、另一条不是。
+      //    ⇒ 一条事实只有在**这一组每条都有**时才算区分事实；否则它不是信息，是缺口。
+      if (vals.some((v) => !v)) continue;
       idx.forEach((i, k) => {
         if (vals[k] && vals[k] !== label) next[i] = `${label} · ${vals[k]}`;
       });

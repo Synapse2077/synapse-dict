@@ -97,20 +97,31 @@ body {
 .dict-app {
   display: grid;
   grid-template-columns: 340px 1fr;
-  grid-template-rows: 64px 1fr;
+  grid-template-rows: 72px 1fr;
   grid-template-areas: "top top" "side detail";
   height: 100vh;
 }
 
+/* 2026-11-24：三列 grid —— 左组 / 搜索 / 操作。
+   中间列固定上限 620px，左右两个 `1fr` 等宽 ⇒ **搜索在视口正中**，
+   不再被「左组比右组长多少」推着偏。 */
 .top-bar {
   grid-area: top;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 620px) minmax(0, 1fr);
   align-items: center;
-  gap: 14px;
-  padding: 0 20px;
+  gap: 16px;
+  padding: 0 24px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   z-index: 10;
+}
+
+.top-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 /* ---- Left column: results ---- */
@@ -162,38 +173,42 @@ button.brand:focus-visible {
 }
 
 .brand-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   background: linear-gradient(135deg, var(--accent), #7aa7ff);
   display: grid;
   place-items: center;
   color: #fff;
   font-weight: 800;
-  font-size: 16px;
+  font-size: 17px;
   box-shadow: var(--shadow-sm);
 }
 
 .brand-name {
   display: block;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
-  letter-spacing: 0.2px;
+  letter-spacing: 0;
 }
 
 .brand-sub {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.2;
   color: var(--text-tertiary);
-  margin-top: 1px;
+  margin-top: 0;
 }
 
+/* 2026-11-24 导航栏收干净：
+   搜索是主控件（有底色、有焦点环），语言/关于/主题退成**幽灵控件** ——
+   原来四个控件都是同一只灰色小胶囊，读者分不出哪个是主操作。 */
 .theme-toggle {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  background: var(--surface-soft);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-secondary);
   display: grid;
   place-items: center;
@@ -203,34 +218,39 @@ button.brand:focus-visible {
 
 .theme-toggle:hover {
   color: var(--text);
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
+  border-color: transparent;
+  background: var(--surface-soft);
 }
 
 .search-input-wrap {
-  flex: 1 1 320px;
+  width: 100%;
   max-width: 620px;
   padding: 0;
-  margin-left: 6px;
+  margin: 0 auto;
   position: relative;
 }
 
 .search-input {
   width: 100%;
-  padding: 12px 40px 12px 40px;
-  border-radius: 12px;
-  border: 1px solid var(--border-strong);
+  height: 38px;
+  padding: 0 38px;
+  border-radius: 10px;
+  border: 1px solid transparent;
   background: var(--surface-soft);
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.search-input:hover {
+  border-color: var(--border-strong);
 }
 
 .search-input:focus {
   border-color: var(--accent);
   background: var(--surface);
-  box-shadow: 0 0 0 4px var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .search-input::placeholder {
@@ -239,20 +259,24 @@ button.brand:focus-visible {
 
 .search-icon {
   position: absolute;
-  left: 28px;
+  left: 13px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-tertiary);
   pointer-events: none;
 }
 
+.search-input-wrap:focus-within .search-icon {
+  color: var(--accent);
+}
+
 .search-spinner {
   position: absolute;
-  right: 30px;
+  right: 14px;
   top: 50%;
   transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border: 2px solid var(--border-strong);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -316,8 +340,10 @@ button.brand:focus-visible {
 }
 
 /* Left-column status messages (empty / no-result / error) */
+/* 2026-11-24：去掉 emoji 与「输入单词开始查询」之后，提示块只剩一句正文。
+   内边距随之收小 —— 原来的 28px 是给 26px emoji 留的。 */
 .list-hint {
-  padding: 28px 20px;
+  padding: 20px;
   text-align: center;
   color: var(--text-secondary);
   font-size: 14px;
@@ -326,12 +352,6 @@ button.brand:focus-visible {
 
 .list-hint.error {
   color: var(--text);
-}
-
-.list-hint .hint-emoji {
-  font-size: 26px;
-  display: block;
-  margin-bottom: 8px;
 }
 
 .retry-btn {
@@ -452,12 +472,6 @@ button.brand:focus-visible {
   color: var(--text-secondary);
 }
 
-.detail-error .hint-emoji {
-  font-size: 34px;
-  display: block;
-  margin-bottom: 12px;
-}
-
 /* ---- Entry detail ---- */
 .entry-detail {
   max-width: 720px;
@@ -469,7 +483,12 @@ button.brand:focus-visible {
   position: sticky;
   top: -40px;
   z-index: 6;
-  background: var(--bg);
+  /* 🔴 2026-11-24：不能只写纯色 `var(--bg)` —— body 的背景是一张
+     `background-attachment: fixed` 的径向渐变，纯色块在暗色下比周围亮一档，
+     词头像贴了一块灰板（用户看到的正是这个）。⇒ 用同一张固定渐变，颜色严丝合缝。 */
+  background-color: var(--bg);
+  background-image: var(--bg-gradient);
+  background-attachment: fixed;
   padding: 8px 0;
   margin: -8px 0 18px;
 }
@@ -643,20 +662,23 @@ button.brand:focus-visible {
    ============================================================ */
 .lang-picker { position: relative; flex: 0 0 auto; }
 
+/* 2026-11-24：与搜索框同一行、同一高度，但**不再画成一只胶囊** ——
+   语言是低频切换，视觉权重让给搜索。悬停/展开时才有底色。 */
 .lang-picker-btn {
-  display: flex; align-items: center; gap: 6px;
-  height: 34px; padding: 0 12px;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  background: var(--surface-soft);
+  display: flex; align-items: center; gap: 5px;
+  height: 36px; padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-secondary);
   font-size: 13px; cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.lang-picker-btn:hover {
-  color: var(--text); border-color: var(--border-strong); background: var(--surface-hover);
+.lang-picker-btn:hover,
+.lang-picker-btn[aria-expanded='true'] {
+  color: var(--text); border-color: transparent; background: var(--surface-soft);
 }
-.lang-picker-name { font-weight: 600; }
+.lang-picker-name { font-weight: 600; color: var(--text); }
 .lang-picker-caret { font-size: 11px; color: var(--text-tertiary); }
 
 .lang-menu {
@@ -1087,6 +1109,33 @@ button.brand:focus-visible {
 /* ============================================================
    Responsive
    ============================================================ */
+/* 手机端专用件：桌面端永不显示（规则写在媒体查询里）。 */
+.mobile-results-back {
+  display: none;
+}
+
+/* 2026-11-24：顶栏一行放不下三块时（左组 / 搜索 / 操作），搜索落到第二行独占。
+   否则中间那列 620px 会把左右两组挤到重叠。
+   断点比版式断点（820px）宽：主区还能两栏，只是导航换行。 */
+@media (max-width: 1100px) {
+  /* 🔴 顶栏变成两行后，外层 grid 的 `72px` 会把第二行挤到结果栏上（实测 1024px
+     搜索框盖住第一条结果）。顶栏这一行必须改成 auto，让它自己撑高。 */
+  .dict-app {
+    grid-template-rows: auto 1fr;
+  }
+  .top-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    height: auto;
+    padding: 12px 18px;
+    gap: 10px;
+  }
+  .top-left { grid-column: 1; grid-row: 1; }
+  .brand-actions { grid-column: 2; grid-row: 1; }
+  /* 搜索仍保持 620px 上限并居中 —— 1024px 下铺满一整行会拉成一根长条。 */
+  .search-input-wrap { grid-column: 1 / -1; grid-row: 2; }
+}
+
 @media (max-width: 820px) {
   .dict-app {
     grid-template-columns: 1fr;
@@ -1097,18 +1146,7 @@ button.brand:focus-visible {
   }
 
   .top-bar {
-    flex-wrap: wrap;
-    height: auto;
     padding: 12px 16px;
-    gap: 10px;
-  }
-
-  /* 搜索框独占第二行，品牌/语言/操作留在第一行。 */
-  .search-input-wrap {
-    flex: 1 1 100%;
-    order: 3;
-    max-width: none;
-    margin-left: 0;
   }
 
   .search-column {
@@ -1118,14 +1156,39 @@ button.brand:focus-visible {
     border-bottom: 1px solid var(--border);
   }
 
+  /* 2026-11-24：选词后收起结果栏，把整屏让给词条；浮动按钮回列表。
+     只在 ≤820px 生效 —— 桌面端两栏并排，不需要这个状态。 */
+  .search-column.results-hidden {
+    display: none;
+  }
+
+  .mobile-results-back {
+    display: inline-flex;
+    position: fixed;
+    left: 14px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    z-index: 30;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow);
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .mobile-results-back:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
   /* 2026-11-23：窄屏下空态原来按桌面尺寸留 28px 上下内边距 + 26px emoji，
      整块占掉详情上方一截 —— 压成一行提示。 */
   .list-hint {
-    padding: 10px 16px;
-  }
-  .list-hint .hint-emoji {
-    font-size: 16px;
-    margin-bottom: 2px;
+    padding: 12px 16px;
   }
 
   .detail-column {
@@ -1141,21 +1204,9 @@ button.brand:focus-visible {
     margin-top: 4vh;
   }
 
-  /* 🔴 2026-11-23：375px 下「关于／主题」两个按钮**在 DOM 里但看不见** ——
-     flex-wrap 把 `brand-actions` 换行后又被 `flex: 1 1 100%` 的搜索框挤掉了。
-     改成两行 grid：第一行品牌／语言／操作，第二行搜索框独占。 */
-  .top-bar {
-    display: grid;
-    grid-template-columns: auto auto 1fr auto;
-    align-items: center;
-    gap: 10px;
-  }
-  .brand { grid-column: 1; grid-row: 1; }
-  .lang-picker { grid-column: 2; grid-row: 1; }
-  /* ⚠️ 必须显式 grid-row:1：按 DOM 顺序自动放置时，搜索框（占第 2 行）之后
-     光标已移到第 3 行，只写 grid-column 会把按钮放到搜索框下面（CDP 实测 y=116）。 */
-  .brand-actions { grid-column: 4; grid-row: 1; justify-self: end; margin-left: 0; }
-  .search-input-wrap { grid-column: 1 / -1; grid-row: 2; order: 0; }
+  /* 2026-11-23 的「375px 下关于／主题看不见」已由 2026-11-24 的顶栏重构修掉：
+     品牌与语言包进 `.top-left`，顶栏是 左组 / 搜索 / 操作 三块，
+     ≤1100px 时搜索独占第二行（见上面的导航断点）。这里不再需要单独摆位。 */
 }
 
 /* ---- 发音提示（设备缺该语言语音时） ---- */
@@ -1738,7 +1789,9 @@ button.brand:focus-visible {
   margin-top: 10px;
 }
 
-.ja-kanji-readings h3 {
+/* 同一个视觉角色只留一个声明块：词读音与字读音两块的分区标题。 */
+.ja-kanji-readings h3,
+.ja-readings-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-tertiary);
@@ -2441,11 +2494,17 @@ button.brand:focus-visible {
   color: var(--text-secondary);
 }
 
-/* 🔴 挂在方言行上的录音：比独立成区的那个窄，别把一行挤爆。
+/* 🔴 2026-11-24：录音从原生 `<audio controls>` 换成胶囊按钮（与其他九门统一）。
+   挂在方言行上的那几个仍要紧凑，别把一行挤爆 ——
    `[[display-extremes-doc]]`：一个词最多 5 个方言行，每行都可能带录音。 */
+.vi-audio-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .vi-audio-inline {
-  height: 26px;
-  max-width: 190px;
   margin-left: 8px;
   vertical-align: middle;
 }
@@ -2455,13 +2514,6 @@ button.brand:focus-visible {
 .vi-audio-note {
   font-size: 12px;
   color: var(--text-secondary);
-  margin-right: 8px;
-}
-
-.vi-audio {
-  height: 32px;
-  max-width: 260px;
-  vertical-align: middle;
   margin-right: 8px;
 }
 
@@ -2666,10 +2718,6 @@ button.brand:focus-visible {
   .vi-word {
     font-size: 25px;
   }
-
-  .vi-audio {
-    max-width: 100%;
-  }
 }
 
 /* W15 的指针跳转按钮。⚠️ 与关系链接同用 `.vi-link` 的颜色和交互，
@@ -2707,8 +2755,6 @@ button.brand:focus-visible {
 .ru-tilde { text-decoration: underline dotted; cursor: help; }
 .ru-folded { font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px; }
 .ru-sec-title { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-tertiary); }
-.ru-audios { display: flex; flex-wrap: wrap; gap: 6px; }
-.ru-audio { height: 32px; max-width: 260px; }
 .ru-pointers { display: block; }
 .ru-pointer { margin: 0 0 4px; font-size: 14px; line-height: 1.6; }
 .ru-pointer-text { color: var(--text); }
@@ -2786,17 +2832,18 @@ button.brand:focus-visible {
    ============================================================ */
 .brand-actions {
   display: flex; align-items: center; gap: 8px;
-  margin-left: auto; flex: 0 0 auto;
+  justify-self: end;
 }
 
+/* 与语言选择同为幽灵控件：低权重，悬停才出现底色。 */
 .about-toggle {
-  height: 34px; padding: 0 12px; border-radius: 9px;
-  border: 1px solid var(--border); background: var(--surface-soft);
+  height: 36px; padding: 0 10px; border-radius: 10px;
+  border: 1px solid transparent; background: transparent;
   color: var(--text-secondary); font-size: 13px; cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .about-toggle:hover {
-  color: var(--text); border-color: var(--border-strong); background: var(--surface-hover);
+  color: var(--text); border-color: transparent; background: var(--surface-soft);
 }
 
 .about-overlay {

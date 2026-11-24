@@ -234,6 +234,18 @@ const CHECKS: Check[] = [
       return n === 0 ? null
         : `读音区有 ${n} 个 ▶ 按钮，而这个词一条录音都没有 —— 它们读的是同一个通用 TTS`;
     } },
+  // 🔴 2026-11-24：**十门统一：真人录音不许用浏览器原生播放器。**
+  //    vi/ru 是最后两门还在用 `<audio controls>` 的（其余八门早就换成胶囊按钮）。
+  //    判据按**含义**写（页面上有没有原生 audio 元素），不按语种/类名写；
+  //    同时要求「至少渲染出一个按钮」—— 否则「一条录音都没渲染」也会满足这条，
+  //    而那是一颗空过的绿。
+  { word: 'và', name: '真人录音不是浏览器原生播放器',
+    hit: (_t, e, html) => {
+      if ((e.audios as any[]).length === 0) return '`và` 现在没有录音 ⇒ 这条检查空过了，换一个样本词';
+      if (/<audio[^>]*\bcontrols\b/.test(html)) return '页面上出现了原生 <audio controls>';
+      return html.includes('data-audio-file=') ? null : '一条录音都没有渲染成按钮（无从判断播放器形态）';
+    } },
+
   // 🔴 另一个方向：**有录音的方言行必须给得出播放器**。
   //    只断言「没录音时没按钮」的话，「永远不给按钮」也能满足它 —— 那就把 4,177 组
   //    真人录音藏起来了（`[[dont-recast-deliverables-as-junk]]`：录音是珍贵资产）。
@@ -250,11 +262,16 @@ const CHECKS: Check[] = [
       if (matched.length === 0) return '`và` 没有方言对得上的录音 ⇒ 这条检查空过了，换样本词';
       // 🔴 **挂在方言行上**才算（`vi-audio-inline`）；落到下面「没标方言」那一区不算，
       //    否则「全部塞进那一区」也能满足这条断言。
-      const inline = (html.match(/class="vi-audio vi-audio-inline"/g) ?? []).length;
-      const missing = matched.filter((a: any) => !html.includes(a.url));
+      // 🔴 2026-11-24：播放器从原生 `<audio>` 换成胶囊按钮，URL 不再出现在 HTML 里
+      //    （点击时才 `new Audio()`，与 es/pt 同一个形状）⇒ 判据改成认
+      //    `data-audio-file` 这个**元件标识**，不是认 URL。否则这条断言会在
+      //    构造上永远绿 —— 「URL 不在 HTML 里」和「录音没渲染」长得一模一样。
+      const inline = (html.match(/class="vi-audio-chips vi-audio-inline"/g) ?? []).length;
+      const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+      const missing = matched.filter((a: any) => !html.includes(`data-audio-file="${esc(a.commonsKey)}"`));
       if (inline === 0) return `${matched.length} 条方言对得上的录音，方言行上一个播放器都没有`;
       return missing.length === 0 ? null
-        : `${missing.length}/${matched.length} 条录音的 url 没出现在页面上：${missing[0].url.slice(0, 50)}`;
+        : `${missing.length}/${matched.length} 条录音没有渲染成按钮：${missing[0].commonsKey.slice(0, 50)}`;
     } },
 
   // 📋 **有意不写**「中文译文不许排进『出处：』那一格」这一条：我写了一版，
@@ -542,6 +559,24 @@ function main() {
       console.log(`\n═══ ${w} ═══\n${e ? bodyText(render(e)) : '（查不到）'}`);
     }
     return;
+  }
+  // 变异：**先正常渲染，再把渲染结果里的一个胶囊按钮换回原生 `<audio controls>`**。
+  // 本闸 2026-11-24 起才有变异入口 —— 第一条要守的是「十门统一用胶囊按钮」。
+  // 构造问题同 `[[it-display-layer-stage8]]`：这条问的是「组件渲染出了什么元素」，
+  // 改数据碰不到它，必须在 HTML 上打坏。
+  if (argv.includes('--mutate')) {
+    const e = svc.getEntry('và');
+    const html = e ? render(e) : '';
+    const broken = html.replace(
+      /<button[^>]*data-audio-file="[^"]*"[^>]*>[\s\S]*?<\/button>/,
+      '<audio controls src="x"></audio>');
+    const check = CHECKS.find((c) => c.name.includes('原生播放器'));
+    const caught = !!check && !!e && check.hit('', e, broken) !== null;
+    const base = !!check && !!e && check.hit('', e, html) === null;
+    console.log(`■ vi 变异（录音形态）`);
+    console.log(`   ${caught ? '✅' : '🔴🔴 没逮到'} 渲染结果被换回原生 <audio controls>`);
+    console.log(`   ${base ? '✅' : '🔴🔴 反控失败'} 基线仍绿（正常渲染时判据不响）`);
+    process.exit(caught && base ? 0 : 1);
   }
   console.log('■ 展示层契约闸（vi）：把 `VietnameseEntryView` 渲染出来，断言可见文字');
   let bad = 0;

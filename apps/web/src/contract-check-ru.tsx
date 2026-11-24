@@ -121,8 +121,17 @@ const CHECKS: Check[] = [
   { id: 'C9', word: 'день', name: '指针段「See the etymology of the corresponding lemma form」不印',
     hit: (t) => (t.includes('See the etymology of the corresponding lemma form') ? '指针段印出来了' : null) },
   // ⑧ 张冠李戴的录音不播（`нога ⇐ Ru-ноги.ogg` 是 hidden）
+  // 🔴 2026-11-24：播放器从原生 `<audio>` 换成胶囊按钮，URL 不再进 HTML ⇒
+  //    判据改成认 `data-audio-file`。**不这么改，这条会在构造上永远绿**：
+  //    「URL 不在 HTML 里」与「录音根本没渲染」长得一模一样。
   { id: 'C10', word: 'нога', name: '张冠李戴的录音不出现',
-    hit: (_t, _e, h) => (h.includes('Ru-%D0%BD%D0%BE%D0%B3%D0%B8') || h.includes('Ru-ноги') ? '录的是复数的那条录音出现在词元页上' : null) },
+    hit: (_t, _e, h) => (h.includes('data-audio-file="Ru-ноги.ogg"') ? '录的是复数的那条录音出现在词元页上' : null) },
+  // ⑧' 2026-11-24：**十门统一：真人录音不许用浏览器原生播放器。**
+  //    ru/vi 是最后两门还在用 `<audio controls>` 的（其余八门早就换成胶囊按钮）。
+  //    原生播放器不跟主题、与页面控件两套外观，死链还静默变哑。
+  //    判据按**含义**写（页面上有没有原生 audio 元素），不按语种/类名写。
+  { id: 'C29', word: 'ебать', name: '真人录音不是浏览器原生播放器',
+    hit: (_t, _e, h) => (/<audio[^>]*\bcontrols\b/.test(h) ? '页面上出现了原生 <audio controls>' : null) },
   // ⑧' R23：纸质词典的 `～` 原样印，但**每一个**都要带「它代的是谁」（不展开 —— 词干断点源头没给）
   { id: 'C17', word: 'агентство', name: '`～` 每一个都带说明（代替词头 агентство）',
     hit: (_t, _e, h) => {
@@ -279,7 +288,10 @@ if (!MUTATE) {
     ['C7', '占位回到词源', (w, e) => { if (w === 'тараса') e.etymologies.push({ entryId: e.entries[0].id, etymNo: 0, text: 'От ??', etymType: null, src: 'ru-edition' }); return e; }],
     ['C8', '构词示意式被放出来', (w, e) => { if (w === 'на-') e.examples.push({ senseId: null, entryId: e.entries[0].id, text: 'на- (na-) + идти́ (idtí, “to go”) → найти́', ref: null, zh: null, zhSrc: null, en: null, src: 'en-edition' }); return e; }],
     ['C9', '指针词源被放出来', (w, e) => { if (w === 'день') e.etymologies.push({ entryId: e.entries[0].id, etymNo: 0, text: 'See the etymology of the corresponding lemma form.', etymType: null, src: 'en-edition' }); return e; }],
-    ['C10', '张冠李戴录音被放出来', (w, e) => { if (w === 'нога') e.audios.push({ entryId: null, url: 'https://upload.wikimedia.org/x/Ru-ноги.ogg', commonsKey: 'Ru-ноги.ogg', src: 'pl-edition' }); return e; }],
+    // ⚠️ 用 `unshift` 不用 `push`：2026-11-24 换成共用 `HumanAudioRow` 后，
+    //    `capAudios` 每个地区只留 2 条 —— `нога` 本来就有 2 条，追加在最后的那条
+    //    **根本不会被渲染**，C10 在构造上就成了假绿。加到最前面才进入渲染集。
+    ['C10', '张冠李戴录音被放出来', (w, e) => { if (w === 'нога') e.audios.unshift({ entryId: null, url: 'https://upload.wikimedia.org/x/Ru-ноги.ogg', commonsKey: 'Ru-ноги.ogg', src: 'pl-edition' }); return e; }],
     // 注入一处**不经 RuTilde 渲染**的 ～（出处位）⇒ 页面上出现一个光秃秃的 ～
     ['C17', '一个 ～ 没带说明', (w, e) => { if (w === 'агентство' && e.examples[0]) e.examples[0].ref = 'торго́вое ～'; return e; }],
     ['C12', '释义回到繁体原文', (w, e) => { if (w === 'товарищ') e.senses.forEach((s: any) => s.glosses.forEach((g: any) => { g.text = g.text.replace('同学', '同學'); })); return e; }],
@@ -304,6 +316,21 @@ if (!MUTATE) {
     const ok = red.includes(id);
     if (!ok) fails += 1;
     console.log(`   ${ok ? '✅' : '🔴🔴 没逮到'} ${id.padEnd(4)} ${why}${ok && red.length > 1 ? `（连带 ${red.filter((x) => x !== id).join(',')}）` : ''}`);
+  }
+  // C29 的变异：**先正常渲染，再把渲染结果里的一个胶囊按钮换回原生 `<audio controls>`**。
+  //    C29 问的是「组件渲染出了什么元素」，改数据碰不到它 —— 与 ko 那批
+  //    「改数据、组件照样忠实渲染」的假变异是同一个构造问题
+  //    （`[[it-display-layer-stage8]]`）。
+  {
+    const e = svc.getEntry('ебать');
+    const html = e ? render(e) : '';
+    const broken = html.replace(
+      /<button[^>]*data-audio-file="[^"]*"[^>]*>[\s\S]*?<\/button>/,
+      '<audio controls src="x"></audio>');
+    const c29 = CHECKS.find((c) => c.id === 'C29');
+    const ok = !!c29 && c29.hit('', e, broken) !== null;
+    if (!ok) fails += 1;
+    console.log(`   ${ok ? '✅' : '🔴🔴 没逮到'} C29  渲染结果被换回原生 <audio controls>`);
   }
   // C16 的变异：搜索退回「只按 word_norm 前缀」（R30 之前的样子）—— 省写 ё 的那条必须红
   {

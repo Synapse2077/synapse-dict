@@ -17,8 +17,8 @@ import {
   JA_REGISTER_LABELS, JA_REGION_LABELS, JA_GRAMMAR_LABELS, JA_USAGE_LABELS,
   jaVclassLabel, mostSpecificTopics,
   KO_POS_LABELS, KO_RELATION_LABELS, KO_ANNOTATION_KINDS, koRelationTagLabels, KO_EXAMPLE_TAG_LABELS,
-  KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE, KO_EDITION_LABELS,
-  koConjMeaningDependent, koHanjaIsMixed,
+  KO_CONJ_CLASS_LABELS, KO_CONJ_SRC_LABELS, koIpaWrap, KO_PRON_SRC_NOTE, KO_PRON_REGION_LABELS,
+  KO_EDITION_LABELS, koConjMeaningDependent, koHanjaIsMixed,
   VI_POS_LABELS, VI_RELATION_LABELS, VI_DIALECT_LABELS, VI_ETYM_TYPE_LABELS,
   VI_SPELLING_RULE, VI_EDITION_LABELS, viEditionRank, VI_EXAMPLE_TAG_LABELS,
   RU_POS_LABELS, RU_RELATION_LABELS, RU_ASPECT_SUBKIND_LABELS, RU_FAMILY_POS_LABELS, RU_FAMILY_FORM_LABELS,
@@ -1051,22 +1051,18 @@ export function CollocationView({ detail, onWord }: {
   );
 }
 
-function HumanAudioRow({ audios, word, fallback, regionLabel }: {
-  audios: PlayableAudio[]; word: string; fallback: () => void;
-  regionLabel: (raw: string) => string;
-}) {
+/**
+ * 真人音频的播放状态与行为 —— **十个视图共用这一份**。
+ *
+ * 🔴 2026-11-24：原来这段逻辑只活在 `HumanAudioRow` 里，而 ru/vi 两门用的是
+ *    浏览器原生 `<audio controls>`。八门早就是小胶囊按钮，这两门是漏抄。
+ *    抽成 hook 之后，vi 的「方言行内联播放器」也能复用同一套行为
+ *    —— 死链回退 TTS、播放态、失效标记都只有一份实现。
+ *    这正是 PITFALLS 51「统一样式的修法是挂别名，不是各写一份」的同一形状。
+ */
+function useAudioPlayback(fallback: () => void) {
   const [playing, setPlaying] = useState<string | null>(null);
   const [dead, setDead] = useState<Record<string, true>>({});
-  // 🔴 **2026-08-31：每个地区最多留 2 条，总数封顶 6。**
-  //    起因是 fr 接上录音后 `chien` 排出**八个按钮、全写着「法国」**，只是录音人不同 ——
-  //    读者要的是「不同口音」，不是同一口音的八个人。
-  //    ⚠️ 规则放在**这个共用组件**里，不放进各语种的 SQL —— 四门语言同一条规则才叫统一，
-  //    而且 pt 的 `a`（四个「巴西」）也是同一个毛病，一起治。
-  //    ⚠️ 留 2 条不留 1 条：第一条是死链时还有个**真人**备份（组件的兜底是 TTS，差一档）。
-  //    各语种的服务层已按「本土音优先 / 地区来源可信优先」排过序，这里取前面的即可。
-  const usable = capAudios(audios);
-  if (usable.length === 0) return null;
-
   const play = (a: PlayableAudio) => {
     if (!a.url || dead[a.file]) return;
     const el = new Audio(a.url);
@@ -1080,6 +1076,58 @@ function HumanAudioRow({ audios, word, fallback, regionLabel }: {
     el.onerror = giveUp;
     el.play().catch(giveUp);
   };
+  return { playing, dead, play };
+}
+
+/** 一个真人录音按钮。`data-audio-file` 给契约闸认「这一条录音有没有被渲染」。 */
+function AudioChipButton({ a, label, word, playing, dead, onPlay }: {
+  a: PlayableAudio; label: string | null; word?: string; playing: string | null;
+  dead: Record<string, true>; onPlay: (a: PlayableAudio) => void;
+}) {
+  const hint = [
+    a.speaker ? `录音人 ${a.speaker}` : null,
+    a.regionSrc === 'speaker' ? '地区按录音人推定' :
+      a.regionSrc === 'tag' ? '地区为原始标注' :
+      a.regionSrc === 'filename' ? '地区取自文件名' : null,
+    a.ipa ? `对应读音 ${a.ipa}` : null,
+    dead[a.file] ? '⚠️ 该录音链接已失效，已改用合成音' : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <button
+      className={'audio-chip' + (playing === a.file ? ' playing' : '') + (dead[a.file] ? ' dead' : '')}
+      data-audio-file={a.file}
+      onClick={() => onPlay(a)}
+      title={hint || word}
+      type="button"
+    >
+      <SpeakerIcon />
+      {label ? <span className="audio-region">{label}</span> : null}
+      {/* 🔴 2026-09-10：原来是一个光秃秃的 `~`，用户问「真人发音有个 ~ 是什么意思？」——
+          **只有 title 提示的符号，等于没说**（en 有 32,049/102,751 = 31.2% 是这样）。
+          它说的是：这条录音的**地区是从录音人名字推出来的，不是源头标的**，
+          所以可能不准。⇒ 换成自解释的「推定」，与项目其余标签一致（中文短码、不用符号）。
+          `[[it-display-layer-stage8]]`：**兜底越体面缺陷越难发现**，
+          这里是它的近亲 —— **标记越含蓄，读者越不知道自己在看什么**。 */}
+      {a.regionSrc === 'speaker'
+        && <span className="audio-inferred" title="地区按录音人推定，非源头标注">推定</span>}
+    </button>
+  );
+}
+
+function HumanAudioRow({ audios, word, fallback, regionLabel, label = '真人发音' }: {
+  audios: PlayableAudio[]; word: string; fallback: () => void;
+  regionLabel: (raw: string) => string; label?: string | null;
+}) {
+  // 🔴 **2026-08-31：每个地区最多留 2 条，总数封顶 6。**
+  //    起因是 fr 接上录音后 `chien` 排出**八个按钮、全写着「法国」**，只是录音人不同 ——
+  //    读者要的是「不同口音」，不是同一口音的八个人。
+  //    ⚠️ 规则放在**这个共用组件**里，不放进各语种的 SQL —— 四门语言同一条规则才叫统一，
+  //    而且 pt 的 `a`（四个「巴西」）也是同一个毛病，一起治。
+  //    ⚠️ 留 2 条不留 1 条：第一条是死链时还有个**真人**备份（组件的兜底是 TTS，差一档）。
+  //    各语种的服务层已按「本土音优先 / 地区来源可信优先」排过序，这里取前面的即可。
+  const usable = capAudios(audios);
+  const { playing, dead, play } = useAudioPlayback(fallback);   // hook 不能放在早退之后
+  if (usable.length === 0) return null;
 
   // 🔴🔴 **2026-09-26（K23）标签逻辑整段搬进 `dict-labels/audio.ts`。**
   //    这里原来是三行内联：base = 地区 ?? 录音人 ?? 未标注；重复时带上录音人。
@@ -1090,38 +1138,11 @@ function HumanAudioRow({ audios, word, fallback, regionLabel }: {
 
   return (
     <div className="audio-row">
-      <span className="audio-row-label">真人发音</span>
-      {usable.map((a, i) => {
-        const region = labels[i];
-        const hint = [
-          a.speaker ? `录音人 ${a.speaker}` : null,
-          a.regionSrc === 'speaker' ? '地区按录音人推定' :
-            a.regionSrc === 'tag' ? '地区为原始标注' :
-            a.regionSrc === 'filename' ? '地区取自文件名' : null,
-          a.ipa ? `对应读音 ${a.ipa}` : null,
-          dead[a.file] ? '⚠️ 该录音链接已失效，已改用合成音' : null,
-        ].filter(Boolean).join(' · ');
-        return (
-          <button
-            key={a.file}
-            className={'audio-chip' + (playing === a.file ? ' playing' : '') + (dead[a.file] ? ' dead' : '')}
-            onClick={() => play(a)}
-            title={hint || word}
-            type="button"
-          >
-            <SpeakerIcon />
-            <span className="audio-region">{region}</span>
-            {/* 🔴 2026-09-10：原来是一个光秃秃的 `~`，用户问「真人发音有个 ~ 是什么意思？」——
-                **只有 title 提示的符号，等于没说**（en 有 32,049/102,751 = 31.2% 是这样）。
-                它说的是：这条录音的**地区是从录音人名字推出来的，不是源头标的**，
-                所以可能不准。⇒ 换成自解释的「推定」，与项目其余标签一致（中文短码、不用符号）。
-                `[[it-display-layer-stage8]]`：**兜底越体面缺陷越难发现**，
-                这里是它的近亲 —— **标记越含蓄，读者越不知道自己在看什么**。 */}
-            {a.regionSrc === 'speaker'
-              && <span className="audio-inferred" title="地区按录音人推定，非源头标注">推定</span>}
-          </button>
-        );
-      })}
+      {label ? <span className="audio-row-label">{label}</span> : null}
+      {usable.map((a, i) => (
+        <AudioChipButton key={a.file} a={a} label={labels[i]} word={word}
+          playing={playing} dead={dead} onPlay={play} />
+      ))}
     </div>
   );
 }
@@ -1369,6 +1390,14 @@ export default function App() {
   // B33②：数据来源与许可页（页脚「数据来源与许可」和顶栏「关于」都开它）。
   const [aboutOpen, setAboutOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
+  // 🔴 2026-11-24 手机端：选词后把结果栏收起来，给一个「← 结果列表」的浮动按钮。
+  //    起因：≤820px 时结果栏固定占 42vh，选完词详情在它下面 —— 看完想换词
+  //    得先往回滚过整张结果表，而搜索框在顶上、列表又在页面中间，读者很容易迷路。
+  //    ⚠️ 只在 CSS 的 ≤820px 里生效；桌面端这个状态不改变任何布局。
+  //    ⚠️ **只在「用户明确选了一个词」时收起**（点击 / Enter / 点例句 / 点词条内链接），
+  //      不放在 `selectWord` / `applyHash` 里 —— 边输入边自动选中也会走那两条路，
+  //      放进去会让结果表在打字时自己消失（本文件里「闪一下」的记录已经够多了）。
+  const [mobileResultsHidden, setMobileResultsHidden] = useState(false);
 
   // 语言下拉：点外面关掉（mousedown，避免点菜单项时先触发关闭）
   useEffect(() => {
@@ -1469,6 +1498,8 @@ export default function App() {
     const hash = window.location.hash.slice(1);
     if (hash) {
       applyHash(hash);
+      // 直接打开带词形的链接（分享/刷新）：手机上直接看词条，不先给一屏结果表。
+      setMobileResultsHidden(true);
       // 搜索框里放**读者能看懂的那一串**：词条页放词形，搭配页放短语。
       setQuery(decodeURIComponent(hash.startsWith('c/') ? hash.slice(2) : hash));
     }
@@ -1527,6 +1558,7 @@ export default function App() {
   const pickExample = useCallback((word: string) => {
     setQuery(word);
     selectWord(word);
+    setMobileResultsHidden(true);
     inputRef.current?.focus();
   }, [selectWord]);
 
@@ -1676,7 +1708,10 @@ export default function App() {
       if (results[prev]) openItem(results[prev]);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (results[activeIndex]) openItem(results[activeIndex]);
+      if (results[activeIndex]) {
+        openItem(results[activeIndex]);
+        setMobileResultsHidden(true);
+      }
     }
   };
 
@@ -1690,6 +1725,7 @@ export default function App() {
   const goToWord = useCallback((word: string) => {
     setQuery(word);
     selectWord(word);
+    setMobileResultsHidden(true);       // 已经在一个词条里了，点链接不该把结果栏弹回来
   }, [selectWord]);
 
   // 点词条页里的搭配。与 `goToWord` 一样也写搜索框 —— 读者得能看出自己在看什么，
@@ -1697,6 +1733,7 @@ export default function App() {
   const goToColloc = useCallback((text: string) => {
     setQuery(text);
     selectColloc(text);
+    setMobileResultsHidden(true);
   }, [selectColloc]);
 
   // 回到首页（点 logo）。2026-09-12。
@@ -1718,6 +1755,7 @@ export default function App() {
     setSelectedColloc(null); // ← 同上，搭配那个效应据此清空（漏了它点 logo 回不了首页）
     setActiveIndex(0);
     setSearchError(null);
+    setMobileResultsHidden(false);
     if (window.location.hash) {
       window.history.replaceState(
         null, '', window.location.pathname + window.location.search);
@@ -1734,46 +1772,51 @@ export default function App() {
       {/* 2026-11-17 界面骨架：顶栏（品牌／语言／搜索／操作）+ 左结果栏 + 右详情。
           语言从 11 个 pill 改成下拉 —— pill 占三行，语言越多越挤。 */}
       <header className="top-bar">
-        <button className="brand" onClick={goHome} type="button"
-                title="回到首页" aria-label="回到首页">
-          <span className="brand-mark">突</span>
-          <span className="brand-text">
-            <span className="brand-name">突触词典</span>
-            <span className="brand-sub">Synapse Dict</span>
-          </span>
-        </button>
+        {/* 2026-11-24：品牌与语言合成左组。顶栏改成三列 grid
+            （左组 / 搜索 / 操作），搜索因此在**视口正中**，
+            不再被左右两组宽度差推着走。 */}
+        <div className="top-left">
+          <button className="brand" onClick={goHome} type="button"
+                  title="回到首页" aria-label="回到首页">
+            <span className="brand-mark">突</span>
+            <span className="brand-text">
+              <span className="brand-name">突触词典</span>
+              <span className="brand-sub">Synapse Dict</span>
+            </span>
+          </button>
 
-        {languages.length > 1 && (
-          <div className="lang-picker">
-            <button
-              className="lang-picker-btn"
-              onClick={() => setLangOpen((v) => !v)}
-              type="button"
-              aria-haspopup="listbox"
-              aria-expanded={langOpen}
-              title={activeLang ? `当前：${activeLang.name}` : '选择语言'}
-            >
-              <span className="lang-picker-name">{activeLang?.name ?? '语言'}</span>
-              <span className="lang-picker-caret">▾</span>
-            </button>
-            {langOpen && (
-              <div className="lang-menu" role="listbox" aria-label="词典语言">
-                {languages.map((l) => (
-                  <button
-                    key={l.code}
-                    className={l.code === lang ? 'lang-option active' : 'lang-option'}
-                    onClick={() => { setLang(l.code); setLangOpen(false); }}
-                    type="button"
-                    role="option"
-                    aria-selected={l.code === lang}
-                  >
-                    {l.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+          {languages.length > 1 && (
+            <div className="lang-picker">
+              <button
+                className="lang-picker-btn"
+                onClick={() => setLangOpen((v) => !v)}
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={langOpen}
+                title={activeLang ? `当前：${activeLang.name}` : '选择语言'}
+              >
+                <span className="lang-picker-name">{activeLang?.name ?? '语言'}</span>
+                <span className="lang-picker-caret">▾</span>
+              </button>
+              {langOpen && (
+                <div className="lang-menu" role="listbox" aria-label="词典语言">
+                  {languages.map((l) => (
+                    <button
+                      key={l.code}
+                      className={l.code === lang ? 'lang-option active' : 'lang-option'}
+                      onClick={() => { setLang(l.code); setLangOpen(false); }}
+                      type="button"
+                      role="option"
+                      aria-selected={l.code === lang}
+                    >
+                      {l.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="search-input-wrap">
           <svg className="search-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
@@ -1781,7 +1824,7 @@ export default function App() {
             ref={inputRef}
             className="search-input"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => { setQuery(e.target.value); setMobileResultsHidden(false); }}
             onKeyDown={handleKeyDown}
             placeholder={activeLang ? `查询${activeLang.name}…` : '输入单词查询…'}
             autoFocus
@@ -1815,7 +1858,7 @@ export default function App() {
         </div>
       </header>
 
-      <aside className="search-column">
+      <aside className={'search-column' + (mobileResultsHidden ? ' results-hidden' : '')}>
         <div className="result-list" ref={resultListRef}>
           {results.map((item, i) => (
             <button
@@ -1825,7 +1868,7 @@ export default function App() {
               key={`${item.id}-${item.word}`}
               // 🔴 落点是 `via.word`（词头），不是 `item.word`（短语本身）——
               //    短语不是词头，拿它去 getEntry 一定查不到，点了就是一片空白。
-              onClick={() => { setActiveIndex(i); openItem(item); }}
+              onClick={() => { setActiveIndex(i); openItem(item); setMobileResultsHidden(true); }}
               type="button"
             >
               <span className="result-word">{item.word}</span>
@@ -1841,32 +1884,24 @@ export default function App() {
 
           {!loading && searchError === 'rate' && (
             <div className="list-hint error">
-              <span className="hint-emoji">🌊</span>
-              查询有点频繁，稍等一下再试～
+              查询过于频繁，请稍后再试
               <br />
               <button className="retry-btn" onClick={retry} type="button">重新查询</button>
             </div>
           )}
           {!loading && searchError === 'network' && (
             <div className="list-hint error">
-              <span className="hint-emoji">😕</span>
-              查询没能完成，请检查网络后重试
+              查询未能完成，请检查网络后重试
               <br />
               <button className="retry-btn" onClick={retry} type="button">重新查询</button>
             </div>
           )}
           {!loading && !searchError && query.trim() && results.length === 0 && (
-            <div className="list-hint">
-              <span className="hint-emoji">🔍</span>
-              没有找到匹配词条
-            </div>
+            <div className="list-hint">没有找到匹配词条</div>
           )}
-          {!query.trim() && (
-            <div className="list-hint">
-              <span className="hint-emoji">⌨️</span>
-              输入单词开始查询
-            </div>
-          )}
+          {/* 2026-11-24：空搜索时左边**什么都不显示**。原来是一个 ⌨️ emoji
+             加「输入单词开始查询」—— 右边欢迎页已经说了这句话，左边再摆一遍
+              既重复又像半成品（用户：「这些不要，美感太差了」）。 */}
         </div>
       </aside>
 
@@ -1922,7 +1957,6 @@ export default function App() {
             ? <SpanishEntryView entry={entry as SpanishEntry} speakLocale={speakLocale} onWord={goToWord} speak={speakWord} onColloc={goToColloc} />
             : (
               <div className="detail-error">
-                <span className="hint-emoji">🧩</span>
                 <p>「{entry.lang}」的展示层还没接上 —— 数据可能在库里，但这一版读不出来。</p>
               </div>
             )
@@ -1934,22 +1968,19 @@ export default function App() {
 
         {!entry && !colloc && !entryLoading && entryError && (
           <div className="detail-error">
-            <span className="hint-emoji">{entryError === 'rate' ? '🌊' : '😕'}</span>
-            <p>{entryError === 'rate' ? '请求有点频繁，稍等一下再试～' : '词条加载失败，请稍后重试'}</p>
+            <p>{entryError === 'rate' ? '请求过于频繁，请稍后再试' : '词条加载失败，请稍后重试'}</p>
             <button className="retry-btn" onClick={retry} type="button">重试</button>
           </div>
         )}
 
         {!colloc && !entryLoading && !entryError && collocNotFound && selectedColloc && (
           <div className="detail-error">
-            <span className="hint-emoji">🔍</span>
             <p>{`没有收录搭配「${selectedColloc}」`}</p>
           </div>
         )}
 
         {!entry && !entryLoading && !entryError && entryNotFound && selectedWord && (
           <div className="detail-error">
-            <span className="hint-emoji">🔍</span>
             <p>词典中没有「{selectedWord}」这个词条</p>
           </div>
         )}
@@ -1992,6 +2023,19 @@ export default function App() {
             「关于」页即可，词条页回到干净版式。
             数据层的 `sources`（每个词条真实用到哪些语言版）保留，只是不渲染。 */}
       </div>
+
+      {/* 手机端浮动「回结果列表」。桌面端由 CSS 藏起来，状态对布局无影响。
+          位置固定在左下角：页面顶部有吸顶的词头，结果栏收起后它才是唯一的返回入口。 */}
+      {mobileResultsHidden && (selectedWord || selectedColloc) && (
+        <button type="button" className="mobile-results-back"
+          onClick={() => setMobileResultsHidden(false)}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          结果列表
+        </button>
+      )}
 
       {toast && <div className="speak-toast" role="status">{toast}</div>}
       {aboutOpen && <AboutPanel onClose={() => setAboutOpen(false)} />}
@@ -5269,6 +5313,58 @@ function JaKanjiReadings({ items, speak }: {
  * ⚠️ 归不了位的声调行 `kana` 是 null（见 `japanese.ts` 里的归属规则）——
  *    那种行**不给按钮**，因为不知道该读什么。宁可少一个按钮，也不读错。
  */
+/**
+ * 同一串假名＋罗马字被源头排成两行时只留一行，保留信息多的那条。
+ *
+ * 🔴 2026-11-24：`上下` 顶部排出 **14 行读音**，其中 `かみしも kamishimo`
+ *    出现两次 —— 一行有 `[ka̠mʲiɕimo̞]`，一行没有。两行来自两条 entry，
+ *    服务层按 `(假名, IPA, 声调)` 去重，IPA 一空一有就都留下了。
+ *    全库实测 5,081 组这样的重复（4,819 个词，5,763 行）。
+ *
+ * ⚠️ **只在「安全的组」里合并**：同一串假名如果有两个以上**不同的非空 IPA**，
+ *    那是读音本身的差异（或两版转写不同），不合并、原样两行都印
+ *    （`[[dont-recast-deliverables-as-junk]]`：不替源头抹平差异）。
+ *    这类 1,176 组原样保留。
+ */
+function dedupeJaReadings(readings: JaReading[]): JaReading[] {
+  const keyOf = (r: JaReading) =>
+    `${r.kana}\u0000${r.romaji ?? ''}\u0000${r.kanaHist ?? ''}`;
+  const groups = new Map<string, JaReading[]>();
+  for (const r of readings) {
+    // 没有假名的行是「只能挂在词上」的声调/IPA 行，服务层已经归过位，不参与合并。
+    if (!r.kana) continue;
+    const key = keyOf(r);
+    const g = groups.get(key);
+    if (g) g.push(r); else groups.set(key, [r]);
+  }
+  const out: JaReading[] = [];
+  const done = new Set<string>();
+  for (const r of readings) {
+    if (!r.kana) { out.push(r); continue; }
+    const key = keyOf(r);
+    const g = groups.get(key)!;
+    if (g.length > 1 && new Set(g.map((x) => x.ipa).filter(Boolean)).size > 1) {
+      out.push(r);                       // 不安全组（真有两种读音）：一行不少
+      continue;
+    }
+    if (done.has(key)) continue;         // 安全组：只印合并后的那一条
+    done.add(key);
+    // 保留第一条的位置，缺的字段用同组后续行补齐
+    let merged = g[0];
+    for (const x of g.slice(1)) {
+      merged = {
+        ...merged,
+        ipa: merged.ipa ?? x.ipa,
+        notation: merged.notation ?? x.notation,
+        pitchMark: merged.pitchMark ?? x.pitchMark,
+        pitchPos: merged.pitchPos ?? x.pitchPos,
+      };
+    }
+    out.push(merged);
+  }
+  return out;
+}
+
 function JaReadingRow({ r, speak }: {
   r: JaReading; speak: (w: string) => void;
 }) {
@@ -5683,7 +5779,13 @@ export function JapaneseEntryView({ entry, speakLocale, onWord, speak }: {
 
       {entry.readings.length > 0 ? (
         <section className="ja-readings">
-          {entry.readings.map((r, i) => (
+          {/* 🔴 2026-11-24：**加标题。** 原来这 14 行假名／罗马字／IPA 直接排在词头下面，
+              读者不知道这是"这个词有几种读法"，还是正文的一部分
+              （用户 2026-09-17 说「乱糟糟」时，这一块是页面最上面的一坨）。
+              只用一行小标题，不折叠、不截断 —— 所有读音都要能看到
+              （`DISPLAY_EXTREMES` §四.1：折叠可以，死胡同不行）。 */}
+          <h3 className="ja-readings-title">读音</h3>
+          {dedupeJaReadings(entry.readings).map((r, i) => (
             <JaReadingRow key={i} r={r} speak={(w) => speak(w, speakLocale)} />
           ))}
         </section>
@@ -5937,8 +6039,8 @@ function KoRelationRow({ group, onWord, hideKind }: {
 }
 
 /** 一行读音。`notation` 决定定界符；发音形谚文与 IPA 并排（ko 独有的一层）。 */
-function KoReadingRow({ p, speak }: {
-  p: KoEntry['pronunciations'][number]; speak: (w: string) => void;
+function KoReadingRow({ p, showRegion, speak }: {
+  p: KoEntry['pronunciations'][number]; showRegion: boolean; speak: (w: string) => void;
 }) {
   return (
     <div className="phonetic-row ko-reading">
@@ -5953,7 +6055,13 @@ function KoReadingRow({ p, speak }: {
         {p.hangeul && <span className="ko-hangeul-phonetic">{p.hangeul}</span>}
         <SpeakerIcon />
       </button>
-      {p.region && <span className="badge region">{p.region}</span>}
+      {/* 🔴 2026-11-24：相邻两行同一个地区只印一次。
+          用户看 `析` 时两行各印「SK-Standard,Seoul」，读者会以为那是两条不同的地区信息
+          （其实是同一个出处的两条读音）。地区没变就不重复 —— 变了才印。 */}
+      {/* 印中文名，不印源头码；映射缺了退回原码由契约闸的全值域覆盖兜底。 */}
+      {p.region && showRegion && (
+        <span className="badge region">{KO_PRON_REGION_LABELS[p.region] ?? p.region}</span>
+      )}
       {/* 🔴 `g2p` 必须如实说明是**我们按 표준발음법 算的**，不是源头给的。
           `[[dont-say-source-lacks-what-we-skipped]]`：我们算的与源头给的
           要在结构上分开，展示层不许抹平。 */}
@@ -6234,7 +6342,9 @@ export function KoreanEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.pronunciations.length > 0 ? (
         <section className="ko-readings">
           {entry.pronunciations.map((p, i) => (
-            <KoReadingRow key={i} p={p} speak={(w) => speak(w, speakLocale)} />
+            <KoReadingRow key={i} p={p}
+              showRegion={i === 0 || entry.pronunciations[i - 1].region !== p.region}
+              speak={(w) => speak(w, speakLocale)} />
           ))}
         </section>
       ) : (
@@ -6478,8 +6588,39 @@ function viRelLabel(kind: string): string | null {
  *   ⚠️ 只有 **2,839 / 66,502（4.27%）** 的词形有任何录音 ⇒ 95.7% 的行**不该有按钮**，
  *     这不是「功能缺失」而是如实：我们没有那个方言的录音。
  */
-function ViPronGroup({ dialect, items, audios }: {
-  dialect: string; items: ViPron[]; audios: ViEntry['audios'];
+/**
+ * 越南语真人录音胶囊。**2026-11-24 从浏览器原生 `<audio controls>` 换过来。**
+ *
+ * vi 与其余九门不同的地方是：录音要挂在**它真正对应的方言行**上（4,177 组对得上），
+ * 所以不能整页塞一个 `HumanAudioRow`。这里复用同一套 `useAudioPlayback` /
+ * `AudioChipButton`，只把「哪一行」交给调用方。
+ *
+ * ⚠️ `capAudios` 的「地区」这里用**方言**：同一个方言最多 2 条。与其余九门
+ *   「同一口音不排一长串」是同一条规则；vi 没有地区列，方言就是它区分口音的方式。
+ * ⚠️ 标签只在**同一行有两条以上**时才编号 —— 方言由所在行说明，
+ *   每条都写一遍「河内音」是噪声（与 ko 那个重复标签同一形状）。
+ */
+function ViAudioChips({ audios, fallback, inline }: {
+  audios: ViEntry['audios']; fallback: () => void; inline?: boolean;
+}) {
+  const usable = capAudios(audios.map((a) => ({
+    file: a.commonsKey, url: a.url, speaker: null, region: a.dialect, regionSrc: null,
+  })));
+  const { playing, dead, play } = useAudioPlayback(fallback);
+  if (usable.length === 0) return null;
+  return (
+    <span className={'vi-audio-chips' + (inline ? ' vi-audio-inline' : '')}>
+      {usable.map((a, i) => (
+        <AudioChipButton key={a.file} a={a}
+          label={usable.length > 1 ? `录音 ${i + 1}` : null}
+          playing={playing} dead={dead} onPlay={play} />
+      ))}
+    </span>
+  );
+}
+
+function ViPronGroup({ dialect, items, audios, fallback }: {
+  dialect: string; items: ViPron[]; audios: ViEntry['audios']; fallback: () => void;
 }) {
   const label = VI_DIALECT_LABELS[dialect];
   const seen = new Set<string>();
@@ -6498,11 +6639,7 @@ function ViPronGroup({ dialect, items, audios }: {
       {/* 🔴 W7：96,267 行是阶段 3b 按音节拼的。不标出来就是拿我们算的冒充源头写的。 */}
       {anyComposed ? <span className="vi-pron-composed" title="由音节规则拼出，非源头标注">按音节拼写</span> : null}
       {/* ✅ 这个方言**真有真人录音**时才给播放器 —— 按钮因此名副其实 */}
-      {audios.map((a) => (
-        <audio key={a.commonsKey} controls preload="none" src={a.url} className="vi-audio vi-audio-inline">
-          <track kind="captions" />
-        </audio>
-      ))}
+      <ViAudioChips audios={audios} fallback={fallback} inline />
     </span>
   );
 }
@@ -6642,7 +6779,8 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
             }
             return [...byDialect.entries()].map(([d, items]) => (
               <ViPronGroup key={d} dialect={d} items={items}
-                audios={audioByDialect.get(d) ?? []} />
+                audios={audioByDialect.get(d) ?? []}
+                fallback={() => speak(entry.word, speakLocale)} />
             ));
           })()}
         </section>
@@ -6652,12 +6790,9 @@ export function VietnameseEntryView({ entry, speakLocale, onWord, speak }: {
       {entry.audios.some((a) => !entry.pronunciations.some((p) => p.dialect === a.dialect)) && (
         <section className="vi-audios">
           <span className="vi-audio-note">没标方言的录音</span>
-          {entry.audios.filter((a) => !entry.pronunciations.some((p) => p.dialect === a.dialect))
-            .map((a) => (
-              <audio key={a.commonsKey} controls preload="none" src={a.url} className="vi-audio">
-                <track kind="captions" />
-              </audio>
-            ))}
+          <ViAudioChips
+            audios={entry.audios.filter((a) => !entry.pronunciations.some((p) => p.dialect === a.dialect))}
+            fallback={() => speak(entry.word, speakLocale)} />
         </section>
       )}
 
@@ -7188,12 +7323,23 @@ export function RussianEntryView({ entry, speakLocale, onWord, speak }: {
         <p className="ru-folded">没有「{entry.foldedFrom}」这个写法，按 ё 的写法找到 <b>{entry.word}</b>（俄语日常书写常把 ё 写成 е）</p>
       ) : null}
 
+      {/* 🔴 2026-11-24：从浏览器原生 `<audio controls>` 换成共用的 `HumanAudioRow`。
+          八门（en/es/it/fr/pt/de/ja/ko）早就用它，ru 是漏抄的第二门（另一门是 vi）：
+          原生播放器**无法跟随主题、手机上和页面其他控件完全两套外观**，而且
+          死链是静默变哑 —— 共用件带「失效 → 回退 TTS」。
+          ⚠️ ru 的 `audio` 表**没有录音人/地区列**（17,552 条是 Commons 的 `Ru-<词>.ogg`），
+            所以标签只能如实写「未标注」/「录音 N」；不拿文件名猜录音人
+            （只有 11 条 Lingua Libre 名字里带人，猜出来也覆盖不了）。
+          ⚠️ `entry.audios` 已按 commonsKey 去重（见上方 `audioSeen`），这里不再重复。 */}
       {audios.length > 0 && (
-        <section className="ru-audios">
-          {audios.map((a) => (
-            <audio key={a.commonsKey} controls preload="none" src={a.url} className="ru-audio"><track kind="captions" /></audio>
-          ))}
-        </section>
+        <HumanAudioRow
+          audios={audios.map((a) => ({
+            file: a.commonsKey, url: a.url, speaker: null, region: null, regionSrc: null,
+          }))}
+          word={entry.word}
+          fallback={() => speak(entry.word, speakLocale)}
+          regionLabel={(r) => r}
+        />
       )}
 
       {pointers.length > 0 && (

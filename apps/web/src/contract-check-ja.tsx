@@ -714,6 +714,36 @@ const CHECKS: Check[] = [
       return eds.includes('en-edition') ? null : `抽过的版名对不上：${eds.join(',')}`;
     },
   },
+  // 🔴 2026-11-24：读音区两件（用户看 `上下` 页时暴露的）
+  //    ① 顶部 14 行假名／罗马字／IPA 没有标题，读者不知道那是什么；
+  //    ② `かみしも` 印了两遍 —— 同一串假名＋罗马字一行有 IPA、一行没有，
+  //       服务层按 (假名, IPA, 声调) 去重，IPA 一空一有就都留下了。
+  //    判据只认**读音区**里的内容，不查整页（词源/例句里也可能出现这几个字）。
+  {
+    word: '上下',
+    name: '🔴 读音区有标题、同一读音不重复印（かみしも 只出现一次）',
+    hit: (_t, e: any, html: string) => {
+      if (!Array.isArray(e.readings) || e.readings.length < 2) return '`上下` 没有多读音 ⇒ 这条检查空过了，换样本词';
+      const m = html.match(/<section class="ja-readings">([\s\S]*?)<\/section>/);
+      if (!m) return '页面没有读音区';
+      if (!/class="ja-readings-title"[^>]*>读音</.test(m[1])) return '读音区没有「读音」标题';
+      const n = (m[1].match(/class="ja-kana">かみしも</g) ?? []).length;
+      return n === 1 ? null
+        : `かみしも 印了 ${n} 行（源数据里是 2 行、应并成 1 行）`;
+    },
+  },
+  // 反方向：**同一串假名下 IPA 真的不同时，不许替源头合并。**
+  // `あほくさい` 的两条是 aho-kusai / ahoːkusai（长音），合并就是改内容。
+  {
+    word: 'あほくさい',
+    name: '🔴 同一假名下不同的 IPA 不合并（不替源头抹平读音差异）',
+    hit: (_t, e: any, html: string) => {
+      const m = html.match(/<section class="ja-readings">([\s\S]*?)<\/section>/);
+      if (!m) return '页面没有读音区';
+      const n = (m[1].match(/class="ja-kana">あほくさい</g) ?? []).length;
+      return n === 2 ? null : `あほくさい 印了 ${n} 行（两条不同 IPA 应都保留 = 2 行）`;
+    },
+  },
 ];
 
 let red = 0;
